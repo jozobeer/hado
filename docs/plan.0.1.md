@@ -37,7 +37,7 @@
 | パイプ | `x \|> f a b` は `f x a b`。標準ライブラリの引数順は data-first |
 | 関数値 | `def` で定義した関数名を引数なしで参照すると `Fn<...>` 型の値 |
 | 呼び出し構文 | 関数は並置 `f x y`、constructor は括弧 `Some(x)`。大文字始まりが constructor |
-| 冗長・到達不能の判定 | 構文的。束縛変数の名前替えと括弧を正規化した後の構造一致。条件列の到達不能は「先行条件との構造一致」と「先行条件が `true`」に限る |
+| 冗長・到達不能の判定 | 構文的。束縛変数の名前替えと括弧を正規化した後の構造一致。条件列の到達不能は、先行条件と構造一致する場合か、先行条件が `true` の場合に限る |
 | module | `module X : SIG = struct ... end` を v0.1 に入れる。signature 注釈は必須。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明。struct 内で sig からも内部からも参照されない `def` はエラー |
 | record | 構築は `{ name = "a"; age = 3 }`。型は field 集合から一意に決まる nominal 型で、曖昧なら注釈を要求。パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）。書かない field は無視。field 更新構文は v0.2 |
 | tuple | 持たない。`Fn<(Int, Int), Int>` の `( )` は引数列 |
@@ -66,7 +66,7 @@
 | ADT のレイアウト | payload なし constructor は即値、payload あり constructor は GC 管理のヒープ。再帰型 `List<T>` はこれで間接参照になる |
 | `/` `%` の戻り型 | Int では `Result<Int, ArithmeticError>`。Float の `/` は `Float`。Float に `%` は置かない |
 | ArithmeticError の名前 | より具体的な名前（`DivisionError` 等）を候補に、M1 で決める |
-| prelude の module 構成 | prelude の各 module も `module X : SIG = struct` の形で書く（2.2 の注釈必須規則に従う） |
+| prelude の module 構成 | prelude の各 module も `module X : SIG = struct` の形で書く（2.2 の規則に従う） |
 | JIT の適用範囲 | JIT はヒープを使わない部分集合（Int / Float / Bool / Unit のみ）の単体テストに限る。コーパスのテストは AOT で実行ファイルを生成しサブプロセスで実行する。Boehm GC と Rust テストプロセスの共存を避けるため |
 | エラーコード | `E1xx` 構文、`E2xx` 名前解決、`E3xx` 型、`E4xx` 網羅性・到達可能性、`E5xx` canonical・冗長、`E6xx` module、`E7xx` 単相化。各コードに短い名前を付け、拒否コーパスはコードで照合する |
 
@@ -99,12 +99,12 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 2. `.cargo/config.toml` に `[env] LLVM_SYS_221_PREFIX = "/usr/lib/llvm-22"` を置く。
 3. ワークスペースを作る。`crates/shin` の依存は `inkwell = { version = "0.10", features = ["llvm22-1"] }`、build 依存は `cc = "1"`。
-4. `runtime/` に `shin_alloc`（`GC_malloc` の薄い包み）と Int 印字を書き、`cc` で静的ライブラリにする。
+4. `runtime/` に `shin_alloc`（`GC_malloc` の包み）と Int 印字を書き、`cc` で静的ライブラリにする。
 5. `def main = 1 + 2` を lexer → parser → 型 → LLVM → オブジェクト → `clang-22` リンクの順で通し、実行ファイルが `3` を印字する。
 
 完了条件:
 
-- `cargo build` が LLVM 22 に対して成功する（確定。ただし現時点で未実走）。
+- `cargo build` が LLVM 22 に対して成功する（確定、未実走）。
 - `cargo test` に、`def main = 1 + 2` を AOT で実行ファイルにし、サブプロセスで走らせて stdout が `3` と一致するテストがあり、通る（確定）。
 - 同じ式を JIT で評価して `3` を返す単体テストが通る（推定）。
 
@@ -241,7 +241,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 多相を単相化で実現した。HM の rank-1 多相と単一コンパイル単位という条件下では常に可能で、実行時型情報が不要になる。ランタイムは確保・文字列・印字だけになり、LLVM の型付き IR をそのまま使える。
 
-メモリ管理を v0.1 では Boehm GC に委ねた。この言語は mutation がなく再帰も top-level の `def rec` に限るため参照が循環せず、参照カウントが最終形として適している。しかし retain / release の挿入は use-after-free を生みやすく、検査器・コード生成と同時に立ち上げると原因の切り分けが難しい。確保関数を一つに絞っておけば、v0.2 での差し替え範囲は明確である。
+メモリ管理を v0.1 では Boehm GC に委ねた。参照カウントの retain / release 挿入は use-after-free を生みやすく、検査器・コード生成と同時に立ち上げると原因の切り分けが難しいため。参照カウントは、この言語が mutation を持たず再帰も top-level の `def rec` に限るため参照が循環せず、最終形として適している。確保関数を一つに絞っておけば、v0.2 での差し替え範囲は明確である。
 
 prelude を shin 自身で書く。`sig` `struct` `def rec` パターン分岐の最初の本格的な利用者になり、コンパイラの実地テストを兼ねる。prelude も canonical 検査を通るので、検査器の妥当性も同時に試される。
 
