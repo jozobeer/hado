@@ -275,6 +275,9 @@ def identity x => x
 
 通常のコードでは型注釈を大量に要求しない。
 
+推論の途中で型が食い違う場合は E305 とする。型変数がそれ自身を含む型に束縛される場合
+（出現検査の失敗）は E306 とする。
+
 ---
 
 # 10. Generics
@@ -1497,7 +1500,7 @@ Fn を含む型への `==` `!=` は E704、`compare` は E705 とする。単相
 
 # 47. 名前空間
 
-名前空間は型・module・constructor・値の 4 つとする。`Option<T>`（型）と `Option.map`（module）は共存する。
+名前空間は型・module・constructor・値の 4 つとする。どの名前空間でも解決できない名前の参照は E205 とする。`Option<T>`（型）と `Option.map`（module）は共存する。
 
 型と constructor は別の空間である。
 
@@ -1561,10 +1564,13 @@ Int / Float: to_string
 | E201 | implicit-recursion | §4 |
 | E203 | dunder-in-user | §47 |
 | E204 | dunder-as-value | §47 |
+| E205 | unbound-name | §47 |
 | E301 | arity-mismatch | §8 |
 | E302 | recursive-type-arg | §10 |
 | E303 | let-question-type | §22 |
 | E304 | record-ambiguous | §12 |
+| E305 | type-mismatch | §9 |
+| E306 | occurs-check | §9 |
 | E401 | missing-cond-fallback | §15 |
 | E402 | non-exhaustive | §18 |
 | E403 | unreachable-branch | §31 |
