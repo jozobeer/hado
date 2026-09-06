@@ -8,10 +8,6 @@
 //!   stdout with the `-- expect:` header;
 //! - reject: expect compilation to fail with the `-- error:` code.
 //!
-//! Failures are printed only; nothing is asserted. At this stage the
-//! compiler only handles `def main = 1 + 2`, so most corpus files are
-//! expected to fail (see `docs/plan.0.1.md:156`).
-
 use std::path::{Path, PathBuf};
 
 /// Repository root: two levels above `CARGO_MANIFEST_DIR` (`crates/shin`).
@@ -54,46 +50,34 @@ fn header_value(text: &str, marker: &str) -> Option<String> {
     })
 }
 
-fn try_accept(rel: &str, text: &str) {
-    let body: Vec<&str> = text
-        .lines()
-        .filter(|line| !line.starts_with("--"))
-        .collect();
-    let source = body.join("\n");
+fn try_accept(rel: &str, text: &str) -> Result<(), String> {
     let work = std::env::temp_dir().join(format!("shin-corpus-{}", std::process::id()));
-    if std::fs::create_dir_all(&work).is_err() {
-        println!("corpus_no_workdir: {rel}");
-        return;
-    }
-    let stem: String = rel.replace('/', "_");
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let stem = rel.replace('/', "_");
     let obj = work.join(format!("{stem}.o"));
     let exe = work.join(format!("{stem}.exe"));
-    match shin::compile_to_object(&source, &obj) {
-        Ok(()) => match shin::link_executable(&obj, &exe) {
-            Ok(()) => match std::process::Command::new(&exe).output() {
-                Ok(out) => {
-                    let stdout = String::from_utf8_lossy(&out.stdout);
-                    let actual = stdout.trim_end_matches(['\n', '\r']);
-                    match header_value(text, "-- expect:") {
-                        Some(want) if actual == want => {}
-                        Some(want) => {
-                            println!("corpus_mismatch: {rel} expect={want:?} got={actual:?}");
-                        }
-                        None => println!("corpus_unexpected_success: {rel}"),
-                    }
-                }
-                Err(e) => println!("corpus_run_failed: {rel} ({e})"),
-            },
-            Err(e) => println!("corpus_link_failed: {rel} ({e})"),
-        },
-        Err(e) => println!("corpus_compile_failed: {rel} ({e})"),
-    }
+    let result = (|| {
+        shin::compile_source_to_object(text, rel, &obj)?;
+        shin::link_executable(&obj, &exe)?;
+        let out = std::process::Command::new(&exe).output().map_err(|e| e.to_string())?;
+        let expected = header_value(text, "-- expect:").ok_or("missing expected stdout")? + "\n";
+        if !out.status.success() || !out.stderr.is_empty() || out.stdout != expected.as_bytes() {
+            return Err(format!("status={:?} stdout={:?} stderr={:?}", out.status, out.stdout, out.stderr));
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(obj);
+    let _ = std::fs::remove_file(exe);
+    let _ = std::fs::remove_dir(work);
+    result
 }
 
-fn try_reject(rel: &str, text: &str) {
-    match header_value(text, "-- error:") {
-        Some(code) => println!("corpus_reject_expect: {rel} {code}"),
-        None => println!("corpus_reject_no_code: {rel}"),
+fn try_reject(rel: &str, text: &str) -> Result<(), String> {
+    let code = header_value(text, "-- error:").ok_or("missing error code")?;
+    match shin::check_source(text, rel) {
+        Err(error) if error.code.as_deref() == Some(code.as_str()) => Ok(()),
+        Err(error) => Err(format!("expected {code}, got {error}")),
+        Ok(_) => Err(format!("expected {code}, but checking succeeded")),
     }
 }
 
@@ -116,12 +100,16 @@ fn corpus() {
     for rel in &rels {
         println!("corpus_file: {rel}");
     }
+    assert!(!rels.is_empty(), "empty corpus");
+    let mut failures = Vec::new();
     for rel in &rels {
         let text = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
-        if rel.starts_with("tests/accept/") {
-            try_accept(rel, &text);
+        let result = if rel.starts_with("tests/accept/") {
+            try_accept(rel, &text)
         } else {
-            try_reject(rel, &text);
-        }
+            try_reject(rel, &text)
+        };
+        if let Err(error) = result { failures.push(format!("{rel}: {error}")); }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

@@ -2,6 +2,7 @@
 -- expect: 1
 -- needs: prelude
 -- item: パイプ
+type User = { name: String; active: Bool }
 def active_names users =>
   users
   |> List.filter (fn user => user.active)
