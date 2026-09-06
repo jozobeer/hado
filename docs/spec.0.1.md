@@ -69,6 +69,8 @@ x
 
 もコンパイルエラーになり得る。
 
+引数をそのまま別の関数に渡すだけの `def`（eta 展開）は冗長としない。
+
 ---
 
 # 3. 名前付き定義
@@ -131,9 +133,13 @@ def rec factorial n =>
   if n <= 1 => 1 | n * factorial (n - 1)
 ```
 
-暗黙の自己再帰は許可しない。
+暗黙の自己再帰は許可しない（E201）。
 
-`def rec` は、値定義ではなく関数定義にのみ使用できる。
+`def rec` は、値定義ではなく関数定義にのみ使用できる。値定義に `rec` を付けると E102 とする。
+
+top-level は定義順に依存しない。呼び出しグラフの閉路に含まれる関数は全て `rec` とする（E516）。閉路に値定義が含まれるとエラーである（E514）。値定義は `rec` を持てない。
+
+多相再帰はコンパイルエラーとする（E701）。
 
 ---
 
@@ -154,6 +160,10 @@ let = local binding
 ```
 
 `let` の本体は `->` の右側に続く継続である。`let` は値を束縛するために使い、成功・失敗の伝播は行わない。
+
+プログラムの入口はトップレベルの `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。
+
+`main` の型は単相で、Fn を含んではならない。`def main = Nil` は型変数が残るため E702、`def main = inc` は印字できず Fn を含むため E703 とする。
 
 ---
 
@@ -190,6 +200,8 @@ next
 ```
 
 `->` は、関数型の表記には使わない。関数型は第37節で定める `Fn<...>` を使う。
+
+`main` の本体は expression であり、`let` の継続に使う `->` では書かない。入口は `def main = expression` である。
 
 ---
 
@@ -243,6 +255,12 @@ Fn<Int, String>
 Fn<(Int, Int), Int>
 ```
 
+`Fn` は n 引数の関数型である。定義の引数数と呼び出しの引数数は一致しなければならない。部分適用は許可しない（E301）。
+
+`def` で定義した関数名を引数なしで参照すると、`Fn<...>` 型の値になる。
+
+関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。
+
 ---
 
 # 9. 型推論
@@ -283,6 +301,16 @@ type Result<T, E> =
   | Error(E)
 ```
 
+型定義の閉路（自己再帰と相互再帰）の中では、型引数は宣言の型引数と同一でなければならない。
+
+```ocaml
+type Nest<T> =
+  | Leaf(T)
+  | Node(Nest<List<T>>)
+```
+
+は E302 とする。派生パスの実体化を有限に保つためである。
+
 ---
 
 # 11. Algebraic Data Types
@@ -315,6 +343,8 @@ Circle(10.0)
 Rectangle(10.0, 20.0)
 ```
 
+constructor が全て payload なしの型は素の整数とする。payload を一つでも持つ型は、全 constructor を一律に GC ヒープの box にする。一つの型の中で即値と pointer を混在させない。
+
 ---
 
 # 12. Record
@@ -333,6 +363,16 @@ type User = {
 ```ocaml
 user.name
 ```
+
+構築は次の形とする。
+
+```ocaml
+{ name = "a"; age = 3 }
+```
+
+型は field 集合から一意に決まる nominal 型である。曖昧なら注釈を要求する（E304）。
+
+パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）とする。書かない field は無視する。field 更新構文は持たない。
 
 ADTとの組み合わせ：
 
@@ -362,6 +402,8 @@ type User =
 すべてexpressionであり、値を返す。
 
 `if` の後に続く構文によって、どの種類の分岐かを決定する。
+
+リテラルパターン（Int / Float / Char / String / Bool）は pattern 分岐の pattern として使える。
 
 ---
 
@@ -411,7 +453,7 @@ if
 
 は必須のfallbackである。
 
-条件列にfallbackがない場合はコンパイルエラーとする。
+条件列にfallbackがない場合はコンパイルエラーとする（E401）。
 
 `if / else if / else` の構文は持たない。
 
@@ -450,6 +492,12 @@ pattern branchでは、各branchはpatternと `=>` と式で構成する。
 ```
 
 pattern branchは、ADTの構造に基づいて網羅的でなければならない。
+
+リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。
+
+最上位の変数パターン `| x => ...` は禁止する（E512）。入れ子の中の変数パターンは許可する。
+
+条件列の全条件が「同一変数 `==` リテラル」なら、pattern 分岐で書けるため拒否する（E511）。
 
 ---
 
@@ -494,7 +542,7 @@ if value
 | Some(x) => x
 ```
 
-はコンパイルエラー。
+はコンパイルエラー（E402）。
 
 `None` が未処理であり、fallbackも存在しないためである。
 
@@ -525,7 +573,7 @@ pattern内部の一部だけを無視するときに使う。
 | _ => default
 ```
 
-は禁止。
+は禁止（E503）。
 
 fallbackのcanonical formは、
 
@@ -539,7 +587,7 @@ fallbackのcanonical formは、
 
 # 20. 分岐のネストは禁止
 
-branch expressionの内部にbranch expressionを書くことは禁止する。
+branch expressionの内部にbranch expressionを書くことは禁止する（E101）。
 
 禁止：
 
@@ -603,6 +651,8 @@ type Result<T, E> =
 
 unchecked exceptionもv0.1では持たない。
 
+`Ok()` が canonical である。`Ok(())` は拒否する（E509）。
+
 ---
 
 # 22. `let?`
@@ -638,7 +688,7 @@ None
   => Noneをそのまま伝播
 ```
 
-`let?` の右辺は、対応するOptionまたはResult型でなければならない。
+`let?` の右辺は、対応するOptionまたはResult型でなければならない。そうでなければコンパイルエラーとする（E303）。
 
 ---
 
@@ -669,7 +719,7 @@ let? _ = validate article ->
 let? _ = ...
 ```
 
-は禁止。
+は禁止（E504）。
 
 意味は、
 
@@ -737,7 +787,7 @@ do?  = discard success value + propagate
 if   = meaningful domain branching
 ```
 
-ただし、`if` によるResult分岐が常に禁止されるわけではない。`if` は、成功と失敗を異なるドメイン値へ変換するなど、意味のある分岐に使用できる。単に同じ失敗を再伝播するだけのbranchは冗長として拒否する。
+ただし、`if` によるResult分岐が常に禁止されるわけではない。`if` は、成功と失敗を異なるドメイン値へ変換するなど、意味のある分岐に使用できる。単に同じ失敗を再伝播するだけのbranchは冗長として拒否する（E508）。
 
 ---
 
@@ -756,6 +806,8 @@ f x
 ```
 
 と同義。
+
+パイプは第 1 引数を埋める。`x |> f a b` は `f x a b` である。標準ライブラリの引数順は data-first とする。
 
 ```ocaml
 users
@@ -834,13 +886,15 @@ let x = calculate ->
 next
 ```
 
-`x` が継続内で使われていないならコンパイルエラー。
+`x` が継続内で使われていないならコンパイルエラー（E505）。
+
+未使用の判定は top-level の `def` にも適用する（E513）。`main` は例外である。
 
 ---
 
 # 28. 値の破棄
 
-純粋値の暗黙的な破棄は禁止。
+純粋値の暗黙的な破棄は禁止（E506）。
 
 禁止：
 
@@ -862,7 +916,7 @@ next
 
 # 29. Identity binding
 
-禁止：
+禁止（E501）：
 
 ```ocaml
 let x = value ->
@@ -879,7 +933,7 @@ value
 
 # 30. 同一branch
 
-禁止：
+禁止（E502）：
 
 ```ocaml
 if condition => value | value
@@ -897,7 +951,7 @@ Boolean branchの両方の結果が同一なら、条件自体が意味を持た
 
 # 31. 到達不能branch
 
-到達不能branchはerror。
+到達不能branchはerror（E403）。
 
 禁止：
 
@@ -910,13 +964,13 @@ if value
 
 `Some` と `None` で既に網羅されている。
 
-同様に、条件列でfallbackより後ろにbranchを置くことはできない。fallbackは必ず最後に置く。
+同様に、条件列でfallbackより後ろにbranchを置くことはできない。fallbackは必ず最後に置く（E404）。
 
 ---
 
 # 32. 重複branch
 
-同一patternの重複は禁止。
+同一patternの重複は禁止（E405）。
 
 ```ocaml
 if value
@@ -927,13 +981,15 @@ if value
 
 はerror。
 
-条件列でも、同一条件または静的に到達不能な条件の重複はerrorとする。
+条件列でも、同一条件または静的に到達不能な条件の重複はerrorとする（E406）。
+
+「静的に到達不能」は次のいずれかに限る。先行条件と、束縛変数の名前替えと括弧を正規化した後の構造が一致する場合。先行条件が `true` の場合。冗長と到達不能の判定は構文的である。
 
 ---
 
 # 33. 不要な再包装
 
-禁止：
+禁止（E507）：
 
 ```ocaml
 if result
@@ -966,6 +1022,8 @@ module type USER_STORE = sig
 end
 ```
 
+ここでの `Error` は prelude の constructor `Error` とは別物であり、signature を書く側が定義する型である。
+
 abstract type：
 
 ```ocaml
@@ -991,9 +1049,7 @@ def = named definition
 
 # 35. Module implementation
 
-v0.1では `sig` を優先し、実装側の詳細なmodule syntaxは後回し。
-
-将来的には、
+v0.1 の module 実装は次の形とする。signature 注釈は必須である（E601）。
 
 ```ocaml
 module UserStore : USER_STORE = struct
@@ -1007,7 +1063,15 @@ module UserStore : USER_STORE = struct
 end
 ```
 
-のようなOCaml的なmodule implementationを検討できる。
+struct は sig に載らない定義を持てる。sig の `type T` は外から不透明である。
+
+```ocaml
+def name (t: UserStore.T) => t.name
+```
+
+は E602 とする。
+
+struct 内で sig からも内部からも参照されない `def` はエラーとする（E515）。
 
 Functorやfirst-class moduleはv0.1には入れない。
 
@@ -1025,6 +1089,18 @@ Float
 Char
 String
 ```
+
+Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `Result<Int, DivisionError>` を返す。除数 0 は `Error(DivisionByZero)` とする。
+
+`DivisionError` の variant は `DivisionByZero` のみとする。返すのは Int の `/` と `%` に限る。
+
+除算の端は次とする。`i64::MIN / -1` は wrap して `Ok(i64::MIN)`。`i64::MIN % -1` は `Ok(0)`。
+
+Float は f64 とする。Float の `/` は Float を返す。Float に `%` は置かない。
+
+Bool は i8、Char は i32、Unit は i64 の 0 とする。Cranelift に i1 はない。
+
+Char は Unicode スカラ値とする。String は不変の UTF-8 とする。
 
 parameterized type：
 
@@ -1053,6 +1129,12 @@ Fn<Int, String>
 ```text
 Fn<(Int, Int), Int>
 ```
+
+`Fn<(Int, Int), Int>` の `( )` は引数列であり、tuple は持たない。
+
+`Fn` は n 引数である。定義と呼び出しの引数数は一致必須であり、部分適用は持たない。規則は第8節に従う。
+
+全ての shin 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。
 
 signatureでは通常、
 
@@ -1089,6 +1171,8 @@ operator overloading
 async / await
 concurrency primitives
 ```
+
+operator overloading の禁止は維持する（E107）。組み込み算術演算子は、ユーザーが定義できない固定集合への型指向解決である。
 
 必要になった段階で追加を検討する。
 
@@ -1213,6 +1297,8 @@ _
 |>
 
 sig
+struct
+module
 ```
 
 ---
@@ -1276,17 +1362,60 @@ pattern_arm
 
 pattern_fallback
   := "|" expression
+
+pattern
+  := "_"
+   | name
+   | name "(" pattern ("," pattern)* ")"
+   | record_pattern
+   | literal_pattern
+```
+
+record：
+
+```text
+record_expr
+  := "{" name "=" expression (";" name "=" expression)* "}"
+
+record_pattern
+  := "{" name "}"
+   | "{" name "=" pattern "}"
+```
+
+List リテラル：
+
+```text
+list_expr
+  := "[" "]"
+   | "[" expression ("," expression)* "]"
+```
+
+module：
+
+```text
+module_impl
+  := "module" name ":" name "=" "struct" (type_definition | definition)* "end"
+
+type_definition
+  := "type" name "=" type_expr
+```
+
+リテラルパターン：
+
+```text
+literal_pattern
+  := int | float | char | string | bool
 ```
 
 意味上、`pattern_fallback` は必ず最後に置く。pattern branchにfallbackがない場合は、pattern coverage checkerによって網羅性を検証する。
 
-条件列とpattern branchは、先頭の構文によって区別する。
+条件列とpattern branchは、直後の構文によって区別する。
 
 * `if` の直後にexpressionがあり、その後に `=>` が続く場合はBoolean branch
 * `if` の直後にexpressionがあり、その後に `| pattern =>` が続く場合はpattern branch
-* `if` の直後に改行された `| condition =>` が続く場合は条件列
+* `if` の直後が `|` なら条件列
 
-実装上の曖昧性を避けるため、条件列は必ず改行後の `|` から開始する。
+パーサは改行を見ない。
 
 ---
 
@@ -1315,4 +1444,150 @@ pattern_fallback
 そして最も重要な原則は、
 
 > **If code can be removed without changing meaning, it should not compile.**
+
+---
+
+# 43. リテラルとコメント
+
+Int は 10 進のみとする。
+
+Float は小数点の両側に数字を必須とする。`.5` や `5.` は文法に含めない。
+
+Char は `'a'` の形とする。値は Unicode スカラ値である。
+
+String は `"..."` の形とする。エスケープは `\n` `\t` `\\` `\"` に限る。
+
+Bool は `true` と `false` とする。
+
+Unit は `()` とする。
+
+コメントは `--` による行コメントのみとする。
+
+---
+
+# 44. 演算子・優先順位・短絡評価
+
+演算子は次に限る。算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&&` `||` `not`。
+
+算術と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相であり、単相化時に確定する。未確定なら Int とする。`/` と `%` の戻り型は第36節に従う。Float に `%` は置かない。
+
+文字列連結演算子は置かない。
+
+優先順位は高い方から、適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`||`、`|>` とする。比較は非結合である。
+
+`&&` と `||` は短絡評価する。左辺が結果を決めるとき、右辺を評価しない。
+
+---
+
+# 45. 構造比較の対象型
+
+`==` と `!=` は、Fn を含まない全型の構造比較である。M5 の派生パスが型ごとに合成する。
+
+Fn を含む型への `==` `!=` は E704、`compare` は E705 とする。単相化時に判明する。
+
+---
+
+# 46. List リテラル
+
+`[a, b, c]` は `Cons` 連鎖の糖衣である。空は `Nil` とする。
+
+末尾がリテラルである `Cons(a, Nil)` と `Cons(a, [b])` は拒否する（E510）。
+
+---
+
+# 47. 名前空間
+
+名前空間は型・module・constructor・値の 4 つとする。`Option<T>`（型）と `Option.map`（module）は共存する。
+
+型と constructor は別の空間である。
+
+prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる。
+
+`__` で始まる名前は `stdlib/` のファイルでのみ解決する。ユーザーコードでは E203 とする。呼び出し位置でしか参照できず、値化は E204 とする。
+
+---
+
+# 48. 末尾呼び出しの保証
+
+末尾位置の関数呼び出しはスタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
+
+全ての shin 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。関数値経由の末尾呼び出しは `return_call_indirect` で表せる。
+
+---
+
+# 49. prelude
+
+言語が名前で解決する型は `Option` `Result` `List` `DivisionError` とする。`/` の戻り型、`let?` の対象、List リテラルの展開先に用いる。
+
+prelude の各 module は `module X : SIG = struct ... end` の形で書く。第35節の規則に従う。
+
+prelude は組み込みを次の形で包む。
+
+```ocaml
+def length s => __string_length s
+```
+
+M5 の extern 表の各項目は、shin 側の名前（`__string_length` 等）と型を持つ。
+
+関数集合は次とする。
+
+```text
+List: map filter fold length reverse append sort
+Option: map unwrap_or is_some ok_or
+Result: map map_error is_ok
+String: length concat
+Int / Float: to_string
+```
+
+`sort` は比較関数を引数に取る merge sort とする。
+
+`String.length` は Unicode スカラ値の個数とする。
+
+---
+
+# 50. エラーコード
+
+拒否コーパスは次のコードで照合する。
+
+| コード | 短い名前 | 節 |
+|---|---|---|
+| E101 | nested-branch | §20 |
+| E102 | rec-on-value | §4 |
+| E107 | operator-overloading | §38 |
+| E201 | implicit-recursion | §4 |
+| E203 | dunder-in-user | §47 |
+| E204 | dunder-as-value | §47 |
+| E301 | arity-mismatch | §8 |
+| E302 | recursive-type-arg | §10 |
+| E303 | let-question-type | §22 |
+| E304 | record-ambiguous | §12 |
+| E401 | missing-cond-fallback | §15 |
+| E402 | non-exhaustive | §18 |
+| E403 | unreachable-branch | §31 |
+| E404 | fallback-not-last | §31 |
+| E405 | duplicate-pattern | §32 |
+| E406 | duplicate-condition | §32 |
+| E501 | identity-binding | §29 |
+| E502 | identical-branches | §30 |
+| E503 | catch-all-underscore | §19 |
+| E504 | let-question-underscore | §23 |
+| E505 | unused-binding | §27 |
+| E506 | implicit-discard | §28 |
+| E507 | rewrap | §33 |
+| E508 | repropagate | §24 |
+| E509 | ok-unit-parens | §21 |
+| E510 | cons-literal-tail | §46 |
+| E511 | cond-to-literal-pattern | §16 |
+| E512 | top-var-pattern | §16 |
+| E513 | unused-toplevel-def | §27 |
+| E514 | rec-cycle-value | §4 |
+| E515 | unused-struct-def | §35 |
+| E516 | missing-rec | §4 |
+| E601 | missing-signature | §35 |
+| E602 | opaque-type | §35 |
+| E701 | poly-recursion | §4 |
+| E702 | main-polymorphic | §5 |
+| E703 | main-contains-fn | §5 |
+| E704 | eq-on-fn | §45 |
+| E705 | compare-on-fn | §45 |
 
