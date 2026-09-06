@@ -259,7 +259,7 @@ Fn<(Int, Int), Int>
 
 `def` で定義した関数名を引数なしで参照すると、`Fn<...>` 型の値になる。
 
-関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。
+関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。この形に反する呼び出しは E106 とする。
 
 ---
 
@@ -1130,7 +1130,7 @@ Fn<Int, String>
 Fn<(Int, Int), Int>
 ```
 
-`Fn<(Int, Int), Int>` の `( )` は引数列であり、tuple は持たない。
+`Fn<(Int, Int), Int>` の `( )` は引数列であり、tuple は持たない。式やパターンに tuple の構文を書くと E105 とする。
 
 `Fn` は n 引数である。定義と呼び出しの引数数は一致必須であり、部分適用は持たない。規則は第8節に従う。
 
@@ -1451,7 +1451,7 @@ literal_pattern
 
 Int は 10 進のみとする。
 
-Float は小数点の両側に数字を必須とする。`.5` や `5.` は文法に含めない。
+Float は小数点の両側に数字を必須とする。`.5` や `5.` は文法に含めない（E103）。
 
 Char は `'a'` の形とする。値は Unicode スカラ値である。
 
@@ -1461,7 +1461,7 @@ Bool は `true` と `false` とする。
 
 Unit は `()` とする。
 
-コメントは `--` による行コメントのみとする。
+コメントは `--` による行コメントのみとする。他の記法によるコメントは E104 とする。
 
 ---
 
@@ -1553,6 +1553,10 @@ Int / Float: to_string
 |---|---|---|
 | E101 | nested-branch | §20 |
 | E102 | rec-on-value | §4 |
+| E103 | float-literal-form | §43 |
+| E104 | comment-form | §43 |
+| E105 | no-tuple | §37 |
+| E106 | constructor-call-form | §8 |
 | E107 | operator-overloading | §38 |
 | E201 | implicit-recursion | §4 |
 | E203 | dunder-in-user | §47 |
