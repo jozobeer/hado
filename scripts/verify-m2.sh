@@ -86,9 +86,9 @@ else
     fail 2 "e1xx-7+swap:$c2_reasons"
 fi
 
-# --- check 3: the 36 non-E1xx files parse; E1xx never counts as non-E1xx ---
+# --- check 3: the 39 non-E1xx files parse; E1xx never counts as non-E1xx ---
 c3_reasons=""
-[ "$(grep -cF 'parse_non_e1xx_ok_n: 36' "$TMPD/base.log")" -ge 1 ] || c3_reasons="$c3_reasons non-e1xx-n!=36"
+[ "$(grep -cF 'parse_non_e1xx_ok_n: 39' "$TMPD/base.log")" -ge 1 ] || c3_reasons="$c3_reasons non-e1xx-n!=39"
 for f in tests/reject/*.shin; do
     [ -e "$f" ] || continue
     rel="tests/reject/$(basename "$f")"
@@ -101,9 +101,9 @@ for f in tests/reject/*.shin; do
     fi
 done
 if [ -z "$c3_reasons" ]; then
-    pass 3 "non-e1xx-36"
+    pass 3 "non-e1xx-39"
 else
-    fail 3 "non-e1xx-36:$c3_reasons"
+    fail 3 "non-e1xx-39:$c3_reasons"
 fi
 
 # --- check 4: E1xx positions, perturbation probes, gen/decoy/tree, emit ---

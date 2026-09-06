@@ -154,7 +154,7 @@ fn corpus_counts() {
 
     assert_eq!(accept_ok.len(), 23, "accept count");
     assert_eq!(e1xx_ok.len(), 7, "E1xx count");
-    assert_eq!(non_e1xx_ok.len(), 36, "non-E1xx count");
+    assert_eq!(non_e1xx_ok.len(), 39, "non-E1xx count");
 }
 
 // ---------------------------------------------------------------------------
