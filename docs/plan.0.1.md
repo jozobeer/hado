@@ -17,17 +17,17 @@
 | 項目 | 決定 |
 |---|---|
 | 成果物 | 検査器と実行ファイル生成を持つコンパイラ。CLI 名 `shin` |
-| バックエンド | LLVM 22 |
-| 実装言語と結合 | Rust、inkwell 0.10（feature `llvm22-1`）。llvm-sys 221 に解決される |
-| LLVM の入手 | apt.llvm.org の noble-22（`llvm-22-dev` `libpolly-22-dev` `clang-22`） |
+| バックエンド | Cranelift 0.135（純 Rust）。`cranelift-codegen` `-frontend` `-module` `-object` `-native` を Cargo.lock で固定 |
+| 外部ツール | リンクに `cc`、Boehm GC に `libgc-dev` |
 | 入口 | `def main = expression`。ランタイムが `main` の値を stdout に印字し終了コード 0。値が `Error(e)` なら stderr に印字し終了コード 1。言語内に副作用はない |
 | 多相の実現 | 単相化。実行時型情報を持たない。多相再帰はコンパイルエラー |
 | メモリ管理 | Boehm GC（`libgc-dev`）。ランタイムの確保関数は一つに絞る。参照カウントは v0.2 |
-| 標準ライブラリ | prelude を shin 自身で書き、全プログラムに暗黙に連結する。組み込みは Int / Float の算術と比較、String の長さ・連結・比較、Char と String の相互変換、構造比較 `==` `compare`、印字に限る |
+| 標準ライブラリ | prelude を shin 自身で書き、全プログラムに暗黙に連結する。組み込みは Int / Float の算術と比較、String の長さ・連結・比較、Char と String の相互変換、スカラと String の印字に限る。構造比較 `==` `compare` と全型の印字は M5 の派生パスが型ごとに合成する |
 | prelude の関数集合 | List: map filter fold length reverse append sort。Option: map unwrap_or is_some ok_or。Result: map map_error is_ok。String: length concat。Int / Float: to_string。sort は比較関数を引数に取る merge sort |
 | Int | `i64`。加減乗はオーバーフローで wrap。`/` `%` は `Result<Int, ArithmeticError>` を返し、除数 0 で `Error(DivisionByZero)`。Float の `/` は IEEE 754 |
 | 拡張子 | `.shin` |
-| 関数値の表現 | 「関数ポインタ + 環境」のクロージャに統一。名前付き関数は環境なし |
+| 関数値の表現 | 「関数ポインタ + 環境」のクロージャに統一。名前付き関数の環境は null |
+| 呼び出し規約 | shin の関数は全て Cranelift の `tail` 規約。末尾位置の呼び出しは `return_call`。C から呼ぶ入口だけ system_v で、通常の `call` で `tail` 側に入る。`preserve_frame_pointers=true` が必須 |
 
 ### 2.2 言語意味論（M1 で仕様に書き込む）
 
@@ -37,6 +37,7 @@
 | パイプ | `x \|> f a b` は `f x a b`。標準ライブラリの引数順は data-first |
 | 関数値 | `def` で定義した関数名を引数なしで参照すると `Fn<...>` 型の値 |
 | 呼び出し構文 | 関数は並置 `f x y`、constructor は括弧 `Some(x)`。大文字始まりが constructor |
+| 末尾呼び出し | 末尾位置の関数呼び出し（自己再帰・相互再帰・関数値経由を含む）はスタックを消費しない。`def rec` が唯一のループなので仕様で保証する |
 | 冗長・到達不能の判定 | 構文的。束縛変数の名前替えと括弧を正規化した後の構造一致。条件列の到達不能は、先行条件と構造一致する場合か、先行条件が `true` の場合に限る |
 | module | `module X : SIG = struct ... end` を v0.1 に入れる。signature 注釈は必須。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明。struct 内で sig からも内部からも参照されない `def` はエラー |
 | record | 構築は `{ name = "a"; age = 3 }`。型は field 集合から一意に決まる nominal 型で、曖昧なら注釈を要求。パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）。書かない field は無視。field 更新構文は v0.2 |
@@ -61,13 +62,15 @@
 | 名前空間の全体 | 型・module・constructor・値の 4 つ。`Option<T>`（型）と `Option.map`（module）は共存する。prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる |
 | 言語が知る prelude の型 | `Option` `Result` `List` `ArithmeticError` はコンパイラが名前で解決する（`/` の戻り型、`let?` の対象、List リテラルの展開先） |
 | `main` の型 | 単相でなければならない。`def main = Nil` は型変数が残るためエラー |
-| 文字 | Char は Unicode スカラ値（`i32`）。String は不変の UTF-8。`String.length` はスカラ値の個数 |
+| 文字 | Char は Unicode スカラ値。String は不変の UTF-8。`String.length` はスカラ値の個数 |
 | top-level の未使用 `def` | エラー（仕様 §27 の適用範囲を top-level にも広げる）。`main` は例外 |
-| ADT のレイアウト | payload なし constructor は即値、payload あり constructor は GC 管理のヒープ。再帰型 `List<T>` はこれで間接参照になる |
+| スカラの機械語型 | Int は i64、Float は f64、Bool は i8、Char は i32、Unit は i64 の 0。Cranelift に i1 はない |
+| ADT のレイアウト | constructor が全て payload なしの型は素の整数。payload を一つでも持つ型は全 constructor を一律に GC ヒープの box にする。一つの型の中で即値と pointer を混在させない |
 | `/` `%` の戻り型 | Int では `Result<Int, ArithmeticError>`。Float の `/` は `Float`。Float に `%` は置かない |
+| 除算の端 | `i64::MIN / -1` は wrap して `Ok(i64::MIN)`、`i64::MIN % -1` は `Ok(0)`。除数 0 と併せて `sdiv` `srem` の前に分岐で除く（Cranelift の `sdiv` は両方でトラップする） |
+| クロージャの呼び出し規約 | 全ての shin 関数が環境を第 1 引数に取る一律規約。名前付き関数は環境を無視する。arity ごとに `tail` 規約の signature が一つに定まるので、関数値経由の末尾呼び出しを `return_call_indirect` で表せる。代替案は「名前付き関数は直接規約、値化時に thunk を生成」 |
 | ArithmeticError の名前 | より具体的な名前（`DivisionError` 等）を候補に、M1 で決める |
 | prelude の module 構成 | prelude の各 module も `module X : SIG = struct` の形で書く（2.2 の規則に従う） |
-| JIT の適用範囲 | JIT はヒープを使わない部分集合（Int / Float / Bool / Unit のみ）の単体テストに限る。コーパスのテストは AOT で実行ファイルを生成しサブプロセスで実行する。Boehm GC と Rust テストプロセスの共存を避けるため |
 | エラーコード | `E1xx` 構文、`E2xx` 名前解決、`E3xx` 型、`E4xx` 網羅性・到達可能性、`E5xx` canonical・冗長、`E6xx` module、`E7xx` 単相化。各コードに短い名前を付け、拒否コーパスはコードで照合する |
 
 ## 3. マイルストーン
@@ -78,8 +81,8 @@
 
 ```text
 Cargo.toml            ワークスペース
-crates/shin/          コンパイラ本体と CLI
-runtime/              C ランタイム（GC 確保・文字列・印字）。cc crate でビルドして静的リンク
+crates/shin/          コンパイラ本体と CLI（lexer, parser, types, check, mono, repr, emit）
+runtime/              C ランタイム（GC 確保・String primitive・スカラ印字）。cc crate でビルドして静的リンク
 stdlib/               prelude（.shin）
 tests/accept/         受理コーパス
 tests/reject/         拒否コーパス
@@ -88,25 +91,22 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 ### M0 環境と歩く骨格
 
-1. LLVM 22 と Boehm GC を導入する。
+1. Boehm GC を導入する。C ツールチェーン（`cc`）は導入済みであることを確認する。
 
    ```sh
-   wget https://apt.llvm.org/llvm.sh
-   chmod +x llvm.sh
-   sudo ./llvm.sh 22
-   sudo apt install llvm-22-dev libpolly-22-dev clang-22 libgc-dev
+   sudo apt install libgc-dev
    ```
 
-2. `.cargo/config.toml` に `[env] LLVM_SYS_221_PREFIX = "/usr/lib/llvm-22"` を置く。
-3. ワークスペースを作る。`crates/shin` の依存は `inkwell = { version = "0.10", features = ["llvm22-1"] }`、build 依存は `cc = "1"`。
-4. `runtime/` に `shin_alloc`（`GC_malloc` の包み）と Int 印字を書き、`cc` で静的ライブラリにする。
-5. `def main = 1 + 2` を lexer → parser → 型 → LLVM → オブジェクト → `clang-22` リンクの順で通し、実行ファイルが `3` を印字する。
+2. ワークスペースを作る。`crates/shin` の依存は `cranelift-codegen` `cranelift-frontend` `cranelift-module` `cranelift-object` `cranelift-native` の `"0.135"`、build 依存は `cc = "1"`。
+3. `runtime/` に `shin_alloc`（`GC_malloc` の包み）と Int 印字を書き、`cc` で静的ライブラリにする。
+4. `def main = 1 + 2` を lexer → parser → 型 → Cranelift → オブジェクト → `cc` リンクの順で通し、実行ファイルが `3` を印字する。
+5. `crates/shin/tests/` に手組みの CLIF テストを置く。`tail` 規約と `return_call` で引数数の異なる相互再帰を組み、system_v の入口から 1 億深さを走らせて完走を確認する。shin の構文はまだ無いので、M0 ではコンパイラを通さず Cranelift の API を直接呼ぶ。
 
 完了条件:
 
-- `cargo build` が LLVM 22 に対して成功する（確定、未実走）。
+- `cargo build` が成功する（確定）。
 - `cargo test` に、`def main = 1 + 2` を AOT で実行ファイルにし、サブプロセスで走らせて stdout が `3` と一致するテストがあり、通る（確定）。
-- 同じ式を JIT で評価して `3` を返す単体テストが通る（推定）。
+- 手組み CLIF の相互再帰 1 億深さがスタックを溢れずに完走する（確定）。
 
 ### M1 仕様の穴埋めとコーパス
 
@@ -121,10 +121,10 @@ docs/                 spec.0.1.md、plan.0.1.md
    | §25 | パイプの第 1 引数 |
    | §32 | 「静的に到達不能」の定義 |
    | §34〜35 | struct |
-   | §36 | Int、Char、String |
+   | §36 | Int、Char、String、除算の端 |
    | §38 | struct を除外一覧から外す。operator overloading の禁止は維持し、組み込み算術演算子はユーザーが定義できない固定集合への型指向解決であると注記する |
    | §41 | 文法 |
-   | 新設 | リテラルとコメント、演算子と優先順位、List リテラル、名前空間、prelude、エラーコード |
+   | 新設 | リテラルとコメント、演算子と優先順位、List リテラル、名前空間、末尾呼び出しの保証、prelude、エラーコード |
 
 2. コーパスを書く。ファイル冒頭に根拠と期待値をコメントで置く。
 
@@ -184,29 +184,34 @@ docs/                 spec.0.1.md、plan.0.1.md
 - `-- needs: prelude` を持たない受理コーパス全件が検査を通る（確定）。
 - 各エラーが「どの branch や binding と同一か」を位置付きで出す（推定）。
 
-### M5 単相化とクロージャ変換
+### M5 単相化・クロージャ変換・派生
 
 1. 多相 `def` を使用型ごとに実体化する。多相再帰を検出してエラーにする。
-2. `fn` と関数値をクロージャ（関数ポインタ + 環境）に変換する。
-3. 型付き中間表現を定義し、`shin dump-mono` で出力する。
+2. `fn` と関数値をクロージャに変換する。`MakeClosure` `CallDirect` `CallClosure` を別ノードにし、各関数は固定 arity の signature を持つ。
+3. 派生パス。型ごとに `eq_T` `compare_T` `print_T` を通常の中間表現の関数として合成する。
+4. 型付き中間表現を定義する。性質は次の 5 つ。単相で型変数を持たない。値はスカラーか参照のどちらかで、集約は全て参照。データ操作は構造的（`Construct` `Project` constructor の switch `RecordGet`）で、バイトサイズとオフセットを持たない。`Call` と `TailCall` を区別する。ランタイム外部関数は（名前、機械語型の引数列と戻り、確保し得るか）の表で一箇所に宣言する。
+5. `shin dump-mono` で出力する。
 
 完了条件:
 
-- `-- needs: prelude` を持たない受理コーパス全件で `shin dump-mono` が成功し、出力に型変数が残らない（確定）。
+- `-- needs: prelude` を持たない受理コーパス全件で `shin dump-mono` が成功し、出力に型変数・バイトサイズ・オフセットが現れない（確定）。
+- 派生関数 `eq_T` `compare_T` `print_T` が `dump-mono` に現れる（推定）。
 - 多相再帰の拒否コーパスが `E7xx` で落ちる（確定）。
 - `main` が単相でない例が `E7xx` で落ちる（推定）。
 
 ### M6 コード生成
 
-1. inkwell で中間表現を LLVM IR に落とす。ADT は 2.3 のレイアウト。
-2. ランタイムに文字列操作、構造比較の補助、全型の印字を足す。
-3. オブジェクト出力と `clang-22` によるリンクを `shin build x.shin` にまとめる。
+1. `repr`。M5 の型から機械語型、box 判定、フィールドオフセットを決める。backend 中立で単体テスト可能にする。
+2. `emit`。中間表現と `repr` から CLIF を生成する。関数は `tail` 規約、入口は system_v、`TailCall` は `return_call`（関数値経由は `return_call_indirect`）。全関数に `cranelift_codegen::verifier::verify_function` を通す。
+3. ランタイムに String primitive とスカラ印字を足す。
+4. オブジェクト出力とランタイム静的ライブラリを `-lgc` と共に `cc` でリンクする工程を `shin build x.shin` にまとめる。
 
 完了条件:
 
 - `-- needs: prelude` を持たない受理コーパス全件が、実行ファイルとして期待 stdout を返す（確定）。
 - `main` が `Error(e)` を返す受理コーパスで、stderr に `e` が印字され終了コードが 1（確定）。
-- `module.verify()` が受理コーパス全件で通る（確定）。
+- `verify_function` が受理コーパス全件の全関数で通る（確定）。
+- 末尾再帰 1 億深さの受理コーパスがスタックを溢れずに完走する（確定）。
 
 ### M7 prelude
 
@@ -223,23 +228,24 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 | 内容 | 状態 | 結果 |
 |---|---|---|
-| inkwell 0.10 `llvm22-1` の依存解決 | 実走 | `cargo fetch` 成功。llvm-sys 221.1.0 に解決 |
-| llvm-sys の prefix 変数名 | 実走 | build.rs より `LLVM_SYS_221_PREFIX` |
-| apt.llvm.org noble-22 の package 名 | 実走 | `clang-22` `llvm-22` `llvm-22-dev` `libpolly-22-dev` `lld-22` を確認 |
-| libgc-dev の内容 | 実走 | `/usr/include/gc.h` `libgc.a` `libgc.so` `bdw-gc.pc` を確認 |
-| `sudo ./llvm.sh 22` と `apt install` | 未検証 | sudo を要するため計画段階では実行していない |
-| LLVM 22 に対する `cargo build` | 未検証 | LLVM 未導入のため |
-| Boehm GC と JIT の共存 | 未検証 | 2.3 で JIT をヒープなし部分集合に限定して回避する |
+| Cranelift 0.135 のフレッシュビルド | 実走 | 20.7 秒、crate 57、システム依存なし |
+| オブジェクト出力を C ランタイムと `-lgc` で `cc` リンク | 実走 | `1 + 2` の実行ファイルが `3` を印字 |
+| `tail` 規約 + `return_call`、2 引数と 9 引数の相互再帰 | 実走 | system_v の入口から 1 億深さを完走。`preserve_frame_pointers=false` では emit が panic |
+| Boehm GC 単独 | 実走 | `GC_malloc` 64 B × 200 万回でヒープ 128 KB に留まる |
+| Cranelift API の変化 | 実走 | 0.135 で `finalize` が引数を取り、`icmp_imm` `iadd_imm` が非推奨 |
+| LLVM 22 + inkwell、テキスト LLVM IR | 実走 | 同じ probe（`1 + 2`、末尾再帰 1 億深さ）を通したうえで不採用 |
 
 ## 5. 判断の解説
 
 インタプリタではなくコンパイラを v0.1 の成果物にした。検査器だけでは「動くプログラム」が一つもなく、型検査の正しさを実行結果で確かめる手段がないため。
 
-バックエンドは C ソース生成ではなく LLVM にした。ユーザーの選好である。inkwell を選んだのは、JIT でテストの回転を速くできることと、型付き Builder が IR の型不一致を構築時に捕まえるため。テキスト IR 生成なら LLVM 23 に即座に乗れるが、inkwell が 22 に追従済みなので差は小さい。
+バックエンドは Cranelift にした。ユーザーの選好である「ツールチェーンを cargo に閉じる」を満たす唯一の案で、システム LLVM の導入・環境変数・版追従が消え、外部依存は `cc` と libgc だけになる。比較した LLVM 22 + inkwell とテキスト LLVM IR も同じ probe を通しており、v0.1 の範囲で機能差はなかった。Boehm GC と単相化により、コード生成に残るのは算術・call・tail call・確保・load / store・switch だけで、バックエンドは M5 の中間表現の後ろに閉じた葉になる。Cranelift の代償は、月次のメジャー更新（Cargo.lock で固定し、上げるのは意図したときだけ）、末尾呼び出しが `tail` 規約と `preserve_frame_pointers=true` を要求すること、フレッシュビルド 20 秒である。後で inkwell やテキスト IR に移る場合は `emit` の書き直しで済む。
 
 関数適用を n 引数にした。パイプが第 1 引数を埋める規則である以上、部分適用が仕様の例を支える場面はない。残るのは表現力の追加だけで、それは「同じ意味に複数の表現を許さない」原則と衝突する。呼び出し規約も 1 定義 1 関数で済む。
 
-多相を単相化で実現した。HM の rank-1 多相と単一コンパイル単位という条件下では常に可能で、実行時型情報が不要になる。ランタイムは確保・文字列・印字だけになり、LLVM の型付き IR をそのまま使える。
+多相を単相化で実現した。HM の rank-1 多相と単一コンパイル単位という条件下では常に可能で、実行時型情報が不要になる。ランタイムは確保・String primitive・スカラ印字だけになる。
+
+構造比較と印字は M5 の派生パスで型ごとに合成する。ランタイムに置くと実行時型情報が要り、単相化と矛盾するため。レイアウトは `repr` 一箇所が決め、`emit` は消費するだけにする。中間表現にサイズやオフセットを入れないのは、バックエンドを交換しても `repr` を無傷で残すため。
 
 メモリ管理を v0.1 では Boehm GC に委ねた。参照カウントの retain / release 挿入は use-after-free を生みやすく、検査器・コード生成と同時に立ち上げると原因の切り分けが難しいため。参照カウントは、この言語が mutation を持たず再帰も top-level の `def rec` に限るため参照が循環せず、最終形として適している。確保関数を一つに絞っておけば、v0.2 での差し替え範囲は明確である。
 
@@ -247,13 +253,15 @@ prelude を shin 自身で書く。`sig` `struct` `def rec` パターン分岐�
 
 コーパスをコンパイラより先に書く。この言語では「何を落とすか」が仕様そのものであり、先に固定しないと検査器の完了条件が書けない。
 
-工程順（構文 → 型 → 検査器 → 単相化 → コード生成）を機能ごとの縦割りより優先した。型検査器と検査器は unify や網羅性行列のように機能横断の設計を先に置かないと作り直しになる。ただし M0 で LLVM 22 と inkwell の結合を最初に実測する。外部依存のうち失敗の影響が最も大きいため。
+工程順（構文 → 型 → 検査器 → 単相化 → コード生成）を機能ごとの縦割りより優先した。型検査器と検査器は unify や網羅性行列のように機能横断の設計を先に置かないと作り直しになる。ただし M0 で歩く骨格を先に通す。バックエンドとランタイムの結合は、失敗したときの影響が最も大きい外部要因であるため。
 
 ## 6. リスクと v0.2 への保留
 
 リスク:
 
-- inkwell の LLVM 追従。LLVM 23 が stable になったとき、inkwell 0.10.0（2026-08-06 公開）は 22 までしか対応しない。追従の遅れの実績は計測していない。
+- Cranelift の API 変化。月次でメジャーが上がり、0.135 でも非推奨化があった。Cargo.lock で固定し、上げるときはコーパスを回して確かめる。
+- 末尾呼び出しの実装が `preserve_frame_pointers=true` を要求する。性能への影響は未測定。
+- Boehm GC の保守的走査。ポインタをタグ埋め込み等で隠すと回収されて壊れる。`repr` はポインタを隠さず 1 語で置く。
 - 多相再帰。型注釈付きで多相再帰が推論される場合、単相化が停止しない。M5 で検出してエラーにする。
 
 v0.2 へ保留:
@@ -263,4 +271,4 @@ v0.2 へ保留:
 - record の field 更新構文。
 - functor、first-class module。
 - I/O と効果の順序付け。
-
+- JIT。Cranelift の `JITModule` は `ObjectModule` と同じ `Module` trait なので `emit` を共有できる。
