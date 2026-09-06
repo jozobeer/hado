@@ -1,0 +1,8 @@
+-- spec: §39
+-- expect: anonymous
+-- item: 変数パターン
+def display_name user =>
+  if user.name
+  | Some(name) => name
+  | "anonymous"
+def main = display_name { name = None }

@@ -1,0 +1,11 @@
+-- spec: §39
+-- expect: Good
+-- item: 条件列の判別
+-- item: 冗長・到達不能の判定
+def classify score =>
+  if
+  | score >= 90 => Excellent
+  | score >= 70 => Good
+  | score >= 50 => Pass
+  | Fail
+def main = classify 75

@@ -1,0 +1,8 @@
+-- spec: §32
+-- error: E406
+def grade2 score =>
+  if
+  | score >= 70 => 1
+  | score >= 70 => 2
+  | 0
+def main = grade2 80

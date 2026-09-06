@@ -1,0 +1,7 @@
+-- spec: §39
+-- expect: guest
+def name user =>
+  if user
+  | Member(user) => user.name
+  | "guest"
+def main = name Guest

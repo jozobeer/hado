@@ -1,0 +1,5 @@
+-- spec: §4
+-- error: E102
+def rec pi = 3.14159
+-- value definitions cannot use rec
+def main = pi

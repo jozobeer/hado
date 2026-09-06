@@ -1,0 +1,7 @@
+-- spec: §12
+-- error: E304
+-- item: record
+type A = { name: String; age: Int }
+type B = { name: String; age: Int }
+def get_field r => r.name
+def main = get_field { name = "a"; age = 3 }

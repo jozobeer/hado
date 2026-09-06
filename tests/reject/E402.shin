@@ -1,0 +1,6 @@
+-- spec: §18
+-- error: E402
+def f x =>
+  if x
+  | Some(v) => v
+def main = f (Some(1))

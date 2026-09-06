@@ -1,0 +1,4 @@
+-- spec: §45
+-- error: E705
+def inc x => x + 1
+def main = compare inc inc

@@ -1,0 +1,11 @@
+-- spec: §39
+-- expect: 1
+-- item: module
+module type USER_STORE = sig
+  type T
+
+  def find(id: Int): Option<T>
+  def save(user: T): Result<Unit, Error>
+  def delete(user: T): Result<Unit, Error>
+end
+def main = 1

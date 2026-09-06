@@ -1,0 +1,5 @@
+-- spec: §47
+-- error: E203
+-- item: 名前空間
+-- item: prelude から組み込みへの到達
+def main = __string_length "hi"

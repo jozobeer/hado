@@ -1,0 +1,4 @@
+-- spec: §43
+-- error: E103
+-- item: リテラル
+def main = .5

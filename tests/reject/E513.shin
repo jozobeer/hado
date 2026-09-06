@@ -1,0 +1,4 @@
+-- spec: §27
+-- error: E513
+def helper x => x
+def main = 1

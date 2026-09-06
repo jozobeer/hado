@@ -1,0 +1,5 @@
+-- spec: §10
+-- expect: 1
+-- item: 再帰型
+type List2<T> = Nil2 | Cons2(T, List2<T>)
+def main = 1

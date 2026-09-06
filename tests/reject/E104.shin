@@ -1,0 +1,5 @@
+-- spec: §43
+-- error: E104
+-- item: コメント
+def main = 1
+# trailing comment in the wrong form

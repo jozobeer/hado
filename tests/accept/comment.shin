@@ -1,0 +1,5 @@
+-- spec: §43
+-- expect: 3
+-- item: コメント
+def main = 1 + 2
+-- trailing line comment

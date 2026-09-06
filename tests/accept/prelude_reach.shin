@@ -1,0 +1,5 @@
+-- spec: §49
+-- expect: 5
+-- needs: prelude
+-- item: prelude から組み込みへの到達
+def main = String.length "hello"

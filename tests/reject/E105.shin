@@ -1,0 +1,4 @@
+-- spec: §37
+-- error: E105
+-- item: tuple
+def main = (1, 2)

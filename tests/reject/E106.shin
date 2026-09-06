@@ -1,0 +1,5 @@
+-- spec: §8
+-- error: E106
+-- item: 呼び出し構文
+def inc x => x + 1
+def main = inc(1)

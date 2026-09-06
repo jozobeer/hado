@@ -1,0 +1,5 @@
+-- spec: §30
+-- error: E502
+def f x =>
+  if x > 1 => 1 | 1
+def main = f 1

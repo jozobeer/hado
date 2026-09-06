@@ -1,0 +1,9 @@
+-- spec: §39
+-- expect: ok
+-- item: 呼び出し構文
+def delete_user id =>
+  let? user = find_user id ->
+  do? authorize_delete user ->
+  do? delete user ->
+  Ok()
+def main = delete_user 1
