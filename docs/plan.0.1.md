@@ -22,7 +22,7 @@
 | 入口 | `def main = expression`。emit が system_v の `shin_entry` を生成し、`main` を呼んで値を stdout に印字し終了コード 0 を返す。値が `Error(e)` なら stderr に印字し終了コード 1。C の `main()` は `GC_INIT()` と `shin_entry()` の呼び出しのみ。言語内に副作用はない |
 | 多相の実現 | 単相化。実行時型情報を持たない。多相再帰はコンパイルエラー |
 | メモリ管理 | Boehm GC（`libgc-dev`）。ランタイムの確保関数は一つに絞る。参照カウントは v0.2 |
-| 標準ライブラリ | prelude を shin 自身で書き、全プログラムに暗黙に連結する。組み込みは Int / Float の算術と比較、String の長さ・連結・比較、Char と String の相互変換、スカラと String の印字に限る。構造比較 `==` `compare` と全型の印字は M5 の派生パスが型ごとに合成する |
+| 標準ライブラリ | prelude を shin 自身で書き、全プログラムに暗黙に連結する。組み込みは Int / Float の算術と比較、String の長さ・連結・比較、Char と String の相互変換、スカラと String の印字に限る。構造比較 `==` `compare` と Fn を含まない全型の印字は M5 の派生パスが型ごとに合成する |
 | prelude の関数集合 | List: map filter fold length reverse append sort。Option: map unwrap_or is_some ok_or。Result: map map_error is_ok。String: length concat。Int / Float: to_string。sort は比較関数を引数に取る merge sort |
 | Int | `i64`。加減乗はオーバーフローで wrap。`/` `%` は `Result<Int, ArithmeticError>` を返し、除数 0 で `Error(DivisionByZero)`。Float の `/` は IEEE 754 |
 | 拡張子 | `.shin` |
@@ -45,7 +45,7 @@
 | module | `module X : SIG = struct ... end` を v0.1 に入れる。signature 注釈は必須。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明。struct 内で sig からも内部からも参照されない `def` はエラー |
 | record | 構築は `{ name = "a"; age = 3 }`。型は field 集合から一意に決まる nominal 型で、曖昧なら注釈を要求。パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）。書かない field は無視。field 更新構文は v0.2 |
 | tuple | 持たない。`Fn<(Int, Int), Int>` の `( )` は引数列 |
-| 演算子 | 算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&& \|\| not`。算術と比較は Int / Float 両用の組み込み多相で、単相化時に確定し、未確定なら Int（`/` `%` の戻り型は 2.3）。文字列連結演算子は置かない。優先順位は高い方から 適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`\|\|`、`\|>`。比較は非結合 |
+| 演算子 | 算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&& \|\| not`。算術と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相で、単相化時に確定し、未確定なら Int（`/` `%` の戻り型は 2.3）。`==` `!=` は Fn を含まない全型の構造比較で、M5 の派生パスが型ごとに合成する。Fn を含む型への `==` `!=` `compare` は単相化時に判明するので `E7xx`。`&&` `\|\|` は短絡評価で、左辺が結果を決めるとき右辺を評価しない。文字列連結演算子は置かない。優先順位は高い方から 適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`\|\|`、`\|>`。比較は非結合 |
 | リテラル | Int は 10 進。Float は小数点の両側に数字必須。Char は `'a'`。String は `"..."`、エスケープは `\n \t \\ \"`。Bool は `true` `false`。Unit は `()` |
 | Unit payload | `Ok()` が canonical。`Ok(())` は拒否 |
 | コメント | `--` 行コメントのみ |
@@ -54,6 +54,7 @@
 | 条件列の判別 | パーサは改行を見ない。`if` の直後が `\|` なら条件列。仕様 1289 行の改行要求は削除 |
 | 名前空間 | 型と constructor は別。仕様 965 行の `Error` 型はユーザー定義 |
 | List リテラル | `[a, b, c]` は `Cons` 連鎖の糖衣。空は `Nil`。末尾がリテラルの `Cons(a, Nil)` `Cons(a, [b])` は拒否 |
+| 再帰型 | 型定義の閉路（自己再帰と相互再帰）の中では、型引数は宣言の型引数と同一でなければならない。`type Nest<T> = Leaf(T) \| Node(Nest<List<T>>)` は `E3xx`。派生パスの実体化を有限にするため |
 | 相互再帰 | top-level は定義順に依存しない。呼び出しグラフの閉路に含まれる関数は全て `rec`。閉路に値定義が含まれるとエラー（値定義は `rec` を持てない、仕様 §4） |
 | prelude から組み込みへの到達 | M5 の extern 表の各項目に shin 側の名前（`__string_length` 等）と型を持たせる。`__` 名は `stdlib/` のファイルでのみ解決し、ユーザーコードでは `E2xx`。呼び出し位置でしか参照できず、値化は `E2xx`。prelude は `def length s => __string_length s` で包む |
 
@@ -65,7 +66,7 @@
 |---|---|
 | 名前空間の全体 | 型・module・constructor・値の 4 つ。`Option<T>`（型）と `Option.map`（module）は共存する。prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる |
 | 言語が知る prelude の型 | `Option` `Result` `List` `ArithmeticError` はコンパイラが名前で解決する（`/` の戻り型、`let?` の対象、List リテラルの展開先） |
-| `main` の型 | 単相でなければならない。`def main = Nil` は型変数が残るためエラー |
+| `main` の型 | 単相で、Fn を含まない型でなければならない。`def main = Nil` は型変数が残るため、`def main = inc` は印字できないため、どちらも `E7xx` |
 | 文字 | Char は Unicode スカラ値。String は不変の UTF-8。`String.length` はスカラ値の個数 |
 | top-level の未使用 `def` | エラー（仕様 §27 の適用範囲を top-level にも広げる）。`main` は例外 |
 | スカラの機械語型 | Int は i64、Float は f64、Bool は i8、Char は i32、Unit は i64 の 0。Cranelift に i1 はない |
@@ -120,6 +121,7 @@ docs/                 spec.0.1.md、plan.0.1.md
    |---|---|
    | §5〜6 | `main` |
    | §8、§37 | `Fn` の n 引数 |
+   | §10〜11 | 再帰型の型引数の制約 |
    | §12 | record の構築とパターン |
    | §13〜19 | リテラルパターン、変数パターン |
    | §25 | パイプの第 1 引数 |
@@ -128,7 +130,7 @@ docs/                 spec.0.1.md、plan.0.1.md
    | §36 | Int、Char、String、除算の端 |
    | §38 | struct を除外一覧から外す。operator overloading の禁止は維持し、組み込み算術演算子はユーザーが定義できない固定集合への型指向解決であると注記する |
    | §41 | 文法 |
-   | 新設 | リテラルとコメント、演算子と優先順位、List リテラル、名前空間、末尾呼び出しの保証、prelude、エラーコード |
+   | 新設 | リテラルとコメント、演算子と優先順位と短絡評価、構造比較の対象型、List リテラル、名前空間、末尾呼び出しの保証、prelude、エラーコード |
 
 2. コーパスを書く。ファイル冒頭に根拠と期待値をコメントで置く。
 
@@ -150,6 +152,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 - 仕様の「禁止」「コンパイルエラー」と書かれた例が全て拒否コーパスに 1 ファイルずつある（確定）。
 - §39 の例が全て受理コーパスにある（確定）。
 - 2.2 の各項目に、受理と拒否のペアが少なくとも 1 組ある（推定）。
+- `&&` `||` の評価されない側に停止しない再帰を置いた受理コーパスがある（確定）。
 - `cargo test --test corpus` がコーパス全件を列挙し、件数を出力する。この時点で通る件数は問わない（確定）。
 
 ### M2 構文
@@ -165,9 +168,9 @@ docs/                 spec.0.1.md、plan.0.1.md
 ### M3 型
 
 1. 名前解決。4 名前空間、module の階層、sig による隠蔽、`__` 名の `stdlib/` 限定。
-2. HM 型推論。`def` 単位の一般化、出現検査、ADT / record / generics。
+2. HM 型推論。`def` 単位の一般化、出現検査、ADT / record / generics、再帰型の型引数制約。
 3. module の signature matching と抽象型。
-4. 組み込み多相（算術・比較・`compare` `==`）。
+4. 組み込み多相（算術・順序比較・`==` `!=` `compare`）。
 5. prelude のうち型定義のみ（`Option` `Result` `List` `ArithmeticError`）を `stdlib/` に置いて連結する。関数は M7。
 
 完了条件:
@@ -184,7 +187,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 完了条件:
 
-- 拒否コーパス全件が指定コードで落ちる（確定）。
+- 拒否コーパスの `E4xx` `E5xx` が指定コードで落ちる（確定）。
 - `-- needs: prelude` を持たない受理コーパス全件が検査を通る（確定）。
 - 各エラーが「どの branch や binding と同一か」を位置付きで出す（推定）。
 
@@ -201,8 +204,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 - `-- needs: prelude` を持たない受理コーパス全件で `shin dump-mono` が成功し、出力に型変数・バイトサイズ・オフセットが現れない（確定）。
 - 派生関数 `eq_T` `compare_T` `print_T` が `dump-mono` に現れる（推定）。
 - `dump-mono` の `TailCall` に extern が現れない（確定）。
-- 多相再帰の拒否コーパスが `E7xx` で落ちる（確定）。
-- `main` が単相でない例が `E7xx` で落ちる（推定）。
+- 拒否コーパス全件が指定コードで落ちる（確定）。`E7xx` の例は多相再帰、`main` が単相でない、`main` が Fn を含む、Fn を含む型への `==` `compare`。
 
 ### M6 コード生成
 
@@ -216,7 +218,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 - `-- needs: prelude` を持たない受理コーパス全件が、実行ファイルとして期待 stdout を返す（確定）。
 - `main` が `Error(e)` を返す受理コーパスで、stderr に `e` が印字され終了コードが 1（確定）。
 - `define_function` が受理コーパス全件の全関数で verifier エラーなく通る（確定）。
-- 末尾再帰 1 億深さの受理コーパスがスタックを溢れずに完走する（確定）。
+- 末尾再帰 1 億深さの受理コーパスがスタックを溢れずに完走する。自己再帰、引数数の異なる相互再帰、捕捉環境を持つ関数値経由の 3 経路（確定）。
 
 ### M7 prelude
 
@@ -248,7 +250,7 @@ docs/                 spec.0.1.md、plan.0.1.md
 
 バックエンドは Cranelift にした。ユーザーの選好である「ツールチェーンを cargo に閉じる」を満たす唯一の案で、システム LLVM の導入・環境変数・版追従が消え、外部依存は `cc` と libgc だけになる。比較した LLVM 22 + inkwell とテキスト LLVM IR も同じ probe を通しており、v0.1 の範囲で機能差はなかった。Boehm GC と単相化により、コード生成に残るのは算術・call・tail call・確保・load / store・switch・String literal の静的データ・closure 用の関数アドレスだけで、バックエンドは M5 の中間表現の後ろに閉じた葉になる。Cranelift の代償は、月次のメジャー更新（Cargo.lock で固定し、上げるのは意図したときだけ）、末尾呼び出しが `tail` 規約と `preserve_frame_pointers=true` を要求すること、フレッシュビルド 20 秒である。後で inkwell やテキスト IR に移る場合は `emit` の書き直しで済む。
 
-性能を v0.1 の条件に含めない。目的は検査器の実証で、利用者は設計者本人である。`opt_level=none` なら CLIF と機械語がほぼ 1 対 1 に対応し、emit の不具合を逆アセンブルで追える。
+性能を v0.1 の条件に含めない。目的は検査器の実証で、利用者は設計者本人である。`opt_level=none` は egraph 最適化を無効にするだけだが、CLIF の命令列に近い機械語が出るので emit の不具合を逆アセンブルで追いやすい。
 
 関数適用を n 引数にした。パイプが第 1 引数を埋める規則である以上、部分適用が仕様の例を支える場面はない。残るのは表現力の追加だけで、それは「同じ意味に複数の表現を許さない」原則と衝突する。呼び出し規約も 1 定義 1 関数で済む。
 
@@ -275,7 +277,7 @@ top-level 値定義は 0 引数関数にした。一度だけ評価して global
 - Cranelift の API 変化。月次でメジャーが上がり、0.135 でも非推奨化があった。Cargo.lock で固定し、上げるときはコーパスを回して確かめる。
 - 非末尾再帰はスタックを消費する。`List.map` のような cons list の素直な再帰は、既定のスタック（Linux では通常 8 MB）を超える深さで SIGSEGV になり、メッセージは出ない。v0.1 では許容し、prelude も素直な再帰で書く。
 - Boehm GC の保守的走査。ポインタをタグ埋め込み等で隠すと回収されて壊れる。`repr` はポインタを隠さず 1 語で置く。
-- 多相再帰。型注釈付きで多相再帰が推論される場合、単相化が停止しない。M5 で検出してエラーにする。
+- 多相再帰。型注釈付きで多相再帰が推論される場合、実体化の集合が有限に閉じず単相化が停止しないことがある。v0.1 では M5 で検出して一律にエラーにする。
 
 v0.2 へ保留:
 
