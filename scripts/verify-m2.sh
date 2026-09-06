@@ -1,0 +1,251 @@
+#!/bin/bash
+# M2 acceptance checks 1..8 (see PLAN.md, R4). Run from the repository root.
+# Each check is independent; all run to the end. Non-zero exit if any fails.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+ok=0
+total=8
+pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
+fail() { echo "NG: $1 $2"; }
+
+TMPD="$(mktemp -d)"
+
+# Any exit path restores the corpus and drops probe files.
+cleanup() {
+    rm -f tests/accept/__probe_bad__.shin
+    git checkout -- tests/accept tests/reject 2>/dev/null
+    rm -rf "$TMPD"
+}
+trap cleanup EXIT
+
+# Base run of the acceptance harness against the committed corpus.
+# --test-threads=1 serialises the four tests so marker lines are not
+# interleaved with harness progress lines (grep below is substring-safe
+# either way).
+cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
+base_status=$?
+
+# --- check 1: the 23 accept files parse; broken probe is not accepted ---
+c1_reasons=""
+[ "$base_status" -eq 0 ] || c1_reasons="$c1_reasons base-exit=$base_status"
+n_accept=$(ls tests/accept/*.shin 2>/dev/null | wc -l | tr -d ' ')
+[ "$n_accept" -eq 23 ] || c1_reasons="$c1_reasons disk-accept-count=$n_accept"
+for f in tests/accept/*.shin; do
+    [ -e "$f" ] || continue
+    rel="tests/accept/$(basename "$f")"
+    n=$(grep -cF "parse_accept_ok: $rel" "$TMPD/base.log")
+    [ "$n" -eq 1 ] || c1_reasons="$c1_reasons $rel:lines=$n"
+done
+[ "$(grep -cF 'parse_accept_ok_n: 23' "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=23"
+# Probe: `def main = )` must not be accepted.
+printf -- '-- spec: §41\n-- expect: 0\ndef main = )\n' > tests/accept/__probe_bad__.shin
+cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
+rm -f tests/accept/__probe_bad__.shin
+n_probe=$(grep -cF 'parse_accept_ok: tests/accept/__probe_bad__.shin' "$TMPD/probe1.log")
+[ "$n_probe" -eq 0 ] || c1_reasons="$c1_reasons probe-bad-accepted($n_probe)"
+n_ok_probe=$(grep -cF 'parse_accept_ok:' "$TMPD/probe1.log")
+[ "$n_ok_probe" -eq 23 ] || c1_reasons="$c1_reasons probe-lost-originals($n_ok_probe)"
+if [ -z "$c1_reasons" ]; then
+    pass 1 "accept-23"
+else
+    fail 1 "accept-23:$c1_reasons"
+fi
+
+# --- check 2: E101..E107 fall with their specified codes; swap probe ---
+c2_reasons=""
+for n in 101 102 103 104 105 106 107; do
+    code="E$n"
+    f="tests/reject/$code.shin"
+    [ "$(grep -cF "parse_e1xx_ok: $f $code" "$TMPD/base.log")" -eq 1 ] \
+        || c2_reasons="$c2_reasons $f:no-ok-line"
+    d=$(grep -F "parse_e1xx_diag: $f " "$TMPD/base.log" | head -n 1 | sed "s|.*parse_e1xx_diag: $f ||")
+    printf '%s' "$d" | grep -qE "^$f:[0-9]+:[1-9][0-9]*: error\[$code\]: .+" \
+        || c2_reasons="$c2_reasons $f:bad-diag($d)"
+done
+[ "$(grep -cF 'parse_e1xx_ok_n: 7' "$TMPD/base.log")" -ge 1 ] || c2_reasons="$c2_reasons e1xx-n!=7"
+# Content-swap probe: keep the E103 header, put the E104 defect in the body.
+cp tests/reject/E103.shin "$TMPD/E103.orig"
+printf -- '-- spec: §43\n-- error: E103\n-- item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103.shin
+cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/swap.log" 2>&1
+want_line=$(grep -nF '# trailing comment in the wrong form' tests/reject/E103.shin | head -n 1 | cut -d: -f1)
+want_col=$(awk '/# trailing comment/{print index($0, "#"); exit}' tests/reject/E103.shin)
+cp "$TMPD/E103.orig" tests/reject/E103.shin
+n_ok=$(grep -cF 'parse_e1xx_ok: tests/reject/E103.shin E103' "$TMPD/swap.log")
+[ "$n_ok" -eq 0 ] || c2_reasons="$c2_reasons swap-e103-still-ok($n_ok)"
+d=$(grep -F 'parse_e1xx_diag: tests/reject/E103.shin ' "$TMPD/swap.log" | head -n 1 | sed 's|.*parse_e1xx_diag: tests/reject/E103.shin ||')
+printf '%s' "$d" | grep -qE '^tests/reject/E103\.shin:[0-9]+:[0-9]+: error\[E104\]: ' \
+    || c2_reasons="$c2_reasons swap-not-e104($d)"
+dline=$(printf '%s' "$d" | cut -d: -f2)
+dcol=$(printf '%s' "$d" | cut -d: -f3)
+[ "$dline" = "$want_line" ] && [ "$dcol" = "$want_col" ] \
+    || c2_reasons="$c2_reasons swap-pos(diag=$dline:$dcol want=$want_line:$want_col)"
+if [ -z "$c2_reasons" ]; then
+    pass 2 "e1xx-7+swap"
+else
+    fail 2 "e1xx-7+swap:$c2_reasons"
+fi
+
+# --- check 3: the 36 non-E1xx files parse; E1xx never counts as non-E1xx ---
+c3_reasons=""
+[ "$(grep -cF 'parse_non_e1xx_ok_n: 36' "$TMPD/base.log")" -ge 1 ] || c3_reasons="$c3_reasons non-e1xx-n!=36"
+for f in tests/reject/*.shin; do
+    [ -e "$f" ] || continue
+    rel="tests/reject/$(basename "$f")"
+    code=$(grep -m1 '^-- error: ' "$f" | sed 's/^-- error: //')
+    n=$(grep -cF "parse_non_e1xx_ok: $rel" "$TMPD/base.log")
+    if printf '%s' "$code" | grep -qE '^E1[0-9][0-9]$'; then
+        [ "$n" -eq 0 ] || c3_reasons="$c3_reasons e1xx-has-non($rel:$n)"
+    else
+        [ "$n" -eq 1 ] || c3_reasons="$c3_reasons $rel:lines=$n"
+    fi
+done
+if [ -z "$c3_reasons" ]; then
+    pass 3 "non-e1xx-36"
+else
+    fail 3 "non-e1xx-36:$c3_reasons"
+fi
+
+# --- check 4: E1xx positions, perturbation probes, gen/decoy/tree, emit ---
+c4_reasons=""
+diag_line() { # log rel
+    grep -F "parse_e1xx_diag: $2 " "$1" | head -n 1 | sed "s|.*parse_e1xx_diag: $2 ||" | cut -d: -f2
+}
+diag_col() { # log rel
+    grep -F "parse_e1xx_diag: $2 " "$1" | head -n 1 | sed "s|.*parse_e1xx_diag: $2 ||" | cut -d: -f3
+}
+expect_line() { # code -> expected defect line
+    case "$1" in
+        E101) echo 5 ;; E102) echo 3 ;; E103) echo 4 ;;
+        E104) echo 5 ;; E105) echo 4 ;; E106) echo 5 ;; E107) echo 4 ;;
+    esac
+}
+for n in 101 102 103 104 105 106 107; do
+    code="E$n"
+    f="tests/reject/$code.shin"
+    line=$(diag_line "$TMPD/base.log" "$f")
+    want=$(expect_line "$code")
+    [ "$line" = "$want" ] || c4_reasons="$c4_reasons $code:line=$line(want=$want)"
+done
+for pair in "E103:12" "E105:12" "E107:5"; do
+    code="${pair%%:*}"
+    want="${pair##*:}"
+    f="tests/reject/$code.shin"
+    col=$(diag_col "$TMPD/base.log" "$f")
+    [ "$col" = "$want" ] || c4_reasons="$c4_reasons $code:col=$col(want=$want)"
+done
+n_cols=$(for n in 101 102 103 104 105 106 107; do diag_col "$TMPD/base.log" "tests/reject/E$n.shin"; done | sort -u | wc -l | tr -d ' ')
+[ "$n_cols" -ge 2 ] || c4_reasons="$c4_reasons distinct-cols=$n_cols"
+# Line-shift probe: a blank line after `-- error:` moves <line> by exactly 1.
+for n in 101 102 103 104 105 106 107; do
+    f="tests/reject/E$n.shin"
+    cp "$f" "$TMPD/ls$n.orig"
+    awk '/^-- error: E[0-9]/ { print; print ""; next } { print }' "$f" >"$TMPD/ls$n.new"
+    cp "$TMPD/ls$n.new" "$f"
+    cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/ls$n.log" 2>&1
+    cp "$TMPD/ls$n.orig" "$f"
+    base=$(diag_line "$TMPD/base.log" "$f")
+    new=$(diag_line "$TMPD/ls$n.log" "$f")
+    want=$((base + 1))
+    [ "$new" -eq "$want" ] || c4_reasons="$c4_reasons shift-$n:line=$new(want=$want)"
+done
+# Column-shift probe: `def main = .5` -> `def main =   .5` moves <col> 12 -> 14.
+cp tests/reject/E103.shin "$TMPD/cs.orig"
+sed 's/^def main = \.5$/def main =   .5/' tests/reject/E103.shin >"$TMPD/cs.new"
+cp "$TMPD/cs.new" tests/reject/E103.shin
+cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/cs.log" 2>&1
+cp "$TMPD/cs.orig" tests/reject/E103.shin
+base_col=$(diag_col "$TMPD/base.log" "tests/reject/E103.shin")
+new_col=$(diag_col "$TMPD/cs.log" "tests/reject/E103.shin")
+[ "$base_col" -eq 12 ] || c4_reasons="$c4_reasons colshift-base=$base_col"
+[ "$new_col" -eq 14 ] || c4_reasons="$c4_reasons colshift-new=$new_col"
+# Gen / decoy / tree probes and the emit.rs lexical dependency.
+n_gen=$(grep -cF 'parse_gen_ok:' "$TMPD/base.log")
+[ "$n_gen" -eq 5 ] || c4_reasons="$c4_reasons gen-count=$n_gen"
+while read -r a b s; do
+    sum=$((a + b))
+    [ "$sum" -eq "$s" ] || c4_reasons="$c4_reasons gen-sum($a $b want=$sum got=$s)"
+done < <(grep -F 'parse_gen_ok:' "$TMPD/base.log" | sed 's/.*parse_gen_ok: //' | awk '{print $1, $2, $3}')
+n_decoy_ok=$(grep -cF 'parse_decoy_ok:' "$TMPD/base.log")
+n_decoy_ng=$(grep -cF 'parse_decoy_ng:' "$TMPD/base.log")
+[ "$n_decoy_ok" -eq 3 ] || c4_reasons="$c4_reasons decoy-ok=$n_decoy_ok"
+[ "$n_decoy_ng" -eq 3 ] || c4_reasons="$c4_reasons decoy-ng=$n_decoy_ng"
+n_tree=$(grep -cF 'parse_tree_ok:' "$TMPD/base.log")
+[ "$n_tree" -eq 20 ] || c4_reasons="$c4_reasons tree-count=$n_tree"
+[ "$(grep -cF 'parse_tree_n: 20' "$TMPD/base.log")" -ge 1 ] || c4_reasons="$c4_reasons tree-n!=20"
+n_lex=$(grep -o 'lexer::' crates/shin/src/emit.rs | wc -l | tr -d ' ')
+[ "$n_lex" -eq 0 ] || c4_reasons="$c4_reasons emit-lexer::=$n_lex"
+if [ -z "$c4_reasons" ]; then
+    pass 4 "diag-positions+probes"
+else
+    fail 4 "diag-positions+probes:$c4_reasons"
+fi
+
+# --- check 5: M0 and M1 gates keep their completion values ---
+c5_reasons=""
+cargo test >"$TMPD/cargo.log" 2>&1
+[ "$?" -eq 0 ] || c5_reasons="$c5_reasons cargo-test-exit!=0"
+cargo test --test walk >"$TMPD/walk.log" 2>&1
+[ "$?" -eq 0 ] || c5_reasons="$c5_reasons walk-exit!=0"
+for spec in "verify-m0.sh:7/7" "verify-m1-spec.sh:6/6" "verify-m1-corpus.sh:7/7"; do
+    script="${spec%%:*}"
+    want="${spec##*:}"
+    bash "scripts/$script" >"$TMPD/$script.log" 2>&1
+    st=$?
+    last=$(tail -n 1 "$TMPD/$script.log")
+    [ "$st" -eq 0 ] && [ "$last" = "PASSED: $want" ] \
+        || c5_reasons="$c5_reasons $script(status=$st,last=$last)"
+done
+if [ -z "$c5_reasons" ]; then
+    pass 5 "gates"
+else
+    fail 5 "gates:$c5_reasons"
+fi
+
+# --- check 6: verify-m1-corpus.sh does not gate src and keeps the 6 paths ---
+c6_reasons=""
+paths=$(grep 'git diff --name-only HEAD --' scripts/verify-m1-corpus.sh | sed 's/.*HEAD --//' | tr ' ' '\n' | sed '/^$/d')
+n_src=$(printf '%s\n' "$paths" | grep -cxF 'crates/shin/src' || true)
+[ "$n_src" -eq 0 ] || c6_reasons="$c6_reasons src-in-guard($n_src)"
+for p in docs/spec.0.1.md docs/plan.0.1.md docs/spec-coverage.0.1.md runtime scripts/verify-m0.sh scripts/verify-m1-spec.sh; do
+    c=$(printf '%s\n' "$paths" | grep -cxF "$p")
+    [ "$c" -eq 1 ] || c6_reasons="$c6_reasons $p:count=$c"
+done
+if [ -z "$c6_reasons" ]; then
+    pass 6 "guard-paths"
+else
+    fail 6 "guard-paths:$c6_reasons"
+fi
+
+# --- check 7: corpus and corpus.rs match HEAD ---
+c7_reasons=""
+n=$(git diff --name-only HEAD -- crates/shin/tests/corpus.rs tests/accept tests/reject | wc -l | tr -d ' ')
+[ "$n" -eq 0 ] || c7_reasons="$c7_reasons diff-lines=$n"
+if [ -z "$c7_reasons" ]; then
+    pass 7 "corpus-unchanged"
+else
+    fail 7 "corpus-unchanged:$c7_reasons"
+fi
+
+# --- check 8: glue — full grammar parses, M0 only flows to emit ---
+c8_reasons=""
+n=$(git diff --name-only HEAD -- crates/shin/src/types.rs | wc -l | tr -d ' ')
+[ "$n" -eq 0 ] || c8_reasons="$c8_reasons types.rs-diff=$n"
+c=$(grep -c 'pub fn compile_to_object' crates/shin/src/lib.rs)
+[ "$c" -eq 1 ] || c8_reasons="$c8_reasons lib-pub-fn=$c"
+c=$(grep -c 'pub use emit::compile_to_object' crates/shin/src/lib.rs)
+[ "$c" -eq 0 ] || c8_reasons="$c8_reasons lib-pub-use=$c"
+c=$(grep -c 'M3+' crates/shin/src/lib.rs)
+[ "$c" -ge 1 ] || c8_reasons="$c8_reasons lib-M3+=0"
+c=$(grep -c 'lexer::lex' crates/shin/src/emit.rs)
+[ "$c" -eq 0 ] || c8_reasons="$c8_reasons emit-lex::lex=$c"
+c=$(grep -c 'parser::parse' crates/shin/src/emit.rs)
+[ "$c" -eq 0 ] || c8_reasons="$c8_reasons emit-parser::parse=$c"
+if [ -z "$c8_reasons" ]; then
+    pass 8 "glue"
+else
+    fail 8 "glue:$c8_reasons"
+fi
+
+echo "PASSED: $ok/$total"
+[ "$ok" -eq "$total" ]

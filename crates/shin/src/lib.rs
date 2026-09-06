@@ -3,7 +3,25 @@ pub mod lexer;
 pub mod parser;
 pub mod types;
 
-pub use emit::compile_to_object;
+use std::path::Path;
+
+/// Compile a source to an object file.
+///
+/// Glue: parse the full grammar, lower only the M0 subset
+/// (`def main = <Int arithmetic>`) into the M0 `Program`, check it, and
+/// pass it to the existing emitter. Anything beyond the subset fails with
+/// an `M3+` error after a successful parse.
+pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
+    let ast = parser::parse_source(source, "main").map_err(|d| d.to_string())?;
+    let prog = parser::lower_to_m0(&ast).ok_or_else(|| {
+        "M3+ 以降で対応: only `def main = <Int arithmetic>` can be compiled yet".to_string()
+    })?;
+    let ty = types::check(&prog)?;
+    if ty != types::Ty::Int {
+        return Err(format!("main must be Int, found {ty:?}"));
+    }
+    emit::compile_to_object(&prog, obj_path)
+}
 
 /// Absolute path of the static runtime library (`libshin_runtime.a`)
 /// built by `build.rs` from `runtime/`.
