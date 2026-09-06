@@ -1,0 +1,4 @@
+-- spec: §4
+-- error: E701
+def rec poly x => poly [x]
+def main = poly 1

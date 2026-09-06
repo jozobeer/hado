@@ -1,0 +1,10 @@
+-- spec: §39
+-- expect: ok
+-- item: 関数適用
+def create_user input =>
+  let? parsed = parse input ->
+  do? validate parsed ->
+  do? authorize parsed ->
+  let? saved = save parsed ->
+  Ok(saved)
+def main = create_user Nil

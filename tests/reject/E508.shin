@@ -1,0 +1,7 @@
+-- spec: §24
+-- error: E508
+def f id =>
+  if find_user id
+  | Ok(user) => user
+  | Error(error) => Error(error)
+def main = f 1

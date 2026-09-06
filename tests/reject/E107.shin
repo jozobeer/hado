@@ -1,0 +1,5 @@
+-- spec: §38
+-- error: E107
+-- item: 演算子
+def (+) a b => a
+def main = 1 + 2

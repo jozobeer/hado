@@ -1,0 +1,5 @@
+-- spec: §10
+-- error: E302
+-- item: 再帰型
+type Nest<T> = Leaf(T) | Node(Nest<List<T>>)
+def main = 1

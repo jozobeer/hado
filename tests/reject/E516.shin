@@ -1,0 +1,6 @@
+-- spec: §4
+-- error: E516
+-- item: 相互再帰
+def is_even n => is_odd n
+def is_odd n => is_even n
+def main = is_even 4

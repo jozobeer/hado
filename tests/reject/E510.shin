@@ -1,0 +1,5 @@
+-- spec: §46
+-- error: E510
+-- item: List リテラル
+def f xs => Cons(1, Nil)
+def main = f Nil

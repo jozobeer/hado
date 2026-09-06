@@ -1,0 +1,9 @@
+-- spec: §16
+-- expect: one
+-- item: リテラルパターン
+def describe x =>
+  if x
+  | 1 => "one"
+  | 2 => "two"
+  | "other"
+def main = describe 1

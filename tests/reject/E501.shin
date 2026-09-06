@@ -1,0 +1,6 @@
+-- spec: §29
+-- error: E501
+def f v =>
+  let x = v ->
+  x
+def main = f 1

@@ -1,0 +1,8 @@
+-- spec: §12
+-- expect: a
+-- item: record
+def get_name user =>
+  if user
+  | { name = n } => n
+  | "?"
+def main = get_name { name = "a"; age = 3 }

@@ -1,0 +1,5 @@
+-- spec: §21
+-- error: E509
+-- item: Unit payload
+def f x => Ok(())
+def main = f 1

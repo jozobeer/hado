@@ -1,0 +1,5 @@
+-- spec: §21
+-- expect: ok
+-- item: Unit payload
+def done x => Ok()
+def main = done 1
