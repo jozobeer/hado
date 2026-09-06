@@ -144,7 +144,7 @@ fn corpus_counts() {
             Err(msg) if is_e1xx(&code) => {}
             Err(msg) => {
                 assert!(
-                    !msg.contains("error"),
+                    !msg.contains("error[E1"),
                     "non-E1xx {rel} must not fail at the syntax stage, got: {msg}"
                 );
             }

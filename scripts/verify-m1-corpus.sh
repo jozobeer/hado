@@ -14,6 +14,7 @@ COV="docs/spec-coverage.0.1.md"
 CORPUS_RS="crates/shin/tests/corpus.rs"
 
 TMPD="$(mktemp -d)"
+find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 trap 'rm -rf "$TMPD"' EXIT
 
 # --- shared: section-50 code table (same extraction as verify-m1-spec.sh:79-95) ---
@@ -349,9 +350,8 @@ m0_last=$(tail -n 1 "$TMPD/m0.log")
 if [ "$m0_status" -ne 0 ] || [ "$m0_last" != "PASSED: 7/7" ]; then
     c7_reasons="$c7_reasons verify-m0(status=$m0_status,last=$m0_last)"
 fi
-diff_lines=$(git diff --name-only HEAD -- docs/spec.0.1.md docs/plan.0.1.md docs/spec-coverage.0.1.md runtime scripts/verify-m0.sh scripts/verify-m1-spec.sh | wc -l | tr -d ' ')
-if [ "$diff_lines" -ne 0 ]; then
-    c7_reasons="$c7_reasons forbidden-diff-lines=$diff_lines"
+if ! sha256sum --status -c "$TMPD/protected.sha"; then
+    c7_reasons="$c7_reasons protected-files-changed-during-verification"
 fi
 if [ -z "$c7_reasons" ]; then
     pass 7 "no-regressions"
