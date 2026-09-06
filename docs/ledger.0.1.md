@@ -8,10 +8,10 @@
 |---|---|---|---|
 | commander | claude（本セッション） | claude-opus-5[1m] | — |
 | planner | cursor-agent | cursor-grok-4.6-xhigh | headless（`-p --force --trust`）|
-| plan-reviewer | opencode | opencode/muse-spark-1.3-contributor-free | headless（`run --dir`）|
-| builder | opencode | opencode/muse-spark-1.3-contributor-free | headless（Herdr ペイン内で実行）|
+| plan-reviewer | opencode | opencode/deepseek-v4-flash | headless（`run --dir`）|
+| builder | opencode | opencode/deepseek-v4-flash | headless（Herdr ペイン内で実行）|
 | reviewer | cursor-agent | cursor-grok-4.6-xhigh | headless（`-p --force --trust`）|
-| fixer | opencode | opencode/muse-spark-1.3-contributor-free | builder と同系 |
+| fixer | opencode | opencode/deepseek-v4-flash | builder と同系 |
 
 ユーザー明示指定に従う。スキル既定からの逸脱と理由:
 
@@ -19,6 +19,7 @@
 - muse spark は `-contributor-free` の版を使う（ユーザー指定・2026-09-06）。R1 は `opencode/muse-spark-1.3` で実施済み。
 - **builder は常に muse spark**（ユーザー指定・2026-09-06）。planner の cursor は plan と spec を書いてよい。
 - plan-reviewer を deepseek-v4-flash から muse spark へ、reviewer を deepseek-v4-flash から cursor-grok-4.6-xhigh へ変更（ユーザー指定・2026-09-06）。R1 は変更前の割当で実施済み。
+- **R4 の途中で muse spark がレート制限に達したため、builder / fixer / plan-reviewer を deepseek-v4-flash へ戻した**（ユーザー指定・2026-09-06）。R2・R3 と R4 の計画審査は muse spark で実施済み。独立性は保たれる（builder=deepseek、reviewer=cursor）。
 - **審査は成果物の種類で分ける**: plan-reviewer（muse spark）が計画側の成果物（PLAN.md と spec 本文）を、reviewer（cursor）が実装側の成果物（コード・コーパス）を見る。こう切ると、planner の cursor が plan と spec の両方を書いても、審査は常に別ベンダーになる。
 - R1 時点では builder と reviewer が同じ CLI（opencode）だった。「別ベンダー」の文面には反するが、意図（盲点の非重複）はモデル系列が別（muse-spark 1.3 / deepseek v4 flash）で満たすと判断した。R2 以降は reviewer が cursor になり、CLI も分かれる。
 
@@ -288,4 +289,99 @@ def f id =>
 `if` は 1 つの型の式なので両枝の型が揃わなければならないが、成功枝は中身の型 `T`、失敗枝は `Result` のまま。検査順（字句 → 構文 → 型 → 網羅性 → 冗長）では**型の不一致が冗長（E508）より先に当たる**ため、このコーパスは M4 で E508 を検証できない。仕様 §24 の例は成功枝が `...`（Result 側の継続）で、コーパスがそこを `user` で埋めたことが原因。
 
 対比: `tests/reject/E507.shin` は両枝とも `Option` で、再包装だけが欠陥になっている。
+
+### R4 — M2 構文: パーサと M2 コーパス
+
+対象: `docs/plan.0.1.md` M2。受け入れ条件 1〜8（`docs/plan.0.1.md:162-166`）。
+
+| 段階 | 担当 | 結果 | 所要 |
+|---|---|---|---|
+| 実装 | builder (deepseek-v4-flash) | `PASSED: 8/8` 到達。parser.rs 約 1700 行、`parse_corpus.rs`、`verify-m2.sh` | — |
+| レビュー | reviewer (cursor-grok-4.6-xhigh) | **合格**。ただし「壊してもゲートが落ちない」穴を 5 件観測 | — |
+| 修正 | fixer (deepseek-v4-flash) | 穴 4 件を単体テストで固定 | — |
+
+**reviewer の観測（合格だが判定力の穴。根は 1 つ）**
+
+コーパスがその構文を使っていないため、実装を消してもどの判定器も落ちない。根は「**実装の存在を固定するゲートが無い**」こと。`tests/**` はスコープ外なので、コーパスを増やすのではなく `parser.rs` の単体テストで固定した。`scripts/verify-m2.sh` の条件 5 は `cargo test` 全体を見るため、以後の回帰は単体テストが捕まえる。
+
+直した 4 件（すべて単体テストで固定、実装を消すと落ちることを実測済み）:
+
+1. §10・§11 の先頭 `|` 付き ADT が parse できない — `parse_type` が最初の variant を name 前提で読んでいた。先頭 `|` の有無どちらも受理するようにした
+2. 単項 `not` を消しても通る — `parse_unary` の `KwNot` 分岐。§44 の演算子集合として固定
+3. `Fn<(Int, Int), Int>` の型グループを消しても通る — `parse_type` の `LParen` 枝。§37 の関数型の書き方として固定
+4. `let (a, b) = ...` のタプルパターンが E105 にならない — `parse_pattern` が `(` で素のエラーを返していた。§37 どおり E105 を返すようにした
+
+**既知の債務（M3 で扱う。M2 の完了条件に含まれず、fixer では直さない）**
+
+- `glue` の `lower_to_m0` が余剰トップレベル `def` を弾かない。`def main = 1 + 2` に別の `def` が並んでも M0 に落ちる。名前解決・型を扱う M3 の領分であり、M2 の完了条件には入っていない
+
+### R4 — M2 構文（lexer と parser）
+
+| 段階 | 担当 | 結果 | 所要 |
+|---|---|---|---|
+| 計画 | planner (cursor-grok-4.6-xhigh) | 述語形式の受け入れ条件 8 件 | 約 3 分 |
+| 計画審査 1〜4 | plan-reviewer (muse-spark) | **不合格 ×3**、4 回目で予算到達 | 約 20 分 |
+| 計画の最終確定 | commander | 指摘を反映して上書き承認 | — |
+| 実装 A（lexer と式）| builder (deepseek-v4-flash) | 式木の往復 20/20 | 約 8 分 |
+| 実装 B（全文法）| builder | `PASSED: 8/8`、3 カウント 23/7/36 | 約 25 分 |
+| レビュー | reviewer (cursor-grok-4.6-xhigh) | **合格**。落ちない欠陥 5 件 | 約 15 分 |
+| 修正 | fixer (deepseek-v4-flash) | 4 件を単体テストで固定 | 約 8 分 |
+
+**plan-review が 3 回不合格になった根（1 つ）**
+
+> **判定器が「文法を実装すること」を一度も強制していない。**
+
+審査者は毎回、実装を伴わない結託ハーネスを作って実測した:
+
+1. **ヘッダ結託**: parse を常に成功させ、ヘッダのコードに対応する欠陥マーカーが本文にあれば診断行を印字する → 8/8 通過。commander は条件 2 のプローブを**内容入替え**（ヘッダは据置き、本文だけ別コードの欠陥に差し替え）にした
+2. **符号キーの行・列テーブル**: 符号は本文から拾うが位置は暗記 → 全チェック素通り。commander は**摂動プローブ**（`-- error:` 行の直後に空行を入れると `<line>` が 1 増える、空白を 2 つ足すと `<col>` が 12 → 14 になる）を足した
+3. **本文走査で符号と位置を両方計算**: マーカー走査だけで摂動にも追随 → 素通り。commander は判定を**コーパスの外**に出した
+
+3 回目への対処として最初に置いた「実行時に生成した算術式を本番経路に通す」は、4 回目の審査で**中核の主張が偽**と実証された — 生成式が `<int> + <int>` で M0 の部分集合にすぎず、§41 を一行も実装しない実装が素通りする。
+
+**主判定器の最終形: 式木の往復**
+
+固定 seed の乱数で式木を 20 本作り、**冗長な括弧・空白・行コメントを混ぜて**ソースに描画し、parse して**完全括弧付きの正規形**を印字させ、木から直接作った正規形と照合する。
+
+これが通るには優先順位・単項マイナス・冗長括弧の除去・コメントと空白の読み飛ばしをすべて正しく実装している必要がある。実行を伴わないので `emit` に手を入れる必要もない（M6 への越境がない）。
+
+**残余の限界（合否ゲートにしない、と計画で宣言した）**
+
+式木の往復まで通す実装は実質 §41 の式文法を実装しているが、「テストが生成する範囲だけを通す最小実装」は理論上ありうる。**有限のテストで一般性は強制できない。** reviewer と commander が `parser.rs` を読む監査で受ける、と宣言した。
+
+**式木の往復が見ていないもの（commander が実測で発見）**
+
+結合性を壊しても式木の往復は落ちない。描画側が `parens_needed` で必要な括弧を必ず付けるため、`a * b * c` のような無括弧の連鎖がソースに現れないから。**往復テストの落とし穴** — 描画側が構造を括弧で明示すると、parser は構造を復元する必要がなくなる。
+
+結合性は `parser::tests::left_assoc_add_and_mul`（lib 側の単体テスト）が固定しており、条件 5 が `cargo test` 全体を見るので捕まる。
+
+**reviewer が見つけた「壊してもゲートが落ちない」5 件**
+
+コーパスがその構文を使っていないため、実装を消してもどの判定器も落ちない:
+
+1. **§10 の先頭 `|` 付き ADT が parse できない** — 仕様自身が使う形。M3 で即座に当たる
+2. 単項 `not` を消しても通る
+3. `Fn<(Int, Int), Int>` の型グループを消しても通る
+4. `let (a, b) = x -> a` が E105 にならない（式の `(1, 2)` はなる）
+5. glue の `lower_to_m0` が余剰トップレベル `def` を弾かない
+
+1〜4 を fixer が直し、**`parser.rs` の単体テストで固定**した（コーパスは既定ロックなので増やさない。条件 5 が `cargo test` 全体を見るので回帰は捕まる）。
+
+**commander が自分の環境で実測した結果**
+
+| 検証 | 結果 |
+|---|---|
+| `bash scripts/verify-m2.sh` | `PASSED: 8/8`、終了コード 0 |
+| `verify-m0.sh` / `verify-m1-spec.sh` / `verify-m1-corpus.sh` | 7/7 / 6/6 / 7/7 |
+| `cargo test` | 38 件通過 |
+| 注入「`parse_mul` の右辺を `parse_mul` にして右結合にする」 | NG: 5（`cargo test` が落ちる）|
+| 注入「診断の `line` を常に 1 にする」 | NG: 4（期待行と摂動プローブの両方で検出）|
+| 注入「先頭 `|` の受理を消す」 | `adt_accepts_leading_pipe` が FAILED、NG: 5 |
+
+**結果: 合格**
+
+**既知の債務（M3 で扱う）**
+
+- glue の `lower_to_m0` が余剰トップレベル `def` を弾かない。`def other = 1` と `def main = 1 + 2` が並ぶと `compile_to_object` が成功する。名前解決と未使用 `def` の検査（E513）は M3・M4 の担当なので、そこで扱う
+- `tests/reject/E508.shin`（R3 から持ち越し）は両枝の型が違うため、型検査が冗長検査より先に当たり E508 に到達しない
 
