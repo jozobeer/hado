@@ -9,9 +9,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
-use crate::lexer;
-use crate::parser::{self, Expr};
-use crate::types;
+use crate::parser::{Expr, Program};
 
 fn make_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
     let mut flag_builder = settings::builder();
@@ -43,17 +41,10 @@ fn build_expr(bcx: &mut FunctionBuilder<'_>, expr: &Expr) -> cranelift_codegen::
     }
 }
 
-/// Compile `def main = <int + int ...>` to an object file exposing
-/// `shin_entry` (SystemV, Export). `shin_entry` calls the `tail`
-/// convention `shin_main`, prints the `i64` result, and returns 0.
-pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
-    let toks = lexer::lex(source)?;
-    let prog = parser::parse(&toks)?;
-    let ty = types::check(&prog)?;
-    if ty != types::Ty::Int {
-        return Err(format!("main must be Int, found {ty:?}"));
-    }
-
+/// Compile a lowered M0 `Program` (`def main = <int + int ...>`) to an
+/// object file exposing `shin_entry` (SystemV, Export). `shin_entry` calls
+/// the `tail` convention `shin_main`, prints the `i64` result, and returns 0.
+pub fn compile_to_object(prog: &Program, obj_path: &Path) -> Result<(), String> {
     let isa = make_isa()?;
     let builder =
         ObjectBuilder::new(isa, "shin_walk".to_string(), default_libcall_names())
