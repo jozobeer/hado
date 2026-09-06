@@ -1,3 +1,4 @@
+pub mod build;
 pub mod emit;
 pub mod lexer;
 pub mod parser;
@@ -5,22 +6,16 @@ pub mod types;
 
 use std::path::Path;
 
-/// Compile a source to an object file.
-///
-/// Glue: parse the full grammar, lower only the M0 subset
-/// (`def main = <Int arithmetic>`) into the M0 `Program`, check it, and
-/// pass it to the existing emitter. Anything beyond the subset fails with
-/// an `M3+` error after a successful parse.
+/// Check, specialize, and compile source to a native object file.
 pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
-    let ast = parser::parse_source(source, "main").map_err(|d| d.to_string())?;
-    let prog = parser::lower_to_m0(&ast).ok_or_else(|| {
-        "M3+ 以降で対応: only `def main = <Int arithmetic>` can be compiled yet".to_string()
-    })?;
-    let ty = types::check(&prog)?;
-    if ty != types::Ty::Int {
-        return Err(format!("main must be Int, found {ty:?}"));
-    }
-    emit::compile_to_object(&prog, obj_path)
+    compile_source_to_object(source, "main", obj_path)
+}
+
+pub fn compile_source_to_object(source: &str, source_path: &str, obj_path: &Path) -> Result<(), String> {
+    let checked = check_source(source, source_path).map_err(|e| e.to_string())?;
+    let (ast, _) = parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
+    let program = mono::lower_program(&ast, &checked)?;
+    emit::compile_mono_to_object(&program, &checked, obj_path)
 }
 
 /// Absolute path of the static runtime library (`libshin_runtime.a`)
@@ -49,3 +44,133 @@ pub fn link_executable(
         Err(format!("cc link failed: {status:?}"))
     }
 }
+
+pub mod infer;
+
+#[derive(Clone)]
+pub struct Checked {
+    pub module_constructors: std::collections::HashMap<String, (u32, types::Scheme)>,
+    pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
+    pub module_definitions: std::collections::HashMap<String, types::Scheme>,
+    pub modules: std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
+    pub constructor_tags: std::collections::HashMap<String, u32>,
+    pub constructors: std::collections::HashMap<String, types::Scheme>,
+    pub records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
+    pub composite_types: std::collections::HashMap<(usize, usize), types::Ty>,
+    pub value_types: std::collections::HashMap<(usize, usize), types::Ty>,
+    pub main: types::Ty,
+    pub definitions: std::collections::HashMap<String, types::Scheme>,
+}
+
+impl Checked {
+    pub(crate) fn for_codegen(&self) -> Self {
+        let mut checked = self.clone();
+        checked.records.extend(self.module_records.clone());
+        for (name, (tag, scheme)) in &self.module_constructors {
+            checked.constructors.insert(name.clone(), scheme.clone());
+            checked.constructor_tags.insert(name.clone(), *tag);
+        }
+        let mut names: std::collections::HashSet<_> = self.module_records.keys().cloned().collect();
+        for (_, scheme) in self.module_constructors.values() {
+            let result = match scheme.body() {
+                types::Ty::Fn(_, result) => result.as_ref(),
+                ty => ty,
+            };
+            if let types::Ty::Adt(name, _) = result { names.insert(name.clone()); }
+        }
+        for scheme in checked.definitions.values_mut().chain(checked.module_definitions.values_mut()).chain(checked.constructors.values_mut()) {
+            *scheme = scheme.reveal(&names);
+        }
+        for (_, scheme) in checked.records.values_mut() { *scheme = scheme.reveal(&names); }
+        for ty in checked.value_types.values_mut().chain(checked.composite_types.values_mut()) {
+            *ty = ty.reveal(&names);
+        }
+        checked.main = checked.main.reveal(&names);
+        checked
+    }
+}
+
+fn parse_with_prelude(source: &str, path: &str) -> Result<(parser::Ast, Option<usize>), parser::Diagnostic> {
+    let mut ast = parser::parse_source(source, path)?;
+    let mut prelude = Vec::new();
+    for (name, source) in [
+        ("stdlib/division_error.shin", include_str!("../../../stdlib/division_error.shin")),
+        ("stdlib/list.shin", include_str!("../../../stdlib/list.shin")),
+        ("stdlib/option.shin", include_str!("../../../stdlib/option.shin")),
+        ("stdlib/result.shin", include_str!("../../../stdlib/result.shin")),
+    ] {
+        prelude.extend(parser::parse_source(source, name)?.items.into_iter().filter(|item| matches!(item, parser::Item::TypeDef(_))));
+    }
+    let mut trusted_start = None;
+    if !std::path::Path::new(path).components().any(|part| part.as_os_str() == "stdlib") {
+        let mut line = source.lines().count() + 2;
+        trusted_start = Some(line + 1);
+        for module in [
+            include_str!("../../../stdlib/list.shin"),
+            include_str!("../../../stdlib/option.shin"),
+            include_str!("../../../stdlib/result.shin"),include_str!("../../../stdlib/string.shin"), include_str!("../../../stdlib/int.shin"), include_str!("../../../stdlib/float.shin")] {
+            let padded = "\n".repeat(line) + module;
+            prelude.extend(parser::parse_source(&padded, path)?.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
+            line += module.lines().count() + 1;
+        }
+    }
+    prelude.append(&mut ast.items);
+    ast.items = prelude;
+    Ok((ast, trusted_start))
+}
+
+pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
+    let (ast, trusted_start) = parse_with_prelude(source, path)?;
+    names::resolve(&ast, path)?;
+    type_cycles::check(&ast, path)?;
+    check::check_ast(&ast, path)?;
+    let checked = infer::check_ast_with_prelude(&ast, path, trusted_start)?;
+    if let Some(name) = names::unused_definitions(&ast, &["main".into()]).first() {
+        let def = ast.items.iter().find_map(|item| match item {
+            parser::Item::Def(def) if &def.name == name => Some(def),
+            _ => None,
+        }).unwrap();
+        return Err(parser::Diagnostic {
+            path: path.into(), line: def.span.line, col: def.span.col,
+            code: Some("E513".into()), message: format!("unused top-level definition {name}"),
+        });
+    }
+    Ok(checked)
+}
+
+mod type_cycles;
+
+pub mod names;
+
+pub mod check;
+
+mod normalize;
+
+mod coverage;
+
+pub mod mono;
+
+pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic> {
+    let checked = check_source(source, path)?;
+    let (ast, _) = parse_with_prelude(source, path)?;
+    let main = ast.main().ok_or_else(|| parser::Diagnostic {
+        path: path.into(), line: ast.span.line, col: ast.span.col, code: None,
+        message: "main must be a value definition for lowering".into(),
+    })?;
+    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic {
+        path: path.into(), line: main.span.line, col: main.span.col, code: None, message,
+    })?;
+    let mut output = format!("fn main() -> {}\n{:?}\n", checked.main, program.entry);
+    let printer_id = mono::FunctionId(program.functions.iter().map(|function| function.id.0).max().map_or(1, |id| id + 2));
+    let printer = mono::derive_printers(printer_id, program.entry.ty(), &checked);
+    for function in program.functions { output.push_str(&format!("{function:?}\n")); }
+    match printer {
+        Ok(functions) => for function in functions { output.push_str(&format!("{function:?}\n")); },
+        Err(message) => output.push_str(&format!("; main printer unavailable: {message}\n")),
+    }
+    Ok(output)
+}
+
+pub mod runtime_abi;
+
+pub mod repr;

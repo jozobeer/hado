@@ -15,6 +15,7 @@ fn walk() {
         ("def main = 1 + 2", "3"),
         ("def main = 10 + 20", "30"),
         ("def main = 4 + 5 + 6", "15"),
+        ("def twice n => n * 2\ndef main = twice 21", "42"),
     ];
     for (i, (src, expected)) in cases.iter().enumerate() {
         let dir = workdir();

@@ -1,0 +1,6 @@
+module type INT = sig
+  def to_string(value: Int): String
+end
+module Int : INT = struct
+  def to_string value => __int_to_string value
+end

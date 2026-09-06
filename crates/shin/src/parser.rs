@@ -74,7 +74,7 @@ pub struct Node {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
     Int(i64),
     Float(f64),
@@ -136,7 +136,7 @@ pub struct Pattern {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PatternKind {
     Underscore,
     Name(String),
@@ -200,6 +200,7 @@ pub enum TypeExpr {
 pub struct Ast {
     pub items: Vec<Item>,
     pub span: Span,
+    pub branches_after_fallback: Vec<Span>,
 }
 
 impl Ast {
@@ -248,6 +249,7 @@ pub enum DefKind {
 #[derive(Debug, Clone)]
 pub struct SigDef {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub span: Span,
@@ -256,6 +258,7 @@ pub struct SigDef {
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: String,
+    pub params: Vec<String>,
     pub ty: Option<TypeExpr>,
     pub span: Span,
 }
@@ -294,7 +297,7 @@ impl fmt::Display for Diagnostic {
                 "{}:{}:{}: error[{code}]: {}",
                 self.path, self.line, self.col, self.message
             ),
-            None => write!(f, "error: {}", self.message),
+            None => write!(f, "{}:{}:{}: error: {}", self.path, self.line, self.col, self.message),
         }
     }
 }
@@ -329,6 +332,7 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
         toks,
         pos: 0,
         path,
+        branches_after_fallback: Vec::new(),
     }
     .parse_program()
 }
@@ -337,6 +341,7 @@ struct Parser<'a> {
     toks: &'a [Tok],
     pos: usize,
     path: &'a str,
+    branches_after_fallback: Vec<Span>,
 }
 
 impl Parser<'_> {
@@ -415,7 +420,7 @@ impl Parser<'_> {
                 }
             }
         }
-        Ok(Ast { items, span })
+        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone() })
     }
 
     fn parse_definition(&mut self) -> Result<Item, Diagnostic> {
@@ -502,6 +507,21 @@ impl Parser<'_> {
                 ))
             }
         };
+        let mut type_params = Vec::new();
+        if self.kind() == &TokKind::Lt {
+            self.bump();
+            loop {
+                let TokKind::Name(parameter) = self.kind() else {
+                    return Err(self.error(None, "expected a type parameter"));
+                };
+                if type_params.contains(parameter) { return Err(self.error(None, "duplicate type parameter")); }
+                type_params.push(parameter.clone());
+                self.bump();
+                if self.kind() != &TokKind::Comma { break; }
+                self.bump();
+            }
+            self.expect(&TokKind::Gt)?;
+        }
         let params = self.parse_params()?;
         let ret = if self.kind() == &TokKind::Colon {
             self.bump();
@@ -511,6 +531,7 @@ impl Parser<'_> {
         };
         Ok(Item::SigDef(SigDef {
             name,
+            type_params,
             params,
             ret,
             span,
@@ -533,11 +554,15 @@ impl Parser<'_> {
                 ))
             }
         };
+        let mut params = Vec::new();
         if self.kind() == &TokKind::Lt {
             self.bump();
             loop {
                 match self.kind() {
-                    TokKind::Name(_) => self.bump(),
+                    TokKind::Name(name) => {
+                        params.push(name.clone());
+                        self.bump();
+                    }
                     other => {
                         return Err(self.error(
                             None,
@@ -559,7 +584,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        Ok(Item::TypeDef(TypeDef { name, ty, span }))
+        Ok(Item::TypeDef(TypeDef { name, params, ty, span }))
     }
 
     fn parse_module(&mut self) -> Result<Item, Diagnostic> {
@@ -605,6 +630,7 @@ impl Parser<'_> {
                 match self.kind() {
                     TokKind::KwType => items.push(self.parse_type_def()?),
                     TokKind::Def => items.push(self.parse_definition()?),
+                    TokKind::KwModule => items.push(self.parse_module()?),
                     TokKind::Eof => {
                         return Err(self.error(None, "unterminated `struct`: expected `end`"))
                     }
@@ -736,7 +762,12 @@ impl Parser<'_> {
     }
 
     fn parse_type_variant(&mut self) -> Result<TypeExpr, Diagnostic> {
-        let name = self.expect_name("a type name")?;
+        let mut name = self.expect_name("a type name")?;
+        while self.kind() == &TokKind::Dot {
+            self.bump();
+            name.push('.');
+            name.push_str(&self.expect_name("a qualified type name")?);
+        }
         if self.kind() == &TokKind::Lt {
             self.bump();
             let mut args = Vec::new();
@@ -779,6 +810,9 @@ impl Parser<'_> {
     /// Parse an expression that must not itself contain a branch
     /// (§20: branches cannot nest). Used for every component of a branch.
     fn parse_branch_expr(&mut self) -> Result<Node, Diagnostic> {
+        if self.kind() == &TokKind::KwIf {
+            return Err(self.error(Some("E101"), "branches cannot be nested inside another branch"));
+        }
         let node = self.parse_expr()?;
         if let Some(sp) = contains_branch(&node) {
             return Err(self.error_at(
@@ -919,16 +953,17 @@ impl Parser<'_> {
     }
 
     fn parse_apply(&mut self) -> Result<Node, Diagnostic> {
-        let mut f = self.parse_primary()?;
+        let f = self.parse_primary()?;
+        let mut args = Vec::new();
         while self.atom_start() {
-            let arg = self.parse_primary()?;
-            let fspan = f.span;
-            f = Node {
-                kind: NodeKind::Apply(Box::new(f), vec![arg]),
-                span: fspan,
-            };
+            args.push(self.parse_primary()?);
         }
-        Ok(f)
+        if args.is_empty() {
+            Ok(f)
+        } else {
+            let span = f.span;
+            Ok(Node { kind: NodeKind::Apply(Box::new(f), args), span })
+        }
     }
 
     fn atom_start(&self) -> bool {
@@ -1167,7 +1202,7 @@ impl Parser<'_> {
                     self.pos = save;
                     let fb = self.parse_branch_expr()?;
                     fallback = Some(Box::new(fb));
-                    break;
+                    self.record_fallback_end();
                 }
                 Ok(Node {
                     kind: NodeKind::PatternBranch {
@@ -1198,12 +1233,19 @@ impl Parser<'_> {
             } else {
                 // `| expression` — a fallback.
                 fallback = Some(Box::new(head));
+                self.record_fallback_end();
             }
         }
         Ok(Node {
             kind: NodeKind::CondBranch { arms, fallback },
             span,
         })
+    }
+
+    fn record_fallback_end(&mut self) {
+        if self.kind() == &TokKind::Pipe {
+            self.branches_after_fallback.push(self.span());
+        }
     }
 
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
@@ -1376,6 +1418,9 @@ fn contains_branch(node: &Node) -> Option<Span> {
 
 /// Lower the full AST to the M0 IR, accepting only `def main = <Int + ...>`.
 pub fn lower_to_m0(ast: &Ast) -> Option<Program> {
+    if ast.items.len() != 1 {
+        return None;
+    }
     let body = lower_expr(ast.main()?)?;
     Some(Program { body })
 }
@@ -1497,290 +1542,18 @@ pub fn canonical(node: &Node) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse_expr_ok(src: &str) -> String {
-        canonical(parse_source(src, "t").unwrap().main().unwrap())
-    }
-
-    /// Type of the first top-level `type` item, if present.
-    fn type_of(src: &str) -> Option<TypeExpr> {
-        match parse_source(src, "t").unwrap().items.into_iter().next() {
-            Some(Item::TypeDef(td)) => td.ty,
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn precedence_mul_over_add() {
-        assert_eq!(parse_expr_ok("def main = 1 + 2 * 3"), "(1 + (2 * 3))");
-        assert_eq!(parse_expr_ok("def main = 2 * 3 + 1"), "((2 * 3) + 1)");
-    }
-
-    #[test]
-    fn left_assoc_add_and_mul() {
-        assert_eq!(
-            parse_expr_ok("def main = 1 + 2 + 3"),
-            "((1 + 2) + 3)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = 10 / 2 / 5"),
-            "((10 / 2) / 5)"
-        );
-    }
-
-    #[test]
-    fn comparisons_and_logic() {
-        assert_eq!(
-            parse_expr_ok("def main = 1 < 2 && 3 >= 4"),
-            "((1 < 2) && (3 >= 4))"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = 1 < 2 || 3 > 4"),
-            "((1 < 2) || (3 > 4))"
-        );
-        assert_eq!(parse_expr_ok("def main = 1 == 2"), "(1 == 2)");
-    }
-
-    #[test]
-    fn unary_minus_binds_tightest() {
-        assert_eq!(parse_expr_ok("def main = - 2 * 3"), "((-2) * 3)");
-        assert_eq!(parse_expr_ok("def main = 1 - - 2"), "(1 - (-2))");
-    }
-
-    #[test]
-    fn parens_override_precedence() {
-        assert_eq!(
-            parse_expr_ok("def main = (1 + 2) * 3"),
-            "((1 + 2) * 3)"
-        );
-    }
-
-    #[test]
-    fn comments_and_newlines_are_ignored() {
-        assert_eq!(
-            parse_expr_ok("def main = 1 -- hi\n + 2"),
-            "(1 + 2)"
-        );
-    }
-
-    #[test]
-    fn non_assoc_comparison_rejected() {
-        let d = parse_source("def main = 1 < 2 < 3", "t").unwrap_err();
-        assert!(d.message.contains("non-associative"), "got: {d}");
-    }
-
-    #[test]
-    fn application_and_pipe() {
-        assert_eq!(
-            parse_expr_ok("def main = f x y"),
-            "f x y"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = 1 |> add 2 3"),
-            "(1 |> add 2 3)"
-        );
-    }
-
-    #[test]
-    fn constructor_and_field() {
-        assert_eq!(
-            parse_expr_ok("def main = Some(x)"),
-            "Some(x)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = M.inc 2"),
-            "M.inc 2"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = user.name"),
-            "user.name"
-        );
-    }
-
-    #[test]
-    fn record_and_list_literals() {
-        assert_eq!(
-            parse_expr_ok("def main = { name = \"a\"; age = 3 }"),
-            "{ name = \"a\"; age = 3 }"
-        );
-        assert_eq!(parse_expr_ok("def main = [1, 2, 3]"), "[1, 2, 3]");
-        assert_eq!(parse_expr_ok("def main = []"), "[]");
-    }
-
-    #[test]
-    fn bindings_and_fn() {
-        assert_eq!(
-            parse_expr_ok("def main = let x = 1 -> x + 1"),
-            "(let x = 1 -> (x + 1))"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = let? x = f y -> x"),
-            "(let? x = f y -> x)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = do? g x -> x"),
-            "(do? g x -> x)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = fn x => x + 1"),
-            "(fn x => (x + 1))"
-        );
-    }
-
-    #[test]
-    fn branches() {
-        assert_eq!(
-            parse_expr_ok("def main = if x > 10 => Large | Small"),
-            "(if (x > 10) => Large | Small)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = if | x > 1 => 1 | 0"),
-            "(if | (x > 1) => 1 | 0)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = if x | Some(v) => v | 0"),
-            "(if x | Some(v) => v | 0)"
-        );
-    }
-
-    #[test]
-    fn defs_modules_types() {
-        assert!(parse_source("def add x y => x + y", "t").is_ok());
-        assert!(parse_source("def rec ping x => pong x", "t").is_ok());
-        assert!(parse_source("type List2<T> = Nil2 | Cons2(T, List2<T>)", "t").is_ok());
-        assert!(parse_source("module type S = sig def inc(x: Int): Int end", "t").is_ok());
-        assert!(parse_source("module M : S = struct def inc x => x + 1 end", "t").is_ok());
-    }
-
-    #[test]
-    fn adt_accepts_leading_pipe() {
-        // §10 / §11 write ADTs with a leading `|` on the first variant;
-        // the no-leading-`|` form must also stay accepted.
-        assert!(parse_source(
-            "type Nest<T> =\n  | Leaf(T)\n  | Node(Nest<List<T>>)",
-            "t",
-        )
-        .is_ok());
-        assert!(parse_source("type Color =\n  | Red\n  | Green\n  | Blue", "t").is_ok());
-        assert!(parse_source("type List2<T> = Nil2 | Cons2(T, List2<T>)", "t").is_ok());
-        assert_eq!(
-            type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
-            Some(TypeExpr::Adt(vec![
-                TypeExpr::Name("Red".into()),
-                TypeExpr::Name("Green".into()),
-                TypeExpr::Name("Blue".into()),
-            ])),
-        );
-    }
-
-    #[test]
-    fn fn_type_group() {
-        // §37: `Fn<(Int, Int), Int>` is the v0.1 function type. The `( )`
-        // is an argument group, not a tuple.
-        assert_eq!(
-            type_of("type F = Fn<(Int, Int), Int>"),
-            Some(TypeExpr::Apply(
-                "Fn".into(),
-                vec![
-                    TypeExpr::Group(vec![TypeExpr::Name("Int".into()), TypeExpr::Name("Int".into())]),
-                    TypeExpr::Name("Int".into()),
-                ],
-            )),
-        );
-        assert!(parse_source("def f(x: Fn<(Int, Int), Int>): Int => 1", "t").is_ok());
-        assert!(parse_source("type F = Fn<Int, String>", "t").is_ok());
-    }
-
-    #[test]
-    fn not_unary_precedence() {
-        // `not` sits in the same tier as unary `-` (§44), above `&&` and the
-        // comparisons.
-        assert_eq!(parse_expr_ok("def main = not true"), "(not true)");
-        assert_eq!(parse_expr_ok("def main = not (1 == 2)"), "(not (1 == 2))");
-        assert_eq!(
-            parse_expr_ok("def main = not true && false"),
-            "((not true) && false)"
-        );
-        assert_eq!(
-            parse_expr_ok("def main = not 1 == 2"),
-            "((not 1) == 2)"
-        );
-        assert_eq!(parse_expr_ok("def main = not not true"), "(not (not true))");
-        assert_eq!(parse_expr_ok("def main = - not true"), "(-(not true))");
-        assert_eq!(parse_expr_ok("def main = not - 1"), "(not (-1))");
-    }
-
-    #[test]
-    fn e101_nested_branch() {
-        let d = parse_source(
-            "def f x =>\n  if x\n  | 1 => if x\n    | 2 => 5\n    | 0\n  | 0",
-            "t",
-        )
-        .unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E101"));
-        assert_eq!(d.line, 3, "inner `if` is on line 3 of the source, got {d}");
-    }
-
-    #[test]
-    fn e102_rec_on_value() {
-        let d = parse_source("def rec pi = 3.14159", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E102"));
-    }
-
-    #[test]
-    fn e105_no_tuple() {
-        let d = parse_source("def main = (1, 2)", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E105"));
-    }
-
-    #[test]
-    fn e105_tuple_pattern() {
-        // §37: tuple syntax in a pattern is also E105, not a plain error.
-        let d = parse_source("def main = let (a, b) = x -> a", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E105"));
-        let d = parse_source("def main = if x | (a, b) => a | 0", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E105"));
-    }
-
-    #[test]
-    fn e106_constructor_call_form() {
-        let d = parse_source("def inc x => x + 1\ndef main = inc(1)", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E106"));
-    }
-
-    #[test]
-    fn e107_operator_overloading() {
-        let d = parse_source("def (+) a b => a", "t").unwrap_err();
-        assert_eq!(d.code.as_deref(), Some("E107"));
-    }
-
-    #[test]
-    fn lower_m0_subset() {
-        let ast = parse_source("def main = 1 + 2 + 3", "t").unwrap();
-        let prog = lower_to_m0(&ast).unwrap();
-        assert_eq!(
-            prog.body,
-            Expr::Add(
-                Box::new(Expr::Add(Box::new(Expr::Int(1)), Box::new(Expr::Int(2)))),
-                Box::new(Expr::Int(3))
-            )
-        );
-        assert!(lower_to_m0(&parse_source("def other = 1", "t").unwrap()).is_none());
-        assert!(lower_to_m0(&parse_source("def main = 1 * 2", "t").unwrap()).is_none());
-    }
-
-    #[test]
-    fn m0_parse_entry() {
-        let toks = crate::lexer::lex("def main = 10 + 20").unwrap();
-        let prog = parse(&toks).unwrap();
-        assert_eq!(
-            prog.body,
-            Expr::Add(Box::new(Expr::Int(10)), Box::new(Expr::Int(20)))
-        );
-        let toks = crate::lexer::lex("def main = 1 < 2").unwrap();
-        assert!(parse(&toks).is_err());
-    }
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
 }
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
+}
+
+impl PartialEq for Param {
+    fn eq(&self, other: &Self) -> bool { self.name == other.name && self.ty == other.ty }
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/parser.rs"]
+mod tests;

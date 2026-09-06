@@ -1,0 +1,6 @@
+module type FLOAT = sig
+  def to_string(value: Float): String
+end
+module Float : FLOAT = struct
+  def to_string value => __float_to_string value
+end

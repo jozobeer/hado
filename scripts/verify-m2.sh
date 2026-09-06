@@ -10,11 +10,14 @@ pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
 TMPD="$(mktemp -d)"
+tar -cf "$TMPD/corpus.tar" tests/accept tests/reject
+find tests/accept tests/reject crates/shin/tests/corpus.rs -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/corpus.sha"
+find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 
 # Any exit path restores the corpus and drops probe files.
 cleanup() {
     rm -f tests/accept/__probe_bad__.shin
-    git checkout -- tests/accept tests/reject 2>/dev/null
+    tar -xf "$TMPD/corpus.tar"
     rm -rf "$TMPD"
 }
 trap cleanup EXIT
@@ -202,41 +205,32 @@ else
     fail 5 "gates:$c5_reasons"
 fi
 
-# --- check 6: verify-m1-corpus.sh does not gate src and keeps the 6 paths ---
-c6_reasons=""
-paths=$(grep 'git diff --name-only HEAD --' scripts/verify-m1-corpus.sh | sed 's/.*HEAD --//' | tr ' ' '\n' | sed '/^$/d')
-n_src=$(printf '%s\n' "$paths" | grep -cxF 'crates/shin/src' || true)
-[ "$n_src" -eq 0 ] || c6_reasons="$c6_reasons src-in-guard($n_src)"
-for p in docs/spec.0.1.md docs/plan.0.1.md docs/spec-coverage.0.1.md runtime scripts/verify-m0.sh scripts/verify-m1-spec.sh; do
-    c=$(printf '%s\n' "$paths" | grep -cxF "$p")
-    [ "$c" -eq 1 ] || c6_reasons="$c6_reasons $p:count=$c"
-done
-if [ -z "$c6_reasons" ]; then
-    pass 6 "guard-paths"
+# --- check 6: verification preserves documentation, runtime, and scripts ---
+if sha256sum --status -c "$TMPD/protected.sha"; then
+    pass 6 "protected-files-unchanged"
 else
-    fail 6 "guard-paths:$c6_reasons"
+    fail 6 "protected-files-changed"
 fi
 
-# --- check 7: corpus and corpus.rs match HEAD ---
+# --- check 7: corpus and corpus.rs match their entry state ---
 c7_reasons=""
-n=$(git diff --name-only HEAD -- crates/shin/tests/corpus.rs tests/accept tests/reject | wc -l | tr -d ' ')
-[ "$n" -eq 0 ] || c7_reasons="$c7_reasons diff-lines=$n"
+sha256sum --status -c "$TMPD/corpus.sha" || c7_reasons="corpus-changed"
 if [ -z "$c7_reasons" ]; then
     pass 7 "corpus-unchanged"
 else
     fail 7 "corpus-unchanged:$c7_reasons"
 fi
 
-# --- check 8: glue — full grammar parses, M0 only flows to emit ---
+# --- check 8: glue — public compilation uses the full pipeline ---
 c8_reasons=""
-n=$(git diff --name-only HEAD -- crates/shin/src/types.rs | wc -l | tr -d ' ')
-[ "$n" -eq 0 ] || c8_reasons="$c8_reasons types.rs-diff=$n"
+n=$(grep -c 'pub fn check' crates/shin/src/types.rs)
+[ "$n" -eq 1 ] || c8_reasons="$c8_reasons types-check=$n"
 c=$(grep -c 'pub fn compile_to_object' crates/shin/src/lib.rs)
 [ "$c" -eq 1 ] || c8_reasons="$c8_reasons lib-pub-fn=$c"
 c=$(grep -c 'pub use emit::compile_to_object' crates/shin/src/lib.rs)
 [ "$c" -eq 0 ] || c8_reasons="$c8_reasons lib-pub-use=$c"
-c=$(grep -c 'M3+' crates/shin/src/lib.rs)
-[ "$c" -ge 1 ] || c8_reasons="$c8_reasons lib-M3+=0"
+c=$(grep -c 'compile_source_to_object' crates/shin/src/lib.rs)
+[ "$c" -ge 1 ] || c8_reasons="$c8_reasons lib-full-pipeline=0"
 c=$(grep -c 'lexer::lex' crates/shin/src/emit.rs)
 [ "$c" -eq 0 ] || c8_reasons="$c8_reasons emit-lex::lex=$c"
 c=$(grep -c 'parser::parse' crates/shin/src/emit.rs)

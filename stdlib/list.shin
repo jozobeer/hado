@@ -1,0 +1,25 @@
+type List<T> = | Nil | Cons(T, List<T>)
+module type LIST = sig
+  def map<A, B>(values: List<A>, f: Fn<A, B>): List<B>
+  def filter<A>(values: List<A>, predicate: Fn<A, Bool>): List<A>
+  def fold<A, B>(values: List<A>, initial: B, f: Fn<(B, A), B>): B
+  def length<A>(values: List<A>): Int
+  def reverse<A>(values: List<A>): List<A>
+  def append<A>(left: List<A>, right: List<A>): List<A>
+  def sort<A>(values: List<A>, comparator: Fn<(A, A), Int>): List<A>
+end
+module List : LIST = struct
+  def rec map values f => if values | Nil => Nil | Cons(head, tail) => Cons(f head, map tail f)
+  def retain head tail keep => if keep => Cons(head, tail) | tail
+  def rec filter values predicate => if values | Nil => Nil | Cons(head, tail) => retain head (filter tail predicate) (predicate head)
+  def rec fold values initial f => if values | Nil => initial | Cons(head, tail) => fold tail (f initial head) f
+  def length values => fold values 0 (fn count value => count + 1)
+  def reverse values => fold values Nil (fn reversed value => Cons(value, reversed))
+  def rec append left right => if left | Nil => right | Cons(head, tail) => Cons(head, append tail right)
+  def rec odds values => if values | Nil => Nil | Cons(head, Nil) => values | Cons(head, Cons(next, tail)) => Cons(head, odds tail)
+  def rec evens values => if values | Nil => Nil | Cons(head, Nil) => Nil | Cons(head, Cons(next, tail)) => Cons(next, evens tail)
+  def rec merge left right comparator => if left | Nil => right | Cons(a, rest_a) => merge_right left a rest_a right comparator
+  def rec merge_right left a rest_a right comparator => if right | Nil => left | Cons(b, rest_b) => merge_heads left a rest_a right b rest_b comparator
+  def rec merge_heads left a rest_a right b rest_b comparator => if comparator a b <= 0 => Cons(a, merge rest_a right comparator) | Cons(b, merge left rest_b comparator)
+  def rec sort values comparator => if values | Nil => Nil | Cons(head, Nil) => values | Cons(head, Cons(next, tail)) => merge (sort (odds values) comparator) (sort (evens values) comparator) comparator
+end

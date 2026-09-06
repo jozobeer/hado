@@ -1,3 +1,5 @@
+#include "shin_runtime.h"
+#include <string.h>
 #include <gc.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,4 +20,117 @@ void shin_print_int(int64_t v) {
 int main(void) {
   GC_INIT();
   return shin_entry();
+}
+
+int64_t shin_string_length(const ShinString *string) {
+  int64_t count = 0;
+  for (size_t i = 0; i < string->length; ++i) {
+    if ((string->bytes[i] & 0xc0) != 0x80) {
+      if (count == INT64_MAX) abort();
+      ++count;
+    }
+  }
+  return count;
+}
+
+ShinString *shin_string_concat(const ShinString *left, const ShinString *right) {
+  if (left->length > SIZE_MAX - right->length) abort();
+  size_t length = left->length + right->length;
+  if (length > SIZE_MAX - sizeof(ShinString)) abort();
+  ShinString *result = shin_alloc(sizeof(ShinString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+  memcpy(result->bytes, left->bytes, left->length);
+  memcpy(result->bytes + left->length, right->bytes, right->length);
+  return result;
+}
+
+int64_t shin_string_compare(const ShinString *left, const ShinString *right) {
+  size_t common = left->length < right->length ? left->length : right->length;
+  int order = memcmp(left->bytes, right->bytes, common);
+  if (order != 0) return order < 0 ? -1 : 1;
+  return (left->length > right->length) - (left->length < right->length);
+}
+
+void shin_print_string(const ShinString *string) {
+  fwrite(string->bytes, 1, string->length, stdout);
+  fputc('\n', stdout);
+  fflush(stdout);
+}
+
+static size_t encode_char(uint32_t value, unsigned char bytes[4]) {
+  size_t length;
+  if (value <= 0x7f) {
+    bytes[0] = value;
+    length = 1;
+  } else if (value <= 0x7ff) {
+    bytes[0] = 0xc0 | (value >> 6);
+    bytes[1] = 0x80 | (value & 0x3f);
+    length = 2;
+  } else if (value <= 0xffff && !(value >= 0xd800 && value <= 0xdfff)) {
+    bytes[0] = 0xe0 | (value >> 12);
+    bytes[1] = 0x80 | ((value >> 6) & 0x3f);
+    bytes[2] = 0x80 | (value & 0x3f);
+    length = 3;
+  } else if (value >= 0x10000 && value <= 0x10ffff) {
+    bytes[0] = 0xf0 | (value >> 18);
+    bytes[1] = 0x80 | ((value >> 12) & 0x3f);
+    bytes[2] = 0x80 | ((value >> 6) & 0x3f);
+    bytes[3] = 0x80 | (value & 0x3f);
+    length = 4;
+  } else {
+    abort();
+  }
+  return length;
+}
+
+void shin_print_char(uint32_t value) {
+  unsigned char bytes[4];
+  size_t length = encode_char(value, bytes);
+  fwrite(bytes, 1, length, stdout);
+  fputc('\n', stdout);
+  fflush(stdout);
+}
+
+void shin_print_float(double value) {
+  printf("%.17g\n", value);
+  fflush(stdout);
+}
+
+ShinString *shin_int_to_string(int64_t value) {
+  char buffer[32];
+  int length = snprintf(buffer, sizeof(buffer), "%lld", (long long)value);
+  if (length < 0 || (size_t)length >= sizeof(buffer)) abort();
+  ShinString *result = shin_alloc(sizeof(ShinString) + (size_t)length);
+  if (result == NULL) abort();
+  result->length = (size_t)length;
+  memcpy(result->bytes, buffer, result->length);
+  return result;
+}
+
+ShinString *shin_float_to_string(double value) {
+  char buffer[32];
+  int length = snprintf(buffer, sizeof(buffer), "%.17g", value);
+  if (length < 0 || (size_t)length >= sizeof(buffer)) abort();
+  ShinString *result = shin_alloc(sizeof(ShinString) + (size_t)length);
+  if (result == NULL) abort();
+  result->length = (size_t)length;
+  memcpy(result->bytes, buffer, result->length);
+  return result;
+}
+
+ShinString *shin_char_to_string(uint32_t value) {
+  unsigned char bytes[4];
+  size_t length = encode_char(value, bytes);
+  ShinString *result = shin_alloc(sizeof(ShinString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+  memcpy(result->bytes, bytes, length);
+  return result;
+}
+
+void shin_print_error_string(const ShinString *string) {
+  fwrite(string->bytes, 1, string->length, stderr);
+  fputc('\n', stderr);
+  fflush(stderr);
 }
