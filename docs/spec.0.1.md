@@ -1038,6 +1038,16 @@ module type USER_ID = sig
 end
 ```
 
+signatureの関数は、名前の直後に型変数を宣言できる。
+
+```ocaml
+module type OPTION = sig
+  def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
+end
+```
+
+宣言した型変数はその関数のsignature内だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は拒否し、未宣言の型名はE205とする。
+
 `val` は使わない。
 
 signature側もimplementation側も、
@@ -1487,6 +1497,8 @@ Unit は `()` とする。
 `==` と `!=` は、Fn を含まない全型の構造比較である。M5 の派生パスが型ごとに合成する。
 
 Fn を含む型への `==` `!=` は E704、`compare` は E705 とする。単相化時に判明する。
+
+`compare a b` は順序に応じて `-1`、`0`、`1` を返す。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。
 
 ---
 
