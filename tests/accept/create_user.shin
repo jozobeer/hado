@@ -1,6 +1,10 @@
 -- spec: §39
 -- expect: ok
 -- item: 関数適用
+def parse (input: List<Int>): Result<List<Int>, String> => Ok(input)
+def validate parsed => if parsed | Nil => Ok() | Cons(head, tail) => Error("invalid")
+def authorize parsed => if parsed | Nil => Ok() | Cons(head, tail) => Error("denied")
+def save parsed => if parsed | Nil => Ok("ok") | Cons(head, tail) => Error("save failed")
 def create_user input =>
   let? parsed = parse input ->
   do? validate parsed ->

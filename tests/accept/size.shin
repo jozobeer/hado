@@ -1,6 +1,7 @@
 -- spec: §39
 -- expect: Small
 -- item: 演算子
+type Size = | Large | Small
 def size x =>
   if x > 10 => Large | Small
 def main = size 3
