@@ -235,3 +235,25 @@ fn lambdas_may_branch_but_cannot_hide_nested_branches() {
         );
     }
 }
+
+#[test]
+fn identifier_namespaces_follow_the_grammar() {
+    for index in 0..12 {
+        for source in [
+            format!("def Upper{index} = 1"),
+            format!("type lower{index} = | Case{index}"),
+            format!("type Choice{index} = | lower{index}"),
+            format!("type Box{index}<lower> = | Box{index}(Int)"),
+            format!("type Record{index} = {{ Upper: Int }}"),
+            format!("module lower{index} : S = struct end"),
+            format!("module type lower{index} = sig end"),
+            format!("module type S = sig def Upper{index}(x: Int): Int end"),
+            format!("def main = {{ Upper{index} = 1 }}"),
+            format!("def main = value.Upper{index}"),
+            "def main = _".into(),
+        ] {
+            let error = parse_source(&source, "generated").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E100"), "{source}");
+        }
+    }
+}
