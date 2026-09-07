@@ -18,6 +18,8 @@ pub enum RuntimeFunction {
     IntToString,
     FloatToString,
     CharToString,
+    QuoteString,
+    QuoteChar,
     StringLength,
     StringConcat,
     StringCompare,
@@ -39,7 +41,7 @@ impl RuntimeFunction {
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
-            Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::PrintChar | Self::PrintFloat => None,
+            Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::PrintChar | Self::PrintFloat => None,
         }
     }
 
@@ -51,7 +53,8 @@ impl RuntimeFunction {
         use crate::mono::{Signature, Type};
         let (parameters, result) = match self {
             Self::Alloc => return None,
-            Self::CharToString => (vec![Type::Char], Type::String),
+            Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
+            Self::QuoteString => (vec![Type::String], Type::String),
             Self::FloatToString => (vec![Type::Float], Type::String),
             Self::IntToString => (vec![Type::Int], Type::String),
             Self::PrintInt => (vec![Type::Int], Type::Unit),
@@ -65,7 +68,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::QuoteString, Self::QuoteChar];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -77,6 +80,8 @@ impl RuntimeFunction {
 
     pub fn declaration(self) -> &'static Declaration {
         match self {
+            Self::QuoteString => &Declaration { symbol: "shin_quote_string", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
+            Self::QuoteChar => &Declaration { symbol: "shin_quote_char", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
             Self::CharToString => &Declaration { symbol: "shin_char_to_string", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
             Self::FloatToString => &Declaration { symbol: "shin_float_to_string", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::IntToString => &Declaration { symbol: "shin_int_to_string", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
