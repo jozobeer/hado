@@ -122,6 +122,8 @@ def add(x: Int, y: Int): Int =>
 
 `def name = expression` は値定義専用であり、関数定義に `=` を使わない。
 
+関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。
+
 ---
 
 # 4. 再帰
@@ -137,9 +139,9 @@ def rec factorial n =>
 
 `def rec` は、値定義ではなく関数定義にのみ使用できる。値定義に `rec` を付けると E102 とする。
 
-top-level は定義順に依存しない。呼び出しグラフの閉路に含まれる関数は全て `rec` とする（E516）。閉路に値定義が含まれるとエラーである（E514）。値定義は `rec` を持てない。
+top-level は定義順に依存しない。呼び出しグラフの閉路に含まれる関数は全て `rec` とする（E208）。閉路に値定義が含まれるとエラーである（E207）。値定義は `rec` を持てない。
 
-多相再帰はコンパイルエラーとする（E701）。
+多相再帰はコンパイルエラーとする（E307）。E307 は、`rec` 関数の再帰呼び出しにおいて、引数の型と仮引数の型の単一化が出現検査に失敗した場合である。それ以外の出現検査の失敗は E306（第9節）とする。
 
 ---
 
@@ -163,7 +165,9 @@ let = local binding
 
 プログラムの入口はトップレベルの `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。
 
-`main` の型は単相で、Fn を含んではならない。`def main = Nil` は型変数が残るため E702、`def main = inc` は印字できず Fn を含むため E703 とする。
+`main` の型は単相で、Fn を含んではならない。`def main = Nil` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702 とする。
+
+`main` の要求は実行ファイルという成果物の規則である。`main` が無い、または `main` が引数を持つプログラムは E206 とする。`main` の値の印字は第51節に従う。
 
 ---
 
@@ -229,6 +233,14 @@ def add x y => x + y
 
 `=>` は関数定義と匿名関数においてのみ、入力と結果の対応を表す。
 
+匿名関数も、引数のパターン分岐の形（第52節）を取れる。
+
+```ocaml
+fn
+| Guest => "guest"
+| Member(user) => user.name
+```
+
 ---
 
 # 8. 型注釈
@@ -276,7 +288,7 @@ def identity x => x
 通常のコードでは型注釈を大量に要求しない。
 
 推論の途中で型が食い違う場合は E305 とする。型変数がそれ自身を含む型に束縛される場合
-（出現検査の失敗）は E306 とする。
+（出現検査の失敗）は E306 とする。ただし再帰呼び出しに起因する出現検査の失敗は E307（第4節）とする。
 
 ---
 
@@ -337,7 +349,9 @@ type Shape =
   | Rectangle(Float, Float)
 ```
 
-`of` は使わない。
+`of` は使わない。constructor の列は先頭の `|` を必須とする。1 行に書く場合も同じである（`type Color = | Red | Green | Blue`）。先頭の `|` が無い型定義は E108 とする。
+
+payload は型を名前で参照する。無名の record を payload に書くことはできない（第12節）。
 
 値生成も同じ形。
 
@@ -357,9 +371,11 @@ Recordを持つ。
 ```ocaml
 type User = {
   name: String;
-  age: Int;
+  age: Int
 }
 ```
+
+`;` は field の区切りである。record 式（下記）と同じ規則で、最後の field の後には置かない。同じ record 型の中で field 名は一意である（E205）。
 
 アクセス：
 
@@ -373,20 +389,24 @@ user.name
 { name = "a"; age = 3 }
 ```
 
-型は field 集合から一意に決まる nominal 型である。曖昧なら注釈を要求する（E304）。
+型は field 集合から一意に決まる nominal 型である。一意に決まらない（該当する型が無い、または 2 つ以上ある）場合は注釈を要求する（E304）。record 式の中で同じ field を 2 回書くことは E205 とする。
 
 パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）とする。書かない field は無視する。field 更新構文は持たない。
 
-ADTとの組み合わせ：
+record は必ず `type` で名前を持つ。ADTとの組み合わせは、名前で参照する。
 
 ```ocaml
+type Profile = {
+  name: String;
+  age: Int
+}
+
 type User =
   | Guest
-  | Member({
-      name: String;
-      age: Int;
-    })
+  | Member(Profile)
 ```
+
+型の別名（`type Id = Int`）は持たない。値を区別したいときは constructor が 1 つの ADT を使う（`type Id = | Id(Int)`）。型 `Id` と constructor `Id` は別の名前空間にある（第47節）。
 
 ---
 
@@ -496,7 +516,7 @@ pattern branchでは、各branchはpatternと `=>` と式で構成する。
 
 pattern branchは、ADTの構造に基づいて網羅的でなければならない。
 
-リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。
+リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Int と Float のリテラルパターンは先頭に `-` を置け、それはリテラルの一部である。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。
 
 最上位の変数パターン `| x => ...` は禁止する（E512）。入れ子の中の変数パターンは許可する。
 
@@ -556,6 +576,8 @@ if value
 
 非網羅branchはwarningではなくerror。
 
+`let` と `let?` のパターンにも同じ規則を当てる（第22節）。
+
 ---
 
 # 19. `_` の用途
@@ -585,6 +607,8 @@ fallbackのcanonical formは、
 ```
 
 である。
+
+`()` はパターンではない。Unit の値は名前か `_` で受ける。
 
 ---
 
@@ -693,6 +717,8 @@ None
 
 `let?` の右辺は、対応するOptionまたはResult型でなければならない。そうでなければコンパイルエラーとする（E303）。
 
+`let` と `let?` のパターンは、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`let Id(n) = x`）とその入れ子は一致する。
+
 ---
 
 # 23. `do?`
@@ -750,7 +776,9 @@ None
   => Noneを伝播
 ```
 
-`do?` は成功値を破棄することを明示するための構文であり、通常の純粋値に対しては使用できない。
+`do?` は成功値を破棄することを明示するための構文であり、通常の純粋値に対しては使用できない。式が Option または Result でなければ E303 とする。
+
+`?` の無い `do` は無い。純粋値の破棄は意味を持たない（第28節）ためである。
 
 ---
 
@@ -820,6 +848,8 @@ users
 ```
 
 `|>` にOption / Resultの特殊意味は持たせない。
+
+`|>` の右辺は値名前空間の関数（名前か適用）に限る。constructor を置くこと（`x |> Some`）は E106 とする。
 
 ---
 
@@ -891,7 +921,9 @@ next
 
 `x` が継続内で使われていないならコンパイルエラー（E505）。
 
-未使用の判定は top-level の `def` にも適用する（E513）。`main` は例外である。
+E505 は `let` `let?` の束縛、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第19節）。引数に `_` は書けないので、引数を使わない関数は書けない。
+
+未使用の判定は top-level の `def` `type` `module type` `module` にも適用する（E513）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
 
 ---
 
@@ -1025,7 +1057,9 @@ module type USER_STORE = sig
 end
 ```
 
-ここでの `Error` は prelude の constructor `Error` とは別物であり、signature を書く側が定義する型である。
+ここでの `Error` は prelude の constructor `Error` とは別物であり、signature を書く側が定義する型である。signature の中の型名も、struct が実装されるかどうかによらず解決される。
+
+signature の型宣言は本体を持たない `type T` に限る。本体を持つ型宣言は E100 とする。外に見せたい型は module の外で定義し、signature にはその名前を書く。
 
 abstract type：
 
@@ -1046,7 +1080,7 @@ module type OPTION = sig
 end
 ```
 
-宣言した型変数はその関数のsignature内だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は拒否し、未宣言の型名はE205とする。
+宣言した型変数はその関数のsignature内だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204 とする。
 
 `val` は使わない。
 
@@ -1062,7 +1096,7 @@ def = named definition
 
 # 35. Module implementation
 
-v0.1 の module 実装は次の形とする。signature 注釈は必須である（E601）。
+v0.1 の module 実装は次の形とする。signature 注釈は必須である（E113）。
 
 ```ocaml
 module UserStore : USER_STORE = struct
@@ -1076,15 +1110,15 @@ module UserStore : USER_STORE = struct
 end
 ```
 
-struct は sig に載らない定義を持てる。sig の `type T` は外から不透明である。
+struct は sig の全ての member と型を持ち、それぞれの型が一致し、sig の型変数に対して十分に多相でなければならない。満たさなければ E602 とする。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明である。
 
 ```ocaml
 def name (t: UserStore.T) => t.name
 ```
 
-は E602 とする。
+は E601 とする。
 
-struct 内で sig からも内部からも参照されない `def` はエラーとする（E515）。
+struct 内で sig からも内部からも参照されない `def` はエラーとする（E514）。
 
 Functorやfirst-class moduleはv0.1には入れない。
 
@@ -1217,10 +1251,9 @@ def delete_user id =>
 ADT分岐：
 
 ```ocaml
-def display user =>
-  if user
-  | Guest => "guest"
-  | Member(user) => user.name
+def display
+| Guest => "guest"
+| Member(user) => user.name
 ```
 
 Option分岐：
@@ -1253,10 +1286,9 @@ def classify score =>
 pattern fallback：
 
 ```ocaml
-def name user =>
-  if user
-  | Member(user) => user.name
-  | "guest"
+def name
+| Member(user) => user.name
+| "guest"
 ```
 
 pipeline：
@@ -1318,111 +1350,156 @@ module
 
 # 41. 文法の概形
 
-名前付き定義：
+v0.1 の文法の全体。字句と構文の形はこの節を正とし、第43節と第44節は値の意味だけを定める。
+
+字句:
 
 ```text
-definition
-  := "def" name "=" expression
-   | "def" ["rec"] name parameters return_type? "=>" expression
+int             := digit+                              10 進。i64 の範囲（E112）
+float           := digit+ "." digit+                   小数点の両側に数字（E103）
+char            := "'" (char_escape | 文字) "'"          ちょうど 1 文字（E111）
+char_escape     := "\n" | "\t" | "\\" | "\'"
+string          := '"' (string_escape | 文字)* '"'
+string_escape   := "\n" | "\t" | "\\" | '\"'           これ以外は E110
+bool            := "true" | "false"
+unit            := "()"
+name            := lower (letter | digit | "_")*       値・field・引数の名前
+upper_name      := upper (letter | digit | "_")*       型・constructor・module・module type・型変数の名前
+dunder_name     := "__" name                           stdlib 限定の組み込み名（第47節）
+comment         := "--" 行末までの文字
 ```
 
-`def rec` は関数定義にのみ使用できる。
+`_` 単独は wildcard であり名前ではない。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
 
-ローカルbinding：
+プログラム:
 
 ```text
-binding
-  := "let" pattern "=" expression "->" expression
-
-rail_binding
-  := "let?" pattern "=" expression "->" expression
-
-rail_discard
-  := "do?" expression "->" expression
+program         := item*
+item            := definition | type_definition | module_type | module_impl
 ```
 
-匿名関数：
+名前付き定義:
 
 ```text
-lambda
-  := "fn" parameters "=>" expression
+definition      := "def" name "=" expression
+                 | "def" ["rec"] name parameters return_type? "=>" expression
+                 | "def" ["rec"] name pattern_arm+ pattern_fallback?       第52節。arity は 1
+parameters      := name+
+                 | "(" typed_param ("," typed_param)* ")"
+typed_param     := name ":" type_expr
+return_type     := ":" type_expr
 ```
 
-Boolean branch：
+`def rec` は関数定義にのみ使用できる（E102）。`parameters` は 1 個以上である（E109）。
+
+型定義:
 
 ```text
-boolean_branch
-  := "if" expression "=>" expression "|" expression
+type_definition := "type" upper_name type_params? "=" ("|" constructor)+
+                 | "type" upper_name type_params? "=" record_type
+type_params     := "<" upper_name ("," upper_name)* ">"
+constructor     := upper_name ["(" type_expr ("," type_expr)* ")"]
+record_type     := "{" field_type (";" field_type)* "}"
+field_type      := name ":" type_expr
 ```
 
-条件列：
+型の右辺はこの 2 形に限る。別名（`type Id = Int`）は無い（第12節）。
+
+型式:
 
 ```text
-condition_branch
-  := "if"
-     ("|" expression "=>" expression)+
-     "|" expression
+type_expr       := upper_name ["<" type_expr ("," type_expr)* ">"]        型か型変数
+                 | upper_name "." upper_name                              module の抽象型（UserStore.T）
+                 | "Fn" "<" fn_params "," type_expr ">"
+fn_params       := type_expr
+                 | "(" type_expr ("," type_expr)* ")"
 ```
 
-pattern branch：
+module:
 
 ```text
-pattern_branch
-  := "if" expression pattern_arm+ pattern_fallback?
-
-pattern_arm
-  := "|" pattern "=>" expression
-
-pattern_fallback
-  := "|" expression
-
-pattern
-  := "_"
-   | name
-   | name "(" pattern ("," pattern)* ")"
-   | record_pattern
-   | literal_pattern
+module_type     := "module" "type" upper_name "=" "sig" sig_item* "end"
+sig_item        := "type" upper_name
+                 | "def" name type_params? "(" typed_param ("," typed_param)* ")" ":" type_expr
+module_impl     := "module" upper_name ":" upper_name "=" "struct" struct_item* "end"
+struct_item     := definition
+                 | type_definition
+                 | "type" upper_name "=" type_expr                        sig の抽象型の実体化に限る
 ```
 
-record：
+sig の `type` は本体を持たない（E100）。sig の `def` は全ての引数と戻りに型を書く。
+
+式（優先順位の低い方から）:
 
 ```text
-record_expr
-  := "{" name "=" expression (";" name "=" expression)* "}"
-
-record_pattern
-  := "{" name "}"
-   | "{" name "=" pattern "}"
+expression      := pipe | prefix_form
+prefix_form     := lambda | binding | rail_binding | rail_discard | branch
+pipe            := or ("|>" or)*
+or              := and ("||" and)*
+and             := compare ("&&" compare)*
+compare         := additive [("<" | "<=" | ">" | ">=" | "==" | "!=") additive]     非結合
+additive        := multiplicative (("+" | "-") multiplicative)*
+multiplicative  := unary (("*" | "/" | "%") unary)*
+unary           := "-" unary | "not" unary | application
+application     := postfix postfix*                                        並置。先頭が関数
+postfix         := primary ("." name)*                                     field access
+primary         := int | float | char | string | bool | unit
+                 | name
+                 | dunder_name                                            呼び出しの先頭に限る（E203）
+                 | upper_name "." name                                    module の値（List.map）
+                 | constructor_expr
+                 | record_expr
+                 | list_expr
+                 | "(" expression ")"
+constructor_expr := upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
+record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
+list_expr       := "[" "]"
+                 | "[" expression ("," expression)* "]"
 ```
 
-List リテラル：
+`prefix_form` は括弧で囲めば `primary` になる（`(fn x => x + 1)`）。
+
+継続と匿名関数:
 
 ```text
-list_expr
-  := "[" "]"
-   | "[" expression ("," expression)* "]"
+binding         := "let" pattern "=" expression "->" expression
+rail_binding    := "let?" pattern "=" expression "->" expression
+rail_discard    := "do?" expression "->" expression
+lambda          := "fn" parameters "=>" expression
+                 | "fn" pattern_arm+ pattern_fallback?                    第52節
 ```
 
-module：
+分岐:
 
 ```text
-module_impl
-  := "module" name ":" name "=" "struct" (type_definition | definition)* "end"
-
-type_definition
-  := "type" name "=" type_expr
+branch          := boolean_branch | condition_branch | pattern_branch
+boolean_branch  := "if" expression "=>" arm_body "|" arm_body
+condition_branch := "if" ("|" expression "=>" arm_body)+ "|" arm_body
+pattern_branch  := "if" expression pattern_arm+ pattern_fallback?
+pattern_arm     := "|" pattern "=>" arm_body
+pattern_fallback := "|" arm_body
+arm_body        := pipe | lambda | binding | rail_binding | rail_discard    branch を直接置けない（E101）
 ```
 
-リテラルパターン：
+`arm_body` の継続や lambda の本体に branch を置くことも E101 である（第20節）。文法は直接の入れ子だけを除く。
+
+パターン:
 
 ```text
-literal_pattern
-  := int | float | char | string | bool
+pattern         := "_"
+                 | name
+                 | upper_name ["(" pattern ("," pattern)* ")"]
+                 | record_pattern
+                 | literal_pattern
+record_pattern  := "{" field_pattern (";" field_pattern)* "}"
+field_pattern   := name
+                 | name "=" pattern
+literal_pattern := ["-"] int | ["-"] float | char | string | bool
 ```
 
-意味上、`pattern_fallback` は必ず最後に置く。pattern branchにfallbackがない場合は、pattern coverage checkerによって網羅性を検証する。
+`pattern_fallback` は必ず最後に置く（E404）。pattern branch に fallback が無い場合は網羅性を検証する（E402）。
 
-条件列とpattern branchは、直後の構文によって区別する。
+`if` の 3 形は直後の構文で区別する。
 
 * `if` の直後にexpressionがあり、その後に `=>` が続く場合はBoolean branch
 * `if` の直後にexpressionがあり、その後に `| pattern =>` が続く場合はpattern branch
@@ -1462,13 +1539,13 @@ literal_pattern
 
 # 43. リテラルとコメント
 
-Int は 10 進のみとする。
+Int は 10 進のみとする。i64 の範囲を超えるリテラルは E112 とする。
 
 Float は小数点の両側に数字を必須とする。`.5` や `5.` は文法に含めない（E103）。
 
-Char は `'a'` の形とする。値は Unicode スカラ値である。
+Char は `'a'` の形とする。値は Unicode スカラ値である。エスケープは `\n` `\t` `\\` `\'` に限る。ちょうど 1 文字でない場合と、それ以外のエスケープは E111 とする。
 
-String は `"..."` の形とする。エスケープは `\n` `\t` `\\` `\"` に限る。
+String は `"..."` の形とする。エスケープは `\n` `\t` `\\` `\"` に限る。それ以外のエスケープは E110 とする。
 
 Bool は `true` と `false` とする。
 
@@ -1476,17 +1553,19 @@ Unit は `()` とする。
 
 コメントは `--` による行コメントのみとする。他の記法によるコメントは E104 とする。
 
+字句と構文の形は第41節の文法を正とする。文法に合わない入力で、特定のコードを持つ規則に当たらないものは E100 とする。
+
 ---
 
 # 44. 演算子・優先順位・短絡評価
 
 演算子は次に限る。算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&&` `||` `not`。
 
-算術と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相であり、単相化時に確定する。未確定なら Int とする。`/` と `%` の戻り型は第36節に従う。Float に `%` は置かない。
+算術 `+ - * /` と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相であり、単相化時に確定する。未確定なら Int とする。`%` は Int 専用であり、Float に当てると E305 である。`/` と `%` の戻り型は第36節に従う。
 
 文字列連結演算子は置かない。
 
-優先順位は高い方から、適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`||`、`|>` とする。比較は非結合である。
+優先順位は高い方から、field access `.`、適用、単項 `-` と `not`、`* / %`、`+ -`、比較、`&&`、`||`、`|>` とする。比較は非結合である。
 
 `&&` と `||` は短絡評価する。左辺が結果を決めるとき、右辺を評価しない。
 
@@ -1496,7 +1575,7 @@ Unit は `()` とする。
 
 `==` と `!=` は、Fn を含まない全型の構造比較である。M5 の派生パスが型ごとに合成する。
 
-Fn を含む型への `==` `!=` は E704、`compare` は E705 とする。単相化時に判明する。
+Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相化時に判明する。
 
 `compare a b` は順序に応じて `-1`、`0`、`1` を返す。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。
 
@@ -1508,17 +1587,19 @@ Fn を含む型への `==` `!=` は E704、`compare` は E705 とする。単相
 
 末尾がリテラルである `Cons(a, Nil)` と `Cons(a, [b])` は拒否する（E510）。
 
+パターンに List リテラルの糖衣は無い。パターンは `Cons` と `Nil` で書く。
+
 ---
 
 # 47. 名前空間
 
-名前空間は型・module・constructor・値の 4 つとする。どの名前空間でも解決できない名前の参照は E205 とする。`Option<T>`（型）と `Option.map`（module）は共存する。
+名前空間は型・module・constructor・値の 4 つとする。どの名前空間でも解決できない名前の参照は E204 とする。`Option<T>`（型）と `Option.map`（module）は共存する。
 
-型と constructor は別の空間である。
+型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
 prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる。
 
-`__` で始まる名前は `stdlib/` のファイルでのみ解決する。ユーザーコードでは E203 とする。呼び出し位置でしか参照できず、値化は E204 とする。
+`__` で始まる名前は `stdlib/` のファイルでのみ解決する。ユーザーコードでは E202 とする。呼び出し位置でしか参照できず、値化は E203 とする。
 
 ---
 
@@ -1558,58 +1639,124 @@ Int / Float: to_string
 
 `String.length` は Unicode スカラ値の個数とする。
 
+prelude は全プログラムに連結され、E513 を除く全ての検査を受ける。
+
 ---
 
 # 50. エラーコード
 
 拒否コーパスは次のコードで照合する。
 
-| コード | 短い名前 | 節 |
-|---|---|---|
-| E101 | nested-branch | §20 |
-| E102 | rec-on-value | §4 |
-| E103 | float-literal-form | §43 |
-| E104 | comment-form | §43 |
-| E105 | no-tuple | §37 |
-| E106 | constructor-call-form | §8 |
-| E107 | operator-overloading | §38 |
-| E201 | implicit-recursion | §4 |
-| E203 | dunder-in-user | §47 |
-| E204 | dunder-as-value | §47 |
-| E205 | unbound-name | §47 |
-| E301 | arity-mismatch | §8 |
-| E302 | recursive-type-arg | §10 |
-| E303 | let-question-type | §22 |
-| E304 | record-ambiguous | §12 |
-| E305 | type-mismatch | §9 |
-| E306 | occurs-check | §9 |
-| E401 | missing-cond-fallback | §15 |
-| E402 | non-exhaustive | §18 |
-| E403 | unreachable-branch | §31 |
-| E404 | fallback-not-last | §31 |
-| E405 | duplicate-pattern | §32 |
-| E406 | duplicate-condition | §32 |
-| E501 | identity-binding | §29 |
-| E502 | identical-branches | §30 |
-| E503 | catch-all-underscore | §19 |
-| E504 | let-question-underscore | §23 |
-| E505 | unused-binding | §27 |
-| E506 | implicit-discard | §28 |
-| E507 | rewrap | §33 |
-| E508 | repropagate | §24 |
-| E509 | ok-unit-parens | §21 |
-| E510 | cons-literal-tail | §46 |
-| E511 | cond-to-literal-pattern | §16 |
-| E512 | top-var-pattern | §16 |
-| E513 | unused-toplevel-def | §27 |
-| E514 | rec-cycle-value | §4 |
-| E515 | unused-struct-def | §35 |
-| E516 | missing-rec | §4 |
-| E601 | missing-signature | §35 |
-| E602 | opaque-type | §35 |
-| E701 | poly-recursion | §4 |
-| E702 | main-polymorphic | §5 |
-| E703 | main-contains-fn | §5 |
-| E704 | eq-on-fn | §45 |
-| E705 | compare-on-fn | §45 |
+検査は 字句 → 構文 → 名前解決 → 型 → 網羅性 → 冗長 → 単相化 の順に走る。1 つのプログラムに複数の欠陥があるとき、報告するのはこの順で最初の段階に当たる 1 件である。同一段階に 2 つ以上あるときは、アンカー位置のソース順で先のものを報告する。アンカーは規則が名指す最小の構文要素の先頭で、表の「アンカー」列に定める。「節」列は主となる節を 1 つ書き、拒否コーパスの `-- spec:` はこれと一致させる。コードの百の位は段階に対応する（E1xx 字句と構文、E2xx 名前解決、E3xx 型、E4xx 網羅性、E5xx 冗長、E6xx module の型、E7xx 単相化）。
 
+| コード | 短い名前 | 節 | 段階 | アンカー |
+|---|---|---|---|---|
+| E100 | syntax-error | §41 | 構文 | 文法に合わない最初のトークン |
+| E101 | nested-branch | §20 | 構文 | 内側の `if` |
+| E102 | rec-on-value | §4 | 構文 | `rec` |
+| E103 | float-literal-form | §43 | 字句 | リテラル |
+| E104 | comment-form | §43 | 字句 | コメントの先頭 |
+| E105 | no-tuple | §37 | 構文 | `(` |
+| E106 | constructor-call-form | §8 | 構文 | 呼び出しの先頭 |
+| E107 | operator-overloading | §38 | 構文 | `def` の直後の演算子 |
+| E108 | adt-leading-pipe | §11 | 構文 | 最初の constructor 名 |
+| E109 | zero-parameter-arrow | §3 | 構文 | `=>` |
+| E110 | string-escape-form | §43 | 字句 | `\` |
+| E111 | char-literal-form | §43 | 字句 | `'` |
+| E112 | int-literal-range | §43 | 字句 | リテラル |
+| E113 | missing-signature | §35 | 構文 | `module` |
+| E201 | implicit-recursion | §4 | 名前解決 | 自分を参照する名前 |
+| E202 | dunder-in-user | §47 | 名前解決 | `__` 名 |
+| E203 | dunder-as-value | §47 | 名前解決 | `__` 名 |
+| E204 | unbound-name | §47 | 名前解決 | 名前 |
+| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前 |
+| E206 | entry-form | §5 | 名前解決 | `def main`。無ければ 1:1 |
+| E207 | rec-cycle-value | §4 | 名前解決 | 閉路に含まれる値定義の `def` |
+| E208 | missing-rec | §4 | 名前解決 | `rec` の無い `def` |
+| E301 | arity-mismatch | §8 | 型 | 適用の先頭 |
+| E302 | recursive-type-arg | §10 | 型 | 宣言と異なる型引数 |
+| E303 | rail-type | §22 | 型 | `let?` `do?` の右辺の式 |
+| E304 | record-ambiguous | §12 | 型 | record 式か record パターンの `{` |
+| E305 | type-mismatch | §9 | 型 | 型が食い違った式の先頭 |
+| E306 | occurs-check | §9 | 型 | 同上 |
+| E307 | poly-recursion | §4 | 型 | 再帰呼び出しの先頭 |
+| E401 | missing-cond-fallback | §15 | 網羅性 | `if` |
+| E402 | non-exhaustive | §18 | 網羅性 | `if`。`let` `let?` ではそのパターン |
+| E403 | unreachable-branch | §31 | 網羅性 | 到達不能な腕の `|` |
+| E404 | fallback-not-last | §31 | 網羅性 | fallback より後の腕の `|` |
+| E405 | duplicate-pattern | §32 | 網羅性 | 重複する 2 番目の腕の `|` |
+| E406 | duplicate-condition | §32 | 網羅性 | 同上 |
+| E501 | identity-binding | §29 | 冗長 | `let` |
+| E502 | identical-branches | §30 | 冗長 | `if` |
+| E503 | catch-all-underscore | §19 | 冗長 | `_` |
+| E504 | let-question-underscore | §23 | 冗長 | `_` |
+| E505 | unused-binding | §27 | 冗長 | 束縛名 |
+| E506 | implicit-discard | §28 | 冗長 | `_` |
+| E507 | rewrap | §33 | 冗長 | `if` |
+| E508 | repropagate | §24 | 冗長 | 再伝播する腕の `|` |
+| E509 | ok-unit-parens | §21 | 冗長 | `Ok` |
+| E510 | cons-literal-tail | §46 | 冗長 | `Cons` |
+| E511 | cond-to-literal-pattern | §16 | 冗長 | `if` |
+| E512 | top-var-pattern | §16 | 冗長 | 変数パターン |
+| E513 | unused-toplevel | §27 | 冗長 | 未使用の宣言の先頭 |
+| E514 | unused-struct-def | §35 | 冗長 | `def` |
+| E515 | if-on-sole-parameter | §52 | 冗長 | `def` か `fn` |
+| E601 | opaque-type | §35 | 型 | field access の `.` |
+| E602 | signature-mismatch | §35 | 型 | `module` |
+| E701 | main-polymorphic | §5 | 単相化 | `def main` |
+| E702 | main-contains-fn | §5 | 単相化 | `def main` |
+| E703 | eq-on-fn | §45 | 単相化 | 演算子 |
+| E704 | compare-on-fn | §45 | 単相化 | `compare` |
+
+---
+
+# 51. 印字
+
+`main` の値は次の規則で印字する。
+
+Result の外側だけ剥がす。`Ok(x)` は `x` を stdout に印字して終了コード 0、`Error(e)` は `e` を stderr に印字して終了コード 1 とする。Option は剥がさない。
+
+中身は canonical なソース表記で印字する。ソースとして再び読める形が一つに定まることを目的とする。
+
+| 型 | 印字 |
+|---|---|
+| Int | 10 進 |
+| Float | 往復可能な最短の 10 進桁を指数を使わず位取りで並べ、小数点の両側に最低 1 桁を置く。`3.0` は `3.0`、`0.1` は `0.1`、10 の 300 乗は `1` の後に `0` が 300 個と `.0`。`-0.0` は `-0.0`。NaN と無限大はソースで書けないので `nan` `inf` `-inf` と出す |
+| Bool | `true` `false` |
+| Char | 入れ子では `'a'` の形。エスケープは第43節の 4 つ |
+| String | 入れ子では `"..."` の形。エスケープは第43節の 4 つ |
+| Unit | 入れ子では `()` |
+| ADT | `Some(1)` `Guest` |
+| List | `[1, 2]` `[]`。`Cons` の形では出さない |
+| record | `{ name = "a"; age = 3 }` |
+
+最上位（Result を剥がした後の値そのもの）だけ 2 つの例外を置く。String と Char は引用符もエスケープも付けずに生の文字列を出す。Unit は何も出さない（改行も出さない）。
+
+---
+
+# 52. 引数のパターン分岐
+
+引数が 1 つで、本体がその引数の pattern 分岐だけの関数は、`if` と引数名を省いて腕を並べる。
+
+```ocaml
+def display
+| Guest => "guest"
+| Member(user) => user.name
+```
+
+```ocaml
+def rec length
+| Nil => 0
+| Cons(_, tail) => 1 + length tail
+```
+
+arity は 1 である。腕の規則は第16節から第19節と同じで、網羅性（E402）、到達不能（E403）、重複（E405）、fallback の位置（E404）、`_` の禁止（E503）、最上位の変数パターンの禁止（E512）をそのまま当てる。`fn` も同じ形を取る（第7節）。
+
+この形で書ける関数を、引数名と `if` を付けて書くことは冗長であり E515 とする。E515 は次の 4 条件を全て満たすときに当たる。
+
+* 引数が 1 つである
+* 引数と戻りに型注釈が無い
+* 引数の自由な参照が scrutinee の 1 回だけである（腕の中で同じ名前を再束縛したものは数えない）
+* 本体が、その引数を scrutinee にした pattern 分岐ちょうどである
+
+腕の中で引数全体を参照する関数、型注釈が要る関数、引数が 2 つ以上の関数は従来の形で書く。名前付きの引数を先に並べて最後の引数に照合する形と、腕の中で照合対象全体を束縛するパターンは v0.1 に無い。
