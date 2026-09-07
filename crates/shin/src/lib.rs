@@ -13,7 +13,7 @@ pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
 
 pub fn compile_source_to_object(source: &str, source_path: &str, obj_path: &Path) -> Result<(), String> {
     let checked = check_source(source, source_path).map_err(|e| e.to_string())?;
-    let (ast, _) = parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
+    let ParsedSource { ast, .. } = parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
     let program = mono::lower_program(&ast, &checked)?;
     emit::compile_mono_to_object(&program, &checked, obj_path)
 }
@@ -48,6 +48,7 @@ pub fn link_executable(
 }
 
 pub mod infer;
+mod unused;
 
 #[derive(Clone)]
 pub struct Checked {
@@ -86,7 +87,13 @@ impl Checked {
     }
 }
 
-fn parse_with_prelude(source: &str, path: &str) -> Result<(parser::Ast, Option<usize>), parser::Diagnostic> {
+struct ParsedSource {
+    ast: parser::Ast,
+    trusted_start: Option<usize>,
+    prelude_items: usize,
+}
+
+fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
     let mut ast = parser::parse_source(source, path)?;
     let mut prelude = Vec::new();
     for (name, source) in [
@@ -113,13 +120,14 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<(parser::Ast, Option<u
             line += module.lines().count() + 1;
         }
     }
+    let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    Ok((ast, trusted_start))
+    Ok(ParsedSource { ast, trusted_start, prelude_items })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
-    let (ast, trusted_start) = parse_with_prelude(source, path)?;
+    let ParsedSource { ast, trusted_start, prelude_items } = parse_with_prelude(source, path)?;
     names::resolve(&ast, path)?;
     names::check_cycles(&ast, path)?;
     type_cycles::check(&ast, path)?;
@@ -127,16 +135,7 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
     if let Err(error) = check::check_ast(&ast, path) {
         diagnostics.push(error);
     }
-    if let Some(name) = names::unused_definitions(&ast, &["main".into()]).first() {
-        let def = ast.items.iter().find_map(|item| match item {
-            parser::Item::Def(def) if &def.name == name => Some(def),
-            _ => None,
-        }).unwrap();
-        diagnostics.push(parser::Diagnostic {
-            path: path.into(), line: def.span.line, col: def.span.col,
-            code: Some("E513".into()), message: format!("unused top-level definition {name}"),
-        });
-    }
+    diagnostics.extend(unused::diagnostics(&ast, &checked, prelude_items, path));
     match diagnostics.into_iter().map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
@@ -169,7 +168,7 @@ pub mod mono;
 
 pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic> {
     let checked = check_source(source, path)?;
-    let (ast, _) = parse_with_prelude(source, path)?;
+    let ParsedSource { ast, .. } = parse_with_prelude(source, path)?;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {
         path: path.into(), line: ast.span.line, col: ast.span.col, code: None,
         message: "main must be a value definition for lowering".into(),
