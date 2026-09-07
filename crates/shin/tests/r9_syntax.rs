@@ -239,3 +239,48 @@ fn integer_field_receivers_remain_separate_from_float_tokens() {
         assert_eq!(ast.main(), restored.main());
     }
 }
+
+#[test]
+fn struct_aliases_only_realize_declared_abstract_types() {
+    for index in 0..20 {
+        let prefix = format!("module M{index} : S{index} = struct type Extra{index} = ");
+        for body in ["Int", "List<Int>", "Fn<Int, Int>", "Other.T"] {
+            let source = format!("{prefix}{body} end\nmodule type S{index} = sig type T end\ndef main = 1");
+            let error = parse_source(&source, "generated").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+        }
+
+        for body in ["type T = Int", "type Private = | Wrap(Int) type T = Private", "type Private = { value: Int } type T = Private"] {
+            let source = format!("module M{index} : S{index} = struct {body} end\nmodule type S{index} = sig type T end\ndef main = 1");
+            parse_source(&source, "generated").unwrap_or_else(|error| panic!("{error}: {source}"));
+        }
+    }
+}
+
+#[test]
+fn abstract_type_aliases_cannot_declare_type_parameters() {
+    for spacing in ["", "  ", "\n  "] {
+        let prefix = format!("module type S = sig type T end\nmodule M : S = struct type T{spacing}");
+        let source = format!("{prefix}<A> = List<A> end\ndef main = 1");
+        let error = parse_source(&source, "generated").unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+        assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1));
+    }
+}
+
+#[test]
+fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
+    let prefix = "module M : LIST = struct type Extra = ";
+    let source = format!("{prefix}Int end\ndef main = 1");
+    let error = shin::check_source(&source, "generated").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+    assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+    for (source, code) in [
+        ("module M : Missing = struct type T = Int end\ndef main = 1", "E204"),
+        ("module type S = sig type T end\nmodule type S = sig end\nmodule M : S = struct type T = Int end\ndef main = 1", "E205"),
+    ] {
+        let error = shin::check_source(source, "generated").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+    }
+}
