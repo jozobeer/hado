@@ -305,3 +305,29 @@ fn deferred_non_record_projection_keeps_the_receiver_position() {
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert_eq!((error.line, error.col), (3, prefix.len() + 1));
 }
+
+#[test]
+fn module_type_errors_do_not_stop_earlier_type_checks() {
+    for padding in 0..20 {
+        for implementation in ["def run x => true", "def other x => x"] {
+            let source = format!("def first = {}true + M.run 1\nmodule type S = sig def run(x: Int): Int end\nmodule M : S = struct {implementation} end\ndef main = first", " ".repeat(padding));
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
+            assert_eq!((error.line, error.col), (1, 13 + padding));
+        }
+    }
+}
+
+#[test]
+fn failed_modules_retain_public_contracts_without_fake_names() {
+    for (signature, implementation, use_site) in [
+        ("def run(x: Int): Int", "def run x => true", "M.run 1"),
+        ("type T def make(x: Int): T", "def make x => x", "M.make 1"),
+        ("def id<A>(x: A): A", "def id x => x + 1", "M.id true"),
+    ] {
+        let source = format!("def first = {use_site}\nmodule type S = sig {signature} end\nmodule M : S = struct {implementation} end\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
+        assert_eq!((error.line, error.col), (3, 1));
+    }
+}
