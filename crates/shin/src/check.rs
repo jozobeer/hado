@@ -22,12 +22,36 @@ fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
     for item in items {
         match item {
             Item::Def(def) => match &def.kind {
-                DefKind::Value(body) | DefKind::Function { body, .. } => check_node(body, path, diagnostics),
+                DefKind::Value(body) => check_node(body, path, diagnostics),
+                DefKind::Function { params, ret, body } => {
+                    if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
+                        diagnostics.push(error);
+                    }
+                    check_node(body, path, diagnostics);
+                }
             },
             Item::ModuleImpl(module) => check_items(&module.items, path, diagnostics),
             _ => {}
         }
     }
+}
+
+fn check_sole_parameter_branch(
+    params: &[crate::parser::Param], ret: Option<&crate::parser::TypeExpr>,
+    body: &Node, span: crate::parser::Span, path: &str,
+) -> Result<(), Diagnostic> {
+    let [parameter] = params else { return Ok(()); };
+    if parameter.ty.is_some() || ret.is_some() || parameter.name == "$argument" { return Ok(()); }
+    let NodeKind::PatternBranch { scrutinee, arms, fallback } = &body.kind else { return Ok(()); };
+    if !matches!(&scrutinee.kind, NodeKind::Name(name) if name == &parameter.name) { return Ok(()); }
+    let referenced_in_arm = arms.iter().any(|(pattern, body)|
+        !crate::names::bound_names(pattern).contains(&parameter.name)
+            && crate::names::references(body, &parameter.name));
+    if referenced_in_arm || fallback.as_ref().is_some_and(|body| crate::names::references(body, &parameter.name)) {
+        return Ok(());
+    }
+    Err(Diagnostic { path: path.into(), line: span.line, col: span.col,
+        code: Some("E515".into()), message: "use pattern arms directly for the sole parameter".into() })
 }
 
 pub(crate) fn boolean_coverage(
@@ -66,6 +90,11 @@ pub(crate) fn boolean_coverage(
 }
 
 fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    if let NodeKind::Fn { params, body } = &node.kind {
+        if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
+            diagnostics.push(error);
+        }
+    }
     for check in [check_cons_tail, check_duplicate_patterns, check_conditions,
         check_literal_fallback, check_local_redundancy, check_rewrap, check_repropagation] {
         if let Err(error) = check(node, path) {
