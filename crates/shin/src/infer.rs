@@ -656,7 +656,7 @@ impl Checker<'_> {
             NodeKind::List(items) => self.list(items),
             NodeKind::Record(fields) => self.record(fields, node.span),
             NodeKind::Field(value, field) => {
-                let ty = self.project(value, &field.name)?;
+                let ty = self.project(value, &field.name, field.dot)?;
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
             },
@@ -712,7 +712,7 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&result))
     }
 
-    fn project(&mut self, value: &Node, field: &str) -> Result<Ty, Diagnostic> {
+    fn project(&mut self, value: &Node, field: &str, dot: Span) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &value.kind {
             if let Some(exports) = self.modules.get(name) {
                 let scheme = exports.get(field).cloned().ok_or_else(|| {
@@ -722,7 +722,7 @@ impl Checker<'_> {
             }
         }
         let ty = self.expression(value)?;
-        self.project_type(&ty, field, value.span)
+        self.project_type(&ty, field, dot)
     }
 
     fn resolve_projections(&mut self, final_pass: bool) -> Result<(), Diagnostic> {
