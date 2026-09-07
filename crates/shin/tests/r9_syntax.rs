@@ -284,3 +284,74 @@ fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
     }
 }
+
+#[test]
+fn alias_errors_precede_later_syntax_errors_across_declaration_boundaries() {
+    for signature_first in [false, true] {
+        for tail in ["end\ndef main = [)", "def broken = [) end\ndef main = 1", "def broken = [)"] {
+            let signature = "module type S = sig type T end\n";
+            let prefix = if signature_first { signature } else { "" };
+            let source = format!("{prefix}module M : S = struct type Extra = Int {tail}\n{}", if signature_first { "" } else { signature });
+            // An unterminated struct cannot expose a later top-level signature.
+            if !signature_first && !tail.contains("end") { continue; }
+            let error = parse_source(&source, "generated").unwrap_err();
+            let expected = source.find("Int").unwrap();
+            let before = &source[..expected];
+            assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+            assert_eq!((error.line, error.col), (before.lines().count(), before.rsplit('\n').next().unwrap().len() + 1), "{source}: {error}");
+        }
+    }
+    let source = "module M : LIST = struct type Extra = Int end\ndef main = [)";
+    let error = shin::check_source(source, "generated").err().unwrap();
+    assert_eq!((error.line, error.col), (1, source.find("Int").unwrap() + 1));
+}
+
+#[test]
+fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
+    for source in [
+        "def broken = [)\nmodule type S = sig type T end\nmodule M : S = struct type Extra = Int end",
+        "def broken = [)\nmodule Bad = struct module type S = sig end end\nmodule type S = sig type T end\nmodule M : S = struct type T = Int end",
+        "def broken = [)\nmodule type S = sig def broken(x: Int) Int end\nmodule M : S = struct type Extra = Int end",
+    ] {
+        let error = parse_source(source, "generated").unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E100"));
+        assert_eq!((error.line, error.col), (1, 15), "{error}: {source}");
+    }
+    let source = "module M : S = struct type T = Int end\nmodule type S = sig type T def broken(x: Int) Int end";
+    let error = parse_source(source, "generated").unwrap_err();
+    assert_eq!(error.line, 2, "an incomplete signature cannot prove an alias invalid: {error}");
+    for source in [
+        "module type S = sig type T end\nmodule M : S = struct type T = Int def broken = [)",
+        "module type S = sig type T end\nmodule M : S = struct type T = Int",
+        "def main = [)",
+    ] {
+        assert!(parse_source(source, "generated").is_err());
+        assert!(shin::check_source(source, "generated").is_err());
+    }
+}
+
+#[test]
+fn recovery_does_not_promote_signatures_from_a_broken_module() {
+    let source = "module M : S = struct type T = Int end\nmodule Bad = struct module type S = sig end end\nmodule type S = sig type T end\ndef main = 1";
+    let error = parse_source(source, "generated").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E113"), "{error}");
+    assert_eq!((error.line, error.col), (2, 1));
+}
+
+#[test]
+fn alias_parameters_precede_a_malformed_alias_body() {
+    let prefix = "module type S = sig type T end\nmodule M : S = struct type T";
+    let source = format!("{prefix}<A> = List<) end\ndef main = 1");
+    let error = parse_source(&source, "generated").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E100"));
+    assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+}
+
+#[test]
+fn alias_context_precedes_an_error_inside_its_type_arguments() {
+    let prefix = "module M : S = struct type Extra = ";
+    let source = format!("{prefix}List<) end\nmodule type S = sig type T end\ndef main = 1");
+    let error = parse_source(&source, "generated").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E100"));
+    assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
+}
