@@ -42,3 +42,21 @@ fn name_cycles_precede_type_errors() {
     let source = "def a x => b x\ndef b x => a x\ndef main = 1 + true";
     assert_eq!(code(source), "E208");
 }
+
+#[test]
+fn later_coverage_errors_precede_earlier_redundancy() {
+    let source = "def a = let x = 1 -> x\ndef z x => if | x > 0 => 2\ndef main = a + z 1";
+    assert_eq!(code(source), "E401");
+}
+
+#[test]
+fn redundancy_uses_source_order_across_definitions() {
+    let first = "def a = let x = 1 -> x";
+    let second = "def z = let unused = 2 -> 3";
+    for (left, right, expected) in [(first, second, "E501"), (second, first, "E505")] {
+        let source = format!("{left}\n{right}\ndef main = a + z");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(expected));
+        assert_eq!(error.line, 1);
+    }
+}
