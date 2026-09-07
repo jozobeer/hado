@@ -546,3 +546,55 @@ fn duplicate_bodies_still_report_independent_field_errors() {
         assert_eq!((error.line, error.col), (line, col), "{error}");
     }
 }
+
+#[test]
+fn ambiguous_module_interfaces_do_not_choose_a_return_type() {
+    let prefix = "type A = { ok: Int }\ntype B = { bad: Int }\ndef early = (M.make 1).ok\n";
+    for declarations in [
+        "module type S = sig def make(x: Int): A end\nmodule type S = sig def make(x: Int): B end\nmodule M : S = struct def make x => { ok = x } end",
+        "module type SA = sig def make(x: Int): A end\nmodule type SB = sig def make(x: Int): B end\nmodule M : SA = struct def make x => { ok = x } end\nmodule M : SB = struct def make x => { bad = x } end",
+    ] {
+        let source = format!("{prefix}{declarations}\ndef main = early");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
+    }
+}
+
+#[test]
+fn ambiguous_interfaces_keep_possible_member_and_type_names() {
+    for source in [
+        "def main = M.first 1\nmodule type S = sig def first(x: Int): Int end\nmodule type S = sig def second(x: Int): Int end\nmodule M : S = struct def first x => x end",
+        "type Box = | Wrap(M.T)\nmodule type S = sig type T end\nmodule type S = sig end\nmodule M : S = struct type T = Int end\ndef main = 1",
+    ] {
+        let error = check_source(source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
+    }
+}
+
+#[test]
+fn ambiguous_module_bodies_retain_independent_diagnostics() {
+    for suffix in [
+        "module type S = sig end\nmodule type S = sig end",
+        "module type S = sig end\nmodule M : S = struct end",
+    ] {
+        let prefix = "module M : S = struct\n type R = { known: Int }\n def bad (x: R) => x.";
+        let source = format!("{prefix}missing\nend\n{suffix}\ndef main = 1");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+        assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    }
+}
+
+#[test]
+fn duplicate_signature_members_do_not_choose_a_public_type() {
+    let source = "type A = { ok: Int }\ntype B = { bad: Int }\ndef early = (M.make 1).ok\nmodule type S = sig def make(x: Int): A def make(x: Int): B end\nmodule M : S = struct def make x => { ok = x } end\ndef main = early";
+    assert_eq!(check_source(source, SOURCE_PATH).err().unwrap().code.as_deref(), Some("E205"));
+}
+
+#[test]
+fn ambiguous_interfaces_still_reject_names_absent_from_every_candidate() {
+    let source = "def main = M.missing 1\nmodule type SA = sig def first(x: Int): Int end\nmodule type SB = sig def second(x: Int): Int end\nmodule M : SA = struct def first x => x end\nmodule M : SB = struct def second x => x end";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+    assert_eq!((error.line, error.col), (1, source.find("missing").unwrap() + 1));
+}
