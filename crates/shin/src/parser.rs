@@ -141,7 +141,7 @@ pub enum PatternKind {
     Underscore,
     Name(String),
     Constructor(String, Vec<Pattern>),
-    Record(Vec<(String, Option<Pattern>)>),
+    Record(Vec<(DeclaredName, Option<Pattern>)>),
     Literal(Box<Node>),
 }
 
@@ -162,9 +162,9 @@ impl fmt::Display for Pattern {
                 let inner = fields
                     .iter()
                     .map(|(n, p)| match p {
-                        Some(p) if matches!(&p.kind, PatternKind::Name(name) if name == n) => n.clone(),
-                        Some(p) => format!("{n} = {p}"),
-                        None => n.clone(),
+                        Some(p) if matches!(&p.kind, PatternKind::Name(name) if name == &n.name) => n.name.clone(),
+                        Some(p) => format!("{} = {p}", n.name),
+                        None => n.name.clone(),
                     })
                     .collect::<Vec<_>>()
                     .join("; ");
@@ -1479,7 +1479,7 @@ impl Parser<'_> {
                         } else {
                             Some(Pattern { kind: PatternKind::Name(fname.clone()), span: binding_span })
                         };
-                        fields.push((fname, pat));
+                        fields.push((DeclaredName { name: fname, span: binding_span }, pat));
                         if self.kind() == &TokKind::Semicolon {
                             self.bump();
                         } else {

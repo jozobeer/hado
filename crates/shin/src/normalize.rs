@@ -57,7 +57,7 @@ fn pattern_shape(pattern: &Pattern) -> PatternShape {
                     if shape == PatternShape::Any {
                         None
                     } else {
-                        Some((name.clone(), shape))
+                        Some((name.name.clone(), shape))
                     }
                 })
                 .collect();
@@ -80,10 +80,10 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
                 && patterns.iter().all(|(name, pattern)| {
                     fields
                         .iter()
-                        .find(|(field, _)| &field.name == name)
+                        .find(|(field, _)| field.name == name.name)
                         .is_some_and(|(_, value)| match pattern {
                             Some(pattern) => rebuilds_pattern(pattern, value),
-                            None => matches!(&value.kind, NodeKind::Name(value) if value == name),
+                            None => matches!(&value.kind, NodeKind::Name(value) if value == &name.name),
                         })
                 })
         }
@@ -123,11 +123,11 @@ fn bind_pattern(pattern: &mut Pattern, scope: &mut BTreeMap<String, String>, nex
             }
         }
         PatternKind::Record(fields) => {
-            fields.sort_by(|a, b| a.0.cmp(&b.0));
+            fields.sort_by(|a, b| a.0.name.cmp(&b.0.name));
             for (name, pattern) in fields {
                 let pattern = pattern.get_or_insert_with(|| Pattern {
-                    kind: PatternKind::Name(name.clone()),
-                    span: crate::parser::Span { line: 0, col: 0 },
+                    kind: PatternKind::Name(name.name.clone()),
+                    span: name.span,
                 });
                 bind_pattern(pattern, scope, next);
             }
