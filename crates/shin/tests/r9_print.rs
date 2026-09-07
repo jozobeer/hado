@@ -72,3 +72,32 @@ fn nested_text_is_quoted_but_outer_result_payload_is_raw() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn floats_print_shortest_fixed_notation_and_special_values() {
+    let dir = std::env::temp_dir().join(format!("shin-r9-float-print-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (index, (source, expected)) in [
+        ("3.0".to_owned(), "3.0".to_owned()),
+        ("0.1".to_owned(), "0.1".to_owned()),
+        ("-0.0".to_owned(), "-0.0".to_owned()),
+        (format!("{}.0", "1".to_owned() + &"0".repeat(300)), format!("{}.0", "1".to_owned() + &"0".repeat(300))),
+        (format!("0.{}1", "0".repeat(299)), format!("0.{}1", "0".repeat(299))),
+        ("0.0 / 0.0".to_owned(), "nan".to_owned()),
+        ("1.0 / 0.0".to_owned(), "inf".to_owned()),
+        ("-1.0 / 0.0".to_owned(), "-inf".to_owned()),
+    ].into_iter().enumerate() {
+        for (case, source, expected) in [
+            ("top", format!("def main = {source}"), expected.clone()),
+            ("nested", format!("def main = Some({source})"), format!("Some({expected})")),
+        ] {
+            let path = dir.join(format!("{index}-{case}"));
+            shin::build::executable(&source, "float-print.shin", &path).unwrap();
+            let actual = Command::new(&path).output().unwrap();
+            assert_eq!(actual.status.code(), Some(0));
+            assert_eq!(actual.stdout, format!("{expected}\n").as_bytes());
+            assert!(actual.stderr.is_empty());
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
