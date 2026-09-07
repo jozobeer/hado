@@ -227,9 +227,16 @@ impl Generator {
         let count = if depth == 0 { 0 } else { self.choose("pipe", 3) };
         self.mark("pipe", 3, count);
         for _ in 0..count {
-            source.push_str(&format!(" |> {} {}", self.name(false), self.primary(depth - 1, in_arm)));
+            source.push_str(&format!(" |> {}", self.pipe_target(depth - 1, in_arm)));
         }
         source
+    }
+
+    fn pipe_target(&mut self, depth: usize, in_arm: bool) -> String {
+        let head = if self.choose("pipe_callee", 2) == 0 { self.name(false) }
+            else { format!("{} . {}", self.name(true), self.name(false)) };
+        let count = self.choose("pipe_arguments", 3);
+        format!("{head} {}", self.list(count, |g| g.primary(depth, in_arm), " "))
     }
 
     fn binary(&mut self, level: usize, depth: usize, in_arm: bool) -> String {
@@ -309,7 +316,7 @@ impl Generator {
 
     fn literal(&mut self, choice: usize) -> String {
         const RULES: &[&str] = &["int", "float", "char", "string", "bool", "unit"];
-        self.mark(RULES[choice], 1, 0);
+        if choice != 4 { self.mark(RULES[choice], 1, 0); }
         match choice {
             0 => self.random(100000).to_string(),
             1 => format!("{}.{}", self.random(10000), self.random(10000)),
@@ -328,7 +335,7 @@ impl Generator {
                     PARTS[selected].into()
                 }, ""))
             }
-            4 => if self.random(2) == 0 { "true".into() } else { "false".into() },
+            4 => if self.choose("bool", 2) == 0 { "true".into() } else { "false".into() },
             _ => "()".into(),
         }
     }
