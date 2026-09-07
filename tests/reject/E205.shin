@@ -1,3 +1,5 @@
 -- spec: §47
 -- error: E205
-def main = undefined_name 1
+def f x => x + 1
+def f x => x + 1
+def main = f 1

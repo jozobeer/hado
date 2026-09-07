@@ -1,6 +1,7 @@
 -- spec: §39
 -- expect: 1
 -- item: module
+type Error = | NotFound
 module type USER_STORE = sig
   type T
 
@@ -8,4 +9,10 @@ module type USER_STORE = sig
   def save(user: T): Result<Unit, Error>
   def delete(user: T): Result<Unit, Error>
 end
-def main = 1
+module UserStore : USER_STORE = struct
+  type T = Error
+  def find id => if id > 0 => Some(NotFound) | None
+  def save user => Error(user)
+  def delete user => Error(user)
+end
+def main = if UserStore.find 1 | Some(_) => 1 | 0

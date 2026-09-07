@@ -1,5 +1,4 @@
 -- spec: §45
 -- error: E704
--- item: 関数値
 def inc x => x + 1
-def main = inc == inc
+def main = compare inc inc

@@ -1,4 +1,3 @@
--- spec: §4
+-- spec: §5
 -- error: E701
-def rec poly x => poly [x]
-def main = poly 1
+def main = Nil

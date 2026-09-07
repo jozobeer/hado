@@ -8,6 +8,6 @@ end
 module Option : OPTION = struct
   def map value f => if value | Some(x) => Some(f x) | None => None
   def unwrap_or value fallback => if value | Some(x) => x | None => fallback
-  def is_some value => if value | Some(x) => true | None => false
+  def is_some | Some(_) => true | None => false
   def ok_or value error => if value | Some(x) => Ok(x) | None => Error(error)
 end

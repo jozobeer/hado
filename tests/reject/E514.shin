@@ -1,5 +1,11 @@
--- spec: §4
+-- spec: §35
 -- error: E514
-def rec ping x => seed
-def seed = ping 0
-def main = seed
+-- item: module
+module type S = sig
+  def used(x: Int): Int
+end
+module M : S = struct
+  def used x => x
+  def dead x => x
+end
+def main = M.used 1

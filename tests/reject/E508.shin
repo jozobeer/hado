@@ -1,7 +1,8 @@
 -- spec: §24
 -- error: E508
+def find_user (id: Int): Result<Int, String> => Ok(id)
 def f id =>
   if find_user id
-  | Ok(user) => user
+  | Ok(user) => Ok(user + 1)
   | Error(error) => Error(error)
 def main = f 1

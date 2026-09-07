@@ -2,7 +2,6 @@
 -- expect: a
 -- item: record
 type User = { name: String; age: Int }
-def get_name user =>
-  if user
+def get_name
   | { name = n } => n
 def main = get_name { name = "a"; age = 3 }

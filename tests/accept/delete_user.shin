@@ -1,5 +1,5 @@
 -- spec: §39
--- expect: ()
+-- expect:
 -- item: 呼び出し構文
 def find_user (id: Int): Result<Int, String> => Ok(id)
 def authorize_delete user => if user == 1 => Ok() | Error("denied")

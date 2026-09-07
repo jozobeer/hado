@@ -1,5 +1,5 @@
 -- spec: §4
--- error: E516
+-- error: E208
 -- item: 相互再帰
 def is_even n => is_odd n
 def is_odd n => is_even n
