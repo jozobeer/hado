@@ -60,7 +60,7 @@ pub(crate) fn bindings(pattern: &Pattern) -> Vec<(&str, crate::parser::Span)> {
         PatternKind::Constructor(_, args) => args.iter().flat_map(bindings).collect(),
         PatternKind::Record(fields) => fields.iter().flat_map(|(name, nested)| match nested {
             Some(nested) => bindings(nested),
-            None => vec![(name.as_str(), pattern.span)],
+            None => vec![(name.name.as_str(), name.span)],
         }).collect(),
         _ => Vec::new(),
     }

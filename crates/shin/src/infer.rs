@@ -993,13 +993,13 @@ impl Checker<'_> {
 
     fn record_pattern(
         &mut self,
-        fields: &[(String, Option<Pattern>)],
+        fields: &[(crate::parser::DeclaredName, Option<Pattern>)],
         expected: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
         if matches!(self.inference.resolve(expected), Ty::Var(_)) {
             let candidates: Vec<_> = self.records.values().filter(|(names, _)|
-                fields.iter().all(|(field, _)| names.contains(field))).map(|(_, scheme)| scheme.clone()).collect();
+                fields.iter().all(|(field, _)| names.contains(&field.name))).map(|(_, scheme)| scheme.clone()).collect();
             let [scheme] = candidates.as_slice() else {
                 return Err(self.error(span, Some("E304"), "record pattern fields must identify one nominal type"));
             };
@@ -1007,12 +1007,12 @@ impl Checker<'_> {
             self.unify(expected, &result, span)?;
         }
         for (name, pattern) in fields {
-            let field = FieldName { name: name.clone(), dot: span, span };
+            let field = FieldName { name: name.name.clone(), dot: span, span: name.span };
             let ty = self.project_type(expected, &field, span)?;
             match pattern {
                 Some(pattern) => self.pattern(pattern, &ty)?,
                 None => {
-                    self.values.insert(name.clone(), Scheme::monomorphic(ty));
+                    self.values.insert(name.name.clone(), Scheme::monomorphic(ty));
                 }
             }
         }

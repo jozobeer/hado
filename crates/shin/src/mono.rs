@@ -969,10 +969,10 @@ impl Lowerer {
             }
             PatternKind::Record(fields) => {
                 for (name, nested) in fields {
-                    let field = self.record_get(value.clone(), name)?;
+                    let field = self.record_get(value.clone(), &name.name)?;
                     let shorthand = crate::parser::Pattern {
-                        kind: PatternKind::Name(name.clone()),
-                        span: pattern.span,
+                        kind: PatternKind::Name(name.name.clone()),
+                        span: name.span,
                     };
                     self.match_steps(nested.as_ref().unwrap_or(&shorthand), field, steps)?;
                 }
@@ -1058,10 +1058,10 @@ impl Lowerer {
             PatternKind::Record(fields) => {
                 for (field, nested) in fields {
                     let value =
-                        self.record_get(Expression::Variable { id, ty: ty.clone() }, field)?;
+                        self.record_get(Expression::Variable { id, ty: ty.clone() }, &field.name)?;
                     let shorthand = crate::parser::Pattern {
-                        kind: PatternKind::Name(field.clone()),
-                        span: pattern.span,
+                        kind: PatternKind::Name(field.name.clone()),
+                        span: field.span,
                     };
                     self.bind_pattern(nested.as_ref().unwrap_or(&shorthand), value, bindings)?;
                 }

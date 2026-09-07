@@ -60,7 +60,7 @@ fn cell(pattern: &Pattern) -> Cell {
                 .iter()
                 .map(|(name, pattern)| {
                     (
-                        name.clone(),
+                        name.name.clone(),
                         pattern.as_ref().map(cell).unwrap_or(Cell::Any),
                     )
                 })
