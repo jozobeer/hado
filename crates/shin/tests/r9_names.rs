@@ -46,3 +46,25 @@ fn diagnostic_numbers_follow_the_current_specification() {
         assert_eq!(error(source).code.as_deref(), Some(code), "{source}");
     }
 }
+
+#[test]
+fn constructors_require_all_payloads_and_are_not_function_values() {
+    let mut state = 0x9ca7_u64;
+    for _ in 0..24 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let arity = 1 + (state % 5) as usize;
+        let name = format!("Pack{state}");
+        let types = vec!["Int"; arity].join(", ");
+        let declaration = format!("type Data = | {name}({types})");
+        for expression in [name.clone(), format!("{name}({})", vec!["1"; arity + 1].join(", "))] {
+            let diagnostic = error(&format!("{declaration}\ndef main = {expression}"));
+            assert_eq!(diagnostic.code.as_deref(), Some("E301"));
+            assert_eq!((diagnostic.line, diagnostic.col), (2, 12));
+        }
+        let source = format!("{declaration}\ndef main = {name}({})", vec!["1"; arity].join(", "));
+        assert_eq!(check_source(&source, "generated-names.shin").unwrap().main,
+            shin::types::Ty::Adt("Data".into(), vec![]));
+    }
+    assert_eq!(error("def apply f => f 1\ndef main = apply Some").code.as_deref(), Some("E301"));
+    assert_eq!(error("def main = Nil(1)").code.as_deref(), Some("E301"));
+}
