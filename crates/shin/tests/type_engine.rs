@@ -79,3 +79,16 @@ fn constrained_scheme_instantiates_predicate_with_function_type() {
         shin::types::Ty::Fn(args, Box::new(shin::types::Ty::Bool))
     );
 }
+
+#[test]
+fn failed_unification_does_not_leave_partial_substitutions() {
+    use shin::types::{Inference, Ty, TypeError};
+    let mut inference = Inference::default();
+    let variable = inference.fresh();
+    let left = Ty::Fn(vec![variable.clone(), Ty::Bool], Box::new(Ty::Unit));
+    let right = Ty::Fn(vec![Ty::Int, Ty::String], Box::new(Ty::Unit));
+    assert_eq!(inference.unify(&left, &right), Err(TypeError::Mismatch));
+    assert_eq!(inference.resolve(&variable), variable);
+    inference.unify(&variable, &Ty::Float).unwrap();
+    assert_eq!(inference.resolve(&variable), Ty::Float);
+}
