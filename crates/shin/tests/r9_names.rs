@@ -99,3 +99,21 @@ fn signatures_can_reference_exported_qualified_types() {
     let ast = shin::parser::parse_source(source, "generated-names.shin").unwrap();
     shin::names::resolve(&ast, "generated-names.shin").unwrap();
 }
+
+#[test]
+fn duplicate_fields_and_type_variables_report_the_second_name() {
+    for index in 0..20 {
+        let field = format!("field{index}");
+        let variable = format!("A{index}");
+        for (prefix, suffix) in [
+            (format!("type Record = {{ {field}: Int; "), format!("{field}: Bool }}\ndef main = 1")),
+            (format!("module type S = sig def id<{variable}, "), format!("{variable}>(x: {variable}): {variable} end\ndef main = 1")),
+            (format!("type Data<{variable}, "), format!("{variable}> = | Empty\ndef main = 1")),
+            (format!("type Data = | Pack{index} | "), format!("Pack{index}\ndef main = 1")),
+        ] {
+            let diagnostic = error(&format!("{prefix}{suffix}"));
+            assert_eq!(diagnostic.code.as_deref(), Some("E205"));
+            assert_eq!((diagnostic.line, diagnostic.col), (1, prefix.len() + 1));
+        }
+    }
+}
