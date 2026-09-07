@@ -40,9 +40,9 @@ fn mutual_cycles_reject_values_and_require_rec() {
     for (source, code) in [
         (
             "def rec ping x => seed\ndef seed = ping 0\ndef main = seed",
-            "E514",
+            "E207",
         ),
-        ("def a x => b x\ndef b x => a x\ndef main = a 1", "E516"),
+        ("def a x => b x\ndef b x => a x\ndef main = a 1", "E208"),
     ] {
         assert_eq!(
             shin::check_source(source, "t")

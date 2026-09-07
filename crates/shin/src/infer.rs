@@ -5,6 +5,7 @@ use crate::Checked;
 use std::collections::HashMap;
 
 struct Checker<'a> {
+    deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
     module_records: HashMap<String, (Vec<String>, Scheme)>,
     trusted_start: Option<usize>,
@@ -33,7 +34,16 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
 }
 
 pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<Checked, Diagnostic> {
+    let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start)?;
+    match deferred.into_iter().min_by_key(crate::diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(checked),
+    }
+}
+
+pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let mut checker = Checker {
+        deferred: Vec::new(),
         module_constructors: HashMap::new(),
         module_records: HashMap::new(),
         trusted_start,
@@ -109,7 +119,7 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
     checker.resolve_projections(true)?;
     for (ty, span, code) in &checker.comparison_constraints {
         if checker.contains_function(&checker.inference.resolve(ty), &mut Vec::new()) {
-            return Err(checker.error(*span, Some(code), "values containing functions cannot be compared"));
+            checker.deferred.push(checker.error(*span, Some(code), "values containing functions cannot be compared"));
         }
     }
     let scheme = checker
@@ -119,12 +129,12 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
         .ok_or_else(|| checker.error(ast.span, Some("E205"), "main is not defined"))?;
     let main = checker.inference.instantiate(&scheme);
     if !checker.inference.resolve(&main).is_monomorphic() {
-        return Err(checker.error(definitions["main"].span, Some("E702"), "main must have a monomorphic type"));
+        checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main must have a monomorphic type"));
     }
     if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
-        return Err(checker.error(definitions["main"].span, Some("E703"), "main cannot return a value containing a function"));
+        checker.deferred.push(checker.error(definitions["main"].span, Some("E703"), "main cannot return a value containing a function"));
     }
-    Ok(Checked {
+    Ok((Checked {
         module_constructors: checker.module_constructors,
         module_records: checker.module_records,
         module_definitions: checker.module_definitions.clone(),
@@ -136,7 +146,7 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
         value_types: checker.value_types.iter().map(|(span, ty)| (*span, checker.inference.resolve(ty))).collect(),
         main: checker.inference.resolve(&main),
         definitions: definitions.keys().map(|name| (name.clone(), checker.values[name].clone())).collect(),
-    })
+    }, checker.deferred))
 }
 
 impl Checker<'_> {
@@ -332,7 +342,7 @@ impl Checker<'_> {
         }
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
-            return Err(self.error(definitions[name].span, Some("E515"), &format!("unused module definition {name}")));
+            self.deferred.push(self.error(definitions[name].span, Some("E515"), &format!("unused module definition {name}")));
         }
         Ok(exports)
     }
@@ -792,7 +802,9 @@ impl Checker<'_> {
             self.branch_result(body, &result)?;
         }
         if self.inference.resolve(&input) == Ty::Bool {
-            crate::check::boolean_coverage(scrutinee, arms, fallback, self.path)?;
+            if let Err(error) = crate::check::boolean_coverage(scrutinee, arms, fallback, self.path) {
+                self.deferred.push(error);
+            }
         }
         if let Ty::Adt(name, _) = self.inference.resolve(&input) {
             let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
@@ -803,7 +815,9 @@ impl Checker<'_> {
             }
             let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
             let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-            crate::check::adt_coverage(scrutinee, arms, fallback, &constructors, &families, self.path)?;
+            if let Err(error) = crate::check::adt_coverage(scrutinee, arms, fallback, &constructors, &families, self.path) {
+                self.deferred.push(error);
+            }
         }
         Ok(self.inference.resolve(&result))
     }
@@ -1133,9 +1147,6 @@ impl Checker<'_> {
         match op {
             BinOp::Eq | BinOp::Ne => {
                 self.comparison_constraints.push((left.clone(), a.span, "E704"));
-                if self.contains_function(&self.inference.resolve(&left), &mut Vec::new()) {
-                    return Err(self.error(a.span, Some("E704"), "function values cannot be compared for equality"));
-                }
                 Ok(Ty::Bool)
             }
             BinOp::And | BinOp::Or => {
@@ -1171,7 +1182,7 @@ impl Checker<'_> {
         match op {
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Ok(Ty::Bool),
             BinOp::Mod if ty == Ty::Float => {
-                Err(self.error(span, None, "Float has no remainder operator"))
+                Err(self.error(span, Some("E305"), "Float has no remainder operator"))
             }
             BinOp::Div | BinOp::Mod if ty == Ty::Int => Ok(Ty::Adt(
                 "Result".into(),

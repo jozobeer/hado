@@ -122,20 +122,38 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<(parser::Ast, Option<u
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
     let (ast, trusted_start) = parse_with_prelude(source, path)?;
     names::resolve(&ast, path)?;
+    names::check_cycles(&ast, path)?;
     type_cycles::check(&ast, path)?;
-    check::check_ast(&ast, path)?;
-    let checked = infer::check_ast_with_prelude(&ast, path, trusted_start)?;
+    let (checked, mut diagnostics) = infer::infer_with_diagnostics(&ast, path, trusted_start)?;
+    if let Err(error) = check::check_ast(&ast, path) {
+        diagnostics.push(error);
+    }
     if let Some(name) = names::unused_definitions(&ast, &["main".into()]).first() {
         let def = ast.items.iter().find_map(|item| match item {
             parser::Item::Def(def) if &def.name == name => Some(def),
             _ => None,
         }).unwrap();
-        return Err(parser::Diagnostic {
+        diagnostics.push(parser::Diagnostic {
             path: path.into(), line: def.span.line, col: def.span.col,
             code: Some("E513".into()), message: format!("unused top-level definition {name}"),
         });
     }
-    Ok(checked)
+    match diagnostics.into_iter().min_by_key(diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(checked),
+    }
+}
+
+pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize) {
+    let stage = match error.code.as_deref().and_then(|code| code.as_bytes().get(1)) {
+        Some(b'1') => 1,
+        Some(b'2') => 2,
+        Some(b'3' | b'6') => 3,
+        Some(b'4') => 4,
+        Some(b'5') => 5,
+        _ => 6,
+    };
+    (stage, error.line, error.col)
 }
 
 mod type_cycles;
