@@ -463,7 +463,7 @@ fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn children(node: &Node) -> Vec<&Node> {
+pub(crate) fn children(node: &Node) -> Vec<&Node> {
     match &node.kind {
         NodeKind::Neg(value)
         | NodeKind::Not(value)
