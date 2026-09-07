@@ -370,7 +370,7 @@ fn string_main_prints_utf8_and_newline() {
 
 #[test]
 fn boolean_and_unit_main_use_derived_printers() {
-    for (index, source, expected) in [(0, "def main = 1 < 2", "true\n"), (1, "def main = 2 < 1", "false\n"), (2, "def main = ()", "()\n")] {
+    for (index, source, expected) in [(0, "def main = 1 < 2", "true\n"), (1, "def main = 2 < 1", "false\n"), (2, "def main = ()", "")] {
         let path = std::env::temp_dir().join(format!("shin-simple-print-{}-{index}", std::process::id()));
         shin::build::executable(source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
@@ -535,4 +535,23 @@ fn polymorphic_global_function_values_specialize_the_thunk_result() {
     assert!(output.status.success());
     assert_eq!(output.stdout, b"42\n");
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn unit_output_preserves_result_status_and_nested_payloads() {
+    for (index, (expression, ty, status, stdout, stderr)) in [
+        ("Ok(())", "Result<Unit, Int>", 0, "", ""),
+        ("Error(())", "Result<Int, Unit>", 1, "", ""),
+        ("Some(())", "Option<Unit>", 0, "Some(())\n", ""),
+        ("Ok(Error(()))", "Result<Result<Int, Unit>, Int>", 0, "Error(())\n", ""),
+        ("Error(Ok(()))", "Result<Int, Result<Unit, Int>>", 1, "", "Ok(())\n"),
+    ].into_iter().enumerate() {
+        let path = std::env::temp_dir().join(format!("shin-unit-result-{}-{index}", std::process::id()));
+        shin::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.shin", &path).unwrap();
+        let output = std::process::Command::new(&path).output().unwrap();
+        assert_eq!(output.status.code(), Some(status));
+        assert_eq!(output.stdout, stdout.as_bytes());
+        assert_eq!(output.stderr, stderr.as_bytes());
+        std::fs::remove_file(path).unwrap();
+    }
 }
