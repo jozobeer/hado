@@ -100,11 +100,6 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             _ => None,
         })
         .collect();
-    for item in &ast.items {
-        if let Item::ModuleImpl(module) = item {
-            checker.module(module, &signatures)?;
-        }
-    }
     let mut definitions = HashMap::new();
     for item in &ast.items {
         match item {
@@ -117,8 +112,16 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
         }
     }
-    for group in crate::names::definition_groups(ast) {
-        checker.definition_group(&group, &definitions)?;
+    for group in crate::dependencies::inference_groups(ast) {
+        let mut functions = Vec::new();
+        for item in group {
+            match item {
+                Item::ModuleImpl(module) => checker.module(module, &signatures)?,
+                Item::Def(def) => functions.push(def.name.clone()),
+                _ => {}
+            }
+        }
+        if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
     }
     checker.resolve_projections(true)?;
     for (ty, span, code) in &checker.comparison_constraints {
