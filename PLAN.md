@@ -1,18 +1,26 @@
 # R8〜R9 実装計画（v0.1 の完了に向けて）
 
-R6（2026-09-07）の決定（`docs/plan.0.1.md` 7 節）を実行する。順序は 仕様 → コーパス → 実装。
+builder 向けの手順書。R6（2026-09-07）の決定（`docs/plan.0.1.md` 7 節）を実行する。順序は 仕様 → コーパス → 実装。
+
+**進め方:** commander が指示したラウンドだけを進める。R8 の報告後、審査と `tests/corpus.sha256` の新設を待ち、R9 は commander の指示で着手する。
+**読む順:** 本ファイル → `docs/corpus.0.1.md` → `docs/spec.0.1.md`（§50 §41 §51 §52 を先に）→ `docs/plan.0.1.md` 7 節。2.2 と 2.3 の表と食い違えば 7 節が、7 節と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
+**触ってよい場所:** 下の表の「成果物」列のみ。`docs/` と `PLAN.md` は全ラウンドで禁止。R8 は `crates/` `scripts/` も、R9 は `tests/accept` `tests/reject` `stdlib/` も禁止。
+**仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
+**コミット:** ラウンドごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
+**報告:** (1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義と迷った点。台帳は commander が書く。
 
 | ラウンド | 成果物 | 書き手 | 審査 |
 |---|---|---|---|
 | R7 仕様改訂（済） | `docs/spec.0.1.md` `docs/plan.0.1.md` 6〜7 節、`docs/spec-trace.0.1.md`、`docs/corpus.0.1.md` | commander | plan-reviewer（未実施） |
-| R8 コーパス | `tests/accept` `tests/reject` `stdlib/` `tests/corpus.sha256` | builder | reviewer（目視）+ 構造検査 |
+| R8 コーパス | `tests/accept` `tests/reject` `stdlib/` | builder | reviewer（目視）+ 構造検査 |
+| R8 の lock | `tests/corpus.sha256` | commander（審査合格後） | — |
 | R9 実装 | `crates/shin/**` `scripts/` `crates/shin/tests/**` | builder | reviewer + 全門番 |
 
-**R7 終了時点で `verify-m1-corpus.sh` チェック 1（§50 と拒否コーパスの 1 対 1）と、それに依存する `verify-m2.sh` チェック 5、`verify-m3.sh` チェック 9 は既に赤である。R8 の終了時点でさらに増える。** 新形式（`def display | ...`）を parse できず、新しいコードを拒否できず、`-- expect:` 空を通せないため。R8 の合否は門番で測らず、下記「R8 の判定」に限る。門番を緩めて green にすることは禁止。
+**R7 終了時点で `verify-m1-corpus.sh` チェック 1（§50 と拒否コーパスの 1 対 1）と、それに依存する `verify-m2.sh` チェック 5、`verify-m3.sh` チェック 9 は既に赤である。R8 の終了時点でさらに増える。** 新形式（`def display | ...`）を parse できず、新しいコードを拒否できず、`-- expect:` 空を通せないため。R8 の合否は下記「R8 の判定」で測る。門番を緩めて green にすることは禁止。
 
 ---
 
-## R7 の残作業
+## R7 の残作業（commander。builder に渡す前に済ませる）
 
 - plan-reviewer に `docs/spec.0.1.md` の差分を出す。観点: §41 の EBNF から §39 の例と受理コーパスの全構文が導出できるか、§50 の 56 行に段階とアンカーが全て書かれているか、`docs/spec-trace.0.1.md` の各行が実在する節を指すか、7 節の決定が本文に漏れなく反映されているか。
 - 指摘は commander が直す。`verify-m1-spec.sh` が `PASSED: 6/6` を保つこと。
@@ -100,14 +108,14 @@ E402 E403 E405 は網羅性段階で E515 より先に当たるので変えな�
 
 ### lock
 
-`tests/corpus.sha256` を新設（`sha256sum tests/accept/*.shin tests/reject/*.shin crates/shin/tests/corpus.rs`）。更新は commander だけが行う。
+R8 の審査合格後に commander が `tests/corpus.sha256` を新設する（`sha256sum tests/accept/*.shin tests/reject/*.shin crates/shin/tests/corpus.rs`）。更新は commander だけが行う。
 
-### R8 の判定（門番は使わない）
+### R8 の判定
 
-- 8-a. 拒否 56 本が §50 の 56 行と 1 対 1（`verify-m1-corpus.sh` チェック 1 の `46` を §50 の行数から導く形に直したうえで実行）。
+- 8-a. `verify-m1-corpus.sh` のチェック 1〜4 と 6 が OK（件数は §50 の行数から導く。チェック 5 と 7 は `cargo test` を含むので R9 まで赤）。
 - 8-b. 全件の `-- spec: §N` が実在する見出しを指し、`-- item:` が `docs/spec-coverage.0.1.md` と文字列一致。
 - 8-c. reviewer が全 83 本を読み、「1 ファイル 1 欠陥」（§50 の段階順とアンカー位置順で判定）と「タグを寄せていない」を確認する。
-- 8-d. R8 終了時に赤になる門番を台帳に列挙する（見込み: `verify-m1-corpus` `verify-m2` `parse_corpus.rs` の件数、`verify-m3` の accept-20、`verify-m4`〜`m7` の新形式と新コード）。
+- 8-d. R8 終了時に赤になる門番を報告に列挙する（見込み: `verify-m1-corpus` の 5 と 7、`verify-m2` と `parse_corpus.rs` の件数、`verify-m3` の accept-20、`verify-m4`〜`m7` の新形式と新コード）。
 
 ---
 
@@ -121,7 +129,7 @@ E402 E403 E405 は網羅性段階で E515 より先に当たるので変えな�
 4. **網羅性と冗長**（`coverage.rs` `check.rs`）: `let` `let?` のパターンに網羅性（E402）。E505 を pattern 束縛と引数に（束縛を考慮した参照計数）。E515（自由な参照の計数は `names::references` 系を使う）。E304 の 0 件。E303 を `do?` に。判定器: E515 の 4 条件を 1 つずつ外した 4 プローブ、refutable な `let` の生成。
 5. **印字**（`mono.rs` の `print_T`、`emit.rs`、`runtime/`）: §51。List、入れ子の String と Char、最上位 Unit、Float。判定器: 型ごとの値を乱数で作り、期待文字列を判定器側で組み立てて実行結果と照合する。
 6. **コーパス走行**（`corpus.rs`）: `-- expect:` 空、`-- expect-error:`。
-7. **門番**: 件数の直書き（`verify-m1-corpus` 46、`verify-m2` 23/39、`parse_corpus.rs` 7/39、`verify-m3` 20）を §50 の行数とディスクの実数から導く形に。`verify-m3.sh` チェック 10 を `tests/corpus.sha256` との照合に。`verify-m4.sh` `verify-m7.sh` の末尾を `PASSED: n/N` に。`verify-m6.sh` の生成プローブ 4 本を消す。上記 1〜5 の判定器を `scripts/verify-r9.sh` に置く。
+7. **門番**: 件数の直書き（`verify-m2` 23/39、`parse_corpus.rs` 7/39、`verify-m3` 20）を §50 の行数とディスクの実数から導く形に。`verify-m3.sh` チェック 10 を `tests/corpus.sha256` との照合に。`verify-m4.sh` `verify-m7.sh` の末尾を `PASSED: n/N` に。`verify-m6.sh` の生成プローブ 4 本を消す。上記 1〜5 の判定器を `scripts/verify-r9.sh` に置く。
 
 R9 の受け入れ条件:
 
