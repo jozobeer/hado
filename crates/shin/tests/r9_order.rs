@@ -73,3 +73,21 @@ fn non_exhaustive_branches_point_to_if_not_the_scrutinee() {
         }
     }
 }
+
+#[test]
+fn arm_diagnostics_point_to_pipe_with_arbitrary_spacing() {
+    for padding in 0..12 {
+        for (prefix, suffix, code) in [
+            ("def main = if true | true => 1 | false => 2 ", "0", "E403"),
+            ("def main = if 1 | 1 => 10 ", "1 => 20 | 0", "E405"),
+            ("def main = if | 1 > 0 => 1 ", "1 > 0 => 2 | 0", "E406"),
+            ("def f | Ok(x) => Ok(x + 1) ", "Error(e) => Error(e)\ndef main = f (1 / 1)", "E508"),
+        ] {
+            let prefix = format!("{prefix}{}", " ".repeat(padding));
+            let source = format!("{prefix}| {}{suffix}", " ".repeat(padding + 2));
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some(code), "{source}");
+            assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{source}");
+        }
+    }
+}
