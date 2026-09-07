@@ -87,6 +87,7 @@ fn cli_rejects_noncanonical_identity_binding() {
 fn reject_corpus_reports_declared_codes_through_cli() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reject");
     let mut checked = 0;
+    let mut failures = Vec::new();
     for entry in std::fs::read_dir(directory).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().and_then(|extension| extension.to_str()) != Some("shin") {
@@ -103,26 +104,25 @@ fn reject_corpus_reports_declared_codes_through_cli() {
             .arg(&path)
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1), "{}", path.display());
-        assert!(output.stdout.is_empty(), "{}", path.display());
         let diagnostic = String::from_utf8(output.stderr).unwrap();
-        assert_eq!(diagnostic.lines().count(), 1, "{diagnostic}");
-        let positioned = diagnostic
-            .strip_prefix(&format!("{}:", path.display()))
-            .unwrap();
-        let mut parts = positioned.splitn(3, ':');
-        assert!(parts.next().unwrap().parse::<usize>().unwrap() > 0);
-        assert!(parts.next().unwrap().parse::<usize>().unwrap() > 0);
-        assert!(
-            parts
-                .next()
-                .unwrap()
-                .starts_with(&format!(" error[{expected}]: ")),
-            "{diagnostic}"
-        );
+        let positioned = diagnostic.strip_prefix(&format!("{}:", path.display()));
+        let valid_position_and_code = positioned.is_some_and(|positioned| {
+            let mut parts = positioned.splitn(3, ':');
+            let line = parts.next().and_then(|value| value.parse::<usize>().ok());
+            let col = parts.next().and_then(|value| value.parse::<usize>().ok());
+            line.is_some_and(|line| line > 0) && col.is_some_and(|col| col > 0)
+                && parts.next().is_some_and(|message| message.starts_with(&format!(" error[{expected}]: ")))
+        });
+        if output.status.code() != Some(1) || !output.stdout.is_empty()
+            || diagnostic.lines().count() != 1 || !valid_position_and_code {
+            failures.push(format!("{} expected {expected}: status={:?}, stdout={:?}, stderr={diagnostic:?}",
+                path.display(), output.status.code(), output.stdout));
+        }
         checked += 1;
     }
     assert!(checked > 0);
+    failures.sort();
+    assert!(failures.is_empty(), "{} failures in {checked} cases:\n{}", failures.len(), failures.join("\n"));
 }
 
 #[test]
