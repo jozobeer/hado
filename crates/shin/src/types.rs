@@ -263,25 +263,6 @@ impl Scheme {
 }
 
 impl Ty {
-    pub fn seal(&self, names: &HashMap<String, String>) -> Ty {
-        match self {
-            Ty::Adt(name, args) => {
-                let args = args.iter().map(|ty| ty.seal(names)).collect();
-                match names.get(name) {
-                    Some(public) => Ty::Abstract(public.clone(), args),
-                    None => Ty::Adt(name.clone(), args),
-                }
-            }
-            Ty::Fn(args, ret) => Ty::Fn(
-                args.iter().map(|ty| ty.seal(names)).collect(),
-                Box::new(ret.seal(names)),
-            ),
-            ty => ty.clone(),
-        }
-    }
-}
-
-impl Ty {
     pub(crate) fn reveal(&self, names: &HashMap<String, Ty>) -> Self {
         match self {
             Self::Abstract(name, _) if names.contains_key(name) => names[name].reveal(names),
