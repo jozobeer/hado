@@ -1,4 +1,5 @@
--- spec: §5
+-- spec: §45
 -- error: E703
+-- item: 関数値
 def inc x => x + 1
-def main = inc
+def main = inc == inc

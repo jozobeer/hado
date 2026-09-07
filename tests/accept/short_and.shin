@@ -1,6 +1,5 @@
 -- spec: §44
 -- expect: false
--- item: 末尾呼び出し
 -- short-circuit: &&
 def rec ping x => pong x
 def rec pong x => ping x

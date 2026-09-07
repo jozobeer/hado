@@ -1,5 +1,5 @@
 -- spec: §21
--- expect: ()
+-- expect:
 -- item: Unit payload
-def done (x: Int): Result<Unit, String> => Ok()
+def done (x: Int): Result<Unit, String> => if x == 1 => Ok() | Error("unexpected")
 def main = done 1

@@ -3,7 +3,7 @@
 -- item: リテラルパターン
 def f x =>
   if
-  | x == 1 => one
-  | x == 2 => two
-  | other
+  | x == 1 => "one"
+  | x == 2 => "two"
+  | "other"
 def main = f 1

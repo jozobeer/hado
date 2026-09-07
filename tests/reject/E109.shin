@@ -1,0 +1,4 @@
+-- spec: §3
+-- error: E109
+def f => 1
+def main = f

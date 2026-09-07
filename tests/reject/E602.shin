@@ -1,13 +1,10 @@
 -- spec: §35
 -- error: E602
--- item: module
 module type S = sig
-  type T
-  def make(x: Int): T
+  def inc(x: Int): Int
+  def dec(x: Int): Int
 end
 module M : S = struct
-  type T = { name: String; age: Int }
-  def make x => { name = "a"; age = x }
+  def inc x => x + 1
 end
-def get_name t => t.name
-def main = get_name (M.make 3)
+def main = M.inc 1

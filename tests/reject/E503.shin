@@ -1,7 +1,6 @@
 -- spec: §19
 -- error: E503
-def f x =>
-  if x
+def f
   | Some(v) => v
   | _ => 0
 def main = f (Some(1))

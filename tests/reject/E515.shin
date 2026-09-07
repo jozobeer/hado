@@ -1,11 +1,6 @@
--- spec: §35
+-- spec: §52
 -- error: E515
--- item: module
-module type S = sig
-  def used(x: Int): Int
-end
-module M : S = struct
-  def used x => x
-  def dead x => x
-end
-def main = M.used 1
+type Profile = { name: String }
+type User = | Guest | Member(Profile)
+def display user => if user | Guest => "guest" | Member(m) => m.name
+def main = display Guest
