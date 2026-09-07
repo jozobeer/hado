@@ -162,6 +162,7 @@ impl fmt::Display for Pattern {
                 let inner = fields
                     .iter()
                     .map(|(n, p)| match p {
+                        Some(p) if matches!(&p.kind, PatternKind::Name(name) if name == n) => n.clone(),
                         Some(p) => format!("{n} = {p}"),
                         None => n.clone(),
                     })
@@ -1365,12 +1366,13 @@ impl Parser<'_> {
                 let mut fields = Vec::new();
                 if self.kind() != &TokKind::RBrace {
                     loop {
+                        let binding_span = self.span();
                         let fname = self.expect_lower_name("a field name")?;
                         let pat = if self.kind() == &TokKind::Eq {
                             self.bump();
                             Some(self.parse_pattern()?)
                         } else {
-                            None
+                            Some(Pattern { kind: PatternKind::Name(fname.clone()), span: binding_span })
                         };
                         fields.push((fname, pat));
                         if self.kind() == &TokKind::Semicolon {
