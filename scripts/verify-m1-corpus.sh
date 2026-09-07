@@ -96,62 +96,40 @@ else
     fail 1 "reject-1:1:$c1_reasons"
 fi
 
-# --- check 2: the 9 section-39 examples are in the accept corpus ---
+# --- check 2: the section-39 examples (first line of each code block) are in the accept corpus ---
 c2_reasons=""
-strings_ok=1
+awk '/^# 39\./{f=1} /^# 40\./{f=0} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
+[ -s "$TMPD/sec39.txt" ] || c2_reasons="$c2_reasons no-sec39-examples"
 while IFS= read -r s; do
     [ -n "$s" ] || continue
     found=0
     for f in tests/accept/*.shin; do
         [ -e "$f" ] || continue
-        if grep -qF -- "$s" "$f"; then
+        if grep -qxF -- "$s" "$f"; then
             found=1
             break
         fi
     done
-    if [ "$found" -ne 1 ]; then
-        c2_reasons="$c2_reasons missing-string:$s"
-        strings_ok=0
-    fi
-done <<'EOF'
-def create_user input =>
-def delete_user id =>
-def display user =>
-def display_name user =>
-def size x =>
-def classify score =>
-def name user =>
-def active_names users =>
-module type USER_STORE = sig
-EOF
+    [ "$found" -eq 1 ] || c2_reasons="$c2_reasons missing-line:$s"
+done <"$TMPD/sec39.txt"
 for f in tests/accept/*.shin; do
     [ -e "$f" ] || continue
     hit=0
     while IFS= read -r s; do
         [ -n "$s" ] || continue
-        if grep -qF -- "$s" "$f"; then
+        if grep -qxF -- "$s" "$f"; then
             hit=1
             break
         fi
-    done <<'EOF'
-def create_user input =>
-def delete_user id =>
-def display user =>
-def display_name user =>
-def size x =>
-def classify score =>
-def name user =>
-def active_names users =>
-module type USER_STORE = sig
-EOF
+    done <"$TMPD/sec39.txt"
     if [ "$hit" -eq 1 ]; then
         grep -qE '^-- spec: §39$' "$f" || c2_reasons="$c2_reasons $f:not-sec39"
     fi
-    if grep -qF 'def display user =>' "$f"; then
+    if grep -qxF 'def display' "$f"; then
         grep -qF '| Guest => "guest"' "$f" || c2_reasons="$c2_reasons $f:missing-guest-branch"
         grep -qE '^-- expect: guest$' "$f" || c2_reasons="$c2_reasons $f:missing-expect-guest"
     fi
-    if grep -qF 'def active_names users =>' "$f"; then
+    if grep -qxF 'def active_names users =>' "$f"; then
         grep -qE '^-- needs: prelude$' "$f" || c2_reasons="$c2_reasons $f:missing-needs-prelude"
     fi
 done
@@ -317,9 +295,10 @@ for f in tests/accept/*.shin tests/reject/*.shin; do
     fi
     case "$f" in
         tests/accept/*)
-            nexpect=$(grep -cE '^-- expect: .+$' "$f" || true)
+            nexpect=$(grep -cE '^-- expect:( .*)?$' "$f" || true)
+            nexpect_err=$(grep -cE '^-- expect-error: .+$' "$f" || true)
             nerror=$(grep -cE '^-- error:' "$f" || true)
-            [ "$nexpect" -ge 1 ] || c6_reasons="$c6_reasons $f:accept-missing-expect"
+            [ $((nexpect + nexpect_err)) -eq 1 ] || c6_reasons="$c6_reasons $f:accept-expect-lines=$((nexpect + nexpect_err))"
             [ "$nerror" -eq 0 ] || c6_reasons="$c6_reasons $f:accept-has-error"
             for m in 'List.map' 'List.filter' 'List.fold' 'List.length' 'List.reverse' 'List.append' 'List.sort' 'Option.map' 'Option.unwrap_or' 'Option.is_some' 'Option.ok_or' 'Result.map' 'Result.map_error' 'Result.is_ok' 'String.length' 'String.concat' 'Int.to_string' 'Float.to_string'; do
                 if grep -qF -- "$m" "$f"; then
@@ -328,7 +307,7 @@ for f in tests/accept/*.shin tests/reject/*.shin; do
             done
             ;;
         tests/reject/*)
-            nexpect=$(grep -cE '^-- expect:' "$f" || true)
+            nexpect=$(grep -cE '^-- expect(-error)?:' "$f" || true)
             [ "$nexpect" -eq 0 ] || c6_reasons="$c6_reasons $f:reject-has-expect"
             ;;
     esac
