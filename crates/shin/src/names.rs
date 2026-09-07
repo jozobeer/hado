@@ -165,10 +165,38 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = Vec::new();
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
+    record_field_duplicates(&ast.items, path, &mut diagnostics);
     signature_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
     match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
+    }
+}
+
+fn record_field_duplicates(items: &[Item], path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
+    for item in items {
+        match item {
+            Item::Def(def) => {
+                let (DefKind::Value(body) | DefKind::Function { body, .. }) = &def.kind;
+                expression_field_duplicates(body, path, diagnostics);
+            }
+            Item::ModuleImpl(module) => record_field_duplicates(&module.items, path, diagnostics),
+            _ => {}
+        }
+    }
+}
+
+fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
+    if let NodeKind::Record(fields) = &node.kind {
+        let mut names = BTreeSet::new();
+        for (name, _) in fields {
+            if let Err(error) = register(&mut names, &name.name, name.span, path) {
+                diagnostics.push(error);
+            }
+        }
+    }
+    for child in crate::check::children(node) {
+        expression_field_duplicates(child, path, diagnostics);
     }
 }
 
