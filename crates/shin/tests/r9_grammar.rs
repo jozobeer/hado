@@ -50,7 +50,7 @@ impl Generator {
             0 => self.definition(),
             1 => self.type_definition(),
             2 => self.module_type(false).0,
-            _ => self.module_impl(),
+            _ => self.module_impl(2),
         }
     }
 
@@ -164,23 +164,27 @@ impl Generator {
         format!("def {name} {params} ( {} ) : {}", self.list(count, |g| g.typed_param(), " , "), self.type_expr(2))
     }
 
-    fn module_impl(&mut self) -> String {
+    fn module_impl(&mut self, depth: usize) -> String {
         self.mark("module_impl", 1, 0);
         let (signature, sig_name, abstract_name) = self.module_type(true);
         self.declarations += 1;
         let count = self.choose("struct_item*", 3);
-        let items = self.list(count, |g| g.struct_item(&abstract_name), " ");
+        let items = self.list(count, |g| g.struct_item(&abstract_name, depth), " ");
         format!("{signature}\nmodule {} : {sig_name} = struct {items} end", self.name(true))
     }
 
-    fn struct_item(&mut self, abstract_name: &str) -> String {
-        match self.choose("struct_item", 3) {
+    fn struct_item(&mut self, abstract_name: &str, depth: usize) -> String {
+        let choice = self.random(if depth == 0 { 3 } else { 5 });
+        self.mark("struct_item", 5, choice);
+        match choice {
             0 => self.definition(),
             1 => self.type_definition(),
-            _ => {
+            2 => {
                 self.declarations += 1;
                 format!("type {abstract_name} = {}", self.type_expr(2))
             }
+            3 => self.module_type(false).0,
+            _ => self.module_impl(depth - 1),
         }
     }
 
