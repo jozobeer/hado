@@ -257,3 +257,22 @@ fn identifier_namespaces_follow_the_grammar() {
         }
     }
 }
+
+#[test]
+fn prefix_expressions_require_grouping_inside_applications_and_operators() {
+    for source in [
+        "def main = f fn x => x",
+        "def main = f let x = 1 -> x",
+        "def main = 1 + if true => 2 | 3",
+        "def main = - if true => 2 | 3",
+    ] {
+        assert_eq!(parse_source(source, "generated").unwrap_err().code.as_deref(), Some("E100"), "{source}");
+    }
+    for source in [
+        "def main = f (fn x => x)",
+        "def main = f (let x = 1 -> x)",
+        "def main = 1 + (if true => 2 | 3)",
+    ] {
+        assert!(parse_source(source, "generated").is_ok(), "{source}");
+    }
+}
