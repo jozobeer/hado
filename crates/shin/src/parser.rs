@@ -1552,7 +1552,7 @@ pub fn canonical(node: &Node) -> String {
             s
         }
         NodeKind::Field(l, r) => {
-            if matches!(l.kind, NodeKind::Apply(..)) { format!("({}).{}", canonical(l), r.name) }
+            if matches!(l.kind, NodeKind::Apply(..) | NodeKind::Int(_)) { format!("({}).{}", canonical(l), r.name) }
             else { format!("{}.{}", canonical(l), r.name) }
         },
         NodeKind::Record(fields) => {
