@@ -43,3 +43,29 @@ fn sole_parameter_branch_checks_all_four_conditions() {
         check_source(source, "coverage.shin").unwrap();
     }
 }
+
+#[test]
+fn let_patterns_must_cover_the_entire_payload_type() {
+    for index in 0..20 {
+        for (prefix, tail) in [
+            ("def main = let ", format!("Some(value) = Some({index}) -> value + 1")),
+            ("def main = let? ", format!("Some(value) = Some(Some({index})) -> Some(value + 1)")),
+        ] {
+            let error = check_source(&format!("{prefix}{tail}"), "coverage.shin").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E402"));
+            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+        }
+        let source = format!("type Id = | Id(Int)\ndef main = let Id(value) = Id({index}) -> value + 1");
+        check_source(&source, "coverage.shin").unwrap();
+    }
+}
+
+#[test]
+fn do_requires_a_rail_and_records_require_a_candidate() {
+    for index in 0..20 {
+        let source = format!("def main = do? {index} -> Some(1)");
+        assert_eq!(check_source(&source, "coverage.shin").err().unwrap().code.as_deref(), Some("E303"));
+        let source = format!("def main = {{ missing{index} = 1 }}");
+        assert_eq!(check_source(&source, "coverage.shin").err().unwrap().code.as_deref(), Some("E304"));
+    }
+}
