@@ -65,3 +65,15 @@ fn signature_type_variables_shadow_abstract_type_names() {
     let source = "module type S = sig type T def make(x: Int): T def identity<T>(x: T): T end\nmodule M : S = struct type T = Int def make x => x def identity x => x end\ndef main = M.identity true";
     assert_eq!(check_source(source, "module-types.shin").unwrap().main, Ty::Bool);
 }
+
+#[test]
+fn opaque_projection_reports_the_dot() {
+    let prefix = "module type S = sig type T def make(x: Int): T end\nmodule M : S = struct type T = { value: Int } def make x => { value = x } end\n";
+    for padding in 0..16 {
+        let before_dot = format!("def main = (M.make 1){}", " ".repeat(padding));
+        let source = format!("{prefix}{before_dot}.value");
+        let error = check_source(&source, "opaque-field.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E601"));
+        assert_eq!((error.line, error.col), (3, before_dot.len() + 1));
+    }
+}
