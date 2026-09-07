@@ -68,3 +68,27 @@ fn constructors_require_all_payloads_and_are_not_function_values() {
     assert_eq!(error("def apply f => f 1\ndef main = apply Some").code.as_deref(), Some("E301"));
     assert_eq!(error("def main = Nil(1)").code.as_deref(), Some("E301"));
 }
+
+#[test]
+fn unused_signatures_resolve_all_type_names_at_the_reference() {
+    let mut state = 0x118b_u64;
+    for padding in 0..24 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let unknown = format!("Missing{state}");
+        let prefix = format!("{}def convert<A>(value: Fn<A, ", " ".repeat(padding));
+        let source = format!("module type API = sig\n{prefix}{unknown}>): A\nend\ndef main = 1");
+        let diagnostic = error(&source);
+        assert_eq!(diagnostic.code.as_deref(), Some("E204"));
+        assert_eq!((diagnostic.line, diagnostic.col), (2, prefix.len() + 1));
+    }
+}
+
+#[test]
+fn signature_type_variables_are_local_to_each_member() {
+    let source = "module type S = sig def first<A>(x: A): A def second(x: A): Int end\ndef main = 1";
+    let diagnostic = error(source);
+    assert_eq!(diagnostic.code.as_deref(), Some("E204"));
+    assert_eq!(diagnostic.col, source.find("second(x: A").unwrap() + "second(x: ".len() + 1);
+    let valid = "module type S = sig type T def first<A>(x: A): A def second(x: T): Int end\nmodule M : S = struct type T = Int def first x => x def second x => x + 1 end\ndef main = M.first 1";
+    assert!(check_source(valid, "generated-names.shin").is_ok());
+}
