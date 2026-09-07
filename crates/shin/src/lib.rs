@@ -95,7 +95,8 @@ struct ParsedSource {
 }
 
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
-    let mut ast = parser::parse_source(source, path)?;
+    let mut parsed_source = parser::parse_source_partial(source, path)?;
+    let ast = &mut parsed_source.ast;
     let mut prelude = Vec::new();
     for (name, source) in [
         ("stdlib/division_error.shin", include_str!("../../../stdlib/division_error.shin")),
@@ -125,7 +126,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    type_realizations::check(&ast, path)?;
+    let ast = parsed_source.finish(path)?;
     Ok(ParsedSource { ast, trusted_start, prelude_items })
 }
 
