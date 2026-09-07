@@ -117,3 +117,10 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
         }
     }
 }
+
+#[test]
+fn aliases_reference_types_without_declaring_constructors() {
+    let source = "module type S = sig type T type U end\nmodule M : S = struct type T = Int type U = Int end\ndef main = 1";
+    let ast = shin::parser::parse_source(source, "generated-names.shin").unwrap();
+    shin::names::resolve(&ast, "generated-names.shin").unwrap();
+}
