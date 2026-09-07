@@ -96,3 +96,26 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
         check_source(source, "coverage.shin").unwrap();
     }
 }
+
+#[test]
+fn record_patterns_resolve_the_whole_field_set() {
+    for index in 0..12 {
+        let source = format!("def f value => let {{ absent{index} }} = value -> absent{index} + 1\ndef main = f 1");
+        let error = check_source(&source, "coverage.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E304"));
+        assert_eq!(error.col, source.find('{').unwrap() + 1);
+    }
+    let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => let { x; y } = value -> x + y\ndef main = f { x = 1; y = 2 }";
+    check_source(source, "coverage.shin").unwrap();
+}
+
+#[test]
+fn discarded_rail_binding_points_to_the_underscore() {
+    for padding in 0..20 {
+        let prefix = format!("def main = let?{}", " ".repeat(padding + 1));
+        let source = format!("{prefix}_ = Some(1) -> Some(2)");
+        let error = check_source(&source, "coverage.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E504"));
+        assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+    }
+}
