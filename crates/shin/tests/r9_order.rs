@@ -1,10 +1,9 @@
 use shin::check_source;
 
-// Isolate stage ordering while the locked prelude's grouping repair is pending.
-const ISOLATED_PATH: &str = "stdlib/generated-order.shin";
+const SOURCE_PATH: &str = "generated-order.shin";
 
 fn code(source: &str) -> String {
-    match check_source(source, ISOLATED_PATH) {
+    match check_source(source, SOURCE_PATH) {
         Err(error) => error.code.clone().unwrap_or_else(|| panic!("uncoded diagnostic: {error:?}")),
         Ok(_) => panic!("expected a diagnostic for {source}"),
     }
@@ -34,4 +33,12 @@ fn remainder_is_int_only() {
     for index in 1..20 {
         assert_eq!(code(&format!("def main = {index}.5 % 2.0")), "E305");
     }
+}
+
+#[test]
+fn name_cycles_precede_type_errors() {
+    let source = "def a = b\ndef b = a\ndef main = 1 + true";
+    assert_eq!(code(source), "E207");
+    let source = "def a x => b x\ndef b x => a x\ndef main = 1 + true";
+    assert_eq!(code(source), "E208");
 }
