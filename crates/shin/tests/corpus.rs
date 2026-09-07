@@ -55,9 +55,9 @@ fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
 
 fn try_accept(rel: &str, text: &str) -> Result<(), String> {
     let (status, stdout, stderr) = expected_output(text)?;
-    let work = std::env::temp_dir().join(format!("shin-corpus-{}", std::process::id()));
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let stem = rel.replace('/', "_");
+    let work = std::env::temp_dir().join(format!("shin-corpus-{}-{stem}", std::process::id()));
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let obj = work.join(format!("{stem}.o"));
     let exe = work.join(format!("{stem}.exe"));
     let result = (|| {
