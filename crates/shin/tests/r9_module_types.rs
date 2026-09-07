@@ -8,6 +8,27 @@ fn module(name: &str, representation: &str, make: &str, get: &str) -> String {
 }
 
 #[test]
+fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
+    for padding in 0..20 {
+        let signature = "module type S = sig type T type U def id(x: Int): Int end";
+        for body in [
+            "type T = T type U = Int",
+            "type T = U type U = T",
+            "type T = List<T> type U = Int",
+        ] {
+            let source = format!("{signature}\n{}module M : S = struct {body} def id x => x end\ndef main = M.id 1", " ".repeat(padding));
+            let error = check_source(&source, "cyclic-alias.shin").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+            assert_eq!((error.line, error.col), (2, padding + 1), "{error}");
+        }
+        for body in ["type T = U type U = Int", "type T = | Done | Next(T) type U = Int"] {
+            let source = format!("{signature}\nmodule M : S = struct {body} def id x => x end\ndef main = M.id {padding}");
+            assert_eq!(check_source(&source, "resolved-alias.shin").unwrap().main, Ty::Int);
+        }
+    }
+}
+
+#[test]
 fn abstract_types_can_be_instantiated_with_existing_types() {
     for (prefix, representation, make, get) in [
         ("", "Int", "x", "value + 1"),

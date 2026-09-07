@@ -1116,6 +1116,8 @@ end
 
 struct は sig の全ての member と型を持ち、それぞれの型が一致し、sig の型変数に対して十分に多相でなければならない。満たさなければ E602 とする。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明である。
 
+抽象型の実体化で別名を展開した結果、同じ別名へ戻って実体が確定しない場合（`type T = T`、`type T = U` と `type U = T` など）は E602 とし、その module 定義の先頭を指す。名前を持つ ADT や record の再帰型は、この別名の循環とは区別する。
+
 ```ocaml
 def name (t: UserStore.T) => t.name
 ```
