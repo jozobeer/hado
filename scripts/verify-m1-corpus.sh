@@ -48,14 +48,15 @@ awk -F '|' '
     }
 ' "$COV" >"$TMPD/items22.txt"
 
-# --- check 1: reject corpus is 1:1 with the 46 section-50 codes ---
+# --- check 1: reject corpus is 1:1 with the section-50 codes (count derived from the table) ---
 c1_reasons=""
 n_reject=0
 if [ -d tests/reject ]; then
     n_reject=$(ls tests/reject/*.shin 2>/dev/null | wc -l | tr -d ' ')
 fi
-if [ "$n_reject" -ne 46 ]; then
-    c1_reasons="$c1_reasons reject-count=$n_reject(want-46)"
+n_codes=$(cut -f1 "$TMPD/codes.tsv" | sort -u | wc -l | tr -d ' ')
+if [ "$n_reject" -ne "$n_codes" ]; then
+    c1_reasons="$c1_reasons reject-count=$n_reject(want-$n_codes)"
 fi
 : >"$TMPD/corpus_codes.txt"
 for f in tests/reject/*.shin; do
