@@ -137,7 +137,7 @@ fn tail_calls_survive_arity_changes_and_captured_indirection() {
 
 #[test]
 fn constructor_payloads_execute_with_tagged_layout() {
-    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap 40 -> x + 2";
+    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap(40) -> x + 2";
     let path = std::env::temp_dir().join(format!("shin-constructor-{}", std::process::id()));
     shin::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
@@ -149,8 +149,8 @@ fn constructor_payloads_execute_with_tagged_layout() {
 #[test]
 fn constructor_switches_execute_immediate_and_boxed_variants() {
     for (index, source, expected) in [
-        (0, "type Flag = | On | Off\ndef choose flag => if flag | On => 17 | Off => 29\ndef main = choose Off", "29\n"),
-        (1, "def choose option => if option | Some(n) => n + 1 | None => 9\ndef main = choose (Some 41)", "42\n"),
+        (0, "type Flag = | On | Off\ndef choose | On => 17 | Off => 29\ndef main = choose Off", "29\n"),
+        (1, "def choose | Some(n) => n + 1 | None => 9\ndef main = choose (Some(41))", "42\n"),
         (2, "def choose (option: Option<Int>) => if option | Some(n) => n + 1 | None => 9\ndef main = choose None", "9\n"),
     ] {
         let path = std::env::temp_dir().join(format!("shin-switch-{}-{index}", std::process::id()));
@@ -164,7 +164,7 @@ fn constructor_switches_execute_immediate_and_boxed_variants() {
 
 #[test]
 fn constructor_switch_values_flow_into_following_arithmetic() {
-    for (index, argument, expected) in [(0, "Some 40", "42\n"), (1, "None", "11\n")] {
+    for (index, argument, expected) in [(0, "Some(40)", "42\n"), (1, "None", "11\n")] {
         let source = format!("def main = let option = {argument} -> (if option | Some(n) => n | None => 9) + 2");
         let path = std::env::temp_dir().join(format!("shin-switch-value-{}-{index}", std::process::id()));
         shin::build::executable(&source, "t", &path).unwrap();
@@ -196,7 +196,7 @@ fn integer_division_handles_zero_and_wrapping_boundary() {
 
 #[test]
 fn nested_literal_patterns_merge_values_without_reaching_impossible_paths() {
-    for (index, argument, expected) in [(0, "Some true", "42\n"), (1, "Some false", "11\n"), (2, "None", "2\n")] {
+    for (index, argument, expected) in [(0, "Some(true)", "42\n"), (1, "Some(false)", "11\n"), (2, "None", "2\n")] {
         let source = format!("def main = let option = {argument} -> (if option | Some(true) => 40 | Some(false) => 9 | None => 0) + 2");
         let path = std::env::temp_dir().join(format!("shin-nested-pattern-{}-{index}", std::process::id()));
         shin::build::executable(&source, "t", &path).unwrap();
@@ -279,8 +279,8 @@ fn recursive_adt_equality_compares_tags_and_payloads() {
         (0, "[1, 2, 3]", "[1, 2, 3]", "1\n"),
         (1, "[1, 2, 3]", "[1, 2, 4]", "0\n"),
         (2, "[1, 2]", "[1]", "0\n"),
-        (3, "Some 3", "None", "0\n"),
-        (4, "Some 3", "Some 3", "1\n"),
+        (3, "Some(3)", "None", "0\n"),
+        (4, "Some(3)", "Some(3)", "1\n"),
     ] {
         let source = format!("def main = if {left} == {right} => 1 | 0");
         let path = std::env::temp_dir().join(format!("shin-adt-equality-{}-{index}", std::process::id()));
@@ -481,7 +481,7 @@ fn record_main_formats_fields_in_declaration_order() {
 
 #[test]
 fn option_main_formats_payload_and_nullary_variant() {
-    for (index, expression, expected) in [(0, "Some 3", "Some(3)\n"), (1, "if true => None | Some 3", "None\n")] {
+    for (index, expression, expected) in [(0, "Some(3)", "Some(3)\n"), (1, "if true => None | Some(3)", "None\n")] {
         let path = std::env::temp_dir().join(format!("shin-option-print-{}-{index}", std::process::id()));
         shin::build::executable(&format!("def main = {expression}"), "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();

@@ -478,17 +478,17 @@ fn polymorphic_named_values_use_the_reference_type() {
 
 #[test]
 fn constructor_values_lower_to_typed_construction() {
-    let output = shin::dump_mono("def main = Some 3", "t").unwrap();
+    let output = shin::dump_mono("def main = Some(3)", "t").unwrap();
     assert!(output.contains("Construct { constructor: \"Some\", fields: [Constant(Int(3))], result: Data(\"Option\", [Int]) }"));
 }
 
 #[test]
-fn nullary_and_piped_constructors_preserve_their_types() {
+fn constructors_lower_as_data_and_reject_pipe_application() {
     let output = shin::dump_mono("type Flag = | On | Off\ndef main = On", "t").unwrap();
     assert!(output
         .contains("Construct { constructor: \"On\", fields: [], result: Data(\"Flag\", []) }"));
-    let output = shin::dump_mono("def main = 3 |> Some", "t").unwrap();
-    assert!(output.contains("Construct { constructor: \"Some\", fields: [Constant(Int(3))], result: Data(\"Option\", [Int]) }"));
+    let error = shin::dump_mono("def main = 3 |> Some", "t").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E106"));
 }
 
 #[test]
@@ -580,7 +580,7 @@ fn exhaustive_boolean_patterns_keep_true_and_false_results() {
 
 #[test]
 fn record_pattern_branches_bind_fields_in_the_arm() {
-    let source = "type User = { age: Int }\ndef age user => if user | { age = n } => n + 1\ndef main = age { age = 3 }";
+    let source = "type User = { age: Int }\ndef age | { age = n } => n + 1\ndef main = age { age = 3 }";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("RecordGet {"));
     assert!(output.contains("field: \"age\", result: Int"));
@@ -589,7 +589,7 @@ fn record_pattern_branches_bind_fields_in_the_arm() {
 
 #[test]
 fn constructor_let_patterns_project_typed_payloads() {
-    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap 3 -> x + 1";
+    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap(3) -> x + 1";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("Project {"));
     assert!(output.contains("constructor: \"Wrap\", index: 0, result: Int"));
@@ -598,7 +598,7 @@ fn constructor_let_patterns_project_typed_payloads() {
 #[test]
 fn nullary_constructor_patterns_lower_to_switch() {
     let source =
-        "type Flag = | On | Off\ndef code flag => if flag | On => 1 | Off => 2\ndef main = code On";
+        "type Flag = | On | Off\ndef code | On => 1 | Off => 2\ndef main = code On";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("Switch {"));
     assert!(output.contains("arms: [(\"On\", Constant(Int(1))), (\"Off\", Constant(Int(2)))]"));
@@ -607,7 +607,7 @@ fn nullary_constructor_patterns_lower_to_switch() {
 
 #[test]
 fn constructor_switch_binds_payload_only_inside_matching_arm() {
-    let source = "def extract option => if option | Some(x) => x + 1 | None => 0\ndef main = extract (Some 3)";
+    let source = "def extract | Some(x) => x + 1 | None => 0\ndef main = extract (Some(3))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("Switch {"));
     assert!(output.contains("arms: [(\"Some\", Let {"));
@@ -618,7 +618,7 @@ fn constructor_switch_binds_payload_only_inside_matching_arm() {
 #[test]
 fn nested_nullary_patterns_check_both_tags() {
     let source =
-        "def classify value => if value | Some(None) => 1 | 0\ndef main = classify (Some (Some 3))";
+        "def classify | Some(None) => 1 | 0\ndef main = classify (Some(Some(3)))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("Switch {").count(), 2);
     assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
@@ -630,7 +630,7 @@ fn nested_nullary_patterns_check_both_tags() {
 
 #[test]
 fn repeated_constructor_arms_fall_through_in_source_order() {
-    let source = "def classify value => if value | Some(None) => 1 | Some(_) => 2 | 0\ndef main = classify (Some (Some 3))";
+    let source = "def classify | Some(None) => 1 | Some(_) => 2 | 0\ndef main = classify (Some(Some(3)))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("arms: [(\"Some\",").count(), 1);
     assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
@@ -640,7 +640,7 @@ fn repeated_constructor_arms_fall_through_in_source_order() {
 
 #[test]
 fn constructor_payload_literals_test_before_falling_through() {
-    let source = "def classify value => if value | Some(1) => 10 | Some(_) => 20 | 0\ndef main = classify (Some 2)";
+    let source = "def classify | Some(1) => 10 | Some(_) => 20 | 0\ndef main = classify (Some(2))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("condition: Binary { op: Eq, left: Project {"));
     assert!(output.contains("right: Constant(Int(1))"));
@@ -650,7 +650,7 @@ fn constructor_payload_literals_test_before_falling_through() {
 
 #[test]
 fn deep_constructor_patterns_guard_payload_bindings() {
-    let source = "def extract value => if value | Some(Some(Some(x))) => x + 1 | 0\ndef main = extract (Some (Some (Some 3)))";
+    let source = "def extract | Some(Some(Some(x))) => x + 1 | 0\ndef main = extract (Some(Some(Some(3))))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("Switch {").count(), 3);
     assert_eq!(
@@ -662,7 +662,7 @@ fn deep_constructor_patterns_guard_payload_bindings() {
 
 #[test]
 fn exhaustive_nested_constructor_patterns_need_no_source_fallback() {
-    let source = "def extract value => if value | Some(None) => 0 | Some(Some(x)) => x | None => -1\ndef main = extract (Some (Some 3))";
+    let source = "def extract | Some(None) => 0 | Some(Some(x)) => x | None => -1\ndef main = extract (Some(Some(3)))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("Switch {").count(), 3);
     assert!(output.contains("constructor: \"Some\", index: 0, result: Int"));
@@ -671,7 +671,7 @@ fn exhaustive_nested_constructor_patterns_need_no_source_fallback() {
 
 #[test]
 fn exhaustive_boolean_payload_patterns_lower_without_fallback() {
-    let source = "def classify value => if value | Some(true) => 1 | Some(false) => 2 | None => 0\ndef main = classify (Some false)";
+    let source = "def classify | Some(true) => 1 | Some(false) => 2 | None => 0\ndef main = classify (Some(false))";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("right: Constant(Bool(true))"));
     assert!(output.contains("right: Constant(Bool(false))"));
@@ -680,7 +680,7 @@ fn exhaustive_boolean_payload_patterns_lower_without_fallback() {
 
 #[test]
 fn record_pattern_columns_match_fields_in_source_order() {
-    let source = "type Flag = { enabled: Bool }\ndef classify flag => if flag | { enabled = true } => 1 | { enabled = false } => 2\ndef main = classify { enabled = false }";
+    let source = "type Flag = { enabled: Bool }\ndef classify | { enabled = true } => 1 | { enabled = false } => 2\ndef main = classify { enabled = false }";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("condition: Binary { op: Eq, left: RecordGet {"));
     assert!(output.contains("right: Constant(Bool(true))"));
@@ -693,7 +693,7 @@ fn record_pattern_columns_match_fields_in_source_order() {
 
 #[test]
 fn option_propagation_branches_before_the_continuation() {
-    let source = "def main = let? x = Some 1 -> Some (x + 2)";
+    let source = "def main = let? x = Some(1) -> Some(x + 2)";
     let output = shin::dump_mono(source, "t").unwrap();
     assert!(output.contains("arms: [(\"Some\", Let {"));
     assert!(output.contains("(\"None\", Construct { constructor: \"None\", fields: [], result: Data(\"Option\", [Int]) })"));
@@ -703,7 +703,7 @@ fn option_propagation_branches_before_the_continuation() {
 #[test]
 fn result_propagation_preserves_error_when_success_type_changes() {
     use shin::mono::Expression;
-    let source = "def main = do? (1 / 2) -> Ok true";
+    let source = "def main = do? (1 / 2) -> Ok(true)";
     let checked = shin::check_source(source, "t").unwrap();
     let ast = shin::parser::parse_source(source, "t").unwrap();
     let program = shin::mono::lower_program(&ast, &checked).unwrap();
@@ -746,7 +746,7 @@ fn result_propagation_preserves_error_when_success_type_changes() {
 
 #[test]
 fn recursive_list_fold_connects_construction_projection_and_calls() {
-    let source = "def rec sum values => if values | Nil => 0 | Cons(head, tail) => head + sum tail\ndef main = sum [2, 3, 5]";
+    let source = "def rec sum | Nil => 0 | Cons(head, tail) => head + sum tail\ndef main = sum [2, 3, 5]";
     let checked = shin::check_source(source, "t").unwrap();
     let ast = shin::parser::parse_source(source, "t").unwrap();
     let program = shin::mono::lower_program(&ast, &checked).unwrap();
@@ -952,7 +952,7 @@ fn aggregate_equality_reuses_scalar_derivations() {
     let source = "type Pair = { left: Int; right: Int }\ndef main = { left = 1; right = 2 } == { left = 1; right = 2 }";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("name: \"eq_Int\"").count(), 1, "{output}");
-    let source = "type Pair = | Pair(Int, Int)\ndef main = Pair 1 2 == Pair 1 2";
+    let source = "type Pair = | Pair(Int, Int)\ndef main = Pair(1, 2) == Pair(1, 2)";
     let output = shin::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("name: \"eq_Int\"").count(), 1, "{output}");
 }

@@ -20,7 +20,7 @@ fn build_executes_module_adt_patterns() {
     let dir = std::env::temp_dir().join(format!("shin-adt-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.shin");
-    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule M : S = struct type T = | Empty | Wrap(Int) def make x => if x == 0 => Empty | Wrap x def get item => if item | Empty => 0 | Wrap(x) => x end\nmodule N : S = struct type T = | Wrap(Int) | Empty def make x => if x == 0 => Empty | Wrap x def get item => if item | Empty => 0 | Wrap(x) => x end\ndef main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)").unwrap();
+    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule M : S = struct type T = | Empty | Wrap(Int) def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x end\nmodule N : S = struct type T = | Wrap(Int) | Empty def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x end\ndef main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_shin")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();
@@ -56,7 +56,7 @@ fn build_executes_nested_parenthesized_constructors() {
     let dir = std::env::temp_dir().join(format!("shin-constructor-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.shin");
-    std::fs::write(&source, "type Pair = | Pair(Int, Option<Int>)\ndef sum pair => if pair | Pair(left, Some(right)) => left + right | Pair(left, None) => left\ndef main = sum (Pair(30, Some(12)))").unwrap();
+    std::fs::write(&source, "type Pair = | Pair(Int, Option<Int>)\ndef sum | Pair(left, Some(right)) => left + right | Pair(left, None) => left\ndef main = sum (Pair(30, Some(12)))").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_shin")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();

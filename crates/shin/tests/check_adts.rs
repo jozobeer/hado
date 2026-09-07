@@ -39,7 +39,7 @@ fn lists_and_constructor_patterns_share_element_types() {
     );
     assert!(check_source("def main = [1, true]", "t").is_err());
     let source =
-        "def unwrap x => if x | Some(value) => value | None => 0\ndef main = unwrap (Some(8))";
+        "def unwrap | Some(value) => value | None => 0\ndef main = unwrap (Some(8))";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
     let source = "def main = if Some(1) | Some(value) => value | None => false";
     assert_eq!(
@@ -96,12 +96,12 @@ fn only_ok_has_the_empty_unit_payload_form() {
 
 #[test]
 fn nullary_constructor_patterns_constrain_the_scrutinee_type() {
-    let source = "type Color = | Red | Blue\ndef f x => if x | Red => 1 | 0\ndef main = f (Some(1))";
+    let source = "type Color = | Red | Blue\ndef f | Red => 1 | 0\ndef main = f (Some(1))";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E305")
     );
-    let source = "def f x => if x | None => 1 | 0\ndef main = f (Some(1))";
+    let source = "def f | None => 1 | 0\ndef main = f (Some(1))";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 
@@ -110,6 +110,6 @@ fn main_requires_a_monomorphic_type() {
     for source in ["def main = Nil", "def main = Some(Nil)"] {
         assert_eq!(check_source(source, "t").err().unwrap().code.as_deref(), Some("E701"));
     }
-    let source = "def empty (n: Int): List<Int> => Nil\ndef main = empty 0";
+    let source = "def empty (n: Int): List<Int> => if n == 0 => Nil | [n]\ndef main = empty 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Adt("List".into(), vec![Ty::Int]));
 }
