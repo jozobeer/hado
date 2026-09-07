@@ -214,3 +214,94 @@ fn failed_patterns_do_not_leak_shadowing_bindings() {
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
+
+#[test]
+fn definition_type_errors_do_not_stop_source_order_checks() {
+    for padding in 0..20 {
+        for definition in [
+            "def rec later x => later [x]",
+            "def later x: String => x + 1",
+        ] {
+            let source = format!("def first = {}true + later 1\n{definition}\ndef main = first", " ".repeat(padding));
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
+            assert_eq!((error.line, error.col), (1, 13 + padding), "{source}: {error}");
+        }
+    }
+}
+
+#[test]
+fn recursive_type_failures_keep_call_arity_without_cascades() {
+    for (use_site, expected, line) in [
+        ("later 1", "E307", 2),
+        ("later 1 2", "E301", 1),
+    ] {
+        let source = format!("def first = {use_site}\ndef rec later x => later [x]\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
+        assert_eq!(error.line, line, "{source}: {error}");
+    }
+}
+
+#[test]
+fn invalid_module_bodies_do_not_fake_polymorphism_errors() {
+    for (definition, expected) in [
+        ("def f x => x + true", "E305"),
+        ("def f x => if x => (fn y => y + y) x | false", "E305"),
+        ("def rec f x => f [x]", "E307"),
+    ] {
+        let source = format!("module type S = sig def f<A>(x: A): A end\nmodule M : S = struct {definition} end\ndef main = M.f 1");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
+    }
+}
+
+#[test]
+fn invalid_module_bodies_retain_explicit_signature_mismatches() {
+    for definition in [
+        "def f (x: Int) => x + true",
+        "def f x y => x + y + true",
+        "def f = fn x y => x + y + true",
+    ] {
+        let source = format!("module type S = sig def f<A>(x: A): A end\nmodule M : S = struct {definition} end\ndef main = M.f 1");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
+        assert_eq!((error.line, error.col), (2, 1));
+    }
+}
+
+#[test]
+fn deferred_numeric_errors_use_source_order_not_record_schema_order() {
+    let prefix = "type R = { a: Bool; b: Bool }\ndef main = { b = (fn x => ";
+    let source = format!("{prefix}x + x) true; a = (fn y => y + y) true }}");
+    let error = check_source(&source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E305"));
+    let line = prefix.lines().last().unwrap();
+    assert_eq!((error.line, error.col), (2, line.len() + 1), "{error}");
+}
+
+#[test]
+fn invalid_recursive_groups_do_not_leave_unresolved_projections() {
+    let source = "type A = { value: Int }\ntype B = { value: Bool }\ndef rec later x => let ignored = x.value -> later [x]\ndef main = later 1";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
+}
+
+#[test]
+fn non_record_projection_is_a_positioned_type_error() {
+    for prefix in ["def later x: String => x + 1", "def later (x: Int): Int => x + 1"] {
+        let source = format!("def first = later.value\n{prefix}\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+        assert_eq!((error.line, error.col), (1, 13));
+    }
+}
+
+#[test]
+fn deferred_non_record_projection_keeps_the_receiver_position() {
+    let prefix = "def get x => ";
+    let source = format!("type A = {{ value: Int }}\ntype B = {{ value: Bool }}\n{prefix}x.value\ndef main = get 1");
+    let error = check_source(&source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert_eq!((error.line, error.col), (3, prefix.len() + 1));
+}
