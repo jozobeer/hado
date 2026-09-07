@@ -1,30 +1,33 @@
 use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, PatternKind};
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
-    if let Some(span) = ast.branches_after_fallback.first() {
-        return Err(Diagnostic {
-            path: path.into(),
-            line: span.line,
-            col: span.col,
-            code: Some("E404".into()),
-            message: "fallback must be the last branch".into(),
+    let mut diagnostics = Vec::new();
+    for span in &ast.branches_after_fallback {
+        diagnostics.push(Diagnostic {
+            path: path.into(), line: span.line, col: span.col,
+            code: Some("E404".into()), message: "fallback must be the last branch".into(),
         });
     }
-    crate::names::check_cycles(ast, path)?;
-    check_items(&ast.items, path)
+    if let Err(error) = crate::names::check_cycles(ast, path) {
+        diagnostics.push(error);
+    }
+    check_items(&ast.items, path, &mut diagnostics);
+    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
-fn check_items(items: &[Item], path: &str) -> Result<(), Diagnostic> {
+fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
     for item in items {
         match item {
             Item::Def(def) => match &def.kind {
-                DefKind::Value(body) | DefKind::Function { body, .. } => check_node(body, path)?,
+                DefKind::Value(body) | DefKind::Function { body, .. } => check_node(body, path, diagnostics),
             },
-            Item::ModuleImpl(module) => check_items(&module.items, path)?,
+            Item::ModuleImpl(module) => check_items(&module.items, path, diagnostics),
             _ => {}
         }
     }
-    Ok(())
 }
 
 pub(crate) fn boolean_coverage(
@@ -60,11 +63,19 @@ pub(crate) fn boolean_coverage(
     })
 }
 
-fn check_node(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    check_cons_tail(node, path)?;
-    check_duplicate_patterns(node, path)?;
-    check_conditions(node, path)?;
-    check_literal_fallback(node, path)?;
+fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    for check in [check_cons_tail, check_duplicate_patterns, check_conditions,
+        check_literal_fallback, check_local_redundancy, check_rewrap, check_repropagation] {
+        if let Err(error) = check(node, path) {
+            diagnostics.push(error);
+        }
+    }
+    for child in children(node) {
+        check_node(child, path, diagnostics);
+    }
+}
+
+fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if let NodeKind::BoolBranch { then, els, .. } = &node.kind {
         if crate::normalize::same_expression(then, els) {
             return Err(Diagnostic {
@@ -164,11 +175,6 @@ fn check_node(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 });
             }
         }
-    }
-    check_rewrap(node, path)?;
-    check_repropagation(node, path)?;
-    for child in children(node) {
-        check_node(child, path)?;
     }
     Ok(())
 }

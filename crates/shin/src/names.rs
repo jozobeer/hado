@@ -242,8 +242,8 @@ pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::D
             _ => None,
         }).collect();
         let violation = definitions.iter().find(|def| matches!(def.kind, DefKind::Value(_)))
-            .map(|def| (*def, "E514", "recursive cycles cannot include value definitions"))
-            .or_else(|| definitions.iter().find(|def| !def.rec).map(|def| (*def, "E516", "every mutually recursive function requires rec")));
+            .map(|def| (*def, "E207", "recursive cycles cannot include value definitions"))
+            .or_else(|| definitions.iter().find(|def| !def.rec).map(|def| (*def, "E208", "every mutually recursive function requires rec")));
         if let Some((def, code, message)) = violation {
             return Err(crate::parser::Diagnostic { path: path.into(), line: def.span.line, col: def.span.col, code: Some(code.into()), message: format!("{message}: {}", group.join(", ")) });
         }
