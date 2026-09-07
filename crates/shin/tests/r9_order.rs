@@ -1,5 +1,25 @@
 use shin::check_source;
 
+#[test]
+fn application_type_errors_point_to_the_failing_argument() {
+    for padding in 0..20 {
+        for (prefix, argument, suffix, code) in [
+            ("def add x => x + 1\ndef main = add ", "true", "", "E305"),
+            ("def add (x: Int, y: Int) => x + y\ndef main = add 1 ", "true", "", "E305"),
+            ("def add x => x + 1\ndef main = ", "true", " |> add", "E305"),
+            ("def add (x: Int, y: Int) => x + y\ndef main = 1 |> add ", "true", "", "E305"),
+            ("type Box = | Pack(Int)\ndef main = Pack(", "true", ")", "E305"),
+            ("def self_apply x => x ", "x", "\ndef main = self_apply 1", "E306"),
+        ] {
+            let prefix = format!("{prefix}\n{}", " ".repeat(padding));
+            let source = format!("{prefix}{argument}{suffix}");
+            let error = check_source(&source, "argument-anchor.shin").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
+            assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, padding + 1), "{source}: {error}");
+        }
+    }
+}
+
 const SOURCE_PATH: &str = "generated-order.shin";
 
 fn code(source: &str) -> String {
