@@ -437,19 +437,7 @@ impl Parser<'_> {
                 "operator overloading is forbidden; operators cannot be defined",
             ));
         }
-        let name = match self.kind() {
-            TokKind::Name(n) => {
-                let n = n.clone();
-                self.bump();
-                n
-            }
-            other => {
-                return Err(self.error(
-                    None,
-                    format!("expected a name after `def`, found {other}"),
-                ))
-            }
-        };
+        let name = self.expect_lower_name("a declaration name")?;
         if self.kind() == &TokKind::Pipe {
             let (params, body) = self.parse_arm_function(span)?;
             return Ok(Item::Def(Def { name, rec, kind: DefKind::Function { params, ret: None, body }, span }));
@@ -496,28 +484,12 @@ impl Parser<'_> {
     fn parse_sig_def(&mut self) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::Def)?;
-        let name = match self.kind() {
-            TokKind::Name(n) => {
-                let n = n.clone();
-                self.bump();
-                n
-            }
-            other => {
-                return Err(self.error(
-                    None,
-                    format!("expected a name after `def`, found {other}"),
-                ))
-            }
-        };
+        let name = self.expect_lower_name("a declaration name")?;
         let mut type_params = Vec::new();
         if self.kind() == &TokKind::Lt {
             self.bump();
             loop {
-                let TokKind::Name(parameter) = self.kind() else {
-                    return Err(self.error(None, "expected a type parameter"));
-                };
-                type_params.push(parameter.clone());
-                self.bump();
+                type_params.push(self.expect_upper_name("a type parameter")?);
                 if self.kind() != &TokKind::Comma { break; }
                 self.bump();
             }
@@ -541,35 +513,12 @@ impl Parser<'_> {
     fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
-        let name = match self.kind() {
-            TokKind::Name(n) => {
-                let n = n.clone();
-                self.bump();
-                n
-            }
-            other => {
-                return Err(self.error(
-                    None,
-                    format!("expected a type name, found {other}"),
-                ))
-            }
-        };
+        let name = self.expect_upper_name("a declaration name")?;
         let mut params = Vec::new();
         if self.kind() == &TokKind::Lt {
             self.bump();
             loop {
-                match self.kind() {
-                    TokKind::Name(name) => {
-                        params.push(name.clone());
-                        self.bump();
-                    }
-                    other => {
-                        return Err(self.error(
-                            None,
-                            format!("expected a type parameter, found {other}"),
-                        ))
-                    }
-                }
+                params.push(self.expect_upper_name("a type parameter")?);
                 if self.kind() == &TokKind::Comma {
                     self.bump();
                 } else {
@@ -596,7 +545,7 @@ impl Parser<'_> {
         if self.kind() == &TokKind::KwType {
             // module type NAME = sig ... end
             self.bump();
-            let name = self.expect_name("a module-type name")?;
+            let name = self.expect_upper_name("a module-type name")?;
             self.expect(&TokKind::Eq)?;
             self.expect(&TokKind::KwSig)?;
             let mut items = Vec::new();
@@ -619,10 +568,10 @@ impl Parser<'_> {
             Ok(Item::ModuleSig(ModuleSig { name, items, span }))
         } else {
             // module NAME [: SIG] = struct ... end
-            let name = self.expect_name("a module name")?;
+            let name = self.expect_upper_name("a module name")?;
             let sig = if self.kind() == &TokKind::Colon {
                 self.bump();
-                Some(self.expect_name("a signature name after `:`")?)
+                Some(self.expect_upper_name("a signature name after `:`")?)
             } else {
                 return Err(self.error_at(span, Some("E113"), "module requires a signature"));
             };
@@ -664,6 +613,23 @@ impl Parser<'_> {
             }
             other => Err(self.error(None, format!("expected {what}, found {other}"))),
         }
+    }
+
+    fn expect_lower_name(&mut self, what: &str) -> Result<String, Diagnostic> {
+        self.expect_name_initial(what, char::is_lowercase)
+    }
+
+    fn expect_upper_name(&mut self, what: &str) -> Result<String, Diagnostic> {
+        self.expect_name_initial(what, char::is_uppercase)
+    }
+
+    fn expect_name_initial(&mut self, what: &str, initial: fn(char) -> bool) -> Result<String, Diagnostic> {
+        let span = self.span();
+        let name = self.expect_name(what)?;
+        if !name.chars().next().is_some_and(initial) {
+            return Err(self.error_at(span, None, format!("expected {what}")));
+        }
+        Ok(name)
     }
 
     // --- parameters and types ---
@@ -736,7 +702,7 @@ impl Parser<'_> {
         self.expect(&TokKind::LBrace)?;
         let mut fields = Vec::new();
         loop {
-            let name = self.expect_name("a field name")?;
+            let name = self.expect_lower_name("a field name")?;
             self.expect(&TokKind::Colon)?;
             fields.push((name, self.parse_type()?));
             if self.kind() != &TokKind::Semicolon { break; }
@@ -747,7 +713,7 @@ impl Parser<'_> {
     }
 
     fn parse_constructor_type(&mut self) -> Result<TypeExpr, Diagnostic> {
-        let name = self.expect_name("a constructor name")?;
+        let name = self.expect_upper_name("a constructor name")?;
         if self.kind() != &TokKind::LParen { return Ok(TypeExpr::Name(name)); }
         self.bump();
         let args = self.parse_type_list(&TokKind::RParen)?;
@@ -772,7 +738,7 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Dot {
             self.bump();
             name.push('.');
-            name.push_str(&self.expect_name("a qualified type name")?);
+            name.push_str(&self.expect_upper_name("a qualified type name")?);
             return Ok(TypeExpr::Name(name));
         }
         if self.kind() != &TokKind::Lt { return Ok(TypeExpr::Name(name)); }
@@ -797,7 +763,14 @@ impl Parser<'_> {
     // --- expressions ---
 
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
-        self.parse_pipe()
+        match self.kind() {
+            TokKind::KwIf => self.parse_branch(),
+            TokKind::KwFn => self.parse_fun(),
+            TokKind::KwLet => self.parse_let(false),
+            TokKind::KwLetQ => self.parse_let(true),
+            TokKind::KwDoQ => self.parse_do(),
+            _ => self.parse_pipe(),
+        }
     }
 
     /// Parse an expression that must not itself contain a branch
@@ -979,11 +952,6 @@ impl Parser<'_> {
                 | TokKind::LParen
                 | TokKind::LBrace
                 | TokKind::LBracket
-                | TokKind::KwIf
-                | TokKind::KwFn
-                | TokKind::KwLet
-                | TokKind::KwLetQ
-                | TokKind::KwDoQ
         )
     }
 
@@ -991,7 +959,7 @@ impl Parser<'_> {
         let mut node = self.parse_atom()?;
         while self.kind() == &TokKind::Dot {
             self.bump();
-            let field = self.expect_name("a field name")?;
+            let field = self.expect_lower_name("a field name")?;
             let span = node.span;
             node = Node { kind: NodeKind::Field(Box::new(node), field), span };
         }
@@ -1061,11 +1029,6 @@ impl Parser<'_> {
                 let items = self.parse_list_items()?;
                 NodeKind::List(items)
             }
-            TokKind::KwIf => return self.parse_branch(),
-            TokKind::KwFn => return self.parse_fun(),
-            TokKind::KwLet => return self.parse_let(false),
-            TokKind::KwLetQ => return self.parse_let(true),
-            TokKind::KwDoQ => return self.parse_do(),
             other => {
                 return Err(self.error(
                     None,
@@ -1079,13 +1042,16 @@ impl Parser<'_> {
     fn parse_name_or_call(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         let name = self.expect_name("a name")?;
+        if !name.chars().next().is_some_and(char::is_alphabetic) && !name.starts_with("__") {
+            return Err(self.error_at(span, None, "expected a value or constructor name"));
+        }
         let mut node = Node {
             kind: NodeKind::Name(name.clone()),
             span,
         };
         while self.kind() == &TokKind::Dot {
             self.bump();
-            let field = self.expect_name("a field name after `.`")?;
+            let field = self.expect_lower_name("a field name after `.`")?;
             node = Node { kind: NodeKind::Field(Box::new(node), field), span };
         }
         if !constructor_head(&node) {
@@ -1121,7 +1087,7 @@ impl Parser<'_> {
             return Err(self.error(None, "record requires a field"));
         }
         loop {
-            let fname = self.expect_name("a field name")?;
+            let fname = self.expect_lower_name("a field name")?;
             self.expect(&TokKind::Eq)?;
             let value = self.parse_expr()?;
             fields.push((fname, value));
@@ -1351,7 +1317,7 @@ impl Parser<'_> {
                 let mut fields = Vec::new();
                 if self.kind() != &TokKind::RBrace {
                     loop {
-                        let fname = self.expect_name("a field name")?;
+                        let fname = self.expect_lower_name("a field name")?;
                         let pat = if self.kind() == &TokKind::Eq {
                             self.bump();
                             Some(self.parse_pattern()?)
