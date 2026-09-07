@@ -162,9 +162,14 @@ struct Namespaces {
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
-    let mut diagnostics = Vec::new();
+    resolve_with_prelude(ast, path, None)
+}
+
+pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(), crate::parser::Diagnostic> {
+    let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
+    if let Err(error) = check_cycles(ast, path) { diagnostics.push(error); }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
     declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
     match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
@@ -392,24 +397,33 @@ fn register(
 }
 
 pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
+    let mut diagnostics = Vec::new();
     for group in definition_groups(ast).into_iter().filter(|group| group.len() > 1) {
-        let definitions: Vec<_> = ast.items.iter().filter_map(|item| match item {
-            Item::Def(def) if group.contains(&def.name) => Some(def),
-            _ => None,
-        }).collect();
-        let violation = definitions.iter().find(|def| matches!(def.kind, DefKind::Value(_)))
-            .map(|def| (*def, "E207", "recursive cycles cannot include value definitions"))
-            .or_else(|| definitions.iter().find(|def| !def.rec).map(|def| (*def, "E208", "every mutually recursive function requires rec")));
-        if let Some((def, code, message)) = violation {
-            return Err(crate::parser::Diagnostic { path: path.into(), line: def.span.line, col: def.span.col, code: Some(code.into()), message: format!("{message}: {}", group.join(", ")) });
+        for item in &ast.items {
+            let Item::Def(def) = item else { continue };
+            if !group.contains(&def.name) { continue; }
+            let violation = if matches!(def.kind, DefKind::Value(_)) {
+                Some(("E207", "recursive cycles cannot include value definitions"))
+            } else if !def.rec {
+                Some(("E208", "every mutually recursive function requires rec"))
+            } else { None };
+            if let Some((code, message)) = violation {
+                diagnostics.push(crate::parser::Diagnostic { path: path.into(), line: def.span.line, col: def.span.col,
+                    code: Some(code.into()), message: format!("{message}: {}", group.join(", ")) });
+            }
         }
     }
     for item in &ast.items {
         if let Item::ModuleImpl(module) = item {
-            check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![] }, path)?;
+            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![] }, path) {
+                diagnostics.push(error);
+            }
         }
     }
-    Ok(())
+    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 fn dependency_graph(ast: &Ast) -> BTreeMap<String, BTreeSet<String>> {
