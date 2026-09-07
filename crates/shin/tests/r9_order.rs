@@ -426,3 +426,38 @@ fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
         assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
     }
 }
+
+#[test]
+fn function_equality_points_to_the_operator() {
+    for padding in 0..20 {
+        for operator in ["==", "!="] {
+            let prefix = format!("def identity x => x\ndef main = identity{}", " ".repeat(padding));
+            let source = format!("{prefix}{operator} identity");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E703"), "{error}");
+            assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+        }
+    }
+}
+
+#[test]
+fn polymorphic_comparison_constraints_keep_their_source_anchor() {
+    for (prefix, expression, suffix, code) in [
+        ("def equal x y => x ", "== y", "\ndef alias = equal\ndef identity x => x\ndef main = alias identity identity", "E703"),
+        ("def cmp x y => ", "compare x y", "\ndef alias = cmp\ndef identity x => x\ndef main = alias identity identity", "E704"),
+        ("module type S = sig def equal<T>(x: T, y: T): Bool end\nmodule M : S = struct def equal x y => x ", "== y", " end\ndef identity x => x\ndef main = M.equal identity identity", "E703"),
+        ("def identity x => x\ndef main = (identity ", "== identity)", " == true", "E703"),
+    ] {
+        let source = format!("{prefix}{expression}{suffix}");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap_or_else(|| panic!("accepted: {source}"));
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+        assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    }
+    for source in [
+        "def equal x y => x == y\ndef alias = equal\ndef main = alias 1 2",
+        "def cmp x y => compare x y\ndef alias = cmp\ndef main = alias 1 2",
+        "module type S = sig def equal<T>(x: T, y: T): Bool end\nmodule M : S = struct def equal x y => x == y end\ndef main = M.equal 1 2",
+    ] {
+        check_source(source, SOURCE_PATH).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
