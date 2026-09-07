@@ -32,12 +32,12 @@ pub fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn same_parameters(args: &[TypeExpr], parameters: &[String]) -> bool {
+fn same_parameters(args: &[TypeExpr], parameters: &[crate::parser::DeclaredName]) -> bool {
     args.len() == parameters.len()
         && args
             .iter()
             .zip(parameters)
-            .all(|(arg, parameter)| matches!(&arg.kind, TypeKind::Name(name) if name == parameter))
+            .all(|(arg, parameter)| matches!(&arg.kind, TypeKind::Name(name) if name == &parameter.name))
 }
 
 type Edges<'a> = HashMap<&'a str, Vec<(&'a str, &'a [TypeExpr])>>;
@@ -65,8 +65,8 @@ fn references(def: &TypeDef) -> Vec<(&str, &[TypeExpr])> {
     if let Some(body) = &def.ty {
         match &body.kind {
             TypeKind::Record(fields) => {
-                for (_, ty) in fields {
-                    collect(ty, &mut result);
+                for field in fields {
+                    collect(&field.ty, &mut result);
                 }
             }
             TypeKind::Adt(variants) => {
@@ -103,8 +103,8 @@ fn collect<'a>(ty: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr])>) {
             }
         }
         TypeKind::Record(fields) => {
-            for (_, ty) in fields {
-                collect(ty, result);
+            for field in fields {
+                collect(&field.ty, result);
             }
         }
     }

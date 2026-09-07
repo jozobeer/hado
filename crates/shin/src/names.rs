@@ -213,7 +213,7 @@ fn signature_types(
             Item::ModuleImpl(module) => signature_types(&module.items, &types, &signatures, path, diagnostics),
             Item::SigDef(def) => {
                 let mut local = types.clone();
-                local.extend(def.type_params.iter().cloned());
+                local.extend(def.type_params.iter().map(|param| param.name.clone()));
                 for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
                     resolve_type_names(ty, &local, path, diagnostics);
                 }
@@ -244,7 +244,7 @@ fn resolve_type_names(
             for arg in args { resolve_type_names(arg, types, path, diagnostics); }
         }
         TypeKind::Record(fields) => {
-            for (_, field) in fields { resolve_type_names(field, types, path, diagnostics); }
+            for field in fields { resolve_type_names(&field.ty, types, path, diagnostics); }
         }
         TypeKind::Adt(variants) => {
             for variant in variants {

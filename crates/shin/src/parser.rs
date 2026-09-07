@@ -182,6 +182,22 @@ pub struct Param {
     pub span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct DeclaredName {
+    pub name: String,
+    pub span: Span,
+}
+
+impl PartialEq for DeclaredName {
+    fn eq(&self, other: &Self) -> bool { self.name == other.name }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeField {
+    pub name: DeclaredName,
+    pub ty: TypeExpr,
+}
+
 /// A type expression (see §8, §10, §35, §37).
 #[derive(Debug, Clone)]
 pub struct TypeExpr {
@@ -200,7 +216,7 @@ pub enum TypeKind {
     Apply(String, Vec<TypeExpr>),
     /// `(Int, Int)` argument group inside `Fn<...>`.
     Group(Vec<TypeExpr>),
-    Record(Vec<(String, TypeExpr)>),
+    Record(Vec<TypeField>),
     /// `Nil2 | Cons2(T, List2<T>)` — ADT alternatives.
     Adt(Vec<TypeExpr>),
 }
@@ -261,7 +277,7 @@ pub enum DefKind {
 pub struct SigDef {
     pub name: String,
     pub name_span: Span,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<DeclaredName>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub span: Span,
@@ -271,7 +287,7 @@ pub struct SigDef {
 pub struct TypeDef {
     pub name: String,
     pub name_span: Span,
-    pub params: Vec<String>,
+    pub params: Vec<DeclaredName>,
     pub ty: Option<TypeExpr>,
     pub span: Span,
 }
@@ -508,7 +524,8 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Lt {
             self.bump();
             loop {
-                type_params.push(self.expect_upper_name("a type parameter")?);
+                let span = self.span();
+                type_params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
                 if self.kind() != &TokKind::Comma { break; }
                 self.bump();
             }
@@ -539,7 +556,8 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Lt {
             self.bump();
             loop {
-                params.push(self.expect_upper_name("a type parameter")?);
+                let span = self.span();
+                params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
                 if self.kind() == &TokKind::Comma {
                     self.bump();
                 } else {
@@ -728,9 +746,10 @@ impl Parser<'_> {
         self.expect(&TokKind::LBrace)?;
         let mut fields = Vec::new();
         loop {
-            let name = self.expect_lower_name("a field name")?;
+            let span = self.span();
+            let name = DeclaredName { name: self.expect_lower_name("a field name")?, span };
             self.expect(&TokKind::Colon)?;
-            fields.push((name, self.parse_type()?));
+            fields.push(TypeField { name, ty: self.parse_type()? });
             if self.kind() != &TokKind::Semicolon { break; }
             self.bump();
         }

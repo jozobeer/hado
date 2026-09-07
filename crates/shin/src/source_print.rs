@@ -49,11 +49,11 @@ fn item(value: &Item) -> String {
     }
 }
 
-fn type_parameters(names: &[String]) -> String {
+fn type_parameters(names: &[DeclaredName]) -> String {
     if names.is_empty() {
         String::new()
     } else {
-        format!("<{}>", names.join(", "))
+        format!("<{}>", names.iter().map(|name| name.name.as_str()).collect::<Vec<_>>().join(", "))
     }
 }
 
@@ -117,7 +117,7 @@ fn type_source(ty: &TypeExpr) -> String {
             "{{ {} }}",
             fields
                 .iter()
-                .map(|(name, ty)| format!("{name}: {}", type_source(ty)))
+                .map(|field| format!("{}: {}", field.name.name, type_source(&field.ty)))
                 .collect::<Vec<_>>()
                 .join("; ")
         ),
