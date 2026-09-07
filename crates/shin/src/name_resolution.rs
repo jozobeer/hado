@@ -83,7 +83,7 @@ impl Resolver<'_> {
                 }
                 Item::ModuleImpl(module) => {
                     if let Some(name) = &module.sig {
-                        if !scope.signatures.contains_key(name) { self.report(module.span, "E204", name); }
+                        if !scope.signatures.contains_key(name) { self.report(module.sig_span, "E204", name); }
                     }
                     self.items(&module.items, &scope);
                 }
@@ -109,7 +109,7 @@ impl Resolver<'_> {
             NodeKind::Field(base, field) => {
                 if let NodeKind::Name(name) = &base.kind {
                     if let Some(members) = scope.modules.get(name) {
-                        if !members.contains(&field.name) { self.report(base.span, "E204", &field.name); }
+                        if !members.contains(&field.name) { self.report(field.span, "E204", &field.name); }
                         return;
                     }
                 }
