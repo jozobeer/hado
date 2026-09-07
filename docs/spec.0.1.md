@@ -271,7 +271,7 @@ Fn<(Int, Int), Int>
 
 `def` で定義した関数名を引数なしで参照すると、`Fn<...>` 型の値になる。
 
-関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。この形に反する呼び出しは E106 とする。
+関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。constructor を先頭に置く並置（`Some 1`）は E106 とする。空白は意味を持たない（第41節）ので、`inc(1)` は `inc (1)` と同じ並置であり、括弧が冗長なだけで拒否しない。
 
 ---
 
@@ -1441,7 +1441,7 @@ compare         := additive [("<" | "<=" | ">" | ">=" | "==" | "!=") additive]  
 additive        := multiplicative (("+" | "-") multiplicative)*
 multiplicative  := unary (("*" | "/" | "%") unary)*
 unary           := "-" unary | "not" unary | application
-application     := postfix postfix*                                        並置。先頭が関数
+application     := postfix postfix*                                        並置。先頭が constructor なら E106
 postfix         := primary ("." name)*                                     field access
 primary         := int | float | char | string | bool | unit
                  | name
@@ -1657,7 +1657,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E103 | float-literal-form | §43 | 字句 | リテラル |
 | E104 | comment-form | §43 | 字句 | コメントの先頭 |
 | E105 | no-tuple | §37 | 構文 | `(` |
-| E106 | constructor-call-form | §8 | 構文 | 呼び出しの先頭 |
+| E106 | constructor-call-form | §8 | 構文 | constructor 名 |
 | E107 | operator-overloading | §38 | 構文 | `def` の直後の演算子 |
 | E108 | adt-leading-pipe | §11 | 構文 | 最初の constructor 名 |
 | E109 | zero-parameter-arrow | §3 | 構文 | `=>` |
