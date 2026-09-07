@@ -72,22 +72,12 @@ fn qualified_abstract_annotations_preserve_module_identity() {
 }
 
 #[test]
-fn nested_modules_are_available_only_in_their_scope() {
-    let prefix = "module type S = sig def run(x: Int): Int end module Outer : S = struct module Inner : S = struct def run x => x + 1 end def run x => Inner.run x end";
-    assert_eq!(
-        check_source(&format!("{prefix} def main = Outer.run 1"), "t")
-            .unwrap()
-            .main,
-        Ty::Int
-    );
-    assert_eq!(
-        check_source(&format!("{prefix} def main = Inner.run 1"), "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E204")
-    );
+fn nested_modules_are_rejected_before_name_resolution() {
+    let prefix = "module type S = sig def run(x: Int): Int end module Outer : S = struct ";
+    let source = format!("{prefix}module Inner : S = struct def run x => x + 1 end def run x => Inner.run x end def main = Outer.run 1");
+    let error = check_source(&source, "t").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E100"));
+    assert_eq!((error.line, error.col), (1, prefix.len() + 1));
 }
 
 #[test]
@@ -140,8 +130,8 @@ fn internal_record_schemas_use_qualified_result_types() {
 }
 
 #[test]
-fn nested_abstract_annotations_match_exported_function_types() {
-    let source = "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule type API = sig def run(x: Int): Int end\nmodule Outer : API = struct\nmodule Inner : S = struct type T = { value: Int } def make x => { value = x } def get item => item.value end\ndef consume (item: Inner.T) => Inner.get item\ndef run x => consume (Inner.make x)\nend\ndef main = Outer.run 42";
+fn abstract_annotations_match_exported_function_types_across_modules() {
+    let source = "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule type API = sig def run(x: Int): Int end\nmodule Inner : S = struct type T = { value: Int } def make x => { value = x } def get item => item.value end\nmodule Outer : API = struct\ndef consume (item: Inner.T) => Inner.get item\ndef run x => consume (Inner.make x)\nend\ndef main = Outer.run 42";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 

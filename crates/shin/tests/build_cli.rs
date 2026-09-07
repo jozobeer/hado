@@ -67,11 +67,11 @@ fn build_executes_nested_parenthesized_constructors() {
 }
 
 #[test]
-fn build_executes_nested_abstract_module_function_values() {
+fn build_executes_abstract_module_function_values() {
     let dir = std::env::temp_dir().join(format!("shin-nested-module-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.shin");
-    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule type API = sig def run(x: Int): Int end\nmodule Outer : API = struct\n  module Inner : S = struct\n    type T = { value: Int }\n    def make x => { value = x }\n    def get item => item.value\n  end\n  def consume (item: Inner.T) => let getter = Inner.get -> getter item\n  def run x => consume (Inner.make x)\nend\ndef main = Outer.run 42\n").unwrap();
+    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule type API = sig def run(x: Int): Int end\nmodule Inner : S = struct\n    type T = { value: Int }\n    def make x => { value = x }\n    def get item => item.value\nend\nmodule Outer : API = struct\n  def consume (item: Inner.T) => let getter = Inner.get -> getter item\n  def run x => consume (Inner.make x)\nend\ndef main = Outer.run 42\n").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_shin")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();

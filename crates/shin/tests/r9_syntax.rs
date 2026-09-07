@@ -2,6 +2,19 @@ use shin::lexer::{TokKind, lex_full};
 use shin::parser::parse_source;
 
 #[test]
+fn module_declarations_are_top_level_only() {
+    for padding in 0..20 {
+        for nested in ["module Inner : S = struct end", "module type Inner = sig end"] {
+            let prefix = format!("module type S = sig end\nmodule Outer : S = struct\n{}", " ".repeat(padding));
+            let source = format!("{prefix}{nested}\nend\ndef main = 1");
+            let error = parse_source(&source, "nested-module.shin").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+            assert_eq!((error.line, error.col), (3, padding + 1), "{error}");
+        }
+    }
+}
+
+#[test]
 fn literal_diagnostics_and_anchors() {
     for padding in 0..8 {
         let prefix = format!("{}def main = ", " ".repeat(padding));
