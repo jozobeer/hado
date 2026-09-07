@@ -123,6 +123,7 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
         let number = index * 17 + 3;
         let success = format!("def main = {number}");
         let failure = format!("def identity (x: Result<Unit, Int>): Result<Unit, Int> => x\ndef main = identity (Error({number}))");
+        let empty_failure = "def identity (x: Result<Int, Unit>) => x\ndef main = identity (Error(()))";
         for (case, source, header, accepted) in [
             ("stdout", success.clone(), format!("-- expect: {number}"), true),
             ("stderr", failure.clone(), format!("-- expect-error: {number}"), true),
@@ -130,6 +131,8 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
             ("wrong-status", success.clone(), format!("-- expect-error: {number}"), false),
             ("wrong-value", success.clone(), format!("-- expect: {}", number + 1), false),
             ("empty", "def main = ()".into(), "-- expect:".into(), true),
+            ("empty-error", empty_failure.into(), "-- expect-error:".into(), true),
+            ("empty-error-wrong-status", empty_failure.into(), "-- expect:".into(), false),
             ("missing", success.clone(), String::new(), false),
             ("both", success, format!("-- expect: {number}\n-- expect-error: {number}"), false),
         ] {
