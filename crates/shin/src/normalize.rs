@@ -80,7 +80,7 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
                 && patterns.iter().all(|(name, pattern)| {
                     fields
                         .iter()
-                        .find(|(field, _)| field == name)
+                        .find(|(field, _)| &field.name == name)
                         .is_some_and(|(_, value)| match pattern {
                             Some(pattern) => rebuilds_pattern(pattern, value),
                             None => matches!(&value.kind, NodeKind::Name(value) if value == name),
@@ -196,7 +196,7 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
             }
         }
         NodeKind::Record(fields) => {
-            fields.sort_by(|a, b| a.0.cmp(&b.0));
+            fields.sort_by(|a, b| a.0.name.cmp(&b.0.name));
             for (_, value) in fields {
                 rename(value, scope, next);
             }

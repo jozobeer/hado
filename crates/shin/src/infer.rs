@@ -681,7 +681,7 @@ impl Checker<'_> {
         }
     }
 
-    fn record(&mut self, fields: &[(String, Node)], span: Span) -> Result<Ty, Diagnostic> {
+    fn record(&mut self, fields: &[(crate::parser::DeclaredName, Node)], span: Span) -> Result<Ty, Diagnostic> {
         let candidates: Vec<_> = self
             .records
             .values()
@@ -689,7 +689,7 @@ impl Checker<'_> {
                 names.len() == fields.len()
                     && names
                         .iter()
-                        .all(|name| fields.iter().any(|(field, _)| field == name))
+                        .all(|name| fields.iter().any(|(field, _)| &field.name == name))
             })
             .cloned()
             .collect();
@@ -705,7 +705,7 @@ impl Checker<'_> {
             unreachable!()
         };
         for (name, ty) in names.iter().zip(&payload) {
-            let value = &fields.iter().find(|(field, _)| field == name).unwrap().1;
+            let value = &fields.iter().find(|(field, _)| &field.name == name).unwrap().1;
             self.branch_result(value, ty)?;
         }
         Ok(self.inference.resolve(&result))
