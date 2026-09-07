@@ -593,6 +593,9 @@ impl Checker<'_> {
                 Ok(ty)
             }
             NodeKind::Name(name) => {
+                if self.constructors.contains_key(name) {
+                    return self.construct(name, &[], node.span);
+                }
                 if name.starts_with("__") {
                     return Err(self.error(
                         node.span,
@@ -603,7 +606,6 @@ impl Checker<'_> {
                 let scheme = self
                     .values
                     .get(name)
-                    .or_else(|| self.constructors.get(name))
                     .cloned()
                     .ok_or_else(|| {
                         self.error(
@@ -977,6 +979,11 @@ impl Checker<'_> {
     }
 
     fn apply(&mut self, callee: &Node, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
+        if let NodeKind::Name(name) = &callee.kind {
+            if self.constructors.contains_key(name) {
+                return self.construct(name, args, callee.span);
+            }
+        }
         let function = self.callee(callee)?;
         let args = args
             .iter()
@@ -985,6 +992,25 @@ impl Checker<'_> {
         let result = self.inference.fresh();
         self.unify(&function, &Ty::Fn(args, Box::new(result.clone())), span)?;
         Ok(self.inference.resolve(&result))
+    }
+
+    fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
+        let scheme = self.constructors[name].clone();
+        // Constructor schemes describe payloads internally; source expressions yield only data.
+        let (payloads, result) = match self.inference.instantiate(&scheme) {
+            Ty::Fn(payloads, result) => (payloads, *result),
+            result => (Vec::new(), result),
+        };
+        if args.len() != payloads.len() {
+            return Err(self.error(span, Some("E301"), "constructor arity mismatch"));
+        }
+        for (arg, payload) in args.iter().zip(payloads) {
+            let actual = self.expression(arg)?;
+            self.unify(&actual, &payload, span)?;
+        }
+        let result = self.inference.resolve(&result);
+        self.value_types.insert((span.line, span.col), result.clone());
+        Ok(result)
     }
 
     fn propagation(
