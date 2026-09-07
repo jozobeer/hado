@@ -62,9 +62,9 @@ fn duplicate_module_members_are_not_silently_overwritten() {
 #[test]
 fn qualified_abstract_annotations_preserve_module_identity() {
     let prefix = "module type S = sig type T def make(x: Int): T end module M : S = struct type T = { x: Int } def make x => { x = x } end module N : S = struct type T = { x: Int } def make x => { x = x } end";
-    let source = format!("{prefix} def accept (x: M.T) => true def main = accept (M.make 1)");
+    let source = format!("{prefix} def accept (x: M.T) => x == M.make 1 def main = accept (M.make 1)");
     assert_eq!(check_source(&source, "t").unwrap().main, Ty::Bool);
-    let source = format!("{prefix} def accept (x: M.T) => true def main = accept (N.make 1)");
+    let source = format!("{prefix} def accept (x: M.T) => x == M.make 1 def main = accept (N.make 1)");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
         Some("E305")

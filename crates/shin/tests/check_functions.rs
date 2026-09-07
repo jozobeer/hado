@@ -47,9 +47,9 @@ fn parameters_and_local_bindings_have_lexical_scope() {
 
 #[test]
 fn pipe_supplies_the_first_argument() {
-    let source = "def choose (a: Bool, b: Int) => b\ndef main = true |> choose 7";
+    let source = "def choose (a: Bool, b: Int) => if a => b | b + 1\ndef main = true |> choose 7";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
-    let source = "def choose (a: Bool, b: Int) => b\ndef main = 7 |> choose true";
+    let source = "def choose (a: Bool, b: Int) => if a => b | b + 1\ndef main = 7 |> choose true";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E305")
@@ -105,7 +105,7 @@ fn division_result_follows_resolved_operand_type() {
 fn function_annotations_check_arguments_and_results() {
     let source = "def apply (f: Fn<Int, Bool>, x: Int) => f x\ndef main = apply (fn n => n == 1) 2";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
-    let source = "def apply (f: Fn<(Int, Bool), Int>) => f 1 true\ndef main = apply (fn a b => a)";
+    let source = "def apply (f: Fn<(Int, Bool), Int>) => f 1 true\ndef main = apply (fn a b => if b => a | a + 1)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
     let source = "def apply (f: Fn<Int, Bool>) => f 1\ndef main = apply (fn n => n + 1)";
     assert_eq!(
