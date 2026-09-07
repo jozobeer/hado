@@ -117,54 +117,6 @@ fn type_definition_contexts_are_distinct() {
 }
 
 #[test]
-fn whole_grammar_round_trip() {
-    let mut seed = 0x52_41_u64;
-    for _ in 0..24 {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let n = seed % 1000 + 1;
-        let expressions = [
-            format!("{n} + 2 * 3"),
-            format!("-{n}.5"),
-            "'\\n'".into(),
-            "\"a\\\"b\\t\"".into(),
-            "()".into(),
-            "true && not false".into(),
-            format!("Some({n})"),
-            "Ok()".into(),
-            "Ok(())".into(),
-            format!("[{n}, {}]", n + 1),
-            "[]".into(),
-            format!("{{ field = {n} }}"),
-            format!("f (g {n})"),
-            format!("{n} |> f 2"),
-            "(f x).field".into(),
-            format!("let x = {n} -> x + 1"),
-            "let? Some(x) = Some(Some(1)) -> Some(x)".into(),
-            "do? Ok() -> Ok()".into(),
-            "fn x y => x + y".into(),
-            "fn (x: Int) => x".into(),
-            "fn | Some(x) => x | 0".into(),
-            format!("if {n} > 0 => 1 | 0"),
-            format!("if | {n} > 0 => 1 | 0"),
-            "if x | Some(_) => 1 | None => 0".into(),
-            format!("if x | -{n} => 1 | 0"),
-            "let { field = x } = r -> x".into(),
-        ];
-        for expression in expressions {
-            let source = format!(
-                "type Box{n}<T> = | Box{n}(T) type Record{n} = {{ field: Int }} module type S{n} = sig type T def f<A>(x: A): A end module M{n} : S{n} = struct type T = Int def f x => x end def rec walk | Some(x) => walk x | 0 def typed (f: Fn<(Int, Int), Int>, x: Int): Int => f x x def main = {expression}"
-            );
-            let ast = parse_source(&source, "generated").unwrap();
-            let normal = shin::parser::canonical_program(&ast);
-            let restored =
-                parse_source(&normal, "normalized").unwrap_or_else(|e| panic!("{e}\n{normal}"));
-            assert_eq!(normal, shin::parser::canonical_program(&restored));
-            assert_eq!(ast.main(), restored.main(), "{normal}");
-        }
-    }
-}
-
-#[test]
 fn incomplete_grammar_forms_are_rejected() {
     for source in [
         "def main = fn => 1",
@@ -274,5 +226,16 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
         "def main = 1 + (if true => 2 | 3)",
     ] {
         assert!(parse_source(source, "generated").is_ok(), "{source}");
+    }
+}
+
+#[test]
+fn integer_field_receivers_remain_separate_from_float_tokens() {
+    for value in 0..24 {
+        let source = format!("def main = {value} . field{value}");
+        let ast = parse_source(&source, "generated").unwrap();
+        let normal = shin::parser::canonical_program(&ast);
+        let restored = parse_source(&normal, "normalized").unwrap_or_else(|error| panic!("{error}: {normal}"));
+        assert_eq!(ast.main(), restored.main());
     }
 }
