@@ -216,13 +216,20 @@ fn declaration_types(
         _ => None,
     }));
     let mut signatures = inherited_signatures.clone();
+    let mut local_signatures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for item in items {
         if let Item::ModuleSig(signature) = item {
-            let exported = signature.items.iter().filter_map(|item| match item {
+            local_signatures.entry(signature.name.clone()).or_default().extend(signature.items.iter().filter_map(|item| match item {
                 Item::TypeDef(def) => Some(def.name.clone()),
                 _ => None,
-            }).collect();
-            signatures.insert(signature.name.clone(), exported);
+            }));
+        }
+    }
+    signatures.extend(local_signatures.into_iter().map(|(name, types)| (name, types.into_iter().collect())));
+    for item in items {
+        if let Item::ModuleImpl(module) = item {
+            let prefix = format!("{}.", module.name);
+            types.retain(|name| !name.starts_with(&prefix));
         }
     }
     for item in items {

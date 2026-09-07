@@ -12,6 +12,7 @@ struct Scope {
 impl Scope {
     fn nested(&self, items: &[Item]) -> Self {
         let mut scope = self.clone();
+        let mut signatures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for item in items {
             match item {
                 Item::Def(def) => { scope.values.insert(def.name.clone()); }
@@ -27,20 +28,23 @@ impl Scope {
                     }
                 }
                 Item::ModuleSig(sig) => {
-                    scope.signatures.insert(sig.name.clone(), sig.items.iter().filter_map(|item| match item {
+                    signatures.entry(sig.name.clone()).or_default().extend(sig.items.iter().filter_map(|item| match item {
                         Item::SigDef(def) => Some(def.name.clone()),
                         _ => None,
-                    }).collect());
+                    }));
                 }
                 _ => {}
             }
         }
+        scope.signatures.extend(signatures);
+        let mut modules: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for item in items {
             if let Item::ModuleImpl(module) = item {
                 let members = module.sig.as_ref().and_then(|name| scope.signatures.get(name)).cloned().unwrap_or_default();
-                scope.modules.insert(module.name.clone(), members);
+                modules.entry(module.name.clone()).or_default().extend(members);
             }
         }
+        scope.modules.extend(modules);
         scope
     }
 }
