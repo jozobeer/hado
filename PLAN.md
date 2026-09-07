@@ -1,6 +1,6 @@
 # R8〜R9 実装計画（v0.1 の完了に向けて）
 
-R6（2026-09-07）の決定（`docs/plan.0.1.md` 7 節）を実行する。順序は 仕様 → コーパス → 実装。R7（仕様改訂）は commander が実施済みで、`docs/spec.0.1.md` が正本になった（経緯は `docs/ledger.0.1.md` の R6）。
+R6（2026-09-07）の決定（`docs/plan.0.1.md` 7 節）を実行する。順序は 仕様 → コーパス → 実装。
 
 | ラウンド | 成果物 | 書き手 | 審査 |
 |---|---|---|---|
@@ -8,7 +8,7 @@ R6（2026-09-07）の決定（`docs/plan.0.1.md` 7 節）を実行する。順�
 | R8 コーパス | `tests/accept` `tests/reject` `stdlib/` `tests/corpus.sha256` | builder | reviewer（目視）+ 構造検査 |
 | R9 実装 | `crates/shin/**` `scripts/` `crates/shin/tests/**` | builder | reviewer + 全門番 |
 
-**R7 終了時点で `verify-m1-corpus.sh` チェック 1（§50 と拒否コーパスの 1 対 1）と、それに依存する `verify-m2.sh` チェック 5、`verify-m3.sh` チェック 9 は既に赤である。R8 の終了時点でさらに増える。** 新形式（`def display | ...`）を parse できず、新しいコードを拒否できず、`-- expect:` 空を通せないため。R8 の合否は門番で測らず、下記「R8 の判定」に限る。門番を緩めて green にすることは禁止。R9 の完了条件が全門番 green である。
+**R7 終了時点で `verify-m1-corpus.sh` チェック 1（§50 と拒否コーパスの 1 対 1）と、それに依存する `verify-m2.sh` チェック 5、`verify-m3.sh` チェック 9 は既に赤である。R8 の終了時点でさらに増える。** 新形式（`def display | ...`）を parse できず、新しいコードを拒否できず、`-- expect:` 空を通せないため。R8 の合否は門番で測らず、下記「R8 の判定」に限る。門番を緩めて green にすることは禁止。
 
 ---
 
