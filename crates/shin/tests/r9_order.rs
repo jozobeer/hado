@@ -109,3 +109,34 @@ fn all_type_references_resolve_before_expression_type_errors() {
         }
     }
 }
+
+#[test]
+fn recursive_type_errors_point_to_the_changed_argument() {
+    for padding in 0..20 {
+        for (prefix, suffix) in [
+            ("type Tree<T> = | Leaf(T) | Next(Tree<", "List<T>>)"),
+            ("type Pair<A, B> = | End | Next(Pair<", "B, A>)"),
+        ] {
+            let prefix = format!("{prefix}{}", " ".repeat(padding));
+            let source = format!("{prefix}{suffix}\ndef main = 1");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E302"));
+            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+        }
+    }
+}
+
+#[test]
+fn recursive_type_errors_use_source_order_across_declarations() {
+    let first = "type A<T> = | WrapA(A<List<T>>)";
+    let second = "type Z<T> = | WrapZ(Z<Option<T>>)";
+    for (left, right) in [(first, second), (second, first)] {
+        for padding in 0..12 {
+            let source = format!("{}{left}\n{right}\ndef main = 1", " ".repeat(padding));
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E302"));
+            let changed = if left == first { "List" } else { "Option" };
+            assert_eq!((error.line, error.col), (1, padding + left.find(changed).unwrap() + 1));
+        }
+    }
+}
