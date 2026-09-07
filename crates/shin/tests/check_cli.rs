@@ -52,13 +52,13 @@ fn cli_usage_and_basic_types() {
 }
 
 #[test]
-fn diagnostics_without_codes_keep_source_position() {
+fn float_remainder_reports_a_positioned_type_error() {
     let error = shin::check_source("def main = 1.0 % 2.0", "float.shin")
         .err()
         .unwrap();
     assert_eq!(
         error.to_string(),
-        "float.shin:1:12: error: Float has no remainder operator"
+        "float.shin:1:12: error[E305]: Float has no remainder operator"
     );
 }
 
