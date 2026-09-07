@@ -124,3 +124,21 @@ fn aliases_reference_types_without_declaring_constructors() {
     let ast = shin::parser::parse_source(source, "generated-names.shin").unwrap();
     shin::names::resolve(&ast, "generated-names.shin").unwrap();
 }
+
+#[test]
+fn signature_mismatches_report_the_module_for_all_four_forms() {
+    for index in 0..20 {
+        let member = format!("member{index}");
+        for (signature, body) in [
+            (format!("def {member}(x: Int): Int"), "".to_owned()),
+            ("type T".to_owned(), "".to_owned()),
+            (format!("def {member}(x: Int): Bool"), format!("def {member} x => x + 1")),
+            (format!("def {member}<A>(x: A): A"), format!("def {member} x => x + 1")),
+        ] {
+            let source = format!("module type S = sig {signature} end\n{}module M : S = struct {body} end\ndef main = 1", " ".repeat(index));
+            let diagnostic = error(&source);
+            assert_eq!(diagnostic.code.as_deref(), Some("E602"), "{source}");
+            assert_eq!((diagnostic.line, diagnostic.col), (2, index + 1));
+        }
+    }
+}
