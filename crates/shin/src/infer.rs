@@ -656,7 +656,7 @@ impl Checker<'_> {
             NodeKind::List(items) => self.list(items),
             NodeKind::Record(fields) => self.record(fields, node.span),
             NodeKind::Field(value, field) => {
-                let ty = self.project(value, field)?;
+                let ty = self.project(value, &field.name)?;
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
             },

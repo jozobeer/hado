@@ -304,13 +304,13 @@ impl Lowerer {
 
         if let NodeKind::Field(record, field) = &node.kind {
             if let NodeKind::Name(module) = &record.kind {
-                let qualified = self.resolve_definition(&format!("{module}.{field}"));
+                let qualified = self.resolve_definition(&format!("{module}.{}", field.name));
                 if self.schemes.contains_key(&qualified) {
                     return self.function_value(&qualified, node.span);
                 }
             }
             let record = self.expression(record)?;
-            return self.record_get(record, field);
+            return self.record_get(record, &field.name);
         }
         if let NodeKind::Record(fields) = &node.kind {
             let ty = self
@@ -619,7 +619,7 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         if let crate::parser::NodeKind::Field(module, member) = &callee.kind {
             if let crate::parser::NodeKind::Name(module) = &module.kind {
-                let qualified = self.resolve_definition(&format!("{module}.{member}"));
+                let qualified = self.resolve_definition(&format!("{module}.{}", member.name));
                 if self.schemes.contains_key(&qualified) {
                     return self.direct_call(&qualified, arguments);
                 }
