@@ -30,6 +30,7 @@ struct Checker<'a> {
     abstract_types: HashMap<String, (usize, String)>,
     projections: Vec<(Ty, String, Ty, Span, Span)>,
     comparison_constraints: Vec<(Ty, Span, &'static str)>,
+    recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
 }
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
@@ -70,6 +71,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         abstract_types: HashMap::new(),
         projections: Vec::new(),
         comparison_constraints: Vec::new(),
+        recursive_calls: HashMap::new(),
     };
     let comparable = checker.inference.fresh();
     let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
@@ -445,6 +447,10 @@ impl Checker<'_> {
             .map(|name| (name.clone(), self.inference.fresh()))
             .collect();
         for (name, ty) in &placeholders {
+            if definitions[name].rec {
+                let Ty::Var(id) = ty else { unreachable!("fresh recursive placeholder") };
+                self.recursive_calls.insert(*id, Vec::new());
+            }
             self.values
                 .insert(name.clone(), Scheme::monomorphic(ty.clone()));
         }
@@ -513,15 +519,28 @@ impl Checker<'_> {
     }
 
     fn check_recursive_arguments(&self, calls: &Ty, definition: &Ty, span: Span) -> Result<(), Diagnostic> {
-        let mut inference = self.inference.clone();
-        if let (Ty::Fn(calls, _), Ty::Fn(parameters, _)) = (inference.resolve(calls), inference.resolve(definition)) {
-            for (call, parameter) in calls.iter().zip(&parameters) {
-                if inference.unify(call, parameter) == Err(TypeError::Occurs) {
-                    return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
-                }
+        let recursive_calls = match calls {
+            Ty::Var(id) => self.recursive_calls.get(id),
+            _ => None,
+        };
+        if let (Some(calls), Ty::Fn(parameters, _)) = (recursive_calls, self.inference.resolve(definition)) {
+            let first = calls.iter().filter(|(arguments, _)| self.recursive_arguments_occur(arguments, &parameters))
+                .map(|(_, span)| *span).min_by_key(|span| (span.line, span.col));
+            if let Some(span) = first {
+                return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
+            }
+        }
+        if let (Ty::Fn(calls, _), Ty::Fn(parameters, _)) = (self.inference.resolve(calls), self.inference.resolve(definition)) {
+            if self.recursive_arguments_occur(&calls, &parameters) {
+                return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
             }
         }
         Ok(())
+    }
+
+    fn recursive_arguments_occur(&self, arguments: &[Ty], parameters: &[Ty]) -> bool {
+        let mut inference = self.inference.clone();
+        arguments.iter().zip(parameters).any(|(argument, parameter)| inference.unify(argument, parameter) == Err(TypeError::Occurs))
     }
 
     fn definition(&mut self, def: &crate::parser::Def) -> Result<Ty, Diagnostic> {
@@ -1115,9 +1134,18 @@ impl Checker<'_> {
             .iter()
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        let recursive = if let Ty::Var(id) = &function {
+            self.recursive_calls.get_mut(id).map(|calls| calls.push((args.clone(), span))).is_some()
+        } else { false };
         if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
         let result = self.inference.fresh();
-        self.unify(&function, &Ty::Fn(args, Box::new(result.clone())), span)?;
+        self.unify(&function, &Ty::Fn(args, Box::new(result.clone())), span).map_err(|mut error| {
+            if recursive && error.code.as_deref() == Some("E306") {
+                error.code = Some("E307".into());
+                error.message = "recursive calls change the argument type".into();
+            }
+            error
+        })?;
         Ok(self.inference.resolve(&result))
     }
 
