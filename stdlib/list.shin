@@ -14,7 +14,7 @@ module List : LIST = struct
   def rec filter values predicate => if values | Nil => Nil | Cons(head, tail) => retain head (filter tail predicate) (predicate head)
   def rec fold values initial f => if values | Nil => initial | Cons(head, tail) => fold tail (f initial head) f
   def rec length | Nil => 0 | Cons(_, tail) => 1 + length tail
-  def reverse values => fold values Nil (fn reversed value => Cons(value, reversed))
+  def reverse values => fold values (Nil) (fn reversed value => Cons(value, reversed))
   def rec append left right => if left | Nil => right | Cons(head, tail) => Cons(head, append tail right)
   def rec odds values => if values | Nil => Nil | Cons(_, Nil) => values | Cons(head, Cons(_, tail)) => Cons(head, odds tail)
   def rec evens | Nil => Nil | Cons(_, Nil) => Nil | Cons(_, Cons(next, tail)) => Cons(next, evens tail)
