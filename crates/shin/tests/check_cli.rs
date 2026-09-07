@@ -141,3 +141,46 @@ fn dump_mono_exposes_typed_arithmetic() {
     assert!(text.starts_with("fn main() -> Int\nBinary { op: Add, left: Constant(Int(1)), right: Constant(Int(2)) }\n"));
     assert!(text.contains("name: \"print_Int\""));
 }
+
+fn positioned_rejection(path: &std::path::Path, code: &str) -> Result<(usize, usize), String> {
+    let output = Command::new(env!("CARGO_BIN_EXE_shin")).arg("check").arg(path).output().unwrap();
+    let text = String::from_utf8(output.stderr).unwrap();
+    if output.status.code() != Some(1) || !output.stdout.is_empty() || text.lines().count() != 1 {
+        return Err(format!("invalid rejection: {:?} {text}", output.status.code()));
+    }
+    let rest = text.strip_prefix(&format!("{}:", path.display())).ok_or_else(|| text.clone())?;
+    let mut parts = rest.splitn(3, ':');
+    let line = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| text.clone())?;
+    let col = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| text.clone())?;
+    if line == 0 || col == 0 || !parts.next().is_some_and(|s| s.starts_with(&format!(" error[{code}]: "))) {
+        return Err(text);
+    }
+    Ok((line, col))
+}
+
+#[test]
+fn every_reject_preserves_code_and_column_after_header_line_insertion() {
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reject");
+    let dir = std::env::temp_dir().join(format!("shin-reject-shift-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for entry in std::fs::read_dir(corpus).unwrap() {
+        let original = entry.unwrap().path();
+        if original.extension().and_then(|s| s.to_str()) != Some("shin") { continue; }
+        let source = std::fs::read_to_string(&original).unwrap();
+        let (header, code) = source.lines().enumerate().find_map(|(i, line)| line.strip_prefix("-- error:").map(|code| (i + 1, code.trim()))).unwrap();
+        let path = dir.join(original.file_name().unwrap());
+        std::fs::write(&path, &source).unwrap();
+        let baseline = positioned_rejection(&path, code);
+        let shifted = source.lines().enumerate().map(|(i, line)| format!("{line}\n{}", if i + 1 == header { "\n" } else { "" })).collect::<String>();
+        std::fs::write(&path, shifted).unwrap();
+        let actual = positioned_rejection(&path, code);
+        let expected = baseline.map(|(line, col)| (line + usize::from(line > header), col));
+        if actual != expected || expected.is_err() { failures.push(format!("{code}: expected {expected:?}, got {actual:?}")); }
+        checked += 1;
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(checked > 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
