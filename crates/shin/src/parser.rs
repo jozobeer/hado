@@ -88,7 +88,7 @@ pub enum NodeKind {
     Bin(BinOp, Box<Node>, Box<Node>),
     /// Juxtaposition application `f x y`.
     Apply(Box<Node>, Vec<Node>),
-    /// Constructor call `Some(x)` (uppercase name immediately followed by `(`).
+    /// Constructor call `Some(x)`; whitespace before `(` is insignificant.
     Call(Box<Node>, Vec<Node>),
     /// Field access `user.name` / qualified name `M.inc`.
     Field(Box<Node>, String),
@@ -337,6 +337,9 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
     .parse_program()
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum TypeContext { TopLevel, Signature, Implementation }
+
 struct Parser<'a> {
     toks: &'a [Tok],
     pos: usize,
@@ -388,17 +391,9 @@ impl Parser<'_> {
             path: self.path.to_string(),
             line: s.line,
             col: s.col,
-            code: code.map(|c| c.to_string()),
+            code: Some(code.unwrap_or("E100").to_string()),
             message: message.into(),
         }
-    }
-
-    /// Whether a `(` immediately follows `name` in the source (no
-    /// whitespace / comment in between). Used to separate constructor
-    /// calls `Some(x)` from juxtaposition `f (x)`.
-    fn paren_attaches(&self, name: &str, span: Span) -> bool {
-        let next = self.span();
-        next.line == span.line && next.col == span.col + name.len()
     }
 
     // --- top level ---
@@ -410,7 +405,7 @@ impl Parser<'_> {
             match self.kind() {
                 TokKind::Eof => break,
                 TokKind::Def => items.push(self.parse_definition()?),
-                TokKind::KwType => items.push(self.parse_type_def()?),
+                TokKind::KwType => items.push(self.parse_type_def(TypeContext::TopLevel)?),
                 TokKind::KwModule => items.push(self.parse_module()?),
                 other => {
                     return Err(self.error(
@@ -435,7 +430,7 @@ impl Parser<'_> {
         }
         // E107: an operator cannot be the defined name (`def (+) a b => ...`).
         if self.kind() == &TokKind::LParen {
-            let s = self.span();
+            let s = self.toks.get(self.pos + 1).map_or(self.span(), |token| token.span);
             return Err(self.error_at(
                 s,
                 Some("E107"),
@@ -455,6 +450,10 @@ impl Parser<'_> {
                 ))
             }
         };
+        if self.kind() == &TokKind::Pipe {
+            let (params, body) = self.parse_arm_function(span)?;
+            return Ok(Item::Def(Def { name, rec, kind: DefKind::Function { params, ret: None, body }, span }));
+        }
         if self.kind() == &TokKind::Eq {
             // E102: `def rec` is only allowed on function definitions.
             if rec {
@@ -474,6 +473,9 @@ impl Parser<'_> {
             }))
         } else {
             let params = self.parse_params()?;
+            if params.is_empty() && self.kind() == &TokKind::Arrow {
+                return Err(self.error(Some("E109"), "function requires a parameter"));
+            }
             let ret = if self.kind() == &TokKind::Colon {
                 self.bump();
                 Some(self.parse_type()?)
@@ -514,7 +516,6 @@ impl Parser<'_> {
                 let TokKind::Name(parameter) = self.kind() else {
                     return Err(self.error(None, "expected a type parameter"));
                 };
-                if type_params.contains(parameter) { return Err(self.error(None, "duplicate type parameter")); }
                 type_params.push(parameter.clone());
                 self.bump();
                 if self.kind() != &TokKind::Comma { break; }
@@ -522,13 +523,12 @@ impl Parser<'_> {
             }
             self.expect(&TokKind::Gt)?;
         }
+        if self.kind() != &TokKind::LParen {
+            return Err(self.error(None, "signature parameters require type annotations"));
+        }
         let params = self.parse_params()?;
-        let ret = if self.kind() == &TokKind::Colon {
-            self.bump();
-            Some(self.parse_type()?)
-        } else {
-            None
-        };
+        self.expect(&TokKind::Colon)?;
+        let ret = Some(self.parse_type()?);
         Ok(Item::SigDef(SigDef {
             name,
             type_params,
@@ -538,7 +538,7 @@ impl Parser<'_> {
         }))
     }
 
-    fn parse_type_def(&mut self) -> Result<Item, Diagnostic> {
+    fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
         let name = match self.kind() {
@@ -578,11 +578,14 @@ impl Parser<'_> {
             }
             self.expect(&TokKind::Gt)?;
         }
-        let ty = if self.kind() == &TokKind::Eq {
-            self.bump();
-            Some(self.parse_type()?)
-        } else {
+        let ty = if context == TypeContext::Signature {
+            if !params.is_empty() || self.kind() == &TokKind::Eq {
+                return Err(self.error(None, "signature types are abstract and have no parameters"));
+            }
             None
+        } else {
+            self.expect(&TokKind::Eq)?;
+            Some(self.parse_type_body(context)?)
         };
         Ok(Item::TypeDef(TypeDef { name, params, ty, span }))
     }
@@ -599,7 +602,7 @@ impl Parser<'_> {
             let mut items = Vec::new();
             while self.kind() != &TokKind::KwEnd {
                 match self.kind() {
-                    TokKind::KwType => items.push(self.parse_type_def()?),
+                    TokKind::KwType => items.push(self.parse_type_def(TypeContext::Signature)?),
                     TokKind::Def => items.push(self.parse_sig_def()?),
                     TokKind::Eof => {
                         return Err(self.error(None, "unterminated `sig`: expected `end`"))
@@ -621,14 +624,14 @@ impl Parser<'_> {
                 self.bump();
                 Some(self.expect_name("a signature name after `:`")?)
             } else {
-                None
+                return Err(self.error_at(span, Some("E113"), "module requires a signature"));
             };
             self.expect(&TokKind::Eq)?;
             self.expect(&TokKind::KwStruct)?;
             let mut items = Vec::new();
             while self.kind() != &TokKind::KwEnd {
                 match self.kind() {
-                    TokKind::KwType => items.push(self.parse_type_def()?),
+                    TokKind::KwType => items.push(self.parse_type_def(TypeContext::Implementation)?),
                     TokKind::Def => items.push(self.parse_definition()?),
                     TokKind::KwModule => items.push(self.parse_module()?),
                     TokKind::Eof => {
@@ -673,11 +676,11 @@ impl Parser<'_> {
                 loop {
                     let span = self.span();
                     let pname = self.expect_name("a parameter name")?;
-                    let mut ty = None;
-                    if self.kind() == &TokKind::Colon {
-                        self.bump();
-                        ty = Some(self.parse_type()?);
+                    if !pname.chars().next().is_some_and(char::is_lowercase) {
+                        return Err(self.error_at(span, None, "expected a lowercase parameter name"));
                     }
+                    self.expect(&TokKind::Colon)?;
+                    let ty = Some(self.parse_type()?);
                     params.push(Param {
                         name: pname,
                         ty,
@@ -695,6 +698,9 @@ impl Parser<'_> {
             while let TokKind::Name(n) = self.kind() {
                 let span = self.span();
                 let n = n.clone();
+                if !n.chars().next().is_some_and(char::is_lowercase) {
+                    return Err(self.error(None, "expected a lowercase parameter name"));
+                }
                 self.bump();
                 params.push(Param {
                     name: n,
@@ -706,99 +712,86 @@ impl Parser<'_> {
         Ok(params)
     }
 
-    fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
-        // Argument group `(Int, Int)` used inside `Fn<(Int, Int), Int>`.
-        if self.kind() == &TokKind::LParen {
-            self.bump();
-            let mut items = Vec::new();
-            if self.kind() != &TokKind::RParen {
-                loop {
-                    items.push(self.parse_type()?);
-                    if self.kind() == &TokKind::Comma {
-                        self.bump();
-                    } else {
-                        break;
-                    }
+    fn parse_type_body(&mut self, context: TypeContext) -> Result<TypeExpr, Diagnostic> {
+        match self.kind() {
+            TokKind::LBrace => self.parse_record_type(),
+            TokKind::Pipe => {
+                let mut constructors = Vec::new();
+                while self.kind() == &TokKind::Pipe {
+                    self.bump();
+                    constructors.push(self.parse_constructor_type()?);
                 }
+                Ok(TypeExpr::Adt(constructors))
             }
-            self.expect(&TokKind::RParen)?;
-            return Ok(TypeExpr::Group(items));
-        }
-        // Record type `{ name: String; age: Int }`.
-        if self.kind() == &TokKind::LBrace {
-            self.bump();
-            let mut fields = Vec::new();
-            if self.kind() != &TokKind::RBrace {
-                loop {
-                    let fname = self.expect_name("a field name")?;
-                    self.expect(&TokKind::Colon)?;
-                    let ty = self.parse_type()?;
-                    fields.push((fname, ty));
-                    if self.kind() == &TokKind::Semicolon {
-                        self.bump();
-                    } else {
-                        break;
-                    }
-                }
+            _ if context == TypeContext::Implementation => self.parse_type(),
+            _ => {
+                let next = self.toks.get(self.pos + 1).map(|token| &token.kind);
+                let code = if matches!(next, Some(TokKind::Pipe | TokKind::LParen)) { "E108" } else { "E100" };
+                Err(self.error(Some(code), "expected a record or a leading | for an ADT"))
             }
-            self.expect(&TokKind::RBrace)?;
-            return Ok(TypeExpr::Record(fields));
-        }
-        // ADT alternatives separated by `|`. A leading `|` (as in §10/§11,
-        // `type Nest<T> =\n  | Leaf(T)`) and no leading `|` are both accepted.
-        if self.kind() == &TokKind::Pipe {
-            self.bump();
-        }
-        let mut alts = vec![self.parse_type_variant()?];
-        while self.kind() == &TokKind::Pipe {
-            self.bump();
-            alts.push(self.parse_type_variant()?);
-        }
-        if alts.len() == 1 {
-            Ok(alts.pop().unwrap())
-        } else {
-            Ok(TypeExpr::Adt(alts))
         }
     }
 
-    fn parse_type_variant(&mut self) -> Result<TypeExpr, Diagnostic> {
+    fn parse_record_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        self.expect(&TokKind::LBrace)?;
+        let mut fields = Vec::new();
+        loop {
+            let name = self.expect_name("a field name")?;
+            self.expect(&TokKind::Colon)?;
+            fields.push((name, self.parse_type()?));
+            if self.kind() != &TokKind::Semicolon { break; }
+            self.bump();
+        }
+        self.expect(&TokKind::RBrace)?;
+        Ok(TypeExpr::Record(fields))
+    }
+
+    fn parse_constructor_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let name = self.expect_name("a constructor name")?;
+        if self.kind() != &TokKind::LParen { return Ok(TypeExpr::Name(name)); }
+        self.bump();
+        let args = self.parse_type_list(&TokKind::RParen)?;
+        Ok(TypeExpr::Apply(name, args))
+    }
+
+    fn parse_type_list(&mut self, end: &TokKind) -> Result<Vec<TypeExpr>, Diagnostic> {
+        let mut args = vec![self.parse_type()?];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            args.push(self.parse_type()?);
+        }
+        self.expect(end)?;
+        Ok(args)
+    }
+
+    fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
         let mut name = self.expect_name("a type name")?;
-        while self.kind() == &TokKind::Dot {
+        if !name.chars().next().is_some_and(char::is_uppercase) {
+            return Err(self.error(None, "type names start with an uppercase letter"));
+        }
+        if self.kind() == &TokKind::Dot {
             self.bump();
             name.push('.');
             name.push_str(&self.expect_name("a qualified type name")?);
+            return Ok(TypeExpr::Name(name));
         }
-        if self.kind() == &TokKind::Lt {
+        if self.kind() != &TokKind::Lt { return Ok(TypeExpr::Name(name)); }
+        self.bump();
+        if name == "Fn" { return self.parse_function_type(); }
+        Ok(TypeExpr::Apply(name, self.parse_type_list(&TokKind::Gt)?))
+    }
+
+    fn parse_function_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let params = if self.kind() == &TokKind::LParen {
             self.bump();
-            let mut args = Vec::new();
-            loop {
-                args.push(self.parse_type()?);
-                if self.kind() == &TokKind::Comma {
-                    self.bump();
-                } else {
-                    break;
-                }
-            }
-            self.expect(&TokKind::Gt)?;
-            Ok(TypeExpr::Apply(name, args))
-        } else if self.kind() == &TokKind::LParen {
-            self.bump();
-            let mut args = Vec::new();
-            if self.kind() != &TokKind::RParen {
-                loop {
-                    args.push(self.parse_type()?);
-                    if self.kind() == &TokKind::Comma {
-                        self.bump();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            self.expect(&TokKind::RParen)?;
-            Ok(TypeExpr::Apply(name, args))
+            TypeExpr::Group(self.parse_type_list(&TokKind::RParen)?)
         } else {
-            Ok(TypeExpr::Name(name))
-        }
+            self.parse_type()?
+        };
+        self.expect(&TokKind::Comma)?;
+        let result = self.parse_type()?;
+        self.expect(&TokKind::Gt)?;
+        Ok(TypeExpr::Apply("Fn".into(), vec![params, result]))
     }
 
     // --- expressions ---
@@ -829,6 +822,9 @@ impl Parser<'_> {
         while self.kind() == &TokKind::PipeArrow {
             self.bump();
             let right = self.parse_or()?;
+            if constructor_head(&right) {
+                return Err(self.error_at(right.span, Some("E106"), "constructor cannot be a pipe target"));
+            }
             let lspan = left.span;
             left = Node {
                 kind: NodeKind::Pipe(Box::new(left), Box::new(right)),
@@ -962,6 +958,9 @@ impl Parser<'_> {
             Ok(f)
         } else {
             let span = f.span;
+            if constructor_head(&f) {
+                return Err(self.error_at(span, Some("E106"), "constructor arguments require parentheses"));
+            }
             Ok(Node { kind: NodeKind::Apply(Box::new(f), args), span })
         }
     }
@@ -989,6 +988,17 @@ impl Parser<'_> {
     }
 
     fn parse_primary(&mut self) -> Result<Node, Diagnostic> {
+        let mut node = self.parse_atom()?;
+        while self.kind() == &TokKind::Dot {
+            self.bump();
+            let field = self.expect_name("a field name")?;
+            let span = node.span;
+            node = Node { kind: NodeKind::Field(Box::new(node), field), span };
+        }
+        Ok(node)
+    }
+
+    fn parse_atom(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         let kind = match self.kind() {
             TokKind::Int(n) => {
@@ -1073,49 +1083,34 @@ impl Parser<'_> {
             kind: NodeKind::Name(name.clone()),
             span,
         };
-        let mut last_name = name;
-        let mut last_span = span;
         while self.kind() == &TokKind::Dot {
             self.bump();
-            let fspan = self.span();
             let field = self.expect_name("a field name after `.`")?;
-            let node_span = node.span;
-            node = Node {
-                kind: NodeKind::Field(Box::new(node), field.clone()),
-                span: node_span,
-            };
-            last_name = field;
-            last_span = fspan;
+            node = Node { kind: NodeKind::Field(Box::new(node), field), span };
         }
-        if self.kind() == &TokKind::LParen && self.paren_attaches(&last_name, last_span) {
-            let lp = self.span();
-            if last_name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                // Constructor call `Some(x)`.
+        if !constructor_head(&node) {
+            return Ok(node);
+        }
+        if name == "Ok" && self.kind() == &TokKind::Unit {
+            let unit = Node { kind: NodeKind::Unit, span: self.span() };
+            self.bump();
+            return Ok(Node { kind: NodeKind::Apply(Box::new(node), vec![unit]), span });
+        }
+        if self.kind() == &TokKind::LParen {
+            self.bump();
+            let mut args = Vec::new();
+            if self.kind() == &TokKind::RParen && name == "Ok" {
+                let unit = Node { kind: NodeKind::Unit, span: self.span() };
                 self.bump();
-                let mut args = Vec::new();
-                if self.kind() != &TokKind::RParen {
-                    loop {
-                        args.push(self.parse_expr()?);
-                        if self.kind() == &TokKind::Comma {
-                            self.bump();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                self.expect(&TokKind::RParen)?;
-                return Ok(Node {
-                    kind: NodeKind::Call(Box::new(node), args),
-                    span,
-                });
-            } else {
-                // E106: functions are called by juxtaposition, not parens.
-                return Err(self.error_at(
-                    lp,
-                    Some("E106"),
-                    "function calls use juxtaposition `f x`; `f(x)` is only for constructors",
-                ));
+                return Ok(Node { kind: NodeKind::Apply(Box::new(node), vec![unit]), span });
             }
+            loop {
+                args.push(self.parse_expr()?);
+                if self.kind() != &TokKind::Comma { break; }
+                self.bump();
+            }
+            self.expect(&TokKind::RParen)?;
+            return Ok(Node { kind: NodeKind::Call(Box::new(node), args), span });
         }
         Ok(node)
     }
@@ -1123,8 +1118,7 @@ impl Parser<'_> {
     fn parse_record_fields(&mut self) -> Result<Vec<(String, Node)>, Diagnostic> {
         let mut fields = Vec::new();
         if self.kind() == &TokKind::RBrace {
-            self.bump();
-            return Ok(fields);
+            return Err(self.error(None, "record requires a field"));
         }
         loop {
             let fname = self.expect_name("a field name")?;
@@ -1183,41 +1177,54 @@ impl Parser<'_> {
                     span,
                 })
             }
-            TokKind::Pipe => {
-                let mut arms = Vec::new();
-                let mut fallback = None;
-                while self.kind() == &TokKind::Pipe {
-                    self.bump();
-                    let save = self.pos;
-                    if let Ok(pat) = self.parse_pattern() {
-                        if self.kind() == &TokKind::Arrow {
-                            self.bump();
-                            let body = self.parse_branch_expr()?;
-                            arms.push((pat, body));
-                            continue;
-                        }
-                    }
-                    // No `=>` after the pattern: it is the fallback
-                    // expression (`pattern_fallback := "|" expression`).
-                    self.pos = save;
-                    let fb = self.parse_branch_expr()?;
-                    fallback = Some(Box::new(fb));
-                    self.record_fallback_end();
-                }
-                Ok(Node {
-                    kind: NodeKind::PatternBranch {
-                        scrutinee: Box::new(scrutinee),
-                        arms,
-                        fallback,
-                    },
-                    span,
-                })
-            }
+            TokKind::Pipe => self.parse_pattern_branch(span, scrutinee),
             other => Err(self.error(
                 None,
                 format!("expected `=>` or `|` after `if`, found {other}"),
             )),
         }
+    }
+
+    fn parse_arm_function(&mut self, span: Span) -> Result<(Vec<Param>, Node), Diagnostic> {
+        // This name cannot occur in source, so lowering cannot capture a user binding.
+        let name = "$argument".to_string();
+        let scrutinee = Node { kind: NodeKind::Name(name.clone()), span };
+        let body = self.parse_pattern_branch(span, scrutinee)?;
+        Ok((vec![Param { name, ty: None, span }], body))
+    }
+
+    fn parse_pattern_branch(&mut self, span: Span, scrutinee: Node) -> Result<Node, Diagnostic> {
+        let mut arms = Vec::new();
+        let mut fallback = None;
+        while self.kind() == &TokKind::Pipe {
+            self.bump();
+            let save = self.pos;
+            if let Ok(pat) = self.parse_pattern() {
+                if self.kind() == &TokKind::Arrow {
+                    self.bump();
+                    let body = self.parse_branch_expr()?;
+                    arms.push((pat, body));
+                    continue;
+                }
+            }
+            // No `=>` after the pattern: it is the fallback
+            // expression (`pattern_fallback := "|" expression`).
+            self.pos = save;
+            let fb = self.parse_branch_expr()?;
+            fallback = Some(Box::new(fb));
+            self.record_fallback_end();
+        }
+        if arms.is_empty() {
+            return Err(self.error_at(span, None, "pattern branch requires at least one arm"));
+        }
+        Ok(Node {
+            kind: NodeKind::PatternBranch {
+                scrutinee: Box::new(scrutinee),
+                arms,
+                fallback,
+            },
+            span,
+        })
     }
 
     fn parse_cond_branch(&mut self, span: Span) -> Result<Node, Diagnostic> {
@@ -1251,7 +1258,12 @@ impl Parser<'_> {
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump(); // `fn`
+        if self.kind() == &TokKind::Pipe {
+            let (params, body) = self.parse_arm_function(span)?;
+            return Ok(Node { kind: NodeKind::Fn { params, body: Box::new(body) }, span });
+        }
         let params = self.parse_params()?;
+        if params.is_empty() { return Err(self.error(None, "lambda requires a parameter")); }
         self.expect(&TokKind::Arrow)?;
         let body = self.parse_expr()?;
         Ok(Node {
@@ -1313,9 +1325,8 @@ impl Parser<'_> {
             }
             TokKind::Name(n) => {
                 let name = n.clone();
-                let name_span = self.span();
                 self.bump();
-                if self.kind() == &TokKind::LParen && self.paren_attaches(&name, name_span) {
+                if self.kind() == &TokKind::LParen && name.chars().next().is_some_and(char::is_uppercase) {
                     self.bump();
                     let mut args = Vec::new();
                     if self.kind() != &TokKind::RParen {
@@ -1336,6 +1347,7 @@ impl Parser<'_> {
             }
             TokKind::LBrace => {
                 self.bump();
+                if self.kind() == &TokKind::RBrace { return Err(self.error(None, "record pattern requires a field")); }
                 let mut fields = Vec::new();
                 if self.kind() != &TokKind::RBrace {
                     loop {
@@ -1356,6 +1368,16 @@ impl Parser<'_> {
                 }
                 self.expect(&TokKind::RBrace)?;
                 PatternKind::Record(fields)
+            }
+            TokKind::Minus => {
+                self.bump();
+                let kind = match self.kind() {
+                    TokKind::Int(value) => NodeKind::Int(-value),
+                    TokKind::Float(value) => NodeKind::Float(-value),
+                    _ => return Err(self.error(None, "expected numeric literal after -")),
+                };
+                self.bump();
+                PatternKind::Literal(Box::new(Node { kind, span }))
             }
             TokKind::Int(_)
             | TokKind::Float(_)
@@ -1379,6 +1401,14 @@ impl Parser<'_> {
             }
         };
         Ok(Pattern { kind, span })
+    }
+}
+
+fn constructor_head(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Name(name) => name.chars().next().is_some_and(char::is_uppercase),
+        NodeKind::Call(head, _) | NodeKind::Apply(head, _) => constructor_head(head),
+        _ => false,
     }
 }
 
@@ -1441,9 +1471,12 @@ fn lower_expr(node: &Node) -> Option<Expr> {
 pub fn canonical(node: &Node) -> String {
     match &node.kind {
         NodeKind::Int(n) => n.to_string(),
-        NodeKind::Float(x) => x.to_string(),
-        NodeKind::Char(c) => format!("'{c}'"),
-        NodeKind::Str(s) => format!("\"{s}\""),
+        NodeKind::Float(x) => {
+            let text = x.to_string();
+            if text.contains('.') { text } else { format!("{text}.0") }
+        },
+        NodeKind::Char(c) => source_print::literal(&c.to_string(), '\''),
+        NodeKind::Str(s) => source_print::literal(s, '"'),
         NodeKind::Bool(b) => b.to_string(),
         NodeKind::Unit => "()".to_string(),
         NodeKind::Name(n) => n.clone(),
@@ -1457,7 +1490,8 @@ pub fn canonical(node: &Node) -> String {
             let mut s = canonical(f);
             for a in args {
                 s.push(' ');
-                s.push_str(&canonical(a));
+                if matches!(a.kind, NodeKind::Apply(..)) || matches!(&a.kind, NodeKind::Name(name) if name.chars().next().is_some_and(char::is_uppercase)) { s.push_str(&format!("({})", canonical(a))); }
+                else { s.push_str(&canonical(a)); }
             }
             s
         }
@@ -1473,7 +1507,10 @@ pub fn canonical(node: &Node) -> String {
             s.push(')');
             s
         }
-        NodeKind::Field(l, r) => format!("{}.{}", canonical(l), r),
+        NodeKind::Field(l, r) => {
+            if matches!(l.kind, NodeKind::Apply(..)) { format!("({}).{r}", canonical(l)) }
+            else { format!("{}.{r}", canonical(l)) }
+        },
         NodeKind::Record(fields) => {
             let inner = fields
                 .iter()
@@ -1500,12 +1537,7 @@ pub fn canonical(node: &Node) -> String {
             format!("(do? {} -> {})", canonical(value), canonical(body))
         }
         NodeKind::Fn { params, body } => {
-            let ps = params
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("(fn {ps} => {})", canonical(body))
+            format!("(fn{})", source_print::function_tail(params, None, body))
         }
         NodeKind::BoolBranch { cond, then, els } => format!(
             "(if {} => {} | {})",
@@ -1557,3 +1589,7 @@ impl PartialEq for Param {
 #[cfg(test)]
 #[path = "../tests/unit/parser.rs"]
 mod tests;
+
+#[path = "source_print.rs"]
+mod source_print;
+pub use source_print::canonical_program;
