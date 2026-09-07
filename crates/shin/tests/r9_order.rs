@@ -385,3 +385,44 @@ fn recursive_type_recovery_preserves_known_payloads_and_breaks_growing_cycles() 
         }
     }
 }
+
+#[test]
+fn polymorphic_recursion_points_to_the_recursive_application() {
+    for padding in 0..20 {
+        for (prefix, call) in [
+            ("def rec poly x => ", "poly [x]"),
+            ("def rec poly x => ", "[x] |> poly"),
+            ("def rec poly x =>\n    ", "poly [x]"),
+        ] {
+            let prefix = format!("{prefix}{}", " ".repeat(padding));
+            let source = format!("{prefix}{call}\ndef main = poly 1");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
+            assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.lines().last().unwrap().len() + 1), "{error}");
+        }
+    }
+}
+
+#[test]
+fn later_type_changing_recursive_calls_are_not_general_occurs_checks() {
+    let prefix = "def rec poly x => if true => poly x | ";
+    let source = format!("{prefix}poly [x]\ndef main = poly 1");
+    let error = check_source(&source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
+    assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
+}
+
+#[test]
+fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
+    for (prefix, call, suffix) in [
+        ("def rec poly x => let invoke = poly -> ", "invoke [x]", "\ndef main = poly 1"),
+        ("def rec f x => ", "g [x]", "\ndef rec g y => f y\ndef main = f 1"),
+        ("def rec poly x => if true => (fn poly => poly 1) (fn n => n) | ", "poly [x]", "\ndef main = poly 1"),
+        ("def rec poly x y => ", "poly y [x]", "\ndef main = poly 1 1"),
+    ] {
+        let source = format!("{prefix}{call}{suffix}");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
+        assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
+    }
+}
