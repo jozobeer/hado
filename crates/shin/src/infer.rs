@@ -593,8 +593,19 @@ impl Checker<'_> {
         })
     }
 
+    fn recover_type_error<T>(&mut self, result: Result<T, Diagnostic>, fallback: T) -> Result<T, Diagnostic> {
+        match result {
+            Err(error) if crate::diagnostic_order(&error).0 == 3 => {
+                self.deferred.push(error);
+                Ok(fallback)
+            }
+            result => result,
+        }
+    }
+
     fn expression(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
-        let ty = self.expression_inner(node)?;
+        let result = self.expression_inner(node);
+        let ty = self.recover_type_error(result, Ty::Error)?;
         if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..)) {
             self.composite_types.insert((node.span.line, node.span.col), ty.clone());
         }
@@ -768,6 +779,7 @@ impl Checker<'_> {
     }
 
     fn project_type(&mut self, ty: &Ty, field: &str, span: Span) -> Result<Ty, Diagnostic> {
+        if self.inference.resolve(ty) == Ty::Error { return Ok(Ty::Error); }
         if matches!(self.inference.resolve(ty), Ty::Abstract(_, _)) {
             return Err(self.error(span, Some("E601"), "abstract type has no accessible fields"));
         }
@@ -1018,6 +1030,7 @@ impl Checker<'_> {
             .iter()
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
         let result = self.inference.fresh();
         self.unify(&function, &Ty::Fn(args, Box::new(result.clone())), span)?;
         Ok(self.inference.resolve(&result))
@@ -1049,6 +1062,13 @@ impl Checker<'_> {
         body: &Node,
     ) -> Result<Ty, Diagnostic> {
         let container = self.expression(value)?;
+        if self.inference.resolve(&container) == Ty::Error {
+            let saved = self.values.clone();
+            let checked = self.propagation_body(pattern, &Ty::Error, body);
+            self.values = saved;
+            checked?;
+            return Ok(Ty::Error);
+        }
         if matches!(self.inference.resolve(&container), Ty::Var(_)) {
             let payload = self.inference.fresh();
             let saved = self.values.clone();
@@ -1135,9 +1155,10 @@ impl Checker<'_> {
     fn binding(&mut self, pat: &Pattern, value: &Node, body: &Node) -> Result<Ty, Diagnostic> {
         let ty = self.expression(value)?;
         let saved = self.values.clone();
-        self.pattern(pat, &ty)?;
-        self.check_irrefutable(pat);
-        let result = self.expression(body);
+        let result = self.pattern(pat, &ty).and_then(|()| {
+            self.check_irrefutable(pat);
+            self.expression(body)
+        });
         self.values = saved;
         result
     }
@@ -1216,7 +1237,7 @@ impl Checker<'_> {
         for (ty, span) in std::mem::take(&mut self.numeric_constraints) {
             match self.inference.resolve(&ty) {
                 Ty::Var(_) => self.unify(&ty, &Ty::Int, span)?,
-                Ty::Int | Ty::Float => {}
+                Ty::Int | Ty::Float | Ty::Error => {}
                 _ => return Err(self.error(span, Some("E305"), "expected Int or Float")),
             }
         }
@@ -1225,7 +1246,7 @@ impl Checker<'_> {
 
     fn numeric(&mut self, ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         match self.inference.resolve(ty) {
-            Ty::Int | Ty::Float => Ok(()),
+            Ty::Int | Ty::Float | Ty::Error => Ok(()),
             Ty::Var(_) => {
                 self.numeric_constraints.push((ty.clone(), span));
                 Ok(())

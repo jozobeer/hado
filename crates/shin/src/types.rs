@@ -2,6 +2,7 @@ use crate::parser::{Expr, Program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ty {
+    Error,
     Int,
     Float,
     Bool,
@@ -146,6 +147,7 @@ impl Inference {
         }
         match (&left, &right) {
             (Ty::Var(id), ty) | (ty, Ty::Var(id)) => self.bind(*id, ty),
+            (Ty::Error, _) | (_, Ty::Error) => Ok(()),
             (Ty::Fn(a, ret_a), Ty::Fn(b, ret_b)) => {
                 self.unify_arguments(a, b)?;
                 self.unify_inner(ret_a, ret_b)

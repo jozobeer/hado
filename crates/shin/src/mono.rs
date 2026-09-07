@@ -14,7 +14,7 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnresolvedType(pub u32);
+pub enum UnresolvedType { Variable(u32), Invalid }
 
 impl TryFrom<&Ty> for Type {
     type Error = UnresolvedType;
@@ -27,7 +27,8 @@ impl TryFrom<&Ty> for Type {
             Ty::Char => Self::Char,
             Ty::String => Self::String,
             Ty::Unit => Self::Unit,
-            Ty::Var(id) => return Err(UnresolvedType(*id)),
+            Ty::Var(id) => return Err(UnresolvedType::Variable(*id)),
+            Ty::Error => return Err(UnresolvedType::Invalid),
             Ty::Adt(name, args) => Self::Data(name.clone(), convert_types(args)?),
             Ty::Abstract(name, args) => Self::Abstract(name.clone(), convert_types(args)?),
             Ty::Fn(args, result) => Self::Closure(
