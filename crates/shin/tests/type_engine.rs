@@ -67,12 +67,13 @@ fn constrained_scheme_instantiates_predicate_with_function_type() {
     let mut inference = shin::types::Inference::default();
     let variable = inference.fresh();
     let function = shin::types::Ty::Fn(vec![variable.clone()], Box::new(shin::types::Ty::Bool));
-    let scheme = inference.generalize_constrained(&function, &[], &[(variable, "E704")]);
+    let origin = Some(shin::lexer::Span { line: 7, col: 13 });
+    let scheme = inference.generalize_constrained(&function, &[], &[shin::types::ComparisonConstraint { ty: variable, code: "E704", span: origin }]);
     let (first, constraints) = inference.instantiate_constrained(&scheme);
     let shin::types::Ty::Fn(args, _) = first else {
         panic!("expected function")
     };
-    assert_eq!(constraints, vec![(args[0].clone(), "E704")]);
+    assert_eq!(constraints, vec![shin::types::ComparisonConstraint { ty: args[0].clone(), code: "E704", span: origin }]);
     let (second, _) = inference.instantiate_constrained(&scheme);
     assert_ne!(
         second,
