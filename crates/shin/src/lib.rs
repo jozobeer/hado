@@ -106,7 +106,10 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<(parser::Ast, Option<u
             include_str!("../../../stdlib/option.shin"),
             include_str!("../../../stdlib/result.shin"),include_str!("../../../stdlib/string.shin"), include_str!("../../../stdlib/int.shin"), include_str!("../../../stdlib/float.shin")] {
             let padded = "\n".repeat(line) + module;
-            prelude.extend(parser::parse_source(&padded, path)?.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
+            let parsed = parser::parse_source(&padded, path)?;
+            ast.branch_anchors.extend(parsed.branch_anchors);
+            ast.branches_after_fallback.extend(parsed.branches_after_fallback);
+            prelude.extend(parsed.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
             line += module.lines().count() + 1;
         }
     }

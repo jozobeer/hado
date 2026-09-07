@@ -252,6 +252,7 @@ impl Checker<'_> {
             items: module.items.clone(),
             span: module.span,
             branches_after_fallback: Vec::new(),
+            branch_anchors: Vec::new(),
         };
         crate::type_cycles::check(&ast, self.path)?;
         let mut signatures = signatures.clone();

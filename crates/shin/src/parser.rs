@@ -228,6 +228,7 @@ pub struct Ast {
     pub items: Vec<Item>,
     pub span: Span,
     pub branches_after_fallback: Vec<Span>,
+    pub branch_anchors: Vec<(Span, Span)>,
 }
 
 impl Ast {
@@ -365,6 +366,7 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
         pos: 0,
         path,
         branches_after_fallback: Vec::new(),
+        branch_anchors: Vec::new(),
     }
     .parse_program()
 }
@@ -377,6 +379,7 @@ struct Parser<'a> {
     pos: usize,
     path: &'a str,
     branches_after_fallback: Vec<Span>,
+    branch_anchors: Vec<(Span, Span)>,
 }
 
 impl Parser<'_> {
@@ -447,7 +450,7 @@ impl Parser<'_> {
                 }
             }
         }
-        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone() })
+        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone() })
     }
 
     fn parse_definition(&mut self) -> Result<Item, Diagnostic> {
@@ -1213,12 +1216,14 @@ impl Parser<'_> {
         let mut arms = Vec::new();
         let mut fallback = None;
         while self.kind() == &TokKind::Pipe {
+            let pipe = self.span();
             self.bump();
             let save = self.pos;
             if let Ok(pat) = self.parse_pattern() {
                 if self.kind() == &TokKind::Arrow {
                     self.bump();
                     let body = self.parse_branch_expr()?;
+                    self.branch_anchors.extend([(pat.span, pipe), (body.span, pipe)]);
                     arms.push((pat, body));
                     continue;
                 }
@@ -1227,6 +1232,7 @@ impl Parser<'_> {
             // expression (`pattern_fallback := "|" expression`).
             self.pos = save;
             let fb = self.parse_branch_expr()?;
+            self.branch_anchors.push((fb.span, pipe));
             fallback = Some(Box::new(fb));
             self.record_fallback_end();
         }
@@ -1247,14 +1253,17 @@ impl Parser<'_> {
         let mut arms = Vec::new();
         let mut fallback = None;
         while self.kind() == &TokKind::Pipe {
+            let pipe = self.span();
             self.bump();
             let head = self.parse_branch_expr()?;
             if self.kind() == &TokKind::Arrow {
                 self.bump();
                 let body = self.parse_branch_expr()?;
+                self.branch_anchors.extend([(head.span, pipe), (body.span, pipe)]);
                 arms.push((head, body));
             } else {
                 // `| expression` — a fallback.
+                self.branch_anchors.push((head.span, pipe));
                 fallback = Some(Box::new(head));
                 self.record_fallback_end();
             }
