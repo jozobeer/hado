@@ -696,11 +696,7 @@ impl Checker<'_> {
         if candidates.len() != 1 {
             return Err(self.error(
                 span,
-                if candidates.len() > 1 {
-                    Some("E304")
-                } else {
-                    None
-                },
+                Some("E304"),
                 "record fields must identify one nominal type",
             ));
         }
@@ -833,12 +829,7 @@ impl Checker<'_> {
             }
         }
         if let Ty::Adt(name, _) = self.inference.resolve(&input) {
-            let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
-            for (constructor, scheme) in &self.constructors {
-                let ty = self.inference.instantiate(scheme);
-                let (arity, result) = match ty { Ty::Fn(args, result) => (args.len(), *result), other => (0, other) };
-                if let Ty::Adt(result, _) = result { groups.entry(result).or_default().push((constructor.clone(), arity)); }
-            }
+            let groups = self.constructor_groups();
             let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
             let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
             if let Err(error) = crate::check::adt_coverage(scrutinee, arms, fallback, &constructors, &families, self.path) {
@@ -1050,20 +1041,43 @@ impl Checker<'_> {
             let checked = self.propagation_body(pattern, &payload, body);
             self.values = saved;
             let result = checked?;
-            let (_, input) = self.propagation_types(&result, pattern.is_some(), value.span)?;
+            let (_, input) = self.propagation_types(&result, value.span)?;
             let Ty::Adt(name, mut args) = input else { unreachable!() };
             args[0] = payload;
             self.unify(&container, &Ty::Adt(name, args), value.span)?;
             return Ok(self.inference.resolve(&result));
         }
         let (payload, result) =
-            self.propagation_types(&container, pattern.is_some(), value.span)?;
+            self.propagation_types(&container, value.span)?;
         let saved = self.values.clone();
         let checked = self.propagation_body(pattern, &payload, body);
         self.values = saved;
         let body_type = checked?;
         self.unify(&body_type, &result, body.span)?;
         Ok(self.inference.resolve(&result))
+    }
+
+    fn constructor_groups(&self) -> HashMap<String, Vec<(String, usize)>> {
+        let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+        for (name, scheme) in &self.constructors {
+            let (result, arity) = match scheme.body() {
+                Ty::Fn(args, result) => (result.as_ref(), args.len()),
+                ty => (ty, 0),
+            };
+            if let Ty::Adt(result, _) = result {
+                groups.entry(result.clone()).or_default().push((name.clone(), arity));
+            }
+        }
+        groups
+    }
+
+    fn check_irrefutable(&mut self, pattern: &Pattern) {
+        let groups = self.constructor_groups();
+        let families = groups.values().flat_map(|group|
+            group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
+        if crate::coverage::covers_pattern(pattern, &families) != Some(true) {
+            self.deferred.push(self.error(pattern.span, Some("E402"), "binding pattern does not cover its type"));
+        }
     }
 
     fn propagation_body(
@@ -1074,6 +1088,7 @@ impl Checker<'_> {
     ) -> Result<Ty, Diagnostic> {
         if let Some(pattern) = pattern {
             self.pattern(pattern, payload)?;
+            self.check_irrefutable(pattern);
         }
         self.expression(body)
     }
@@ -1081,7 +1096,6 @@ impl Checker<'_> {
     fn propagation_types(
         &mut self,
         container: &Ty,
-        binding: bool,
         span: Span,
     ) -> Result<(Ty, Ty), Diagnostic> {
         match self.inference.resolve(container) {
@@ -1098,7 +1112,7 @@ impl Checker<'_> {
             }
             _ => Err(self.error(
                 span,
-                if binding { Some("E303") } else { None },
+                Some("E303"),
                 "propagation requires Option or Result",
             )),
         }
@@ -1108,6 +1122,7 @@ impl Checker<'_> {
         let ty = self.expression(value)?;
         let saved = self.values.clone();
         self.pattern(pat, &ty)?;
+        self.check_irrefutable(pat);
         let result = self.expression(body);
         self.values = saved;
         result
