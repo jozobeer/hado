@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 failed = False
+all_passed = all_total = 0
 for kind, files in [
     ("reject", sorted(Path("tests/reject").glob("E[45]*.shin"))),
     ("accept", sorted(Path("tests/accept").glob("*.shin"))),
@@ -17,8 +18,6 @@ for kind, files in [
     total = passed = 0
     for path in files:
         source = path.read_text()
-        if kind == "accept" and re.search(r"^-- needs: prelude\s*$", source, re.M):
-            continue
         total += 1
         result = subprocess.run([sys.argv[1], "check", str(path)], capture_output=True, text=True)
         if kind == "reject":
@@ -33,7 +32,10 @@ for kind, files in [
             failed = True
             print(f"FAIL {path}: exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}")
     print(f"{kind}: {passed}/{total}")
+    all_passed += passed + int(total > 0)
+    all_total += total + 1
     if total == 0:
         failed = True
+print(f"PASSED: {all_passed}/{all_total}")
 sys.exit(1 if failed else 0)
 PY

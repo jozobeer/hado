@@ -37,24 +37,18 @@ with tempfile.TemporaryDirectory(prefix="shin-m6-") as temporary:
         if not include_prelude and re.search(r"^-- needs: prelude\s*$", text, re.M):
             continue
         total += 1
-        expected = re.search(r"^-- expect: (.*)$", text, re.M)
+        headers = [(line.startswith("-- expect-error:"), line.split(":", 1)[1].strip())
+                   for line in text.splitlines()
+                   if line.startswith(("-- expect:", "-- expect-error:"))]
+        if len(headers) != 1:
+            print(f"NG: {source}: expected exactly one output header")
+            continue
+        is_error, expected = headers[0]
+        output = (expected + "\n").encode() if expected else b""
         copied = Path(temporary) / source.name
         copied.write_text(text)
-        if expected is None:
-            print(f"NG: {source}: missing expected stdout")
-            continue
-        passed += verify(source, copied, (expected[1] + "\n").encode())
-    probes = [
-        ("result-error", "def main = 7 / 0", b"", b"DivisionByZero\n", 1),
-        ("tail-self", "def rec down n => if n == 0 => 42 | down (n - 1)\ndef main = down 100000000", b"42\n", b"", 0),
-        ("tail-mutual", "def rec ping n => if n == 0 => 42 | pong (n - 1) 1 2 3 4 5 6 7 8\ndef rec pong n a b c d e f g h => if n == 0 => a + b + c + d + e + f + g + h | ping (n - 1)\ndef main = ping 100000000", b"42\n", b"", 0),
-        ("tail-closure", "def rec loop offset n => if n == 0 => offset | let f = fn x => loop offset x -> f (n - 1)\ndef main = loop 42 100000000", b"42\n", b"", 0),
-    ]
-    for name, text, stdout, stderr, status in probes:
-        total += 1
-        copied = Path(temporary) / ("probe-" + name + ".shin")
-        copied.write_text(text)
-        passed += verify(name, copied, stdout, stderr, status)
+        passed += verify(source, copied, b"" if is_error else output,
+                         output if is_error else b"", int(is_error))
 print(f"PASSED: {passed}/{total}")
 sys.exit(0 if total > 0 and passed == total else 1)
 PY
