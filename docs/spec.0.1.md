@@ -139,7 +139,7 @@ def rec factorial n =>
 
 `def rec` は、値定義ではなく関数定義にのみ使用できる。値定義に `rec` を付けると E102 とする。
 
-top-level は定義順に依存しない。呼び出しグラフの閉路に含まれる関数は全て `rec` とする（E208）。閉路に値定義が含まれるとエラーである（E207）。値定義は `rec` を持てない。
+top-level は定義順に依存しない。呼び出しグラフで異なる2つ以上の定義を通る閉路に含まれる関数は全て `rec` とする（E208）。`rec` のない関数の自己参照には E201 を適用する。閉路に値定義が含まれるとエラーである（E207）。値定義は `rec` を持てない。
 
 多相再帰はコンパイルエラーとする（E307）。E307 は、`rec` 関数の再帰呼び出しにおいて、引数の型と仮引数の型の単一化が出現検査に失敗した場合である。それ以外の出現検査の失敗は E306（第9節）とする。
 
@@ -1453,7 +1453,8 @@ primary         := int | float | char | string | bool | unit
                  | record_expr
                  | list_expr
                  | "(" expression ")"
-constructor_expr := upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
+constructor_expr := "Ok" "(" ")"                                          Unit payload の正準形（第21節）
+                 | upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
 list_expr       := "[" "]"
                  | "[" expression ("," expression)* "]"
@@ -1601,7 +1602,7 @@ Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相
 
 prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる。
 
-`__` で始まる名前は `stdlib/` のファイルでのみ解決する。ユーザーコードでは E202 とする。呼び出し位置でしか参照できず、値化は E203 とする。
+`__` で始まる名前は呼び出し位置でしか参照できず、値化はファイルの場所によらず E203 とする。呼び出し位置では `stdlib/` のファイルでのみ解決し、ユーザーコードでは E202 とする。
 
 ---
 
@@ -1694,7 +1695,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E504 | let-question-underscore | §23 | 冗長 | `_` |
 | E505 | unused-binding | §27 | 冗長 | 束縛名 |
 | E506 | implicit-discard | §28 | 冗長 | `_` |
-| E507 | rewrap | §33 | 冗長 | `if` |
+| E507 | rewrap | §33 | 冗長 | `if`。第52節の腕形式では `def` か `fn` |
 | E508 | repropagate | §24 | 冗長 | 再伝播する腕の `|` |
 | E509 | ok-unit-parens | §21 | 冗長 | `Ok` |
 | E510 | cons-literal-tail | §46 | 冗長 | `Cons` |
