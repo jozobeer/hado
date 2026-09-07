@@ -2,11 +2,13 @@ use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span}
 use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError};
 use crate::Checked;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
     aliases: HashMap<String, TypeExpr>,
+    ambiguous_types: HashSet<String>,
+    ambiguous_constructors: HashSet<String>,
     abstract_representations: HashMap<String, Ty>,
     deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
@@ -49,6 +51,8 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
 pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let mut checker = Checker {
         aliases: HashMap::new(),
+        ambiguous_types: HashSet::new(),
+        ambiguous_constructors: HashSet::new(),
         abstract_representations: HashMap::new(),
         deferred: Vec::new(),
         module_constructors: HashMap::new(),
@@ -84,14 +88,11 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             "compare".into(),
             checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
         );
+        let ambiguous_values = checker.prepare_ambiguous_declarations(&ast.items);
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
-                if checker
-                    .type_arities
-                    .insert(def.name.clone(), def.params.len())
-                    .is_some()
-                {
-                    return Err(checker.error(def.span, None, "duplicate type"));
+                if !checker.ambiguous_types.contains(&def.name) {
+                    checker.type_arities.insert(def.name.clone(), def.params.len());
                 }
             }
         }
@@ -122,9 +123,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         for item in &ast.items {
             match item {
                 Item::Def(def) => {
-                    if definitions.insert(def.name.clone(), def).is_some() {
-                        return Err(checker.error(def.span, None, "duplicate definition"));
-                    }
+                    definitions.entry(def.name.clone()).or_insert(def);
                 }
                 Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) => {}
                 _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
@@ -135,12 +134,13 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             for item in group {
                 match item {
                     Item::ModuleImpl(module) => checker.module(module, &signatures)?,
-                    Item::Def(def) => functions.push(def.name.clone()),
+                    Item::Def(def) if !ambiguous_values.contains(&def.name) => functions.push(def.name.clone()),
                     _ => {}
                 }
             }
             if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
         }
+        checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
         checker.resolve_projections(true)?;
         for constraint in &checker.comparison_constraints {
             if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
@@ -185,6 +185,46 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
 }
 
 impl Checker<'_> {
+    fn prepare_ambiguous_declarations(&mut self, items: &[Item]) -> HashSet<String> {
+        let ambiguous = crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
+        for name in &ambiguous.declared_types {
+            self.ambiguous_types.remove(name);
+            self.type_arities.remove(name);
+            self.aliases.remove(name);
+            self.records.remove(name);
+        }
+        for name in &ambiguous.declared_constructors {
+            if self.ambiguous_constructors.remove(name) {
+                self.constructors.remove(name);
+                self.constructor_tags.remove(name);
+            }
+        }
+        self.ambiguous_types.extend(ambiguous.types);
+        self.ambiguous_constructors.extend(ambiguous.constructors);
+        for name in &ambiguous.values {
+            self.values.insert(name.clone(), Scheme::monomorphic(Ty::Error));
+        }
+        for name in &self.ambiguous_constructors {
+            self.constructors.insert(name.clone(), Scheme::monomorphic(Ty::Error));
+        }
+        self.deferred.extend(ambiguous.diagnostics);
+        ambiguous.values
+    }
+
+    fn check_ambiguous_definitions(&mut self, items: &[Item], ambiguous: &HashSet<String>) {
+        for item in items {
+            let Item::Def(def) = item else { continue };
+            if !ambiguous.contains(&def.name) { continue; }
+            let saved = self.clone();
+            self.current_definition = Some(def.name.clone());
+            let result = self.definition(def);
+            let mut diagnostics = self.deferred.split_off(saved.deferred.len());
+            if let Err(error) = result { diagnostics.push(error); }
+            *self = saved;
+            self.deferred.extend(diagnostics);
+        }
+    }
+
     fn module(
         &mut self,
         module: &crate::parser::ModuleImpl,
@@ -261,6 +301,8 @@ impl Checker<'_> {
         self.abstract_types = saved.abstract_types;
         self.type_arities = saved.type_arities;
         self.aliases = saved.aliases;
+        self.ambiguous_types = saved.ambiguous_types;
+        self.ambiguous_constructors = saved.ambiguous_constructors;
         self.records = saved.records;
         self.constructors = saved.constructors;
         self.constructor_tags = saved.constructor_tags;
@@ -328,13 +370,11 @@ impl Checker<'_> {
                 self.module(inner, &signatures)?;
             }
         }
+        let ambiguous_values = self.prepare_ambiguous_declarations(&ast.items);
         let mut definitions = HashMap::new();
-        let mut local_types = std::collections::HashSet::new();
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
-                if !local_types.insert(def.name.clone()) {
-                    return Err(self.error(def.span, None, "duplicate module type"));
-                }
+                if self.ambiguous_types.contains(&def.name) { continue; }
                 self.type_arities.insert(def.name.clone(), def.params.len());
                 self.aliases.remove(&def.name);
                 if let Some(ty) = &def.ty {
@@ -348,9 +388,7 @@ impl Checker<'_> {
             match item {
                 Item::TypeDef(def) => self.register_type(def, &[])?,
                 Item::Def(def) => {
-                    if definitions.insert(def.name.clone(), def).is_some() {
-                        return Err(self.error(def.span, None, "duplicate module definition"));
-                    }
+                    definitions.entry(def.name.clone()).or_insert(def);
                 }
                 Item::ModuleImpl(_) | Item::ModuleSig(_) => {}
                 _ => {
@@ -363,8 +401,10 @@ impl Checker<'_> {
             }
         }
         for group in crate::names::definition_groups(&ast) {
-            self.definition_group(&group, &definitions)?;
+            let group: Vec<_> = group.into_iter().filter(|name| !ambiguous_values.contains(name)).collect();
+            if !group.is_empty() { self.definition_group(&group, &definitions)?; }
         }
+        self.check_ambiguous_definitions(&ast.items, &ambiguous_values);
         for name in definitions.keys() {
             self.module_definitions.insert(format!("{}.{}", self.module_path.join("."), name), self.values[name].clone());
         }
@@ -405,7 +445,7 @@ impl Checker<'_> {
             }
             let scheme = self.values[&declaration.name].clone();
             let (mut actual, constraints) = self.inference.instantiate_constrained(&scheme);
-            if self.inference.resolve(&actual).has_error() {
+            if !ambiguous_values.contains(&declaration.name) && self.inference.resolve(&actual).has_error() {
                 let known = self.invalid_definition_type(definitions[&declaration.name]);
                 actual = self.inference.freshen_errors(&known);
             }
@@ -578,6 +618,7 @@ impl Checker<'_> {
     }
 
     fn register_type(&mut self, def: &crate::parser::TypeDef, rejected: &[Span]) -> Result<(), Diagnostic> {
+        if self.ambiguous_types.contains(&def.name) { return Ok(()); }
         if self.aliases.contains_key(&def.name) { return Ok(()); }
         let parameters: HashMap<_, _> = def
             .params
@@ -651,6 +692,7 @@ impl Checker<'_> {
         } else {
             Ty::Fn(payload, Box::new(result.clone()))
         };
+        if self.ambiguous_constructors.contains(name) { return Ok(()); }
         let scheme = self.inference.generalize(&ty, &[]);
         if self.constructors.insert(name.clone(), scheme).is_some() {
             return Err(self.error(span, None, "duplicate constructor"));
@@ -1049,6 +1091,10 @@ impl Checker<'_> {
             .cloned()
             .ok_or_else(|| self.error(span, Some("E204"), "unknown constructor"))?;
         let ty = self.inference.instantiate(&scheme);
+        if ty == Ty::Error {
+            for pattern in args { self.pattern(pattern, &Ty::Error)?; }
+            return Ok(());
+        }
         match ty {
             Ty::Fn(payload, result) => {
                 self.unify(&result, expected, span)?;
@@ -1181,6 +1227,10 @@ impl Checker<'_> {
 
     fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
         let scheme = self.constructors[name].clone();
+        if scheme.body() == &Ty::Error {
+            for argument in args { self.expression(argument)?; }
+            return Ok(Ty::Error);
+        }
         // Constructor schemes describe payloads internally; source expressions yield only data.
         let (payloads, result) = match self.inference.instantiate(&scheme) {
             Ty::Fn(payloads, result) => (payloads, *result),
@@ -1311,6 +1361,9 @@ impl Checker<'_> {
     }
 
     fn annotation_inner(&self, annotation: &TypeExpr, span: Span, visiting: &mut Vec<String>) -> Result<Ty, Diagnostic> {
+        if matches!(&annotation.kind, TypeKind::Name(name) | TypeKind::Apply(name, _) if self.ambiguous_types.contains(name)) {
+            return Ok(Ty::Error);
+        }
         if let TypeKind::Name(name) = &annotation.kind {
             if let Some(target) = self.aliases.get(name) {
                 if visiting.contains(name) {
