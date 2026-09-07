@@ -967,9 +967,10 @@ impl Checker<'_> {
         for (input, field, output, receiver) in std::mem::take(&mut self.projections) {
             if matches!(self.inference.resolve(&input), Ty::Var(_)) {
                 if final_pass {
-                    return Err(self.error(field.dot, None, "record type could not be inferred"));
+                    self.deferred.push(self.error(receiver, Some("E304"), "record type could not be inferred"));
+                } else {
+                    self.projections.push((input, field, output, receiver));
                 }
-                self.projections.push((input, field, output, receiver));
             } else {
                 let checked = self.project_type(&input, &field, receiver);
                 let actual = self.recover_inference_error(checked, Ty::Error)?;
