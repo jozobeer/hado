@@ -173,9 +173,86 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = Vec::new();
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
+    signature_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
     match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
+    }
+}
+
+fn signature_types(
+    items: &[Item], inherited: &BTreeSet<String>, inherited_signatures: &BTreeMap<String, Vec<String>>, path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut types = inherited.clone();
+    types.extend(["Int", "Float", "Bool", "Char", "String", "Unit", "Fn"].map(str::to_owned));
+    types.extend(items.iter().filter_map(|item| match item {
+        Item::TypeDef(def) => Some(def.name.clone()),
+        _ => None,
+    }));
+    let mut signatures = inherited_signatures.clone();
+    for item in items {
+        if let Item::ModuleSig(signature) = item {
+            let exported = signature.items.iter().filter_map(|item| match item {
+                Item::TypeDef(def) => Some(def.name.clone()),
+                _ => None,
+            }).collect();
+            signatures.insert(signature.name.clone(), exported);
+        }
+    }
+    for item in items {
+        if let Item::ModuleImpl(module) = item {
+            if let Some(exported) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
+                types.extend(exported.iter().map(|name| format!("{}.{name}", module.name)));
+            }
+        }
+    }
+    for item in items {
+        match item {
+            Item::ModuleSig(signature) => signature_types(&signature.items, &types, &signatures, path, diagnostics),
+            Item::ModuleImpl(module) => signature_types(&module.items, &types, &signatures, path, diagnostics),
+            Item::SigDef(def) => {
+                let mut local = types.clone();
+                local.extend(def.type_params.iter().cloned());
+                for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
+                    resolve_type_names(ty, &local, path, diagnostics);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_type_names(
+    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    use crate::parser::TypeKind;
+    match &ty.kind {
+        TypeKind::Name(name) | TypeKind::Apply(name, _) => {
+            if !types.contains(name) {
+                diagnostics.push(crate::parser::Diagnostic {
+                    path: path.into(), line: ty.span.line, col: ty.span.col,
+                    code: Some("E204".into()), message: format!("unknown type {name}"),
+                });
+            }
+            if let TypeKind::Apply(_, args) = &ty.kind {
+                for arg in args { resolve_type_names(arg, types, path, diagnostics); }
+            }
+        }
+        TypeKind::Group(args) => {
+            for arg in args { resolve_type_names(arg, types, path, diagnostics); }
+        }
+        TypeKind::Record(fields) => {
+            for (_, field) in fields { resolve_type_names(field, types, path, diagnostics); }
+        }
+        TypeKind::Adt(variants) => {
+            for variant in variants {
+                if let TypeKind::Apply(_, payloads) = &variant.kind {
+                    for payload in payloads { resolve_type_names(payload, types, path, diagnostics); }
+                }
+            }
+        }
     }
 }
 
