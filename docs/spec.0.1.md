@@ -273,6 +273,8 @@ Fn<(Int, Int), Int>
 
 関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。constructor を先頭に置く並置（`Some 1`）は E106 とする。`inc(1)` は `inc (1)` と同じ並置である（空白は意味を持たない。第41節）。
 
+constructor は関数値ではない。payload を持つ constructor は必ず payload を伴い、payload の数と引数の数が異なる形（単独の `Some`、`Some(1, 2)`、`apply Some`）は E301 とする。
+
 ---
 
 # 9. 型推論
