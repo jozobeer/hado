@@ -4,6 +4,7 @@ use crate::types::{Inference, Scheme, Ty, TypeError};
 use crate::Checked;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 struct Checker<'a> {
     aliases: HashMap<String, TypeExpr>,
     abstract_representations: HashMap<String, Ty>,
@@ -170,14 +171,7 @@ impl Checker<'_> {
         let signature = signatures
             .get(name)
             .ok_or_else(|| self.error(module.span, Some("E204"), "unknown signature"))?;
-        let saved = self.values.clone();
-        let saved_types = self.type_arities.clone();
-        let saved_aliases = self.aliases.clone();
-        let saved_records = self.records.clone();
-        let saved_constructors = self.constructors.clone();
-        let saved_tags = self.constructor_tags.clone();
-        let saved_modules = self.modules.clone();
-        let saved_abstracts = self.abstract_types.clone();
+        let saved = self.clone();
         let saved_value_spans: std::collections::HashSet<_> = self.value_types.keys().copied().collect();
         let saved_composite_spans: std::collections::HashSet<_> = self.composite_types.keys().copied().collect();
         self.module_path.push(module.name.clone());
@@ -226,14 +220,14 @@ impl Checker<'_> {
             }
         }
         self.module_path.pop();
-        self.modules = saved_modules;
-        self.abstract_types = saved_abstracts;
-        self.type_arities = saved_types;
-        self.aliases = saved_aliases;
-        self.records = saved_records;
-        self.constructors = saved_constructors;
-        self.constructor_tags = saved_tags;
-        self.values = saved;
+        self.modules = saved.modules;
+        self.abstract_types = saved.abstract_types;
+        self.type_arities = saved.type_arities;
+        self.aliases = saved.aliases;
+        self.records = saved.records;
+        self.constructors = saved.constructors;
+        self.constructor_tags = saved.constructor_tags;
+        self.values = saved.values;
         self.modules.insert(module.name.clone(), result?);
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
