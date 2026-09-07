@@ -461,6 +461,30 @@ fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
 }
 
 #[test]
+fn indirect_polymorphic_recursion_points_to_its_definition() {
+    for index in 0..20 {
+        let name = format!("poly{index}");
+        for (helper, body) in [
+            ("", format!("(fn invoke => invoke [x]) {name}")),
+            ("", format!("let call = fn invoke => invoke [x] -> call {name}")),
+            ("def apply f x => f x\n", format!("apply {name} [x]")),
+            ("def identity x => x\n", format!("(identity {name}) [x]")),
+        ] {
+            let prefix = format!("{}{}{}", "\n".repeat(index), helper, " ".repeat(index));
+            let source = format!("{prefix}def rec {name} x => {body}\ndef main = {name} 1");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E307"), "{source}: {error}");
+            assert_eq!((error.line, error.col), (index + helper.lines().count() + 1, index + 1), "{source}: {error}");
+        }
+    }
+    assert_eq!(code("def main = (fn invoke => invoke invoke) (fn x => x)"), "E306");
+    check_source(
+        "def rec poly x => (fn poly => poly [x]) (fn values => values)\ndef main = poly 1",
+        SOURCE_PATH,
+    ).unwrap();
+}
+
+#[test]
 fn function_equality_points_to_the_operator() {
     for padding in 0..20 {
         for operator in ["==", "!="] {
