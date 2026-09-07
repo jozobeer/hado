@@ -89,6 +89,13 @@ fn signature_type_variables_are_local_to_each_member() {
     let diagnostic = error(source);
     assert_eq!(diagnostic.code.as_deref(), Some("E204"));
     assert_eq!(diagnostic.col, source.find("second(x: A").unwrap() + "second(x: ".len() + 1);
-    let valid = "module type S = sig type T def first<A>(x: A): A def second(x: T): Int end\nmodule M : S = struct type T = Int def first x => x def second x => x + 1 end\ndef main = M.first 1";
-    assert!(check_source(valid, "generated-names.shin").is_ok());
+    let valid = "module type S = sig type T def first<A>(x: A): A def second(x: T): Int end\nmodule M : S = struct type T = { value: Int } def first x => x def second x => x.value end\ndef main = M.first 1";
+    check_source(valid, "generated-names.shin").unwrap();
+}
+
+#[test]
+fn signatures_can_reference_exported_qualified_types() {
+    let source = "module type S = sig type T def make(x: Int): T end\nmodule M : S = struct type T = { value: Int } def make x => { value = x } end\nmodule type API = sig def consume(value: M.T): Int end\ndef main = 1";
+    let ast = shin::parser::parse_source(source, "generated-names.shin").unwrap();
+    shin::names::resolve(&ast, "generated-names.shin").unwrap();
 }
