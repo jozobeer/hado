@@ -1257,23 +1257,40 @@ impl Checker<'_> {
             }
         }
         let function = self.callee(callee)?;
-        let args = args
+        let argument_types = args
             .iter()
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
         let recursive = if let Ty::Var(id) = &function {
-            self.recursive_calls.get_mut(id).map(|calls| calls.push((args.clone(), span))).is_some()
+            self.recursive_calls.get_mut(id).map(|calls| calls.push((argument_types.clone(), span))).is_some()
         } else { false };
         if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
         let result = self.inference.fresh();
-        self.unify(&function, &Ty::Fn(args, Box::new(result.clone())), span).map_err(|mut error| {
+        self.unify(&function, &Ty::Fn(argument_types.clone(), Box::new(result.clone())), span).map_err(|mut error| {
             if recursive && error.code.as_deref() == Some("E306") {
                 error.code = Some("E307".into());
                 error.message = "recursive calls change the argument type".into();
+            } else if matches!(error.code.as_deref(), Some("E305" | "E306")) {
+                let anchor = self.application_argument_span(&function, &argument_types, args, callee.span);
+                error.line = anchor.line;
+                error.col = anchor.col;
             }
             error
         })?;
         Ok(self.inference.resolve(&result))
+    }
+
+    fn application_argument_span(&self, function: &Ty, types: &[Ty], args: &[Node], fallback: Span) -> Span {
+        let mut probe = self.inference.clone();
+        let parameters: Vec<_> = types.iter().map(|_| probe.fresh()).collect();
+        let result = probe.fresh();
+        if probe.unify(function, &Ty::Fn(parameters.clone(), Box::new(result))).is_err() {
+            return fallback;
+        }
+        for ((parameter, actual), argument) in parameters.iter().zip(types).zip(args) {
+            if probe.unify(parameter, actual).is_err() { return argument.span; }
+        }
+        fallback
     }
 
     fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
@@ -1292,7 +1309,13 @@ impl Checker<'_> {
         }
         for (arg, payload) in args.iter().zip(payloads) {
             let actual = self.expression(arg)?;
-            self.unify(&actual, &payload, span)?;
+            self.unify(&actual, &payload, span).map_err(|mut error| {
+                if matches!(error.code.as_deref(), Some("E305" | "E306")) {
+                    error.line = arg.span.line;
+                    error.col = arg.span.col;
+                }
+                error
+            })?;
         }
         let result = self.inference.resolve(&result);
         self.value_types.insert((span.line, span.col), result.clone());
