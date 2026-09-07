@@ -91,7 +91,7 @@ pub enum NodeKind {
     /// Constructor call `Some(x)`; whitespace before `(` is insignificant.
     Call(Box<Node>, Vec<Node>),
     /// Field access `user.name` / qualified name `M.inc`.
-    Field(Box<Node>, String),
+    Field(Box<Node>, FieldName),
     Record(Vec<(DeclaredName, Node)>),
     List(Vec<Node>),
     Let {
@@ -181,6 +181,16 @@ pub struct Param {
     pub name: String,
     pub ty: Option<TypeExpr>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldName {
+    pub name: String,
+    pub dot: Span,
+}
+
+impl PartialEq for FieldName {
+    fn eq(&self, other: &Self) -> bool { self.name == other.name }
 }
 
 #[derive(Debug, Clone)]
@@ -1010,10 +1020,11 @@ impl Parser<'_> {
     fn parse_primary(&mut self) -> Result<Node, Diagnostic> {
         let mut node = self.parse_atom()?;
         while self.kind() == &TokKind::Dot {
+            let dot = self.span();
             self.bump();
             let field = self.expect_lower_name("a field name")?;
             let span = node.span;
-            node = Node { kind: NodeKind::Field(Box::new(node), field), span };
+            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot }), span };
         }
         Ok(node)
     }
@@ -1102,9 +1113,10 @@ impl Parser<'_> {
             span,
         };
         while self.kind() == &TokKind::Dot {
+            let dot = self.span();
             self.bump();
             let field = self.expect_lower_name("a field name after `.`")?;
-            node = Node { kind: NodeKind::Field(Box::new(node), field), span };
+            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot }), span };
         }
         if !constructor_head(&node) {
             return Ok(node);
@@ -1534,8 +1546,8 @@ pub fn canonical(node: &Node) -> String {
             s
         }
         NodeKind::Field(l, r) => {
-            if matches!(l.kind, NodeKind::Apply(..)) { format!("({}).{r}", canonical(l)) }
-            else { format!("{}.{r}", canonical(l)) }
+            if matches!(l.kind, NodeKind::Apply(..)) { format!("({}).{}", canonical(l), r.name) }
+            else { format!("{}.{}", canonical(l), r.name) }
         },
         NodeKind::Record(fields) => {
             let inner = fields
