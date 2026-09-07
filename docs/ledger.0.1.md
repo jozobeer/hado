@@ -461,13 +461,13 @@ M3〜M7 は `9600c2f` `8b5a2d9`（別セッション、builder = Claude Sonnet 5
 | M6「Error-main と 1 億深さの受理コーパス」 | `tests/accept` に無く、`verify-m6.sh` の生成プローブで代替 |
 | `verify-m3.sh` チェック 10（corpus-lock） | スクリプト実行の前後比較になっており、直後の `8b5a2d9` で受理 10 本が書き換えられた |
 
-**決定（ユーザー、grilling 35 問）**
+**決定（ユーザー、grilling 36 問）**
 
 決定の一覧は `docs/plan.0.1.md` 7 節。前半 19 問（Q1〜Q19）は M3〜M7 の欠陥から出た未決事項と、引数のパターン分岐の追加。後半 16 問（Q20〜Q35）は、符号無しの診断と「通ってしまう入力」を実測で洗い出して決めたもの（Float の `%`、`do?` の対象、sig の不一致、`main` の欠落、同名宣言、refutable な `let`、負のリテラルパターン、パイプの右辺の constructor、Float の印字、番号と段階の一致、アンカー位置、無名 record、型の別名、sig の型）。
 
 **R7（仕様改訂）の実施**
 
-commander が本セッションで `docs/spec.0.1.md` に反映した。`verify-m1-spec.sh` は `PASSED: 6/6`（チェック 2 の新設節の範囲を 43..52 に広げた）。§50 は 56 行で全行に段階とアンカーがある。§41 は完全な EBNF に置き換えた。付随して `docs/plan.0.1.md` 6 節と 7 節、`docs/corpus.0.1.md`、`docs/spec-trace.0.1.md`（新設）、`PLAN.md` を更新した。plan-reviewer の審査は未実施。
+commander が本セッションで `docs/spec.0.1.md` に反映した。`verify-m1-spec.sh` は `PASSED: 6/6`（チェック 2 の新設節の範囲を 43..52 に広げた）。§50 は 56 行で全行に段階とアンカーがある。§41 は完全な EBNF に置き換えた。付随して `docs/plan.0.1.md` 6 節と 7 節、`docs/corpus.0.1.md`、`docs/spec-trace.0.1.md`（新設）、`PLAN.md` を更新した。advisor の審査で §41「空白は意味を持たない」と E106 コーパス `inc(1)` の矛盾が見つかり、Q36 として追加で問うた（A: 空白は意味を持たず、E106 は constructor の側だけ）。plan-reviewer の審査は未実施。
 
 仕様を先に変えたため、R7 終了時点で次の門番が赤になっている（想定どおり。R8 と R9 で green に戻す）: `verify-m1-corpus.sh` チェック 1（§50 が 56 行、拒否コーパスが 46 本で 1 対 1 でない）、それに依存する `verify-m2.sh` チェック 5 と `verify-m3.sh` チェック 9。他の門番と `cargo test` は全通過。
 
