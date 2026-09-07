@@ -91,3 +91,21 @@ fn arm_diagnostics_point_to_pipe_with_arbitrary_spacing() {
         }
     }
 }
+
+#[test]
+fn all_type_references_resolve_before_expression_type_errors() {
+    for index in 0..20 {
+        for declaration in [
+            format!("type Box{index} = {{ value: Missing{index} }}"),
+            format!("type Box{index} = | Pack{index}(Missing{index})"),
+            format!("def f (value: Missing{index}) => value"),
+            format!("def f value: Missing{index} => value"),
+            format!("def f = fn (value: Missing{index}) => value"),
+        ] {
+            let source = format!("def broken = 1 + true\n{declaration}\ndef main = broken");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E204"), "{source}");
+            assert_eq!((error.line, error.col), (2, declaration.find(&format!("Missing{index}")).unwrap() + 1));
+        }
+    }
+}
