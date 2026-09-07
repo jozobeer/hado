@@ -54,28 +54,20 @@ pub(crate) fn bound_names(pattern: &Pattern) -> BTreeSet<String> {
     names
 }
 
-fn bind(pattern: &Pattern, bound: &mut BTreeSet<String>) {
+pub(crate) fn bindings(pattern: &Pattern) -> Vec<(&str, crate::parser::Span)> {
     match &pattern.kind {
-        PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => {
-            bound.insert(name.clone());
-        }
-        PatternKind::Constructor(_, args) => {
-            for arg in args {
-                bind(arg, bound);
-            }
-        }
-        PatternKind::Record(fields) => {
-            for (name, pattern) in fields {
-                match pattern {
-                    Some(pattern) => bind(pattern, bound),
-                    None => {
-                        bound.insert(name.clone());
-                    }
-                }
-            }
-        }
-        _ => {}
+        PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => vec![(name, pattern.span)],
+        PatternKind::Constructor(_, args) => args.iter().flat_map(bindings).collect(),
+        PatternKind::Record(fields) => fields.iter().flat_map(|(name, nested)| match nested {
+            Some(nested) => bindings(nested),
+            None => vec![(name.as_str(), pattern.span)],
+        }).collect(),
+        _ => Vec::new(),
     }
+}
+
+fn bind(pattern: &Pattern, bound: &mut BTreeSet<String>) {
+    bound.extend(bindings(pattern).into_iter().map(|(name, _)| name.to_owned()));
 }
 
 pub(crate) fn references(node: &Node, name: &str) -> bool {
