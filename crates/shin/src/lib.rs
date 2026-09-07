@@ -162,6 +162,7 @@ pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize)
 
 mod type_cycles;
 mod type_realizations;
+mod ambiguous_declarations;
 
 pub mod names;
 
