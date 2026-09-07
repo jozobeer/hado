@@ -374,7 +374,7 @@ fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
 }
 
 pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
-    Parser {
+    let ast = Parser {
         toks,
         pos: 0,
         path,
@@ -382,7 +382,9 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
         branch_anchors: Vec::new(),
         equality_anchors: Vec::new(),
     }
-    .parse_program()
+    .parse_program()?;
+    crate::type_realizations::check(&ast, path)?;
+    Ok(ast)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -571,6 +573,7 @@ impl Parser<'_> {
         self.expect(&TokKind::KwType)?;
         let name_span = self.span();
         let name = self.expect_upper_name("a declaration name")?;
+        let parameter_start = self.span();
         let mut params = Vec::new();
         if self.kind() == &TokKind::Lt {
             self.bump();
@@ -594,6 +597,10 @@ impl Parser<'_> {
             self.expect(&TokKind::Eq)?;
             Some(self.parse_type_body(context)?)
         };
+        if context == TypeContext::Implementation && !params.is_empty()
+            && ty.as_ref().is_some_and(|ty| matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(..))) {
+            return Err(self.error_at(parameter_start, Some("E100"), "abstract type realizations cannot declare type parameters"));
+        }
         Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, span }))
     }
 

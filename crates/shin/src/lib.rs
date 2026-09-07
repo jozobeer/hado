@@ -125,6 +125,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
+    type_realizations::check(&ast, path)?;
     Ok(ParsedSource { ast, trusted_start, prelude_items })
 }
 
@@ -155,6 +156,7 @@ pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize)
 }
 
 mod type_cycles;
+mod type_realizations;
 
 pub mod names;
 
