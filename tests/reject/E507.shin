@@ -1,7 +1,6 @@
 -- spec: §33
 -- error: E507
-def f x =>
-  if x
+def f
   | Some(v) => Some(v)
   | None => None
 def main = f (Some(1))
