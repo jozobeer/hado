@@ -4,7 +4,7 @@ use std::process::Command;
 const SIGNATURE: &str = "module type S = sig type T def make(x: Int): T def get(value: T): Int end";
 
 fn module(name: &str, representation: &str, make: &str, get: &str) -> String {
-    format!("module {name} : S = struct type T = {representation} def make x => {make} def get value => {get} end")
+    format!("module {name} : S = struct type T = {representation} def make x => {make} def get (value: T) => {get} end")
 }
 
 #[test]
