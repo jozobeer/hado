@@ -338,6 +338,7 @@ M3〜M7 の成果物を実測して見つかった未決事項を、grilling 形
 | Q33 | ADT payload の無名 record | 書けない | §11, §12 |
 | Q34 | 型の別名 | 許さない。newtype は単一 constructor の ADT | §12 |
 | Q35 | sig の型 | 抽象型 `type T` のみ | §34 |
+| Q36 | `inc(1)` と空白 | 空白は意味を持たない。E106 は constructor の側だけ（`Some 1`、`x \| Some`）。`inc(1)` は `inc (1)` と同じ並置として通す | §8, §41 |
 
 grilling を経ずに commander が決めた点（可逆。異議があれば戻す）:
 
