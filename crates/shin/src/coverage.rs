@@ -16,6 +16,9 @@ pub(crate) fn constructor_payloads(
     arms: &[(Pattern, Node)],
     families: &Families,
 ) -> Option<bool> {
+    if arms.iter().any(|(pattern, _)| matches!(cell(pattern), Cell::Any)) {
+        return Some(true);
+    }
     let rows: Vec<_> = arms
         .iter()
         .filter_map(|(pattern, _)| match cell(pattern) {
