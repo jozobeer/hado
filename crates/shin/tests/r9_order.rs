@@ -461,3 +461,30 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
         check_source(source, SOURCE_PATH).unwrap_or_else(|error| panic!("{source}: {error}"));
     }
 }
+
+#[test]
+fn field_name_errors_are_ordered_with_unresolved_value_names() {
+    for index in 0..20 {
+        for field_first in [false, true] {
+            let field = format!("def field{index} (x: R) => x.missing{index}");
+            let value = format!("def value{index} = absent{index}");
+            let (first, second, anchor) = if field_first { (&field, &value, format!("missing{index}")) }
+                else { (&value, &field, format!("absent{index}")) };
+            let source = format!("type R = {{ known: Int }}\n{first}\n{second}\ndef main = field{index} {{ known = 1 }}");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+            assert_eq!((error.line, error.col), (2, first.find(&anchor).unwrap() + 1), "{error}: {source}");
+        }
+    }
+}
+
+#[test]
+fn independent_fields_survive_unresolved_payload_type_names() {
+    for broken in ["type Broken = { value: Missing }", "type Broken = | Bad(Missing)"] {
+        let field = "def field (x: R) => x.missing";
+        let source = format!("type R = {{ known: Int }}\n{field}\n{broken}\ndef main = field {{ known = 1 }}");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+        assert_eq!((error.line, error.col), (2, field.find("missing").unwrap() + 1), "{error}");
+    }
+}
