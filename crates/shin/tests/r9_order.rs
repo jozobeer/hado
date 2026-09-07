@@ -60,3 +60,16 @@ fn redundancy_uses_source_order_across_definitions() {
         assert_eq!(error.line, 1);
     }
 }
+
+#[test]
+fn non_exhaustive_branches_point_to_if_not_the_scrutinee() {
+    for padding in 0..20 {
+        for (input, arms) in [("true", "true => 1"), ("Some(1)", "Some(x) => x")] {
+            let prefix = format!("def main = {}", " ".repeat(padding));
+            let source = format!("{prefix}if   {input} | {arms}");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E402"));
+            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+        }
+    }
+}
