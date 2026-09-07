@@ -33,6 +33,8 @@ pub fn link_executable(
     let status = std::process::Command::new("cc")
         .arg(obj_path)
         .arg(runtime_lib_path())
+        .arg(std::path::PathBuf::from(env!("OUT_DIR")).join("libshin_float_format.a"))
+        .arg("-Wl,--gc-sections")
         .arg("-lgc")
         .arg("-o")
         .arg(exe_path)

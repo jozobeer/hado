@@ -20,6 +20,7 @@ pub enum RuntimeFunction {
     CharToString,
     QuoteString,
     QuoteChar,
+    CanonicalFloat,
     StringLength,
     StringConcat,
     StringCompare,
@@ -41,7 +42,7 @@ impl RuntimeFunction {
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
-            Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::PrintChar | Self::PrintFloat => None,
+            Self::CanonicalFloat | Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::PrintChar | Self::PrintFloat => None,
         }
     }
 
@@ -55,7 +56,7 @@ impl RuntimeFunction {
             Self::Alloc => return None,
             Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
             Self::QuoteString => (vec![Type::String], Type::String),
-            Self::FloatToString => (vec![Type::Float], Type::String),
+            Self::FloatToString | Self::CanonicalFloat => (vec![Type::Float], Type::String),
             Self::IntToString => (vec![Type::Int], Type::String),
             Self::PrintInt => (vec![Type::Int], Type::Unit),
             Self::PrintString | Self::PrintErrorString => (vec![Type::String], Type::Unit),
@@ -68,7 +69,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::QuoteString, Self::QuoteChar];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -80,6 +81,7 @@ impl RuntimeFunction {
 
     pub fn declaration(self) -> &'static Declaration {
         match self {
+            Self::CanonicalFloat => &Declaration { symbol: "shin_canonical_float", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::QuoteString => &Declaration { symbol: "shin_quote_string", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
             Self::QuoteChar => &Declaration { symbol: "shin_quote_char", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
             Self::CharToString => &Declaration { symbol: "shin_char_to_string", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
