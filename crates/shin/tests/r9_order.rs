@@ -179,3 +179,38 @@ fn mixed_recursion_errors_use_the_first_declaration() {
         assert_eq!((error.line, error.col), (1, 1));
     }
 }
+
+#[test]
+fn type_errors_are_ordered_independently_of_definition_dependencies() {
+    for padding in 0..20 {
+        let source = format!("def first = {}true + later\ndef later = 1 + \"bad\"\ndef main = first", " ".repeat(padding));
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E305"));
+        assert_eq!((error.line, error.col), (1, 13 + padding));
+    }
+}
+
+#[test]
+fn broken_dependencies_do_not_create_earlier_type_errors() {
+    for use_site in ["later + 1", "later 1", "later.value", "let? x = later -> Some(x + 1)"] {
+        let source = format!("def first = {use_site}\ndef later = 1 + \"bad\"\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
+        assert_eq!(error.line, 2, "{source}: {error}");
+    }
+}
+
+#[test]
+fn invalid_function_bodies_preserve_known_call_arity() {
+    let source = "def first = later 1 2\ndef later x => x + true\ndef main = first";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E301"));
+    assert_eq!((error.line, error.col), (1, 13));
+}
+
+#[test]
+fn failed_patterns_do_not_leak_shadowing_bindings() {
+    let source = "type A = { good: Int }\ntype B = { bad: Int }\ntype Pair<X, Y> = | Pair(X, Y)\ndef main = let x = { good = 1 } -> (let Pair(x, Some(n)) = Pair({ bad = 1 }, 2) -> n) + x.good";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
