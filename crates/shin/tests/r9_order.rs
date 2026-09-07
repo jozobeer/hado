@@ -331,3 +331,57 @@ fn failed_modules_retain_public_contracts_without_fake_names() {
         assert_eq!((error.line, error.col), (3, 1));
     }
 }
+
+#[test]
+fn failed_modules_roll_back_shared_inference_and_pending_projections() {
+    let source = "def main = M.run 1 + get { value = 1 }\ntype A = { value: Int }\ntype B = { value: Bool; extra: Int }\ndef get x => x.value\nmodule type S = sig def run(x: Int): Int end\nmodule M : S = struct def run x => get { value = x > 0; extra = x } end";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+    assert_eq!((error.line, error.col), (6, 1));
+
+    let source = "type A = { value: Int }\ntype B = { value: Bool }\nmodule type S = sig def run(x: Int): Int end\nmodule M : S = struct def run x y => let ignored = x.value -> y end\ndef main = M.run 1";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+    assert_eq!((error.line, error.col), (4, 1));
+}
+
+#[test]
+fn module_errors_follow_source_order_even_with_outer_dependencies() {
+    let source = "module M : S = struct def run x => helper x end\nmodule N : S = struct def run x => true end\nmodule type S = sig def run(x: Int): Int end\ndef helper x => x > 0\ndef main = M.run 1 + N.run 1";
+    let error = check_source(source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+    assert_eq!((error.line, error.col), (1, 1));
+}
+
+#[test]
+fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
+    for index in 0..20 {
+        let declaration = format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Tree{index}<List<T>>)");
+        let first = "def first = true + 1";
+        let source = format!("{first}\n{declaration}\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+        assert_eq!((error.line, error.col), (1, 13));
+
+        let source = format!("{declaration}\n{first}\ndef main = first");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E302"), "{error}");
+        assert_eq!((error.line, error.col), (1, declaration.find("List<T>").unwrap() + 1));
+    }
+}
+
+#[test]
+fn recursive_type_recovery_preserves_known_payloads_and_breaks_growing_cycles() {
+    for index in 0..20 {
+        for declaration in [
+            format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Tree{index}<List<T>>)"),
+            format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Branch{index}<List<T>>)\ntype Branch{index}<T> = | Back{index}(Tree{index}<T>)"),
+        ] {
+            let source = format!("def first = Leaf{index}(true)\n{declaration}\ndef main = first");
+            assert_eq!(code(&source), "E305", "{source}");
+
+            let source = format!("{declaration}\ndef main = Leaf{index}(1) == Leaf{index}(2)");
+            assert_eq!(code(&source), "E302", "{source}");
+        }
+    }
+}
