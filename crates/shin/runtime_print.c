@@ -33,3 +33,16 @@ ShinString *shin_quote_string(const ShinString *value) {
 ShinString *shin_quote_char(uint32_t value) {
   return quote_text(shin_char_to_string(value), '\'');
 }
+
+size_t shin_format_float(double value, unsigned char *bytes, size_t capacity);
+
+ShinString *shin_canonical_float(double value) {
+  unsigned char bytes[400];
+  size_t length = shin_format_float(value, bytes, sizeof(bytes));
+  if (length == 0 || length > sizeof(bytes)) abort();
+  ShinString *result = shin_alloc(sizeof(ShinString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+  for (size_t i = 0; i < length; ++i) result->bytes[i] = bytes[i];
+  return result;
+}

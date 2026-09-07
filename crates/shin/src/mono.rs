@@ -1735,7 +1735,7 @@ pub fn derive_scalar_printer(id: FunctionId, ty: Type) -> Result<Function, Strin
         Type::Int => (RuntimeFunction::PrintInt, value),
         Type::String => (RuntimeFunction::PrintString, value),
         Type::Char => (RuntimeFunction::PrintChar, value),
-        Type::Float => (RuntimeFunction::PrintFloat, value),
+        Type::Float => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::CanonicalFloat, vec![value])?),
         Type::Bool => (RuntimeFunction::PrintString, branch(value, text("true"), text("false"))?),
         Type::Unit => return Ok(Function {
             id, name: format!("print_{ty:?}"),
@@ -1855,7 +1855,7 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
     let runtime = match value.ty() {
         Type::String => RuntimeFunction::QuoteString,
         Type::Int => RuntimeFunction::IntToString,
-        Type::Float => RuntimeFunction::FloatToString,
+        Type::Float => RuntimeFunction::CanonicalFloat,
         Type::Char => RuntimeFunction::QuoteChar,
         Type::Bool => return branch(value, text("true"), text("false")),
         Type::Unit => return Ok(text("()")),
