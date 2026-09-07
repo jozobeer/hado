@@ -58,6 +58,15 @@ pub struct Inference {
 }
 
 impl Ty {
+    pub(crate) fn has_error(&self) -> bool {
+        match self {
+            Ty::Error => true,
+            Ty::Fn(args, result) => args.iter().any(Ty::has_error) || result.has_error(),
+            Ty::Adt(_, args) | Ty::Abstract(_, args) => args.iter().any(Ty::has_error),
+            _ => false,
+        }
+    }
+
     pub fn is_monomorphic(&self) -> bool {
         let mut variables = BTreeSet::new();
         self.free_variables(&mut variables);
@@ -109,6 +118,16 @@ impl Inference {
         let variable = Ty::Var(self.next);
         self.next += 1;
         variable
+    }
+
+    pub(crate) fn freshen_errors(&mut self, ty: &Ty) -> Ty {
+        match ty {
+            Ty::Error => self.fresh(),
+            Ty::Fn(args, result) => Ty::Fn(args.iter().map(|arg| self.freshen_errors(arg)).collect(), Box::new(self.freshen_errors(result))),
+            Ty::Adt(name, args) => Ty::Adt(name.clone(), args.iter().map(|arg| self.freshen_errors(arg)).collect()),
+            Ty::Abstract(name, args) => Ty::Abstract(name.clone(), args.iter().map(|arg| self.freshen_errors(arg)).collect()),
+            ty => ty.clone(),
+        }
     }
 
     pub fn resolve(&self, ty: &Ty) -> Ty {
