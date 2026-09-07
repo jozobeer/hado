@@ -39,6 +39,8 @@ pub(crate) fn boolean_coverage(
     let exhaustive = [false, true].iter().all(|value| {
         arms.iter().any(|(pattern, _)| {
         matches!(&pattern.kind, PatternKind::Literal(node) if node.kind == NodeKind::Bool(*value))
+            || matches!(&pattern.kind, PatternKind::Underscore)
+            || matches!(&pattern.kind, PatternKind::Name(name) if !name.starts_with(char::is_uppercase))
     })
     });
     let (code, location, message) = match (exhaustive, fallback) {
@@ -253,6 +255,9 @@ fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
         crate::normalize::same_expression(scrutinee, body)
     });
     if !arms.is_empty()
+        && arms.iter().all(|(pattern, _)| !matches!(&pattern.kind,
+            PatternKind::Underscore) && !matches!(&pattern.kind,
+            PatternKind::Name(name) if !name.starts_with(char::is_uppercase)))
         && fallback_unchanged
         && arms
             .iter()
