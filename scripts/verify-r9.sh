@@ -17,7 +17,7 @@ check() {
 }
 
 check 'R9-1 字句・全文法の往復・空白摂動' \
-    cargo test --offline --no-fail-fast --test r9_syntax --test parse_corpus
+    cargo test --offline --no-fail-fast --test r9_syntax --test r9_grammar --test parse_corpus
 check 'R9-2 検査段階・位置順・全拒否コードの位置摂動' \
     cargo test --offline --no-fail-fast --test r9_order --test check_cli
 check 'R9-3 名前解決・未使用宣言・signature・prelude' \
