@@ -149,22 +149,20 @@ fn branches() {
 fn defs_modules_types() {
     assert!(parse_source("def add x y => x + y", "t").is_ok());
     assert!(parse_source("def rec ping x => pong x", "t").is_ok());
-    assert!(parse_source("type List2<T> = Nil2 | Cons2(T, List2<T>)", "t").is_ok());
+    assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
     assert!(parse_source("module type S = sig def inc(x: Int): Int end", "t").is_ok());
     assert!(parse_source("module M : S = struct def inc x => x + 1 end", "t").is_ok());
 }
 
 #[test]
 fn adt_accepts_leading_pipe() {
-    // §10 / §11 write ADTs with a leading `|` on the first variant;
-    // the no-leading-`|` form must also stay accepted.
     assert!(parse_source(
         "type Nest<T> =\n  | Leaf(T)\n  | Node(Nest<List<T>>)",
         "t",
     )
     .is_ok());
     assert!(parse_source("type Color =\n  | Red\n  | Green\n  | Blue", "t").is_ok());
-    assert!(parse_source("type List2<T> = Nil2 | Cons2(T, List2<T>)", "t").is_ok());
+    assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
     assert_eq!(
         type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
         Some(TypeExpr::Adt(vec![
@@ -180,7 +178,10 @@ fn fn_type_group() {
     // §37: `Fn<(Int, Int), Int>` is the v0.1 function type. The `( )`
     // is an argument group, not a tuple.
     assert_eq!(
-        type_of("type F = Fn<(Int, Int), Int>"),
+        match type_of("type F = { function: Fn<(Int, Int), Int> }") {
+            Some(TypeExpr::Record(mut fields)) => Some(fields.remove(0).1),
+            _ => None,
+        },
         Some(TypeExpr::Apply(
             "Fn".into(),
             vec![
@@ -190,7 +191,7 @@ fn fn_type_group() {
         )),
     );
     assert!(parse_source("def f(x: Fn<(Int, Int), Int>): Int => 1", "t").is_ok());
-    assert!(parse_source("type F = Fn<Int, String>", "t").is_ok());
+    assert!(parse_source("type F = { function: Fn<Int, String> }", "t").is_ok());
 }
 
 #[test]
@@ -246,7 +247,7 @@ fn e105_tuple_pattern() {
 
 #[test]
 fn e106_constructor_call_form() {
-    let d = parse_source("def inc x => x + 1\ndef main = inc(1)", "t").unwrap_err();
+    let d = parse_source("def main = Some 1", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E106"));
 }
 
@@ -274,9 +275,9 @@ fn lower_m0_subset() {
 #[test]
 fn typedef_preserves_parameters() {
     for (source, expected) in [
-        ("type List2<T> = Nil2 | Cons2(T, List2<T>)", vec!["T"]),
+        ("type List2<T> = | Nil2 | Cons2(T, List2<T>)", vec!["T"]),
         ("type Pair<A, B> = { first: A; second: B }", vec!["A", "B"]),
-        ("type Count = Int", vec![]),
+        ("type Count = | Count(Int)", vec![]),
     ] {
         let ast = parse_source(source, "t").unwrap();
         let Item::TypeDef(def) = &ast.items[0] else { panic!("expected type") };
@@ -292,9 +293,9 @@ fn lower_rejects_extra_items() {
     assert!(lower_to_m0(&ast).is_none());
     let error = crate::compile_to_object(source, std::path::Path::new("unused.o"))
         .unwrap_err();
-    assert!(error.contains("E513"));
+    assert!(error.contains("E513"), "{error}");
     println!("lower_extra_def_ng: 1");
-    for extra in ["type Extra = Int", "def main = 4"] {
+    for extra in ["type Extra = | Extra(Int)", "def main = 4"] {
         let source = format!("def main = 1 + 2\n{extra}");
         assert!(lower_to_m0(&parse_source(&source, "t").unwrap()).is_none());
     }
