@@ -540,11 +540,11 @@ fn polymorphic_global_function_values_specialize_the_thunk_result() {
 #[test]
 fn unit_output_preserves_result_status_and_nested_payloads() {
     for (index, (expression, ty, status, stdout, stderr)) in [
-        ("Ok(())", "Result<Unit, Int>", 0, "", ""),
+        ("Ok()", "Result<Unit, Int>", 0, "", ""),
         ("Error(())", "Result<Int, Unit>", 1, "", ""),
         ("Some(())", "Option<Unit>", 0, "Some(())\n", ""),
         ("Ok(Error(()))", "Result<Result<Int, Unit>, Int>", 0, "Error(())\n", ""),
-        ("Error(Ok(()))", "Result<Int, Result<Unit, Int>>", 1, "", "Ok(())\n"),
+        ("Error(Ok())", "Result<Int, Result<Unit, Int>>", 1, "", "Ok(())\n"),
     ].into_iter().enumerate() {
         let path = std::env::temp_dir().join(format!("shin-unit-result-{}-{index}", std::process::id()));
         shin::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.shin", &path).unwrap();
