@@ -11,6 +11,10 @@ enum Cell {
     Unknown,
 }
 
+pub(crate) fn covers_pattern(pattern: &Pattern, families: &Families) -> Option<bool> {
+    covers(&[vec![cell(pattern)]], families)
+}
+
 pub(crate) fn constructor_payloads(
     name: &str,
     arms: &[(Pattern, Node)],
