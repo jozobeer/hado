@@ -142,3 +142,15 @@ fn signature_mismatches_report_the_module_for_all_four_forms() {
         }
     }
 }
+
+#[test]
+fn duplicate_record_values_report_the_second_field_before_type_errors() {
+    for index in 0..20 {
+        let name = format!("field{index}");
+        let prefix = format!("def main = {{ {name} = 1; {}", " ".repeat(index));
+        let source = format!("{prefix}{name} = true }}");
+        let diagnostic = error(&source);
+        assert_eq!(diagnostic.code.as_deref(), Some("E205"));
+        assert_eq!((diagnostic.line, diagnostic.col), (1, prefix.len() + 1));
+    }
+}
