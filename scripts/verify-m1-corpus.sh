@@ -237,7 +237,7 @@ else
         [ -z "$d_only_disk" ] || c5_reasons="$c5_reasons missing-from-output:$d_only_disk"
         [ -z "$d_only_out" ] || c5_reasons="$c5_reasons extra-in-output:$d_only_out"
     fi
-    for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_to_object' 'link_executable' '-- expect:' '-- error:'; do
+    for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_source_to_object' 'link_executable' '-- expect:' '-- error:'; do
         grep -qF -- "$lit" "$CORPUS_RS" || c5_reasons="$c5_reasons corpus.rs-missing:$lit"
     done
     for f in tests/accept/*.shin tests/reject/*.shin; do
