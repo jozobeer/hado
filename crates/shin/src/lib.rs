@@ -48,7 +48,7 @@ pub fn link_executable(
 }
 
 pub mod infer;
-mod unused;
+mod dependencies;
 
 #[derive(Clone)]
 pub struct Checked {
@@ -135,7 +135,7 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
     if let Err(error) = check::check_ast(&ast, path) {
         diagnostics.push(error);
     }
-    diagnostics.extend(unused::diagnostics(&ast, &checked, prelude_items, path));
+    diagnostics.extend(dependencies::diagnostics(&ast, &checked, prelude_items, path));
     match diagnostics.into_iter().map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),

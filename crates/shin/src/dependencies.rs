@@ -18,13 +18,8 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
 }
 
 pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, path: &str) -> Vec<Diagnostic> {
-    let collector = Collector { checked, constructors: constructor_owners(&ast.items) };
-    let graph: BTreeMap<_, _> = ast.items.iter().filter_map(|item| {
-        let (key, _) = declaration(item)?;
-        let mut references = References::new();
-        collector.item(item, &Scope::default(), &mut references);
-        Some((key, references))
-    }).collect();
+    let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
+    let graph = collector.graph(ast);
     let used = reachable(&graph);
     ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
@@ -87,11 +82,20 @@ impl Scope {
 }
 
 struct Collector<'a> {
-    checked: &'a crate::Checked,
+    checked: Option<&'a crate::Checked>,
     constructors: BTreeMap<String, Key>,
 }
 
 impl Collector<'_> {
+    fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
+        ast.items.iter().filter_map(|item| {
+        let (key, _) = declaration(item)?;
+        let mut references = References::new();
+        self.item(item, &Scope::default(), &mut references);
+        Some((key, references))
+    }).collect()
+    }
+
     fn item(&self, item: &Item, scope: &Scope, references: &mut References) {
         match item {
             Item::Def(def) => self.definition(&def.kind, scope, references),
@@ -141,7 +145,7 @@ impl Collector<'_> {
     }
 
     fn expression(&self, node: &Node, scope: &Scope, references: &mut References) {
-        if let Some(ty) = self.checked.composite_types.get(&(node.span.line, node.span.col)) {
+        if let Some(ty) = self.checked.and_then(|checked| checked.composite_types.get(&(node.span.line, node.span.col))) {
             inferred_type(ty, scope, references);
         }
         match &node.kind {
