@@ -20,7 +20,7 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
 pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, path: &str) -> Vec<Diagnostic> {
     let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
     let graph = collector.graph(ast);
-    let used = reachable(&graph);
+    let used = transitive_references(&Key::Value("main".into()), &graph);
     ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
         (!used.contains(&key)).then(|| Diagnostic { path: path.into(), line: span.line, col: span.col,
@@ -28,15 +28,33 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     }).collect()
 }
 
-fn reachable(graph: &BTreeMap<Key, References>) -> References {
-    let mut used = References::new();
-    let mut pending = vec![Key::Value("main".into())];
+pub(crate) fn inference_groups(ast: &Ast) -> Vec<Vec<&Item>> {
+    let collector = Collector { checked: None, constructors: constructor_owners(&ast.items) };
+    let mut graph = collector.graph(ast);
+    let keys: Vec<_> = ast.items.iter().filter_map(|item| declaration(item).map(|(key, _)| key)).collect();
+    let mut groups = Vec::new();
+    while !graph.is_empty() {
+        let closure: BTreeMap<_, _> = graph.keys().map(|key| (key.clone(), transitive_references(key, &graph))).collect();
+        let first = keys.iter().filter(|key| graph.contains_key(*key)).find(|key| {
+            graph.keys().all(|dependency| !closure[*key].contains(dependency) || closure[dependency].contains(*key))
+        }).expect("a finite dependency graph has a sink component");
+        let component: References = graph.keys().filter(|key| closure[first].contains(*key) && closure[*key].contains(first)).cloned().collect();
+        let group = ast.items.iter().filter(|item| declaration(item).is_some_and(|(key, _)| component.contains(&key))).collect();
+        for key in component { graph.remove(&key); }
+        groups.push(group);
+    }
+    groups
+}
+
+fn transitive_references(start: &Key, graph: &BTreeMap<Key, References>) -> References {
+    let mut visited = References::new();
+    let mut pending = vec![start.clone()];
     while let Some(key) = pending.pop() {
-        if used.insert(key.clone()) {
-            if let Some(references) = graph.get(&key) { pending.extend(references.iter().cloned()); }
+        if visited.insert(key.clone()) {
+            if let Some(next) = graph.get(&key) { pending.extend(next.iter().cloned()); }
         }
     }
-    used
+    visited
 }
 
 fn constructor_owners(items: &[Item]) -> BTreeMap<String, Key> {
@@ -89,11 +107,11 @@ struct Collector<'a> {
 impl Collector<'_> {
     fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
         ast.items.iter().filter_map(|item| {
-        let (key, _) = declaration(item)?;
-        let mut references = References::new();
-        self.item(item, &Scope::default(), &mut references);
-        Some((key, references))
-    }).collect()
+            let (key, _) = declaration(item)?;
+            let mut references = References::new();
+            self.item(item, &Scope::default(), &mut references);
+            Some((key, references))
+        }).collect()
     }
 
     fn item(&self, item: &Item, scope: &Scope, references: &mut References) {
