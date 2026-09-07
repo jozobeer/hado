@@ -321,7 +321,7 @@ impl Lowerer {
                 .map_err(|_| "record type is not concrete")?;
             let fields = fields
                 .iter()
-                .map(|(name, value)| Ok((name.clone(), self.expression(value)?)))
+                .map(|(name, value)| Ok((name.name.clone(), self.expression(value)?)))
                 .collect::<Result<Vec<_>, String>>()?;
             return Ok(Expression::Record { fields, result });
         }

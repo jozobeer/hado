@@ -92,7 +92,7 @@ pub enum NodeKind {
     Call(Box<Node>, Vec<Node>),
     /// Field access `user.name` / qualified name `M.inc`.
     Field(Box<Node>, String),
-    Record(Vec<(String, Node)>),
+    Record(Vec<(DeclaredName, Node)>),
     List(Vec<Node>),
     Let {
         pat: Pattern,
@@ -1130,13 +1130,14 @@ impl Parser<'_> {
         Ok(node)
     }
 
-    fn parse_record_fields(&mut self) -> Result<Vec<(String, Node)>, Diagnostic> {
+    fn parse_record_fields(&mut self) -> Result<Vec<(DeclaredName, Node)>, Diagnostic> {
         let mut fields = Vec::new();
         if self.kind() == &TokKind::RBrace {
             return Err(self.error(None, "record requires a field"));
         }
         loop {
-            let fname = self.expect_lower_name("a field name")?;
+            let span = self.span();
+            let fname = DeclaredName { name: self.expect_lower_name("a field name")?, span };
             self.expect(&TokKind::Eq)?;
             let value = self.parse_expr()?;
             fields.push((fname, value));
@@ -1530,7 +1531,7 @@ pub fn canonical(node: &Node) -> String {
         NodeKind::Record(fields) => {
             let inner = fields
                 .iter()
-                .map(|(n, v)| format!("{n} = {}", canonical(v)))
+                .map(|(n, v)| format!("{} = {}", n.name, canonical(v)))
                 .collect::<Vec<_>>()
                 .join("; ");
             format!("{{ {inner} }}")
