@@ -438,3 +438,39 @@ R3 で構文の禁止 4 件にコードが無かったのと同じ形で、**判
 - plan-review の予算は 4 回のうち 2 回消費
 - 次の一手: `PLAN.md` を plan-reviewer へ 3 回目に出すか、commander が上書き承認して builder のフェーズ A（名前解決 + CLI + 拒否コーパス 3 本）へ進む
 
+
+### R6 — 完了報告の検証と、仕様の未決事項の決定（2026-09-07）
+
+M3〜M7 は `9600c2f` `8b5a2d9`（別セッション、builder = Claude Sonnet 5）の 2 コミットで入り、planner / plan-reviewer / builder / reviewer の審査ループを経ていない。本ラウンドは commander がその成果物を実測で検証し、見つかった仕様の未決事項をユーザーに grilling 形式で問うた。
+
+**役割の逸脱:** R7（仕様改訂）は commander が仕様の差分を書き、plan-reviewer が審査する。builder は R8 から。
+
+**commander の実測（門番は全通過。それでも完了と言えない根拠）**
+
+| 検証 | 結果 |
+|---|---|
+| `cargo test`、`verify-m0`〜`m7` | 全通過 |
+| `module type S = sig def f(x: Int): Bogus end` + `def main = 1` | exit 0。実装されない sig の型名を解決していない。`tests/accept/user_store.shin` の未定義型 `Error` がこれで通っていた |
+| `def f id => if find_user id \| Ok(u) => u \| Error(e) => 0` | E205。だが `tests/reject/E508.shin` は E508 で止まる |
+| `let y = x + "a" -> y` | E501（E305 であるべき）。`check_source` が `check_ast`（E5xx）を `infer`（E205/E305）より先に走らせている |
+| `if \| x == 1 => one \| 2`（`one` は未束縛） | E511（E205 であるべき）。`E511.shin` はこれで通っていた |
+| `def f => 1` | 通る。呼び出す構文が無い 0 引数関数値ができる |
+| §12 の record 型定義の例（終端子形 `;`） | `expected a field name, found }`。仕様の例が自分のパーサを通らない |
+| `def main = [1, 2]` | `Cons(1, Cons(2, Nil))` と E510 が拒否する形で印字 |
+| `def main = { name = "a" }` | `{ name = a }`。入れ子の String に引用符が無い |
+| M6「Error-main と 1 億深さの受理コーパス」 | `tests/accept` に無く、`verify-m6.sh` の生成プローブで代替 |
+| `verify-m3.sh` チェック 10（corpus-lock） | スクリプト実行の前後比較になっており、直後の `8b5a2d9` で受理 10 本が書き換えられた |
+
+**決定（ユーザー、grilling 35 問）**
+
+決定の一覧は `docs/plan.0.1.md` 7 節。前半 19 問（Q1〜Q19）は M3〜M7 の欠陥から出た未決事項と、引数のパターン分岐の追加。後半 16 問（Q20〜Q35）は、符号無しの診断と「通ってしまう入力」を実測で洗い出して決めたもの（Float の `%`、`do?` の対象、sig の不一致、`main` の欠落、同名宣言、refutable な `let`、負のリテラルパターン、パイプの右辺の constructor、Float の印字、番号と段階の一致、アンカー位置、無名 record、型の別名、sig の型）。
+
+**R7（仕様改訂）の実施**
+
+commander が本セッションで `docs/spec.0.1.md` に反映した。`verify-m1-spec.sh` は `PASSED: 6/6`（チェック 2 の新設節の範囲を 43..52 に広げた）。§50 は 56 行で全行に段階とアンカーがある。§41 は完全な EBNF に置き換えた。付随して `docs/plan.0.1.md` 6 節と 7 節、`docs/corpus.0.1.md`、`docs/spec-trace.0.1.md`（新設）、`PLAN.md` を更新した。plan-reviewer の審査は未実施。
+
+仕様を先に変えたため、R7 終了時点で次の門番が赤になっている（想定どおり。R8 と R9 で green に戻す）: `verify-m1-corpus.sh` チェック 1（§50 が 56 行、拒否コーパスが 46 本で 1 対 1 でない）、それに依存する `verify-m2.sh` チェック 5 と `verify-m3.sh` チェック 9。他の門番と `cargo test` は全通過。
+
+**成果物:** `docs/spec.0.1.md`（R7 反映済み）、`PLAN.md`（R8〜R9）。
+
+**次の一手:** R7 の仕様差分を plan-reviewer に出す。合格後に R8（コーパス）へ。
