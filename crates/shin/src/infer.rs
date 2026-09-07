@@ -321,7 +321,7 @@ impl Checker<'_> {
             let scheme = self.values[&declaration.name].clone();
             let (actual, constraints) = self.inference.instantiate_constrained(&scheme);
             self.comparison_constraints.extend(constraints.into_iter().map(|(ty, code)| (ty, declaration.span, code)));
-            let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.clone(), self.inference.fresh())).collect();
+            let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
             let expected = self.signature_type(declaration, &parameters)?;
             self.inference
                 .unify(&actual, &expected)
@@ -443,13 +443,13 @@ impl Checker<'_> {
         let parameters: HashMap<_, _> = def
             .params
             .iter()
-            .map(|name| (name.clone(), self.inference.fresh()))
+            .map(|name| (name.name.clone(), self.inference.fresh()))
             .collect();
         let result = Ty::Adt(
             def.name.clone(),
             def.params
                 .iter()
-                .map(|name| parameters[name].clone())
+                .map(|name| parameters[&name.name].clone())
                 .collect(),
         );
         let body = def
@@ -459,7 +459,7 @@ impl Checker<'_> {
         if let TypeKind::Record(fields) = &body.kind {
             let payload = fields
                 .iter()
-                .map(|(_, ty)| self.payload_type(ty, &parameters, def.span))
+                .map(|field| self.payload_type(&field.ty, &parameters, def.span))
                 .collect::<Result<Vec<_>, _>>()?;
             let scheme = self
                 .inference
@@ -467,7 +467,7 @@ impl Checker<'_> {
             self.records.insert(
                 def.name.clone(),
                 (
-                    fields.iter().map(|(name, _)| name.clone()).collect(),
+                    fields.iter().map(|field| field.name.name.clone()).collect(),
                     scheme,
                 ),
             );

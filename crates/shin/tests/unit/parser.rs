@@ -175,7 +175,7 @@ fn fn_type_group() {
     // is an argument group, not a tuple.
     assert_eq!(
         match type_of("type F = { function: Fn<(Int, Int), Int> }") {
-            Some(TypeExpr { kind: TypeKind::Record(mut fields), .. }) => Some(fields.remove(0).1),
+            Some(TypeExpr { kind: TypeKind::Record(mut fields), .. }) => Some(fields.remove(0).ty),
             _ => None,
         },
         Some(type_expr(TypeKind::Apply(
@@ -274,7 +274,7 @@ fn typedef_preserves_parameters() {
     ] {
         let ast = parse_source(source, "t").unwrap();
         let Item::TypeDef(def) = &ast.items[0] else { panic!("expected type") };
-        assert_eq!(def.params, expected);
+        assert_eq!(def.params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>(), expected);
     }
     println!("typedef_params_ok: 1");
 }
