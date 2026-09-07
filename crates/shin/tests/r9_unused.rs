@@ -30,6 +30,16 @@ fn references_through_modules_signatures_and_inferred_records_are_used() {
         "def main = List.length [1, 2]",
         "def main = 1",
     ] {
-        assert!(check_source(source, "used.shin").is_ok(), "{source}");
+        if let Err(error) = check_source(source, "used.shin") { panic!("{source}: {error}"); }
+    }
+}
+
+#[test]
+fn unused_module_is_reported_even_when_its_signature_is_used() {
+    for index in 0..12 {
+        let source = format!("module type S = sig def run(x: Int): Int end\nmodule Unused{index} : S = struct def run x => x + 1 end\nmodule Used : S = struct def run x => x + 1 end\ndef main = Used.run {index}");
+        let error = check_source(&source, "unused-module.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E513"));
+        assert_eq!((error.line, error.col), (2, 1));
     }
 }
