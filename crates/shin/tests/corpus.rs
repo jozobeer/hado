@@ -1,13 +1,3 @@
-//! M1 corpus enumeration test (see `docs/plan.0.1.md` M1, steps 2-3).
-//!
-//! Lists every `*.shin` file under `tests/accept` and `tests/reject`,
-//! prints the count and the paths, then attempts the accept/reject
-//! control flow for each file:
-//!
-//! - accept: `compile_to_object` -> `link_executable` -> run, compare
-//!   stdout with the `-- expect:` header;
-//! - reject: expect compilation to fail with the `-- error:` code.
-//!
 use std::path::{Path, PathBuf};
 
 /// Repository root: two levels above `CARGO_MANIFEST_DIR` (`crates/shin`).
@@ -50,7 +40,21 @@ fn header_value(text: &str, marker: &str) -> Option<String> {
     })
 }
 
+fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    let headers: Vec<_> = text.lines().filter_map(|line| {
+        line.strip_prefix("-- expect:").map(|value| (0, value))
+            .or_else(|| line.strip_prefix("-- expect-error:").map(|value| (1, value)))
+    }).collect();
+    let [(status, value)] = headers.as_slice() else {
+        return Err("expected exactly one output header".into());
+    };
+    let value = value.trim();
+    let bytes = if value.is_empty() { Vec::new() } else { format!("{value}\n").into_bytes() };
+    Ok(if *status == 0 { (0, bytes, Vec::new()) } else { (1, Vec::new(), bytes) })
+}
+
 fn try_accept(rel: &str, text: &str) -> Result<(), String> {
+    let (status, stdout, stderr) = expected_output(text)?;
     let work = std::env::temp_dir().join(format!("shin-corpus-{}", std::process::id()));
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let stem = rel.replace('/', "_");
@@ -60,8 +64,7 @@ fn try_accept(rel: &str, text: &str) -> Result<(), String> {
         shin::compile_source_to_object(text, rel, &obj)?;
         shin::link_executable(&obj, &exe)?;
         let out = std::process::Command::new(&exe).output().map_err(|e| e.to_string())?;
-        let expected = header_value(text, "-- expect:").ok_or("missing expected stdout")? + "\n";
-        if !out.status.success() || !out.stderr.is_empty() || out.stdout != expected.as_bytes() {
+        if out.status.code() != Some(status) || out.stderr != stderr || out.stdout != stdout {
             return Err(format!("status={:?} stdout={:?} stderr={:?}", out.status, out.stdout, out.stderr));
         }
         Ok(())
