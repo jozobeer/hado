@@ -154,3 +154,32 @@ fn duplicate_record_values_report_the_second_field_before_type_errors() {
         assert_eq!((diagnostic.line, diagnostic.col), (1, prefix.len() + 1));
     }
 }
+
+#[test]
+fn value_name_resolution_respects_binding_scopes() {
+    for source in [
+        "def f f => f + 1\ndef main = f 1",
+        "def f x => let f = x + 1 -> f + 1\ndef main = f 1",
+        "def f x => (fn f => f + 1) x\ndef main = f 1",
+        "def f | Some(f) => f + 1 | None => 0\ndef main = f (Some(1))",
+    ] {
+        shin::check_source(source, "binding-scope.shin").unwrap();
+    }
+    for source in [
+        "def main = (let x = 1 -> x + 1) + x",
+        "def f | Some(n) => n + 1 | None => n\ndef main = f (Some(1))",
+    ] {
+        assert_eq!(shin::check_source(source, "binding-scope.shin").err().unwrap().code.as_deref(), Some("E204"));
+    }
+}
+
+#[test]
+fn unresolved_value_names_report_the_first_reference() {
+    for index in 0..20 {
+        let prefix = format!("def main = {}", " ".repeat(index));
+        let source = format!("{prefix}missing{index} + later{index}");
+        let error = shin::check_source(&source, "value-position.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"));
+        assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+    }
+}

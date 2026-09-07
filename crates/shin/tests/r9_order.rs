@@ -140,3 +140,42 @@ fn recursive_type_errors_use_source_order_across_declarations() {
         }
     }
 }
+
+#[test]
+fn unresolved_values_and_intrinsics_precede_type_errors() {
+    for index in 0..20 {
+        for (body, expected) in [
+            (format!("missing{index} {index}"), "E204"),
+            (format!("Unknown{index}.value {index}"), "E204"),
+            (format!("if {index} | Unknown{index}(x) => x | 0"), "E204"),
+            ("__string_length 1".into(), "E202"),
+            ("__string_length".into(), "E203"),
+        ] {
+            let source = format!("def broken = 1 + true\ndef other = {body}\ndef main = broken");
+            assert_eq!(code(&source), expected, "{source}");
+        }
+    }
+}
+
+#[test]
+fn recursion_and_unbound_names_share_source_order() {
+    let cycle = "def a x => b x\ndef b x => a x";
+    let unknown = "def unknown = missing";
+    for (prefix, expected) in [(format!("{cycle}\n{unknown}"), "E208"), (format!("{unknown}\n{cycle}"), "E204")] {
+        let error = check_source(&format!("{prefix}\ndef main = a unknown"), SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(expected));
+        assert_eq!(error.line, 1);
+    }
+}
+
+#[test]
+fn mixed_recursion_errors_use_the_first_declaration() {
+    for (prefix, expected) in [
+        ("def ping x => seed\ndef seed = ping 0", "E208"),
+        ("def seed = ping 0\ndef ping x => seed", "E207"),
+    ] {
+        let error = check_source(&format!("{prefix}\ndef main = seed"), SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(expected));
+        assert_eq!((error.line, error.col), (1, 1));
+    }
+}
