@@ -499,7 +499,12 @@ impl Parser<'_> {
             let item = match self.kind() {
                 TokKind::Def => self.parse_definition(),
                 TokKind::KwType => self.parse_type_def(context),
-                TokKind::KwModule => self.parse_module(),
+                TokKind::KwModule => {
+                    if context != TypeContext::TopLevel {
+                        self.diagnostics.push(self.error(Some("E100"), "module declarations must be top-level"));
+                    }
+                    self.parse_module()
+                }
                 other => Err(self.error(None, format!("expected `def`, `type`, or `module`, found {other}"))),
             };
             match item {
