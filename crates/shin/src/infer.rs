@@ -93,6 +93,21 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             }
         }
     }
+    let signatures: HashMap<_, _> = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
+            _ => None,
+        })
+        .collect();
+    for item in &ast.items {
+        if let Item::ModuleImpl(module) = item {
+            if let Some(signature) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
+                checker.module_abstract_parameters(module, signature);
+            }
+        }
+    }
     let violations = crate::type_cycles::violations(ast, path);
     for item in &ast.items {
         if let Item::TypeDef(def) = item {
@@ -102,14 +117,6 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         }
     }
     checker.deferred.extend(violations.into_iter().map(|violation| violation.diagnostic));
-    let signatures: HashMap<_, _> = ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
-            _ => None,
-        })
-        .collect();
     let mut definitions = HashMap::new();
     for item in &ast.items {
         match item {
