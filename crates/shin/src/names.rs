@@ -272,11 +272,15 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
     for item in items {
         match item {
             Item::Def(def) => register(&mut names.values, &def.name, def.name_span, path)?,
-            Item::SigDef(def) => register(&mut names.values, &def.name, def.name_span, path)?,
+            Item::SigDef(def) => {
+                register(&mut names.values, &def.name, def.name_span, path)?;
+                register_parameters(&def.type_params, path)?;
+            }
             Item::TypeDef(def) => {
                 register(&mut names.types, &def.name, def.name_span, path)?;
+                register_parameters(&def.params, path)?;
                 if let Some(body) = &def.ty {
-                    register_constructors(body, &mut names.constructors, def.span, path)?;
+                    register_type_members(body, &mut names.constructors, path)?;
                 }
             }
             Item::ModuleImpl(module) => {
@@ -292,20 +296,30 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
     Ok(())
 }
 
-fn register_constructors(
+fn register_parameters(parameters: &[crate::parser::DeclaredName], path: &str) -> Result<(), crate::parser::Diagnostic> {
+    let mut names = BTreeSet::new();
+    for parameter in parameters { register(&mut names, &parameter.name, parameter.span, path)?; }
+    Ok(())
+}
+
+fn register_type_members(
     body: &crate::parser::TypeExpr,
     names: &mut BTreeSet<String>,
-    span: crate::parser::Span,
     path: &str,
 ) -> Result<(), crate::parser::Diagnostic> {
     use crate::parser::TypeKind;
     match &body.kind {
         TypeKind::Adt(variants) => {
             for variant in variants {
-                register_constructors(variant, names, span, path)?;
+                if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &variant.kind {
+                    register(names, name, variant.span, path)?;
+                }
             }
         }
-        TypeKind::Name(name) | TypeKind::Apply(name, _) => register(names, name, span, path)?,
+        TypeKind::Record(fields) => {
+            let mut names = BTreeSet::new();
+            for field in fields { register(&mut names, &field.name.name, field.name.span, path)?; }
+        }
         _ => {}
     }
     Ok(())
