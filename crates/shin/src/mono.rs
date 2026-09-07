@@ -1772,7 +1772,11 @@ fn derive_printer(id: FunctionId, ty: Type, context: &mut DisplayContext<'_>) ->
                 let effect = if parameters[index] == Type::Unit {
                     Expression::Constant(Constant::Unit)
                 } else {
-                    let text = context.format(payload)?;
+                    let text = match parameters[index] {
+                        Type::String => payload,
+                        Type::Char => Expression::call_runtime(crate::runtime_abi::RuntimeFunction::CharToString, vec![payload])?,
+                        _ => context.format(payload)?,
+                    };
                     Expression::call_runtime(runtime, vec![text])?
                 };
                 arms.push((constructor.into(), Expression::Let { id: 1, value: Box::new(effect), body: Box::new(Expression::Constant(Constant::Int(index as i64))) }));
@@ -1849,10 +1853,10 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
     use crate::runtime_abi::RuntimeFunction;
     let text = |s: &str| Expression::Constant(Constant::String(s.into()));
     let runtime = match value.ty() {
-        Type::String => return Ok(value),
+        Type::String => RuntimeFunction::QuoteString,
         Type::Int => RuntimeFunction::IntToString,
         Type::Float => RuntimeFunction::FloatToString,
-        Type::Char => RuntimeFunction::CharToString,
+        Type::Char => RuntimeFunction::QuoteChar,
         Type::Bool => return branch(value, text("true"), text("false")),
         Type::Unit => return Ok(text("()")),
         Type::Data(name, parameters) if name == "List" && parameters.len() == 1 => {
