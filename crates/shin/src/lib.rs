@@ -130,7 +130,6 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
     let ParsedSource { ast, trusted_start, prelude_items } = parse_with_prelude(source, path)?;
     names::resolve_with_prelude(&ast, path, trusted_start)?;
-    type_cycles::check(&ast, path)?;
     let (checked, mut diagnostics) = infer::infer_with_diagnostics(&ast, path, trusted_start)?;
     if let Err(error) = check::check_ast(&ast, path) {
         diagnostics.push(error);

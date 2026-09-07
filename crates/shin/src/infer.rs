@@ -88,11 +88,15 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             }
         }
     }
+    let violations = crate::type_cycles::violations(ast, path);
     for item in &ast.items {
         if let Item::TypeDef(def) = item {
-            checker.register_type(def)?;
+            let rejected: Vec<_> = violations.iter().filter(|violation| violation.definition == def.name)
+                .map(|violation| violation.reference).collect();
+            checker.register_type(def, &rejected)?;
         }
     }
+    checker.deferred.extend(violations.into_iter().map(|violation| violation.diagnostic));
     let signatures: HashMap<_, _> = ast
         .items
         .iter()
@@ -175,8 +179,19 @@ impl Checker<'_> {
         let saved_value_spans: std::collections::HashSet<_> = self.value_types.keys().copied().collect();
         let saved_composite_spans: std::collections::HashSet<_> = self.composite_types.keys().copied().collect();
         self.module_path.push(module.name.clone());
-        let result = self.module_body(module, signature, signatures);
-        if result.is_ok() {
+        let exports = match self.module_body(module, signature, signatures) {
+            Ok(exports) => exports,
+            Err(error) => {
+                let diagnostics = self.deferred.split_off(saved.deferred.len());
+                *self = saved;
+                self.deferred.extend(diagnostics);
+                self.recover_type_error(Err(error), ())?;
+                let exports = self.module_signature_exports(module, signature)?;
+                self.modules.insert(module.name.clone(), exports);
+                return Ok(());
+            }
+        };
+        {
             let type_names: HashMap<_, _> = module.items.iter().filter_map(|item| match item {
                 Item::TypeDef(definition) => Some((definition.name.clone(), format!("{}.{}", self.module_path.join("."), definition.name))),
                 _ => None,
@@ -228,15 +243,42 @@ impl Checker<'_> {
         self.constructors = saved.constructors;
         self.constructor_tags = saved.constructor_tags;
         self.values = saved.values;
-        self.modules.insert(module.name.clone(), result?);
+        self.modules.insert(module.name.clone(), exports);
+        self.module_abstract_parameters(module, signature);
+        Ok(())
+    }
+
+    fn module_abstract_parameters(
+        &mut self, module: &crate::parser::ModuleImpl, signature: &crate::parser::ModuleSig,
+    ) -> HashMap<String, Ty> {
+        let mut parameters = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
                 let local = format!("{}.{}", module.name, def.name);
                 let qualified = if self.module_path.is_empty() { local.clone() } else { format!("{}.{}", self.module_path.join("."), local) };
-                self.abstract_types.insert(local, (def.params.len(), qualified));
+                self.abstract_types.insert(local, (def.params.len(), qualified.clone()));
+                parameters.insert(def.name.clone(), Ty::Abstract(qualified, vec![]));
             }
         }
-        Ok(())
+        parameters
+    }
+
+    fn module_signature_exports(
+        &mut self, module: &crate::parser::ModuleImpl, signature: &crate::parser::ModuleSig,
+    ) -> Result<HashMap<String, Scheme>, Diagnostic> {
+        let abstracts = self.module_abstract_parameters(module, signature);
+        let mut exports = HashMap::new();
+        for item in &signature.items {
+            if let Item::SigDef(member) = item {
+                let mut parameters = abstracts.clone();
+                for parameter in &member.type_params {
+                    parameters.insert(parameter.name.clone(), self.inference.fresh());
+                }
+                let ty = self.signature_type(member, &parameters)?;
+                exports.insert(member.name.clone(), self.inference.generalize(&ty, &[]));
+            }
+        }
+        Ok(exports)
     }
 
     fn module_body(
@@ -281,7 +323,7 @@ impl Checker<'_> {
         }
         for item in &ast.items {
             match item {
-                Item::TypeDef(def) => self.register_type(def)?,
+                Item::TypeDef(def) => self.register_type(def, &[])?,
                 Item::Def(def) => {
                     if definitions.insert(def.name.clone(), def).is_some() {
                         return Err(self.error(def.span, None, "duplicate module definition"));
@@ -496,7 +538,7 @@ impl Checker<'_> {
         }
     }
 
-    fn register_type(&mut self, def: &crate::parser::TypeDef) -> Result<(), Diagnostic> {
+    fn register_type(&mut self, def: &crate::parser::TypeDef, rejected: &[Span]) -> Result<(), Diagnostic> {
         if self.aliases.contains_key(&def.name) { return Ok(()); }
         let parameters: HashMap<_, _> = def
             .params
@@ -517,7 +559,7 @@ impl Checker<'_> {
         if let TypeKind::Record(fields) = &body.kind {
             let payload = fields
                 .iter()
-                .map(|field| self.payload_type(&field.ty, &parameters, def.span))
+                .map(|field| self.recovering_payload_type(&field.ty, &parameters, def.span, rejected))
                 .collect::<Result<Vec<_>, _>>()?;
             let scheme = self
                 .inference
@@ -536,7 +578,7 @@ impl Checker<'_> {
             _ => std::slice::from_ref(body),
         };
         for (tag, variant) in variants.iter().enumerate() {
-            self.register_constructor(variant, &parameters, &result, def.span)?;
+            self.register_constructor(variant, &parameters, &result, def.span, rejected)?;
             let name = match &variant.kind {
                 TypeKind::Name(name) | TypeKind::Apply(name, _) => name,
                 _ => unreachable!("registered constructor"),
@@ -553,13 +595,14 @@ impl Checker<'_> {
         parameters: &HashMap<String, Ty>,
         result: &Ty,
         span: Span,
+        rejected: &[Span],
     ) -> Result<(), Diagnostic> {
         let (name, payload) = match &variant.kind {
             TypeKind::Name(name) => (name, Vec::new()),
             TypeKind::Apply(name, args) => (
                 name,
                 args.iter()
-                    .map(|arg| self.payload_type(arg, parameters, span))
+                    .map(|arg| self.recovering_payload_type(arg, parameters, span, rejected))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => return Err(self.error(span, None, "record definitions are not implemented")),
@@ -582,10 +625,19 @@ impl Checker<'_> {
         parameters: &HashMap<String, Ty>,
         span: Span,
     ) -> Result<Ty, Diagnostic> {
+        self.recovering_payload_type(expr, parameters, span, &[])
+    }
+
+    fn recovering_payload_type(
+        &self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
+    ) -> Result<Ty, Diagnostic> {
+        if rejected.iter().any(|reference| reference.line == expr.span.line && reference.col == expr.span.col) {
+            return Ok(Ty::Error);
+        }
         match &expr.kind {
             TypeKind::Apply(name, args) if name == "Fn" && args.len() == 2 => {
                 let inputs = match &args[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => std::slice::from_ref(&args[0]) };
-                Ok(Ty::Fn(inputs.iter().map(|ty| self.payload_type(ty, parameters, span)).collect::<Result<_, _>>()?, Box::new(self.payload_type(&args[1], parameters, span)?)))
+                Ok(Ty::Fn(inputs.iter().map(|ty| self.recovering_payload_type(ty, parameters, span, rejected)).collect::<Result<_, _>>()?, Box::new(self.recovering_payload_type(&args[1], parameters, span, rejected)?)))
             }
             TypeKind::Name(name) if parameters.contains_key(name) => Ok(parameters[name].clone()),
             TypeKind::Name(name) if self.aliases.contains_key(name) => self.annotation(expr, span),
@@ -595,7 +647,7 @@ impl Checker<'_> {
             TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
                 let args = args
                     .iter()
-                    .map(|arg| self.payload_type(arg, parameters, span))
+                    .map(|arg| self.recovering_payload_type(arg, parameters, span, rejected))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Adt(name.clone(), args))
             }
