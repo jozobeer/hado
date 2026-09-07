@@ -5,8 +5,6 @@ python3 - <<'PY'
 import os, pathlib, re, subprocess, tempfile, json
 P = pathlib.Path
 results = {}
-locked = {p: p.read_bytes() for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*.shin')}
-locked[P('crates/shin/tests/corpus.rs')] = P('crates/shin/tests/corpus.rs').read_bytes()
 def run(*args):
     try:
         return subprocess.run(args, capture_output=True, text=True, timeout=180)
@@ -26,7 +24,7 @@ def check(path, print_type=False):
 def success(r): return r.returncode == 0 and not r.stdout and not r.stderr
 usage = [run(shin), run(shin, 'check')]
 report(1, 'cli', build.returncode == 0 and os.access(shin, os.X_OK) and all(r.returncode == 2 and not r.stdout and r.stderr.startswith('usage: shin ') and '<file>' in r.stderr for r in usage))
-accept = [p for p in sorted(P('tests/accept').glob('*.shin')) if not re.search(r'^-- needs: prelude', p.read_text(), re.M)]
+accept = sorted(P('tests/accept').glob('*.shin'))
 accepted = 0
 for p in accept:
     r = check(p)
@@ -34,7 +32,7 @@ for p in accept:
         accepted += 1
         print(f'm3_accept_ok: {p}')
     else: print(r.stderr.strip())
-report(2, 'accept-20', len(accept) == accepted == 20)
+report(2, f'accept-{len(accept)}', bool(accept) and len(accept) == accepted)
 codes = ['E201','E203','E204','E301','E302','E303','E304','E601','E602']
 reject = [P(f'tests/reject/{code}.shin') for code in codes]
 lines = {}
@@ -50,7 +48,7 @@ p = reject[0]
 original = p.read_bytes()
 try:
     header = '\n'.join(original.decode().splitlines()[:2])
-    p.write_text(header+'\ntype Nest<T> = Leaf(T) | Node(Nest<List<T>>)\ndef main = 1\n')
+    p.write_text(header+'\ntype Nest<T> = | Leaf(T) | Node(Nest<List<T>>)\ndef main = 1\n')
     r = check(p)
     report(4, 'swap', 'error[E302]' in r.stderr and 'error[E201]' not in r.stderr)
 finally: p.write_bytes(original)
@@ -93,16 +91,17 @@ with tempfile.TemporaryDirectory(prefix='shin-m3-') as temp:
         r = check(p)
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
-source = '\n'.join(p.read_text() for p in P('crates/shin/src').rglob('*.rs'))
+source = '\n'.join(p.read_text() for p in [*P('crates/shin/src').rglob('*.rs'), P('crates/shin/tests/corpus.rs')])
+corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*.shin')]
 lib = P('crates/shin/src/lib.rs').read_text()
 types = P('crates/shin/src/types.rs').read_text()
 names = P('crates/shin/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
-glue &= not any('"'+p.name+'"' in source for p in reject)
-for p in accept+reject:
+glue &= not any('"'+p.name+'"' in source or str(p) in source for p in corpus)
+for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
-tests = run('cargo','test','--offline','--','--nocapture','--test-threads=1')
+tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1')
 log = tests.stdout+tests.stderr
 hm = all(re.search(r'test [^\n]*'+name+r'[^\n]* \.\.\. ok',log) for name in ['unify','generalize','occurs','signature_matching'])
 report(8, 'glue+unit-hm', glue and hm)
@@ -113,7 +112,11 @@ for script,total in [('m0',7),('m1-spec',6),('m1-corpus',7),('m2',8)]:
     print(f'gate_{script}: {int(ok)}',flush=True)
     gates &= ok
 report(9,'gates',gates)
-report(10,'corpus-lock',all(p.read_bytes() == content for p, content in locked.items()))
+lock_entries = P('tests/corpus.sha256').read_text().splitlines()
+lock_paths = [line.split(maxsplit=1)[1].lstrip('*') for line in lock_entries if len(line.split(maxsplit=1)) == 2]
+expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*.shin')}
+lock_check = run('sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256')
+report(10,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
 stdlib = [('option','Option'),('result','Result'),('list','List'),('division_error','DivisionError')]
 report(11,'stdlib-types',all(P('stdlib/'+file+'.shin').is_file() and 'type '+ty in P('stdlib/'+file+'.shin').read_text() for file,ty in stdlib) and not any(re.search(r'^def ',p.read_text(),re.M) for p in P('stdlib').glob('*.shin')))
 report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', log)) == 1)

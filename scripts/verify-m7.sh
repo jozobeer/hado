@@ -2,7 +2,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 failed=0
-bash scripts/verify-m6.sh --with-prelude || failed=1
+passed=0
+total=3
+if bash scripts/verify-m6.sh --with-prelude; then passed=$((passed + 1)); else failed=1; fi
 python3 - <<'PY'
 from pathlib import Path
 import re
@@ -33,6 +35,7 @@ for module, members in required.items():
 print(f"prelude inventory: {passed}/{total}")
 sys.exit(0 if passed == total else 1)
 PY
-if [ "$?" -ne 0 ]; then failed=1; fi
-cargo test --offline || failed=1
+if [ "$?" -eq 0 ]; then passed=$((passed + 1)); else failed=1; fi
+if cargo test --offline --no-fail-fast; then passed=$((passed + 1)); else failed=1; fi
+echo "PASSED: $passed/$total"
 exit "$failed"
