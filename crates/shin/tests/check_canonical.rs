@@ -100,15 +100,15 @@ fn duplicate_patterns_point_to_the_previous_arm() {
     assert_eq!(error.code.as_deref(), Some("E405"));
     assert_eq!(error.line, 3);
     assert!(error.message.contains("2:3"));
-    let ast = parse_source("def f x => if x | 1 => 10 | 2 => 20 | 0", "t").unwrap();
+    let ast = parse_source("def f | 1 => 10 | 2 => 20 | 0", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
 #[test]
 fn duplicate_patterns_ignore_bound_variable_names() {
     for source in [
-        "def f value => if value | Some(x) => x | Some(y) => y | 0",
-        "def f value => if value | Some(_) => 1 | Some(x) => 2 | 0",
+        "def f | Some(x) => x | Some(y) => y | 0",
+        "def f | Some(_) => 1 | Some(x) => 2 | 0",
     ] {
         let ast = parse_source(source, "t").unwrap();
         assert_eq!(
@@ -117,7 +117,7 @@ fn duplicate_patterns_ignore_bound_variable_names() {
         );
     }
     let ast = parse_source(
-        "def f value => if value | Some(1) => 1 | Some(2) => 2 | 0",
+        "def f | Some(1) => 1 | Some(2) => 2 | 0",
         "t",
     )
     .unwrap();
@@ -182,7 +182,7 @@ fn non_boolean_literal_patterns_require_fallback_at_any_depth() {
         "Some(1)",
         "{ value = Some(1) }",
     ] {
-        let source = format!("def f x => if x | {pattern} => 1");
+        let source = format!("def f | {pattern} => 1");
         let ast = parse_source(&source, "t").unwrap();
         assert_eq!(
             check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
@@ -192,7 +192,7 @@ fn non_boolean_literal_patterns_require_fallback_at_any_depth() {
         let source = format!("{source} | 0");
         check::check_ast(&parse_source(&source, "t").unwrap(), "t").unwrap();
     }
-    let ast = parse_source("def f x => if x | true => 1 | false => 0", "t").unwrap();
+    let ast = parse_source("def f | true => 1 | false => 0", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -220,7 +220,8 @@ fn equality_columns_for_one_variable_require_pattern_syntax() {
         "x == y",
         "f x == 1",
     ] {
-        let source = format!("def f x y => if | {conditions} => 2 | 0");
+        let params = if conditions.contains('y') { "x y" } else { "x" };
+        let source = format!("def f {params} => if | {conditions} => 2 | 0");
         check::check_ast(&parse_source(&source, "t").unwrap(), "t").unwrap();
     }
 }
@@ -228,9 +229,9 @@ fn equality_columns_for_one_variable_require_pattern_syntax() {
 #[test]
 fn nullary_constructors_keep_their_identity_during_normalization() {
     let source =
-        "type Color = Red | Blue\ndef f x => if x | Red => 1 | Blue => 2\ndef main = f Red";
+        "type Color = | Red | Blue\ndef f | Red => 1 | Blue => 2\ndef main = f Red";
     shin::check_source(source, "t").unwrap();
-    let source = "type Color = Red | Blue\ndef f x => if x | Red => 1 | Red => 2\ndef main = f Red";
+    let source = "type Color = | Red | Blue\ndef f | Red => 1 | Red => 2 | Blue => 3\ndef main = f Red";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -243,7 +244,7 @@ fn nullary_constructors_keep_their_identity_during_normalization() {
 
 #[test]
 fn broader_constructor_pattern_makes_later_arm_unreachable() {
-    let source = "def f x => if x | Some(v) => 1 | Some(3) => 2 | 0\ndef main = f (Some(1))";
+    let source = "def f | Some(_) => 1 | Some(3) => 2 | 0\ndef main = f (Some(1))";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -252,13 +253,13 @@ fn broader_constructor_pattern_makes_later_arm_unreachable() {
             .as_deref(),
         Some("E403")
     );
-    let source = "def f x => if x | Some(3) => 1 | Some(v) => 2 | 0\ndef main = f (Some(1))";
+    let source = "def f | Some(3) => 1 | Some(_) => 2 | 0\ndef main = f (Some(1))";
     shin::check_source(source, "t").unwrap();
 }
 
 #[test]
 fn catch_all_underscore_requires_fallback_syntax() {
-    let source = "def f x => if x | Some(v) => v | _ => 0\ndef main = f (Some(1))";
+    let source = "def f | Some(v) => v | _ => 0\ndef main = f (Some(1))";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -267,7 +268,7 @@ fn catch_all_underscore_requires_fallback_syntax() {
             .as_deref(),
         Some("E503")
     );
-    let source = "def f x => if x | Some(_) => 1 | 0\ndef main = f (Some(1))";
+    let source = "def f | Some(_) => 1 | 0\ndef main = f (Some(1))";
     shin::check_source(source, "t").unwrap();
 }
 
@@ -276,7 +277,7 @@ fn fallback_must_be_last_in_both_branch_forms() {
     for source in [
         "def main = if | 1 > 2 => 1 | 0 | 2 > 3 => 2",
         "def main = if | 1 > 2 => 1 | 0 | 2",
-        "def main = if Some(1) | Some(v) => v | 0 | None => 2",
+        "def main = if 1 | 1 => 10 | 0 | 2 => 20",
     ] {
         assert_eq!(
             shin::check_source(source, "t")
@@ -333,7 +334,7 @@ fn plain_let_cannot_discard_a_value() {
 
 #[test]
 fn rebuilding_every_constructor_is_redundant() {
-    let source = "def f x => if x | Some(v) => Some(v) | None => None\ndef main = f (Some(1))";
+    let source = "def f | Some(v) => Some(v) | None => None\ndef main = f (Some(1))";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -343,8 +344,8 @@ fn rebuilding_every_constructor_is_redundant() {
         Some("E507")
     );
     for source in [
-        "def f x => if x | Some(v) => Some(v + 1) | None => None\ndef main = f (Some(1))",
-        "type Pair = Pair(Int, Int)\ndef f x => if x | Pair(a, b) => Pair(b, a)\ndef main = f (Pair(1, 2))",
+        "def f | Some(v) => Some(v + 1) | None => None\ndef main = f (Some(1))",
+        "type Pair = | Pair(Int, Int)\ndef f | Pair(a, b) => Pair(b, a)\ndef main = f (Pair(1, 2))",
     ] {
         shin::check_source(source, "t").unwrap();
     }
@@ -355,7 +356,7 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
     let prefix = "type Pair = { left: Int; right: Int }\n";
     let suffix = "\ndef main = f { left = 1; right = 2 }";
     let source = format!(
-        "{prefix}def f x => if x | {{ left = a; right = b }} => {{ right = b; left = a }}{suffix}"
+        "{prefix}def f | {{ left = a; right = b }} => {{ right = b; left = a }}{suffix}"
     );
     assert_eq!(
         shin::check_source(&source, "t")
@@ -366,7 +367,7 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
         Some("E507")
     );
     let source = format!(
-        "{prefix}def f x => if x | {{ left = a; right = b }} => {{ right = a; left = b }}{suffix}"
+        "{prefix}def f | {{ left = a; right = b }} => {{ right = a; left = b }}{suffix}"
     );
     shin::check_source(&source, "t").unwrap();
 }
@@ -374,7 +375,7 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
 #[test]
 fn unchanged_error_branch_requires_railway_syntax() {
     let source =
-        "def f r => if r | Ok(x) => Ok(x + 1) | Error(e) => Error(e)\ndef main = f (Ok(1))";
+        "def f | Ok(x) => Ok(x + 1) | Error(e) => Error(e)\ndef main = f (Ok(1))";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -384,13 +385,13 @@ fn unchanged_error_branch_requires_railway_syntax() {
         Some("E508")
     );
     let source =
-        "def f r => if r | Ok(x) => Ok(x + 1) | Error(e) => Error(e + 1)\ndef main = f (Error(1))";
+        "def f | Ok(x) => Ok(x + 1) | Error(e) => Error(e + 1)\ndef main = f (Error(1))";
     shin::check_source(source, "t").unwrap();
 }
 
 #[test]
 fn selective_error_handling_is_not_plain_repropagation() {
-    let source = "def f r => if r | Error(1) => Error(1) | Ok(0)\ndef main = f (Error(2))";
+    let source = "def f | Error(1) => Error(1) | Ok(0)\ndef main = f (Error(2))";
     shin::check_source(source, "t").unwrap();
 }
 
@@ -427,7 +428,7 @@ fn unused_railway_binding_requires_do() {
 }
 
 #[test]
-fn discarded_railway_syntax_is_reported_before_body_type_error() {
+fn body_type_error_precedes_discarded_railway_syntax() {
     let source = "def main = let? _ = Some(1) -> 1";
     assert_eq!(
         shin::check_source(source, "t")
@@ -435,7 +436,7 @@ fn discarded_railway_syntax_is_reported_before_body_type_error() {
             .unwrap()
             .code
             .as_deref(),
-        Some("E504")
+        Some("E305")
     );
 }
 
@@ -466,11 +467,11 @@ fn boolean_patterns_must_cover_both_values_without_redundant_fallback() {
 fn adt_branches_cover_constructor_alternatives() {
     for (source, code) in [
         (
-            "def f x => if x | Some(v) => v\ndef main = f (Some(1))",
+            "def f | Some(v) => v\ndef main = f (Some(1))",
             "E402",
         ),
         (
-            "def f x => if x | Some(v) => v | None => 0 | 2\ndef main = f (Some(1))",
+            "def f | Some(v) => v | None => 0 | 2\ndef main = f (Some(1))",
             "E403",
         ),
     ] {
@@ -484,7 +485,7 @@ fn adt_branches_cover_constructor_alternatives() {
         );
     }
     shin::check_source(
-        "def f x => if x | Some(v) => v | None => 0\ndef main = f (Some(1))",
+        "def f | Some(v) => v | None => 0\ndef main = f (Some(1))",
         "t",
     )
     .unwrap();
@@ -492,7 +493,7 @@ fn adt_branches_cover_constructor_alternatives() {
 
 #[test]
 fn restricted_payload_does_not_hide_missing_constructor() {
-    let source = "def f x => if x | Some(true) => 1\ndef main = f (Some(true))";
+    let source = "def f | Some(true) => 1\ndef main = f (Some(true))";
     assert_eq!(
         shin::check_source(source, "t")
             .err()
@@ -502,7 +503,7 @@ fn restricted_payload_does_not_hide_missing_constructor() {
         Some("E402")
     );
     shin::check_source(
-        "def f x => if x | Some(true) => 1 | 0\ndef main = f (Some(true))",
+        "def f | Some(true) => 1 | 0\ndef main = f (Some(true))",
         "t",
     )
     .unwrap();
@@ -510,7 +511,7 @@ fn restricted_payload_does_not_hide_missing_constructor() {
 
 #[test]
 fn boolean_payload_coverage_preserves_argument_correlations() {
-    let prefix = "type Pair = Pair(Bool, Bool)\ndef f p => if p ";
+    let prefix = "type Pair = | Pair(Bool, Bool)\ndef f ";
     let suffix = "\ndef main = f (Pair(true, false))";
     let source = format!("{prefix}| Pair(true, true) => 1 | Pair(false, false) => 2{suffix}");
     assert_eq!(
@@ -548,7 +549,7 @@ fn generated_boolean_payload_subsets_match_finite_domain_oracle() {
                 )
             })
             .collect();
-        let source = format!("type Pair = Pair(Bool, Bool)\ndef f p => if p{arms}\ndef main = f (Pair(false, false))");
+        let source = format!("type Pair = | Pair(Bool, Bool)\ndef f{arms}\ndef main = f (Pair(false, false))");
         let checked = shin::check_source(&source, "t");
         if mask.count_ones() == 4 {
             checked.unwrap();
@@ -568,8 +569,8 @@ fn generated_boolean_payload_subsets_match_finite_domain_oracle() {
         }
     }
     let source =
-        "type Pair = Pair(Bool, Bool)\ndef f p => if p | 0\ndef main = f (Pair(false, false))";
-    shin::check_source(source, "t").unwrap();
+        "type Pair = | Pair(Bool, Bool)\ndef f | 0\ndef main = f (Pair(false, false))";
+    assert_eq!(shin::check_source(source, "t").err().unwrap().code.as_deref(), Some("E100"));
 }
 
 #[test]
@@ -582,7 +583,7 @@ fn nested_adt_coverage_tracks_inner_alternatives() {
             Some("E403"),
         ),
     ] {
-        let source = format!("def f x => if x | {arms}\ndef main = f (Some(Some(1)))");
+        let source = format!("def f | {arms}\ndef main = f (Some(Some(1)))");
         let result = shin::check_source(&source, "t");
         match code {
             Some(code) => assert_eq!(result.err().unwrap().code.as_deref(), Some(code)),
@@ -604,7 +605,7 @@ fn recursive_list_coverage_terminates_and_finds_missing_lengths() {
         ("Nil => 0 | Cons(_, _) => 1 | 2", Some("E403")),
     ] {
         let source =
-            format!("def length_class xs => if xs | {arms}\ndef main = length_class [1, 2, 3]");
+            format!("def length_class | {arms}\ndef main = length_class [1, 2, 3]");
         let result = shin::check_source(&source, "t");
         match expected {
             Some(code) => assert_eq!(result.err().unwrap().code.as_deref(), Some(code)),
@@ -617,7 +618,7 @@ fn recursive_list_coverage_terminates_and_finds_missing_lengths() {
 
 #[test]
 fn record_pattern_coverage_uses_field_names_and_omitted_fields() {
-    let prefix = "type Flags = { a: Bool; b: Bool }\ndef f r => if r ";
+    let prefix = "type Flags = { a: Bool; b: Bool }\ndef f ";
     let suffix = "\ndef main = f { a = true; b = false }";
     for (arms, expected) in [
         (
