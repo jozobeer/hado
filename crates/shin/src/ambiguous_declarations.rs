@@ -42,7 +42,6 @@ impl AmbiguousDeclarations {
                         record(name, span, &mut constructors, &mut result.constructors, &mut result.diagnostics, path);
                     }
                 }
-                _ => {}
             }
         }
         for item in items {
