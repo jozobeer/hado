@@ -76,7 +76,7 @@ pub(crate) fn references(node: &Node, name: &str) -> bool {
     names.contains(name)
 }
 
-fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTreeSet<String>) {
+pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTreeSet<String>) {
     match &node.kind {
         NodeKind::Name(name) if !bound.contains(name) => {
             result.insert(name.clone());
