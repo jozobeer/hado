@@ -2,6 +2,19 @@ use crate::parser::{Ast, Diagnostic, Item, Span, TypeDef, TypeExpr, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
+    match violations(ast, path).into_iter().map(|violation| violation.diagnostic).min_by_key(crate::diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+pub(crate) struct Violation {
+    pub definition: String,
+    pub reference: Span,
+    pub diagnostic: Diagnostic,
+}
+
+pub(crate) fn violations(ast: &Ast, path: &str) -> Vec<Violation> {
     let definitions: HashMap<_, _> = ast
         .items
         .iter()
@@ -19,19 +32,20 @@ pub fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
         for (target, args, reference) in &edges[name] {
             if reaches(target, name, &edges, &mut HashSet::new()) {
                 if let Some(span) = changed_argument(args, &def.params, *reference) {
-                    diagnostics.push(Diagnostic {
-                        path: path.into(), line: span.line, col: span.col,
-                        code: Some("E302".into()),
-                        message: "recursive type arguments must preserve declared parameters".into(),
+                    diagnostics.push(Violation {
+                        definition: (*name).into(),
+                        reference: *reference,
+                        diagnostic: Diagnostic {
+                            path: path.into(), line: span.line, col: span.col,
+                            code: Some("E302".into()),
+                            message: "recursive type arguments must preserve declared parameters".into(),
+                        },
                     });
                 }
             }
         }
     }
-    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+    diagnostics
 }
 
 fn changed_argument(args: &[TypeExpr], parameters: &[crate::parser::DeclaredName], reference: Span) -> Option<Span> {
