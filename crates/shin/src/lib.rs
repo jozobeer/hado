@@ -137,7 +137,7 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
             code: Some("E513".into()), message: format!("unused top-level definition {name}"),
         });
     }
-    match diagnostics.into_iter().min_by_key(diagnostic_order) {
+    match diagnostics.into_iter().map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
     }

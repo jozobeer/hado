@@ -12,10 +12,20 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
         diagnostics.push(error);
     }
     check_items(&ast.items, path, &mut diagnostics);
-    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+    match diagnostics.into_iter().map(|error| arm_diagnostic(ast, error)).min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
     }
+}
+
+pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
+    if matches!(error.code.as_deref(), Some("E403" | "E405" | "E406" | "E508")) {
+        if let Some((_, pipe)) = ast.branch_anchors.iter().find(|(source, _)| source.line == error.line && source.col == error.col) {
+            error.line = pipe.line;
+            error.col = pipe.col;
+        }
+    }
+    error
 }
 
 fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
