@@ -127,8 +127,7 @@ pub struct Tok {
     pub span: Span,
 }
 
-/// A lexical error. `code` is the E-code when the error is one of the
-/// syntax-level rejections (§43 E103 / E104); `None` for ordinary errors.
+/// A lexical error carrying the specification diagnostic code and anchor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexError {
     pub line: usize,
@@ -231,7 +230,7 @@ impl Lexer<'_> {
         LexError {
             line: self.tok_start.line,
             col: self.tok_start.col,
-            code,
+            code: Some(code.unwrap_or("E100")),
             message: message.into(),
         }
     }
@@ -414,26 +413,31 @@ impl Lexer<'_> {
             let text = &self.src[start..self.i];
             let value: i64 = text
                 .parse()
-                .map_err(|_| self.err(None, format!("integer out of range: {text}")))?;
+                .map_err(|_| self.err(Some("E112"), format!("integer out of range: {text}")))?;
             Ok(TokKind::Int(value))
         }
     }
 
     fn lex_char(&mut self) -> Result<TokKind, LexError> {
         self.bump(); // opening '
-        let c = match self.peek() {
+        let c = match self.bump() {
+            Some('\\') => match self.bump() {
+                Some('n') => '\n',
+                Some('t') => '\t',
+                Some('\\') => '\\',
+                Some('\'') => '\'',
+                _ => return Err(self.err(Some("E111"), "unsupported char escape")),
+            },
             Some(c) if c != '\'' && c != '\n' => c,
-            Some('\'') => return Err(self.err(None, "empty char literal")),
-            _ => return Err(self.err(None, "unterminated char literal")),
+            _ => return Err(self.err(Some("E111"), "expected one character")),
         };
-        self.bump();
         match self.peek() {
             Some('\'') => {
                 self.bump();
                 Ok(TokKind::Char(c))
             }
             _ => Err(self.err(
-                None,
+                Some("E111"),
                 "char literal must contain exactly one character",
             )),
         }
@@ -450,6 +454,7 @@ impl Lexer<'_> {
                     return Ok(TokKind::Str(out));
                 }
                 Some('\\') => {
+                    let escape = self.span();
                     self.bump();
                     match self.peek() {
                         Some('n') => {
@@ -468,7 +473,12 @@ impl Lexer<'_> {
                             self.bump();
                             out.push('"');
                         }
-                        _ => return Err(self.err(None, "unsupported escape in string literal")),
+                        _ => return Err(LexError {
+                            line: escape.line,
+                            col: escape.col,
+                            code: Some("E110"),
+                            message: "unsupported escape in string literal".into(),
+                        }),
                     }
                 }
                 Some(c) => {
