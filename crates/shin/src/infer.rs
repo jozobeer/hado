@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
-    aliases: HashMap<String, TypeExpr>,
+    aliases: HashMap<String, (TypeExpr, Span)>,
     ambiguous_modules: HashSet<String>,
     ambiguous_signatures: HashSet<String>,
     ambiguous_types: HashSet<String>,
@@ -411,7 +411,7 @@ impl Checker<'_> {
                 self.aliases.remove(&def.name);
                 if let Some(ty) = &def.ty {
                     if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
-                        self.aliases.insert(def.name.clone(), ty.clone());
+                        self.aliases.insert(def.name.clone(), (ty.clone(), ast.span));
                     }
                 }
             }
@@ -1443,9 +1443,9 @@ impl Checker<'_> {
             return Ok(Ty::Error);
         }
         if let TypeKind::Name(name) = &annotation.kind {
-            if let Some(target) = self.aliases.get(name) {
+            if let Some((target, module)) = self.aliases.get(name) {
                 if visiting.contains(name) {
-                    return Err(self.error(annotation.span, None, "cyclic abstract type instantiation has no specified diagnostic"));
+                    return Err(self.error(*module, Some("E602"), "cyclic abstract type instantiation"));
                 }
                 visiting.push(name.clone());
                 let result = self.annotation_inner(target, target.span, visiting);
