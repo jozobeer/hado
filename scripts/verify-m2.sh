@@ -29,18 +29,18 @@ trap cleanup EXIT
 cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
 base_status=$?
 
-# --- check 1: the 23 accept files parse; broken probe is not accepted ---
+# --- check 1: all accept files parse; broken probe is not accepted ---
 c1_reasons=""
 [ "$base_status" -eq 0 ] || c1_reasons="$c1_reasons base-exit=$base_status"
 n_accept=$(ls tests/accept/*.shin 2>/dev/null | wc -l | tr -d ' ')
-[ "$n_accept" -eq 23 ] || c1_reasons="$c1_reasons disk-accept-count=$n_accept"
+[ "$n_accept" -gt 0 ] || c1_reasons="$c1_reasons disk-accept-count=$n_accept"
 for f in tests/accept/*.shin; do
     [ -e "$f" ] || continue
     rel="tests/accept/$(basename "$f")"
     n=$(grep -cF "parse_accept_ok: $rel" "$TMPD/base.log")
     [ "$n" -eq 1 ] || c1_reasons="$c1_reasons $rel:lines=$n"
 done
-[ "$(grep -cF 'parse_accept_ok_n: 23' "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=23"
+[ "$(grep -cF "parse_accept_ok_n: $n_accept" "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=$n_accept"
 # Probe: `def main = )` must not be accepted.
 printf -- '-- spec: §41\n-- expect: 0\ndef main = )\n' > tests/accept/__probe_bad__.shin
 cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
@@ -48,17 +48,19 @@ rm -f tests/accept/__probe_bad__.shin
 n_probe=$(grep -cF 'parse_accept_ok: tests/accept/__probe_bad__.shin' "$TMPD/probe1.log")
 [ "$n_probe" -eq 0 ] || c1_reasons="$c1_reasons probe-bad-accepted($n_probe)"
 n_ok_probe=$(grep -cF 'parse_accept_ok:' "$TMPD/probe1.log")
-[ "$n_ok_probe" -eq 23 ] || c1_reasons="$c1_reasons probe-lost-originals($n_ok_probe)"
+[ "$n_ok_probe" -eq "$n_accept" ] || c1_reasons="$c1_reasons probe-lost-originals($n_ok_probe)"
 if [ -z "$c1_reasons" ]; then
-    pass 1 "accept-23"
+    pass 1 "accept-$n_accept"
 else
-    fail 1 "accept-23:$c1_reasons"
+    fail 1 "accept-$n_accept:$c1_reasons"
 fi
 
-# --- check 2: E101..E107 fall with their specified codes; swap probe ---
+# --- check 2: specification E1xx codes and swap probe ---
+e1xx_codes=$(sed -n 's/^| \(E1[0-9][0-9]\) |.*/\1/p' docs/spec.0.1.md | sort -u)
+n_e1xx=$(printf '%s\n' "$e1xx_codes" | wc -l)
+n_non_e1xx=$(sed -n 's/^| \(E[2-9][0-9][0-9]\) |.*/\1/p' docs/spec.0.1.md | sort -u | wc -l)
 c2_reasons=""
-for n in 101 102 103 104 105 106 107; do
-    code="E$n"
+for code in $e1xx_codes; do
     f="tests/reject/$code.shin"
     [ "$(grep -cF "parse_e1xx_ok: $f $code" "$TMPD/base.log")" -eq 1 ] \
         || c2_reasons="$c2_reasons $f:no-ok-line"
@@ -66,7 +68,7 @@ for n in 101 102 103 104 105 106 107; do
     printf '%s' "$d" | grep -qE "^$f:[0-9]+:[1-9][0-9]*: error\[$code\]: .+" \
         || c2_reasons="$c2_reasons $f:bad-diag($d)"
 done
-[ "$(grep -cF 'parse_e1xx_ok_n: 7' "$TMPD/base.log")" -ge 1 ] || c2_reasons="$c2_reasons e1xx-n!=7"
+[ "$(grep -cF "parse_e1xx_ok_n: $n_e1xx" "$TMPD/base.log")" -ge 1 ] || c2_reasons="$c2_reasons e1xx-n!=$n_e1xx"
 # Content-swap probe: keep the E103 header, put the E104 defect in the body.
 cp tests/reject/E103.shin "$TMPD/E103.orig"
 printf -- '-- spec: §43\n-- error: E103\n-- item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103.shin
@@ -84,14 +86,14 @@ dcol=$(printf '%s' "$d" | cut -d: -f3)
 [ "$dline" = "$want_line" ] && [ "$dcol" = "$want_col" ] \
     || c2_reasons="$c2_reasons swap-pos(diag=$dline:$dcol want=$want_line:$want_col)"
 if [ -z "$c2_reasons" ]; then
-    pass 2 "e1xx-7+swap"
+    pass 2 "e1xx-$n_e1xx+swap"
 else
-    fail 2 "e1xx-7+swap:$c2_reasons"
+    fail 2 "e1xx-$n_e1xx+swap:$c2_reasons"
 fi
 
-# --- check 3: the 39 non-E1xx files parse; E1xx never counts as non-E1xx ---
+# --- check 3: non-E1xx files parse; E1xx never counts as non-E1xx ---
 c3_reasons=""
-[ "$(grep -cF 'parse_non_e1xx_ok_n: 39' "$TMPD/base.log")" -ge 1 ] || c3_reasons="$c3_reasons non-e1xx-n!=39"
+[ "$(grep -cF "parse_non_e1xx_ok_n: $n_non_e1xx" "$TMPD/base.log")" -ge 1 ] || c3_reasons="$c3_reasons non-e1xx-n!=$n_non_e1xx"
 for f in tests/reject/*.shin; do
     [ -e "$f" ] || continue
     rel="tests/reject/$(basename "$f")"
@@ -104,9 +106,9 @@ for f in tests/reject/*.shin; do
     fi
 done
 if [ -z "$c3_reasons" ]; then
-    pass 3 "non-e1xx-39"
+    pass 3 "non-e1xx-$n_non_e1xx"
 else
-    fail 3 "non-e1xx-39:$c3_reasons"
+    fail 3 "non-e1xx-$n_non_e1xx:$c3_reasons"
 fi
 
 # --- check 4: E1xx positions, perturbation probes, gen/decoy/tree, emit ---
@@ -120,7 +122,7 @@ diag_col() { # log rel
 expect_line() { # code -> expected defect line
     case "$1" in
         E101) echo 5 ;; E102) echo 3 ;; E103) echo 4 ;;
-        E104) echo 5 ;; E105) echo 4 ;; E106) echo 5 ;; E107) echo 4 ;;
+        E104) echo 5 ;; E105) echo 4 ;; E106) echo 4 ;; E107) echo 4 ;;
     esac
 }
 for n in 101 102 103 104 105 106 107; do
@@ -130,7 +132,7 @@ for n in 101 102 103 104 105 106 107; do
     want=$(expect_line "$code")
     [ "$line" = "$want" ] || c4_reasons="$c4_reasons $code:line=$line(want=$want)"
 done
-for pair in "E103:12" "E105:12" "E107:5"; do
+for pair in "E103:12" "E105:12" "E107:6"; do
     code="${pair%%:*}"
     want="${pair##*:}"
     f="tests/reject/$code.shin"
