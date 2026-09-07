@@ -43,3 +43,41 @@ fn unused_module_is_reported_even_when_its_signature_is_used() {
         assert_eq!((error.line, error.col), (2, 1));
     }
 }
+
+#[test]
+fn definitions_and_modules_follow_dependencies_in_any_source_order() {
+    let declarations = [
+        "module type S = sig def run(x: Int): Int end",
+        "def increment x => x + 1",
+        "module A : S = struct def run x => increment x end",
+        "def twice x => A.run (A.run x)",
+        "module B : S = struct def run x => twice x end",
+        "def main = B.run 40",
+    ];
+    for rotation in 0..declarations.len() {
+        for reverse in [false, true] {
+            let mut items = declarations.to_vec();
+            items.rotate_left(rotation);
+            if reverse { items.reverse(); }
+            let source = items.join("\n");
+            assert_eq!(check_source(&source, "dependencies.shin").unwrap().main, shin::types::Ty::Int);
+        }
+    }
+}
+
+#[test]
+fn module_calls_to_outer_definitions_execute() {
+    use std::process::Command;
+    let dir = std::env::temp_dir().join(format!("shin-outer-def-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.shin");
+    let source = "def main = M.run 20\nmodule M : S = struct def run x => add (add x) end\ndef add x => x + 1\nmodule type S = sig def run(x: Int): Int end";
+    std::fs::write(&path, source).unwrap();
+    let built = Command::new(env!("CARGO_BIN_EXE_shin")).arg("build").arg(&path).output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = Command::new(path.with_extension("")).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"22\n");
+    assert!(output.stderr.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
