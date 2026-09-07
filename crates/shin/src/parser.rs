@@ -183,8 +183,18 @@ pub struct Param {
 }
 
 /// A type expression (see §8, §10, §35, §37).
+#[derive(Debug, Clone)]
+pub struct TypeExpr {
+    pub kind: TypeKind,
+    pub span: Span,
+}
+
+impl PartialEq for TypeExpr {
+    fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeExpr {
+pub enum TypeKind {
     Name(String),
     /// `Option<T>` / `Cons2(T, List2<T>)` — type arguments or payloads.
     Apply(String, Vec<TypeExpr>),
@@ -693,6 +703,7 @@ impl Parser<'_> {
     }
 
     fn parse_type_body(&mut self, context: TypeContext) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
         match self.kind() {
             TokKind::LBrace => self.parse_record_type(),
             TokKind::Pipe => {
@@ -701,7 +712,7 @@ impl Parser<'_> {
                     self.bump();
                     constructors.push(self.parse_constructor_type()?);
                 }
-                Ok(TypeExpr::Adt(constructors))
+                Ok(TypeExpr { kind: TypeKind::Adt(constructors), span })
             }
             _ if context == TypeContext::Implementation => self.parse_type(),
             _ => {
@@ -713,6 +724,7 @@ impl Parser<'_> {
     }
 
     fn parse_record_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
         self.expect(&TokKind::LBrace)?;
         let mut fields = Vec::new();
         loop {
@@ -723,15 +735,16 @@ impl Parser<'_> {
             self.bump();
         }
         self.expect(&TokKind::RBrace)?;
-        Ok(TypeExpr::Record(fields))
+        Ok(TypeExpr { kind: TypeKind::Record(fields), span })
     }
 
     fn parse_constructor_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
         let name = self.expect_upper_name("a constructor name")?;
-        if self.kind() != &TokKind::LParen { return Ok(TypeExpr::Name(name)); }
+        if self.kind() != &TokKind::LParen { return Ok(TypeExpr { kind: TypeKind::Name(name), span }); }
         self.bump();
         let args = self.parse_type_list(&TokKind::RParen)?;
-        Ok(TypeExpr::Apply(name, args))
+        Ok(TypeExpr { kind: TypeKind::Apply(name, args), span })
     }
 
     fn parse_type_list(&mut self, end: &TokKind) -> Result<Vec<TypeExpr>, Diagnostic> {
@@ -745,6 +758,7 @@ impl Parser<'_> {
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
         let mut name = self.expect_name("a type name")?;
         if !name.chars().next().is_some_and(char::is_uppercase) {
             return Err(self.error(None, "type names start with an uppercase letter"));
@@ -753,25 +767,26 @@ impl Parser<'_> {
             self.bump();
             name.push('.');
             name.push_str(&self.expect_upper_name("a qualified type name")?);
-            return Ok(TypeExpr::Name(name));
+            return Ok(TypeExpr { kind: TypeKind::Name(name), span });
         }
-        if self.kind() != &TokKind::Lt { return Ok(TypeExpr::Name(name)); }
+        if self.kind() != &TokKind::Lt { return Ok(TypeExpr { kind: TypeKind::Name(name), span }); }
         self.bump();
-        if name == "Fn" { return self.parse_function_type(); }
-        Ok(TypeExpr::Apply(name, self.parse_type_list(&TokKind::Gt)?))
+        if name == "Fn" { return self.parse_function_type(span); }
+        Ok(TypeExpr { kind: TypeKind::Apply(name, self.parse_type_list(&TokKind::Gt)?), span })
     }
 
-    fn parse_function_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+    fn parse_function_type(&mut self, span: Span) -> Result<TypeExpr, Diagnostic> {
         let params = if self.kind() == &TokKind::LParen {
+            let span = self.span();
             self.bump();
-            TypeExpr::Group(self.parse_type_list(&TokKind::RParen)?)
+            TypeExpr { kind: TypeKind::Group(self.parse_type_list(&TokKind::RParen)?), span }
         } else {
             self.parse_type()?
         };
         self.expect(&TokKind::Comma)?;
         let result = self.parse_type()?;
         self.expect(&TokKind::Gt)?;
-        Ok(TypeExpr::Apply("Fn".into(), vec![params, result]))
+        Ok(TypeExpr { kind: TypeKind::Apply("Fn".into(), vec![params, result]), span })
     }
 
     // --- expressions ---

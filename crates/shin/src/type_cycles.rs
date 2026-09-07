@@ -1,4 +1,4 @@
-use crate::parser::{Ast, Diagnostic, Item, TypeDef, TypeExpr};
+use crate::parser::{Ast, Diagnostic, Item, TypeDef, TypeExpr, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
@@ -37,7 +37,7 @@ fn same_parameters(args: &[TypeExpr], parameters: &[String]) -> bool {
         && args
             .iter()
             .zip(parameters)
-            .all(|(arg, parameter)| matches!(arg, TypeExpr::Name(name) if name == parameter))
+            .all(|(arg, parameter)| matches!(&arg.kind, TypeKind::Name(name) if name == parameter))
 }
 
 type Edges<'a> = HashMap<&'a str, Vec<(&'a str, &'a [TypeExpr])>>;
@@ -63,25 +63,25 @@ fn reaches<'a>(
 fn references(def: &TypeDef) -> Vec<(&str, &[TypeExpr])> {
     let mut result = Vec::new();
     if let Some(body) = &def.ty {
-        match body {
-            TypeExpr::Record(fields) => {
+        match &body.kind {
+            TypeKind::Record(fields) => {
                 for (_, ty) in fields {
                     collect(ty, &mut result);
                 }
             }
-            TypeExpr::Adt(variants) => {
+            TypeKind::Adt(variants) => {
                 for variant in variants {
                     payload(variant, &mut result);
                 }
             }
-            variant => payload(variant, &mut result),
+            _ => payload(body, &mut result),
         }
     }
     result
 }
 
 fn payload<'a>(variant: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr])>) {
-    if let TypeExpr::Apply(_, args) = variant {
+    if let TypeKind::Apply(_, args) = &variant.kind {
         for arg in args {
             collect(arg, result);
         }
@@ -89,20 +89,20 @@ fn payload<'a>(variant: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr])
 }
 
 fn collect<'a>(ty: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr])>) {
-    match ty {
-        TypeExpr::Name(name) => result.push((name, &[])),
-        TypeExpr::Apply(name, args) => {
+    match &ty.kind {
+        TypeKind::Name(name) => result.push((name, &[])),
+        TypeKind::Apply(name, args) => {
             result.push((name, args));
             for arg in args {
                 collect(arg, result);
             }
         }
-        TypeExpr::Group(args) | TypeExpr::Adt(args) => {
+        TypeKind::Group(args) | TypeKind::Adt(args) => {
             for arg in args {
                 collect(arg, result);
             }
         }
-        TypeExpr::Record(fields) => {
+        TypeKind::Record(fields) => {
             for (_, ty) in fields {
                 collect(ty, result);
             }

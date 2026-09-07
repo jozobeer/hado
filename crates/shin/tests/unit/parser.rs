@@ -165,11 +165,7 @@ fn adt_accepts_leading_pipe() {
     assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
     assert_eq!(
         type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
-        Some(TypeExpr::Adt(vec![
-            TypeExpr::Name("Red".into()),
-            TypeExpr::Name("Green".into()),
-            TypeExpr::Name("Blue".into()),
-        ])),
+        Some(type_expr(TypeKind::Adt(vec![named_type("Red"), named_type("Green"), named_type("Blue")]))),
     );
 }
 
@@ -179,16 +175,13 @@ fn fn_type_group() {
     // is an argument group, not a tuple.
     assert_eq!(
         match type_of("type F = { function: Fn<(Int, Int), Int> }") {
-            Some(TypeExpr::Record(mut fields)) => Some(fields.remove(0).1),
+            Some(TypeExpr { kind: TypeKind::Record(mut fields), .. }) => Some(fields.remove(0).1),
             _ => None,
         },
-        Some(TypeExpr::Apply(
+        Some(type_expr(TypeKind::Apply(
             "Fn".into(),
-            vec![
-                TypeExpr::Group(vec![TypeExpr::Name("Int".into()), TypeExpr::Name("Int".into())]),
-                TypeExpr::Name("Int".into()),
-            ],
-        )),
+            vec![type_expr(TypeKind::Group(vec![named_type("Int"), named_type("Int")])), named_type("Int")],
+        ))),
     );
     assert!(parse_source("def f(x: Fn<(Int, Int), Int>): Int => 1", "t").is_ok());
     assert!(parse_source("type F = { function: Fn<Int, String> }", "t").is_ok());
@@ -312,3 +305,9 @@ fn m0_parse_entry() {
     let toks = crate::lexer::lex("def main = 1 < 2").unwrap();
     assert!(parse(&toks).is_err());
 }
+
+fn type_expr(kind: TypeKind) -> TypeExpr {
+    TypeExpr { kind, span: Span { line: 1, col: 1 } }
+}
+
+fn named_type(name: &str) -> TypeExpr { type_expr(TypeKind::Name(name.into())) }

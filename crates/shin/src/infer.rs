@@ -1,5 +1,5 @@
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
-use crate::parser::{Param, Pattern, PatternKind, TypeExpr};
+use crate::parser::{Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{Inference, Scheme, Ty, TypeError};
 use crate::Checked;
 use std::collections::HashMap;
@@ -196,7 +196,7 @@ impl Checker<'_> {
             }
             for item in &module.items {
                 if let Item::TypeDef(definition) = item {
-                    if matches!(definition.ty, Some(TypeExpr::Record(_))) {
+                    if matches!(definition.ty.as_ref().map(|ty| &ty.kind), Some(TypeKind::Record(_))) {
                         if let Some(record) = self.records.get(&definition.name) {
                             self.module_records.insert(format!("{}.{}", self.module_path.join("."), definition.name), (record.0.clone(), record.1.qualify_data_types(&type_names)));
                         }
@@ -456,7 +456,7 @@ impl Checker<'_> {
             .ty
             .as_ref()
             .ok_or_else(|| self.error(def.span, None, "abstract type outside signature"))?;
-        if let TypeExpr::Record(fields) = body {
+        if let TypeKind::Record(fields) = &body.kind {
             let payload = fields
                 .iter()
                 .map(|(_, ty)| self.payload_type(ty, &parameters, def.span))
@@ -473,14 +473,14 @@ impl Checker<'_> {
             );
             return Ok(());
         }
-        let variants = match body {
-            TypeExpr::Adt(variants) => variants.as_slice(),
-            other => std::slice::from_ref(other),
+        let variants = match &body.kind {
+            TypeKind::Adt(variants) => variants.as_slice(),
+            _ => std::slice::from_ref(body),
         };
         for (tag, variant) in variants.iter().enumerate() {
             self.register_constructor(variant, &parameters, &result, def.span)?;
-            let name = match variant {
-                TypeExpr::Name(name) | TypeExpr::Apply(name, _) => name,
+            let name = match &variant.kind {
+                TypeKind::Name(name) | TypeKind::Apply(name, _) => name,
                 _ => unreachable!("registered constructor"),
             };
             let tag = u32::try_from(tag).map_err(|_| self.error(def.span, None, "too many constructors"))?;
@@ -496,9 +496,9 @@ impl Checker<'_> {
         result: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
-        let (name, payload) = match variant {
-            TypeExpr::Name(name) => (name, Vec::new()),
-            TypeExpr::Apply(name, args) => (
+        let (name, payload) = match &variant.kind {
+            TypeKind::Name(name) => (name, Vec::new()),
+            TypeKind::Apply(name, args) => (
                 name,
                 args.iter()
                     .map(|arg| self.payload_type(arg, parameters, span))
@@ -524,16 +524,16 @@ impl Checker<'_> {
         parameters: &HashMap<String, Ty>,
         span: Span,
     ) -> Result<Ty, Diagnostic> {
-        match expr {
-            TypeExpr::Apply(name, args) if name == "Fn" && args.len() == 2 => {
-                let inputs = match &args[0] { TypeExpr::Group(inputs) => inputs.as_slice(), input => std::slice::from_ref(input) };
+        match &expr.kind {
+            TypeKind::Apply(name, args) if name == "Fn" && args.len() == 2 => {
+                let inputs = match &args[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => std::slice::from_ref(&args[0]) };
                 Ok(Ty::Fn(inputs.iter().map(|ty| self.payload_type(ty, parameters, span)).collect::<Result<_, _>>()?, Box::new(self.payload_type(&args[1], parameters, span)?)))
             }
-            TypeExpr::Name(name) if parameters.contains_key(name) => Ok(parameters[name].clone()),
-            TypeExpr::Name(name) if self.type_arities.get(name) == Some(&0) => {
+            TypeKind::Name(name) if parameters.contains_key(name) => Ok(parameters[name].clone()),
+            TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
                 Ok(Ty::Adt(name.clone(), vec![]))
             }
-            TypeExpr::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
+            TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
                 let args = args
                     .iter()
                     .map(|arg| self.payload_type(arg, parameters, span))
@@ -1090,21 +1090,21 @@ impl Checker<'_> {
     }
 
     fn annotation(&self, annotation: &TypeExpr, span: Span) -> Result<Ty, Diagnostic> {
-        match annotation {
-            TypeExpr::Name(name) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == 0) => {
+        match &annotation.kind {
+            TypeKind::Name(name) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == 0) => {
                 Ok(Ty::Abstract(self.abstract_types[name].1.clone(), vec![]))
             }
-            TypeExpr::Apply(name, args) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == args.len()) => {
+            TypeKind::Apply(name, args) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == args.len()) => {
                 let args = args
                     .iter()
                     .map(|arg| self.annotation(arg, span))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Abstract(self.abstract_types[name].1.clone(), args))
             }
-            TypeExpr::Apply(name, args) if name == "Fn" && args.len() == 2 => {
-                let inputs = match &args[0] {
-                    TypeExpr::Group(inputs) => inputs.as_slice(),
-                    input => std::slice::from_ref(input),
+            TypeKind::Apply(name, args) if name == "Fn" && args.len() == 2 => {
+                let inputs = match &args[0].kind {
+                    TypeKind::Group(inputs) => inputs.as_slice(),
+                    _ => std::slice::from_ref(&args[0]),
                 };
                 let inputs = inputs
                     .iter()
@@ -1113,17 +1113,17 @@ impl Checker<'_> {
                 let output = self.annotation(&args[1], span)?;
                 Ok(Ty::Fn(inputs, Box::new(output)))
             }
-            TypeExpr::Name(name) if self.type_arities.get(name) == Some(&0) => {
+            TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
                 Ok(Ty::Adt(name.clone(), vec![]))
             }
-            TypeExpr::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
+            TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
                 let args = args
                     .iter()
                     .map(|arg| self.annotation(arg, span))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Adt(name.clone(), args))
             }
-            TypeExpr::Name(name) => match name.as_str() {
+            TypeKind::Name(name) => match name.as_str() {
                 "Int" => Ok(Ty::Int),
                 "Float" => Ok(Ty::Float),
                 "Bool" => Ok(Ty::Bool),
