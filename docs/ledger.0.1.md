@@ -467,10 +467,10 @@ M3〜M7 は `9600c2f` `8b5a2d9`（別セッション、builder = Claude Sonnet 5
 
 **R7（仕様改訂）の実施**
 
-commander が本セッションで `docs/spec.0.1.md` に反映した。`verify-m1-spec.sh` は `PASSED: 6/6`（チェック 2 の新設節の範囲を 43..52 に広げた）。§50 は 56 行で全行に段階とアンカーがある。§41 は完全な EBNF に置き換えた。付随して `docs/plan.0.1.md` 6 節と 7 節、`docs/corpus.0.1.md`、`docs/spec-trace.0.1.md`（新設）、`PLAN.md` を更新した。commander のレビューで §41「空白は意味を持たない」と E106 コーパス `inc(1)` の矛盾が見つかり、Q36 として追加で問うた（A: 空白は意味を持たず、E106 は constructor の側だけ）。plan-reviewer の審査は未実施。
+commander が本セッションで `docs/spec.0.1.md` に反映した。`verify-m1-spec.sh` は `PASSED: 6/6`（チェック 2 の新設節の範囲を 43..52 に広げた）。§50 は 56 行で全行に段階とアンカーがある。§41 は完全な EBNF に置き換えた。付随して `docs/plan.0.1.md` 6 節と 7 節、`docs/corpus.0.1.md`、`docs/spec-trace.0.1.md`（新設）、`PLAN.md` を更新した。commander のレビューで §41「空白は意味を持たない」と E106 コーパス `inc(1)` の矛盾が見つかり、Q36 として追加で問うた（A: 空白は意味を持たず、E106 は constructor の側だけ）。仕様の審査は `PLAN.md` の手順 0 として実行エージェントが行う（ユーザー指定・2026-09-07: PLAN.md を役割の語彙に依存させない）。
 
 仕様を先に変えたため、R7 終了時点で次の門番が赤になっている（想定どおり。R8 と R9 で green に戻す）: `verify-m1-corpus.sh` チェック 1（§50 が 56 行、拒否コーパスが 46 本で 1 対 1 でない）とチェック 2（§39 の例が新形式でコーパスが旧形式）、それらに依存する `verify-m2.sh` チェック 5 と `verify-m3.sh` チェック 9。他の門番と `cargo test` は全通過。
 
 **成果物:** `docs/spec.0.1.md`（R7 反映済み）、`PLAN.md`（R8〜R9）。
 
-**次の一手:** R7 の仕様差分を plan-reviewer に出す。合格後に R8（コーパス）へ。
+**次の一手:** `PLAN.md` をエージェントに渡す。手順 0（仕様の審査）から R9 まで一続きで進む。
