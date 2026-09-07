@@ -132,6 +132,13 @@ impl Inference {
     }
 
     pub fn unify(&mut self, left: &Ty, right: &Ty) -> Result<(), TypeError> {
+        let saved = self.substitutions.clone();
+        let result = self.unify_inner(left, right);
+        if result.is_err() { self.substitutions = saved; }
+        result
+    }
+
+    fn unify_inner(&mut self, left: &Ty, right: &Ty) -> Result<(), TypeError> {
         let left = self.resolve(left);
         let right = self.resolve(right);
         if left == right {
@@ -141,7 +148,7 @@ impl Inference {
             (Ty::Var(id), ty) | (ty, Ty::Var(id)) => self.bind(*id, ty),
             (Ty::Fn(a, ret_a), Ty::Fn(b, ret_b)) => {
                 self.unify_arguments(a, b)?;
-                self.unify(ret_a, ret_b)
+                self.unify_inner(ret_a, ret_b)
             }
             (Ty::Adt(a, args_a), Ty::Adt(b, args_b))
             | (Ty::Abstract(a, args_a), Ty::Abstract(b, args_b))
@@ -158,7 +165,7 @@ impl Inference {
             return Err(TypeError::Arity);
         }
         for (left, right) in a.iter().zip(b) {
-            self.unify(left, right)?;
+            self.unify_inner(left, right)?;
         }
         Ok(())
     }
