@@ -350,8 +350,29 @@ impl fmt::Display for Diagnostic {
 
 /// Parse a source string into the full AST.
 pub fn parse_source(src: &str, path: &str) -> Result<Ast, Diagnostic> {
+    parse_source_partial(src, path)?.finish(path)
+}
+
+pub(crate) struct PartialParse {
+    pub ast: Ast,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl PartialParse {
+    pub(crate) fn finish(mut self, path: &str) -> Result<Ast, Diagnostic> {
+        if let Err(error) = crate::type_realizations::check(&self.ast, path) {
+            self.diagnostics.push(error);
+        }
+        match self.diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+            Some(error) => Err(error),
+            None => Ok(self.ast),
+        }
+    }
+}
+
+pub(crate) fn parse_source_partial(src: &str, path: &str) -> Result<PartialParse, Diagnostic> {
     let toks = crate::lexer::lex_full(src).map_err(|e| lex_error_to_diag(e, path))?;
-    parse_tokens(&toks, path)
+    Ok(parse_tokens_partial(&toks, path))
 }
 
 /// M0-compatible entry: full-parse, then lower to the M0 IR
@@ -374,17 +395,21 @@ fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
 }
 
 pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
-    let ast = Parser {
+    parse_tokens_partial(toks, path).finish(path)
+}
+
+fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
+    let mut parser = Parser {
         toks,
         pos: 0,
         path,
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
         equality_anchors: Vec::new(),
-    }
-    .parse_program()?;
-    crate::type_realizations::check(&ast, path)?;
-    Ok(ast)
+        diagnostics: Vec::new(),
+    };
+    let ast = parser.parse_program();
+    PartialParse { ast, diagnostics: parser.diagnostics }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -397,6 +422,7 @@ struct Parser<'a> {
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
     equality_anchors: Vec<(Span, Span, Span)>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl Parser<'_> {
@@ -450,24 +476,63 @@ impl Parser<'_> {
 
     // --- top level ---
 
-    fn parse_program(&mut self) -> Result<Ast, Diagnostic> {
+    fn parse_program(&mut self) -> Ast {
         let span = self.span();
+        let items = self.parse_items(TypeContext::TopLevel);
+        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone() }
+    }
+
+    fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
         loop {
-            match self.kind() {
-                TokKind::Eof => break,
-                TokKind::Def => items.push(self.parse_definition()?),
-                TokKind::KwType => items.push(self.parse_type_def(TypeContext::TopLevel)?),
-                TokKind::KwModule => items.push(self.parse_module()?),
-                other => {
-                    return Err(self.error(
-                        None,
-                        format!("expected `def`, `type`, or `module`, found {other}"),
-                    ))
+            if self.kind() == &TokKind::Eof {
+                if context != TypeContext::TopLevel {
+                    self.diagnostics.push(self.error(None, "unterminated `struct`: expected `end`"));
+                }
+                break;
+            }
+            if context != TypeContext::TopLevel && self.kind() == &TokKind::KwEnd {
+                self.bump();
+                break;
+            }
+            let start = self.pos;
+            let item = match self.kind() {
+                TokKind::Def => self.parse_definition(),
+                TokKind::KwType => self.parse_type_def(context),
+                TokKind::KwModule => self.parse_module(),
+                other => Err(self.error(None, format!("expected `def`, `type`, or `module`, found {other}"))),
+            };
+            match item {
+                Ok(item) => items.push(item),
+                Err(error) => {
+                    self.diagnostics.push(error);
+                    self.recover_declaration(start, context);
                 }
             }
         }
-        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone() })
+        items
+    }
+
+    fn recover_declaration(&mut self, start: usize, context: TypeContext) {
+        // Rewind only for delimiter accounting; a failed declaration is never retried.
+        let failed_at = self.pos;
+        self.pos = start;
+        let mut depth = 0usize;
+        while self.kind() != &TokKind::Eof {
+            if self.pos > start && self.pos >= failed_at && depth == 0 {
+                match self.kind() {
+                    TokKind::Def | TokKind::KwType | TokKind::KwModule => break,
+                    TokKind::KwEnd if context != TypeContext::TopLevel => break,
+                    _ => {}
+                }
+            }
+            match self.kind() {
+                TokKind::KwSig | TokKind::KwStruct => depth += 1,
+                TokKind::KwEnd => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            self.bump();
+        }
     }
 
     fn parse_definition(&mut self) -> Result<Item, Diagnostic> {
@@ -595,12 +660,12 @@ impl Parser<'_> {
             None
         } else {
             self.expect(&TokKind::Eq)?;
+            if context == TypeContext::Implementation && !params.is_empty()
+                && matches!(self.kind(), TokKind::Name(_)) {
+                return Err(self.error_at(parameter_start, Some("E100"), "abstract type realizations cannot declare type parameters"));
+            }
             Some(self.parse_type_body(context)?)
         };
-        if context == TypeContext::Implementation && !params.is_empty()
-            && ty.as_ref().is_some_and(|ty| matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(..))) {
-            return Err(self.error_at(parameter_start, Some("E100"), "abstract type realizations cannot declare type parameters"));
-        }
         Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, span }))
     }
 
@@ -645,24 +710,7 @@ impl Parser<'_> {
             };
             self.expect(&TokKind::Eq)?;
             self.expect(&TokKind::KwStruct)?;
-            let mut items = Vec::new();
-            while self.kind() != &TokKind::KwEnd {
-                match self.kind() {
-                    TokKind::KwType => items.push(self.parse_type_def(TypeContext::Implementation)?),
-                    TokKind::Def => items.push(self.parse_definition()?),
-                    TokKind::KwModule => items.push(self.parse_module()?),
-                    TokKind::Eof => {
-                        return Err(self.error(None, "unterminated `struct`: expected `end`"))
-                    }
-                    other => {
-                        return Err(self.error(
-                            None,
-                            format!("expected `type` or `def` in struct, found {other}"),
-                        ))
-                    }
-                }
-            }
-            self.bump();
+            let items = self.parse_items(TypeContext::Implementation);
             Ok(Item::ModuleImpl(ModuleImpl {
                 name,
                 name_span,
@@ -760,12 +808,27 @@ impl Parser<'_> {
                 }
                 Ok(TypeExpr { kind: TypeKind::Adt(constructors), span })
             }
-            _ if context == TypeContext::Implementation => self.parse_type(),
+            _ if context == TypeContext::Implementation => self.parse_alias_type(),
             _ => {
                 let next = self.toks.get(self.pos + 1).map(|token| &token.kind);
                 let code = if matches!(next, Some(TokKind::Pipe | TokKind::LParen)) { "E108" } else { "E100" };
                 Err(self.error(Some(code), "expected a record or a leading | for an ADT"))
             }
+        }
+    }
+
+    fn parse_alias_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let prefix = match self.kind() {
+            TokKind::Name(name) => Some(TypeExpr { kind: TypeKind::Name(name.clone()), span: self.span() }),
+            _ => None,
+        };
+        match (self.parse_type(), prefix) {
+            (Err(error), Some(prefix)) => {
+                // Preserve the alias anchor for contextual syntax checking. finish rejects this partial AST.
+                self.diagnostics.push(error);
+                Ok(prefix)
+            }
+            (result, _) => result,
         }
     }
 
