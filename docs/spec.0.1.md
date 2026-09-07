@@ -1429,11 +1429,11 @@ module_impl     := "module" upper_name ":" upper_name "=" "struct" struct_item* 
 struct_item     := definition
                  | type_definition
                  | "type" upper_name "=" type_expr                        sig の抽象型の実体化に限る
-                 | module_type
-                 | module_impl
 ```
 
 sig の `type` は本体を持たない（E100）。sig の `def` は全ての引数と戻りに型を書く。
+
+v0.1 の `module` と `module type` はトップレベルでのみ宣言できる。`struct` 内の入れ子宣言は E100 とし、内側の `module` を指す。
 
 式（優先順位の低い方から）:
 

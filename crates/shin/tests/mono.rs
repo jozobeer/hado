@@ -856,15 +856,15 @@ fn module_exports_can_be_used_as_function_values() {
 }
 
 #[test]
-fn nested_module_definition_metadata_uses_full_paths() {
-    let source = "module type S = sig def run(x: Int): Int end\nmodule A : S = struct module Inner : S = struct def run x => x + 1 end def run x => Inner.run x end\nmodule B : S = struct module Inner : S = struct def run x => x + 2 end def run x => Inner.run x end\ndef main = A.run 1 + B.run 1";
+fn sibling_module_definition_metadata_uses_distinct_paths() {
+    let source = "module type S = sig def run(x: Int): Int end\nmodule A : S = struct def run x => x + 1 end\nmodule B : S = struct def run x => x + 2 end\ndef main = A.run 1 + B.run 1";
     let checked = shin::check_source(source, "t").unwrap();
-    assert!(checked.module_definitions.contains_key("A.Inner.run"));
-    assert!(checked.module_definitions.contains_key("B.Inner.run"));
-    assert!(!checked.module_definitions.contains_key("Inner.run"));
+    assert!(checked.module_definitions.contains_key("A.run"));
+    assert!(checked.module_definitions.contains_key("B.run"));
+    assert!(!checked.module_definitions.contains_key("run"));
     let output = shin::dump_mono(source, "t").unwrap();
-    assert!(output.contains("name: \"A.Inner.run\""));
-    assert!(output.contains("name: \"B.Inner.run\""));
+    assert!(output.contains("name: \"A.run\""));
+    assert!(output.contains("name: \"B.run\""));
 }
 
 #[test]
