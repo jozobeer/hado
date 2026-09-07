@@ -92,10 +92,12 @@ E402 E403 E405 は網羅性段階で E515 より先に当たるので変えな�
 | `E110.shin` | `def main = "a\q"` |
 | `E111.shin` | `def main = ''` |
 | `E112.shin` | `def main = 99999999999999999999` |
-| `E205.shin` | `def f x => x + 1` を 2 回 |
+| `E205.shin` | `def f x => x + 1` を 2 回と、`f` を呼ぶ `main` |
 | `E206.shin` | `main` が無い（`def f x => x + 1` のみ）。引数を持つ `main` は判定器側のプローブ |
-| `E515.shin` | `def display user => if user \| Guest => "guest" \| Member(m) => m.name`（`type` 定義付き） |
-| `E602.shin` | sig の member を struct が欠く |
+| `E515.shin` | `def display user => if user \| Guest => "guest" \| Member(m) => m.name`（`type` 定義付き。`display` を呼ぶ `main`） |
+| `E602.shin` | sig の member を struct が欠く。module を使う `main` |
+
+非 E1xx の拒否は全件、全ての定義を使う `main` を持つ（既存の 39 本と同じ）。`main` が無いと E206 が 1:1 に当たって同一段階の E205 より先になり、定義が未使用だと E513 が E515 と同じ段階・同じ位置に当たる。
 
 ### prelude（`stdlib/`）
 
