@@ -1427,6 +1427,8 @@ module_impl     := "module" upper_name ":" upper_name "=" "struct" struct_item* 
 struct_item     := definition
                  | type_definition
                  | "type" upper_name "=" type_expr                        sig の抽象型の実体化に限る
+                 | module_type
+                 | module_impl
 ```
 
 sig の `type` は本体を持たない（E100）。sig の `def` は全ての引数と戻りに型を書く。
