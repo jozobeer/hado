@@ -62,7 +62,7 @@ fn duplicate_module_members_are_not_silently_overwritten() {
 #[test]
 fn qualified_abstract_annotations_preserve_module_identity() {
     let prefix = "module type S = sig type T def make(x: Int): T end module M : S = struct type T = { x: Int } def make x => { x = x } end module N : S = struct type T = { x: Int } def make x => { x = x } end";
-    let source = format!("{prefix} def accept (x: M.T) => x == M.make 1 def main = accept (M.make 1)");
+    let source = format!("{prefix} def accept (x: M.T) => x == M.make 1 def main = accept (M.make 1) && N.make 1 == N.make 1");
     assert_eq!(check_source(&source, "t").unwrap().main, Ty::Bool);
     let source = format!("{prefix} def accept (x: M.T) => x == M.make 1 def main = accept (N.make 1)");
     assert_eq!(
@@ -110,7 +110,7 @@ fn signature_specialization_preserves_comparison_constraints() {
 
 #[test]
 fn checked_modules_retain_separate_internal_record_schemas() {
-    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = { first: Int } def make x => { first = x } end\nmodule B : S = struct type T = { second: Int } def make x => { second = x } end\ndef main = 0";
+    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = { first: Int } def make x => { first = x } end\nmodule B : S = struct type T = { second: Int } def make x => { second = x } end\ndef main = A.make 1 == A.make 1 && B.make 1 == B.make 1";
     let checked = check_source(source, "t").unwrap();
     assert_eq!(checked.module_records["A.T"].0, vec!["first"]);
     assert_eq!(checked.module_records["B.T"].0, vec!["second"]);
@@ -119,7 +119,7 @@ fn checked_modules_retain_separate_internal_record_schemas() {
 
 #[test]
 fn checked_modules_retain_internal_constructor_tags_and_schemes() {
-    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = | Empty | Wrap(Int) def make x => Wrap(x) end\nmodule B : S = struct type T = | Wrap(Int) | Empty def make x => Wrap(x) end\ndef main = 0";
+    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = | Empty | Wrap(Int) def make x => Wrap(x) end\nmodule B : S = struct type T = | Wrap(Int) | Empty def make x => Wrap(x) end\ndef main = A.make 1 == A.make 1 && B.make 1 == B.make 1";
     let checked = check_source(source, "t").unwrap();
     assert_eq!(checked.module_constructors["A.Wrap"].0, 1);
     assert_eq!(checked.module_constructors["B.Wrap"].0, 0);
@@ -129,7 +129,7 @@ fn checked_modules_retain_internal_constructor_tags_and_schemes() {
 
 #[test]
 fn internal_record_schemas_use_qualified_result_types() {
-    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = { value: Int } def make x => { value = x } end\ndef main = 0";
+    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = { value: Int } def make x => { value = x } end\ndef main = A.make 1";
     let checked = check_source(source, "t").unwrap();
     let mut inference = shin::types::Inference::default();
     let ty = inference.instantiate(&checked.module_records["A.T"].1);

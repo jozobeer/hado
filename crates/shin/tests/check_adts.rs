@@ -70,9 +70,9 @@ fn recursive_type_cycles_preserve_parameters() {
             "{source}"
         );
     }
-    let source = "type A<T> = | AEnd | ANode(B<T>)\ntype B<U> = | BNode(A<U>)\ndef main = 1";
+    let source = "type A<T> = | AEnd | ANode(B<T>)\ntype B<U> = | BNode(A<U>)\ndef main = if ANode(BNode(AEnd)) == ANode(BNode(AEnd)) => 1 | 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
-    let source = "type Wrap<T> = | Wrapped(List<List<T>>)\ndef main = 1";
+    let source = "type Wrap<T> = | Wrapped(List<List<T>>)\ndef main = if Wrapped([[1]]) == Wrapped([[1]]) => 1 | 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 

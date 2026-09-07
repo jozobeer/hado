@@ -21,7 +21,7 @@ fn scalar_widths_follow_the_plan() {
 #[test]
 fn payload_variants_share_a_pointer_representation() {
     let checked = shin::check_source(
-        "type Flag = | On | Off\ntype Record = { count: Int }\ndef main = 0",
+        "type Flag = | On | Off\ntype Record = { count: Int }\ndef main = On == Off && { count = 0 }.count == 0",
         "t",
     )
     .unwrap();
@@ -63,7 +63,7 @@ fn aggregate_layout_aligns_fields_and_total_size() {
 #[test]
 fn record_layout_specializes_fields_in_declaration_order() {
     let checked = shin::check_source(
-        "type Row<T> = { flag: Bool; value: T; marker: Char }\ndef main = 0",
+        "type Row<T> = { flag: Bool; value: T; marker: Char }\ndef main = { flag = true; value = 0; marker = 'a' }",
         "t",
     )
     .unwrap();
@@ -81,7 +81,7 @@ fn record_layout_specializes_fields_in_declaration_order() {
 
 #[test]
 fn constructor_layout_keeps_nullary_variants_boxed_when_required() {
-    let checked = shin::check_source("type Flag = | On | Off\ndef main = 0", "t").unwrap();
+    let checked = shin::check_source("type Flag = | On | Off\ndef main = On", "t").unwrap();
     let option = Type::Data("Option".into(), vec![Type::Bool]);
     let some = shin::repr::constructor_layout("Some", &option, &checked, 8)
         .unwrap()
@@ -132,7 +132,7 @@ fn function_abi_always_has_an_environment_parameter() {
 
 #[test]
 fn constructor_tags_follow_declaration_order_within_each_type() {
-    let checked = shin::check_source("type First = | Zebra | Apple\ntype Second = | Yes | No\ndef main = 0", "t").unwrap();
+    let checked = shin::check_source("type First = | Zebra | Apple\ntype Second = | Yes | No\ndef main = Zebra == Apple && Yes == No", "t").unwrap();
     let first = Type::Data("First".into(), vec![]);
     let second = Type::Data("Second".into(), vec![]);
     assert_eq!(shin::repr::constructor_tag("Zebra", &first, &checked).unwrap(), 0);
