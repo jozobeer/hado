@@ -1,19 +1,3 @@
-//! R4 acceptance harness (PLAN.md "判定" and "コーパス外プローブ").
-//!
-//! 1. `expression_tree_round_trip`: generate 20 expression trees with a
-//!    fixed-seed LCG, render each to a source string with randomly mixed
-//!    redundant parentheses / whitespace / `--` line comments, parse it as
-//!    `def main = <source>`, and require the fully-parenthesized canonical
-//!    form of the parsed tree to equal the canonical form built directly
-//!    from the generated tree.
-//! 2. `corpus_counts`: enumerate `tests/accept` and `tests/reject` with
-//!    `read_dir`, print the accept / E1xx / non-E1xx contract lines, and
-//!    check the parse/compile divergence (non-E1xx fail only at the
-//!    non-syntax `M3+` stage; E1xx fail at parse).
-//! 3. `gen_probe`: five `def main = <a> + <b>` pairs through the production
-//!    path (`compile_to_object` -> `link_executable` -> run).
-//! 4. `decoy_probes`: three lexically-similar success/failure pairs.
-
 use std::path::{Path, PathBuf};
 
 use shin::parser::{BinOp, Node, NodeKind, Span, canonical, parse_source};
@@ -31,15 +15,9 @@ fn repo_root() -> PathBuf {
 /// `*.shin` files directly under `dir`, sorted. Anything else is ignored.
 fn list_shin(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(e) => {
-            println!("parse_corpus_unreadable_dir: {} ({e})", dir.display());
-            return out;
-        }
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let entries = std::fs::read_dir(dir).unwrap();
+    for entry in entries {
+        let path = entry.unwrap().path();
         if path.extension().and_then(|e| e.to_str()) == Some("shin") {
             out.push(path);
         }
@@ -64,7 +42,7 @@ fn is_e1xx(code: &str) -> bool {
 }
 
 fn read_rel(root: &Path, rel: &str) -> String {
-    std::fs::read_to_string(root.join(rel)).unwrap_or_default()
+    std::fs::read_to_string(root.join(rel)).unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -140,21 +118,36 @@ fn corpus_counts() {
         let text = read_rel(&root, rel);
         let code = header_value(&text, "-- error:").unwrap_or_default();
         let obj = work.join(rel.replace('/', "_"));
-        match shin::compile_to_object(&text, &obj) {
-            Err(msg) if is_e1xx(&code) => {}
+        match shin::compile_source_to_object(&text, rel, &obj) {
+            Err(msg) if is_e1xx(&code) => assert!(msg.contains(&format!("error[{code}]")), "{rel}: {msg}"),
             Err(msg) => {
                 assert!(
                     !msg.contains("error[E1"),
                     "non-E1xx {rel} must not fail at the syntax stage, got: {msg}"
                 );
             }
-            Ok(()) => {}
+            Ok(()) => panic!("reject corpus compiled successfully: {rel}"),
         }
     }
+    std::fs::remove_dir_all(work).unwrap();
 
-    assert_eq!(accept_ok.len(), 23, "accept count");
-    assert_eq!(e1xx_ok.len(), 7, "E1xx count");
-    assert_eq!(non_e1xx_ok.len(), 39, "non-E1xx count");
+    let spec = read_rel(&root, "docs/spec.0.1.md");
+    let codes: std::collections::BTreeSet<_> = spec.lines().filter_map(|line| {
+        let code = line.strip_prefix("| E")?.split('|').next()?.trim();
+        (code.len() == 3 && code.bytes().all(|b| b.is_ascii_digit())).then(|| format!("E{code}"))
+    }).collect();
+    assert!(!codes.is_empty(), "spec diagnostic table is empty");
+    let rejects = list_shin(&root.join("tests/reject"));
+    let declared: std::collections::BTreeSet<_> = rejects.iter().map(|path| {
+        header_value(&std::fs::read_to_string(path).unwrap(), "-- error:").expect("reject header")
+    }).collect();
+    assert_eq!(declared, codes, "reject codes must match the specification");
+    assert_eq!(rejects.len(), codes.len(), "one reject per diagnostic code");
+    let accepts = list_shin(&root.join("tests/accept"));
+    assert!(!accepts.is_empty(), "empty accept corpus");
+    assert_eq!(accept_ok.len(), accepts.len(), "accept count");
+    assert_eq!(e1xx_ok.len(), codes.iter().filter(|code| is_e1xx(code)).count(), "E1xx count");
+    assert_eq!(non_e1xx_ok.len(), codes.iter().filter(|code| !is_e1xx(code)).count(), "non-E1xx count");
 }
 
 // ---------------------------------------------------------------------------
@@ -196,12 +189,12 @@ fn decoy_probes() {
     let ok_cases = [
         ("paren-expr", "def main = (1 + 2)"),
         ("string-comment", "def main = \"-- not a comment\""),
-        ("juxt-call", "def inc x => x + 1\ndef main = inc 1"),
+        ("paren-call", "def inc x => x + 1\ndef main = inc(1)"),
     ];
     let ng_cases = [
         ("paren-tuple", "def main = (1, 2)", "E105"),
         ("hash-comment", "def main = 1\n# c", "E104"),
-        ("paren-call", "def inc x => x + 1\ndef main = inc(1)", "E106"),
+        ("constructor-juxt", "def main = Some 1", "E106"),
     ];
 
     for (label, src) in ok_cases {
