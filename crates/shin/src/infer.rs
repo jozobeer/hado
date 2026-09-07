@@ -663,7 +663,7 @@ impl Checker<'_> {
                 scrutinee,
                 arms,
                 fallback,
-            } => self.pattern_branch(scrutinee, arms, fallback.as_deref()),
+            } => self.pattern_branch(scrutinee, arms, fallback.as_deref(), node.span),
             NodeKind::Pipe(value, target) => self.pipe(value, target),
             NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) => {
                 self.apply(callee, args, node.span)
@@ -809,6 +809,7 @@ impl Checker<'_> {
         scrutinee: &Node,
         arms: &[(Pattern, Node)],
         fallback: Option<&Node>,
+        branch_span: Span,
     ) -> Result<Ty, Diagnostic> {
         let input = self.expression(scrutinee)?;
         let result = self.inference.fresh();
@@ -824,7 +825,7 @@ impl Checker<'_> {
             self.branch_result(body, &result)?;
         }
         if self.inference.resolve(&input) == Ty::Bool {
-            if let Err(error) = crate::check::boolean_coverage(scrutinee, arms, fallback, self.path) {
+            if let Err(error) = crate::check::boolean_coverage(branch_span, arms, fallback, self.path) {
                 self.deferred.push(error);
             }
         }
@@ -832,7 +833,7 @@ impl Checker<'_> {
             let groups = self.constructor_groups();
             let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
             let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-            if let Err(error) = crate::check::adt_coverage(scrutinee, arms, fallback, &constructors, &families, self.path) {
+            if let Err(error) = crate::check::adt_coverage(branch_span, arms, fallback, &constructors, &families, self.path) {
                 self.deferred.push(error);
             }
         }

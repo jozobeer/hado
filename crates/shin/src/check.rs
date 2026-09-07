@@ -67,7 +67,7 @@ fn check_sole_parameter_branch(
 }
 
 pub(crate) fn boolean_coverage(
-    scrutinee: &Node,
+    branch_span: crate::parser::Span,
     arms: &[(Pattern, Node)],
     fallback: Option<&Node>,
     path: &str,
@@ -82,20 +82,20 @@ pub(crate) fn boolean_coverage(
     let (code, location, message) = match (exhaustive, fallback) {
         (false, None) => (
             "E402",
-            scrutinee,
+            branch_span,
             "Boolean patterns do not cover both values",
         ),
         (true, Some(body)) => (
             "E403",
-            body,
+            body.span,
             "fallback is unreachable after both Boolean values",
         ),
         _ => return Ok(()),
     };
     Err(Diagnostic {
         path: path.into(),
-        line: location.span.line,
-        col: location.span.col,
+        line: location.line,
+        col: location.col,
         code: Some(code.into()),
         message: message.into(),
     })
@@ -222,7 +222,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
 }
 
 pub(crate) fn adt_coverage(
-    scrutinee: &Node,
+    branch_span: crate::parser::Span,
     arms: &[(Pattern, Node)],
     fallback: Option<&Node>,
     constructors: &[String],
@@ -240,18 +240,18 @@ pub(crate) fn adt_coverage(
     let exhaustive = coverage.iter().all(|covered| *covered == Some(true));
     let missing = coverage.contains(&Some(false));
     let (code, location, message) = match (exhaustive, fallback) {
-        (false, None) if missing => ("E402", scrutinee, "not all constructor values are covered"),
+        (false, None) if missing => ("E402", branch_span, "not all constructor values are covered"),
         (true, Some(body)) => (
             "E403",
-            body,
+            body.span,
             "fallback is unreachable after all constructors",
         ),
         _ => return Ok(()),
     };
     Err(Diagnostic {
         path: path.into(),
-        line: location.span.line,
-        col: location.span.col,
+        line: location.line,
+        col: location.col,
         code: Some(code.into()),
         message: message.into(),
     })
