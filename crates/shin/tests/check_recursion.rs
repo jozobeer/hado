@@ -64,7 +64,7 @@ fn type_changing_recursion_reports_poly_recursion() {
             .unwrap()
             .code
             .as_deref(),
-        Some("E701")
+        Some("E307")
     );
     let source = "def rec bad x => x x\ndef main = bad 1";
     assert_eq!(

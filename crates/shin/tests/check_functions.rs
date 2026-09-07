@@ -26,7 +26,7 @@ fn application_checks_arity_and_occurs() {
     for (source, code) in [
         ("def f x y => x\ndef main = f 1", "E301"),
         ("def main = fn x => x x", "E306"),
-        ("def main = missing", "E205"),
+        ("def main = missing", "E204"),
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),
@@ -146,7 +146,7 @@ fn function_values_cannot_be_compared_for_equality() {
     let source = "def inc x => x + 1\ndef main = inc == inc";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E704")
+        Some("E703")
     );
 }
 
@@ -156,7 +156,7 @@ fn equality_rejects_functions_inside_generic_containers() {
         let source = format!("def inc x => x + 1\ndef main = {value} == {value}");
         assert_eq!(
             check_source(&source, "t").err().unwrap().code.as_deref(),
-            Some("E704")
+            Some("E703")
         );
     }
 }
@@ -166,25 +166,25 @@ fn equality_rejects_fixed_function_fields() {
     let source = "type Handler = { run: Fn<Int, Int> }\ndef inc x => x + 1\ndef main = { run = inc } == { run = inc }";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E704")
+        Some("E703")
     );
 }
 
 #[test]
 fn equality_inspects_recursive_payloads_without_looping() {
-    let source = "type Tree = Leaf(Int) | Branch(Tree, Tree)\ndef main = Leaf(1) == Leaf(2)";
+    let source = "type Tree = | Leaf(Int) | Branch(Tree, Tree)\ndef main = Leaf(1) == Leaf(2)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
-    let source = "type Tree = Leaf(Fn<Int, Int>) | Branch(Tree, Tree)\ndef inc x => x + 1\ndef main = Leaf(inc) == Leaf(inc)";
+    let source = "type Tree = | Leaf(Fn<Int, Int>) | Branch(Tree, Tree)\ndef inc x => x + 1\ndef main = Leaf(inc) == Leaf(inc)";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E704")
+        Some("E703")
     );
 }
 
 #[test]
 fn phantom_function_parameter_does_not_make_a_value_contain_a_function() {
     let source =
-        "type Token<T> = Token\ndef eq (x: Token<Fn<Int, Int>>) => x == x\ndef main = eq Token";
+        "type Token<T> = | Token\ndef eq (x: Token<Fn<Int, Int>>) => x == x\ndef main = eq Token";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
 }
 
@@ -194,7 +194,7 @@ fn compare_rejects_function_values_and_containers() {
         let source = format!("def inc x => x + 1\ndef main = compare {value} {value}");
         assert_eq!(
             check_source(&source, "t").err().unwrap().code.as_deref(),
-            Some("E705")
+            Some("E704")
         );
     }
 }
@@ -207,7 +207,7 @@ fn compare_constraints_follow_local_aliases_and_pipes() {
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),
-            Some("E705")
+            Some("E704")
         );
     }
     let source = "def choose a b => a 1 + b 2\ndef apply compare x => compare x x\ndef inc x => x + 1\ndef main = apply choose inc";
@@ -222,7 +222,7 @@ fn equality_constraints_wait_for_local_argument_types() {
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),
-            Some("E704")
+            Some("E703")
         );
     }
     assert_eq!(
@@ -236,9 +236,9 @@ fn equality_constraints_wait_for_local_argument_types() {
 #[test]
 fn polymorphic_definitions_preserve_comparison_constraints() {
     for (definition, code) in [
-        ("def eq x => x == x", "E704"),
-        ("def eq x => compare x x", "E705"),
-        ("def eq = compare", "E705"),
+        ("def eq x => x == x", "E703"),
+        ("def eq x => compare x x", "E704"),
+        ("def eq = compare", "E704"),
     ] {
         let call = if definition == "def eq = compare" {
             "eq inc inc"
@@ -258,8 +258,8 @@ fn polymorphic_definitions_preserve_comparison_constraints() {
 #[test]
 fn comparison_constraints_propagate_through_polymorphic_wrappers() {
     for (definition, code) in [
-        ("def eq x y => x == y", "E704"),
-        ("def eq = compare", "E705"),
+        ("def eq x y => x == y", "E703"),
+        ("def eq = compare", "E704"),
     ] {
         let source = format!("{definition}\ndef invoke f x => f x x\ndef wrapped x => invoke eq x\ndef inc x => x + 1\ndef main = wrapped inc");
         assert_eq!(
@@ -275,7 +275,7 @@ fn main_cannot_return_a_function_or_function_container() {
         let source = format!("def inc x => x + 1\ndef main = {value}");
         assert_eq!(
             check_source(&source, "t").err().unwrap().code.as_deref(),
-            Some("E703")
+            Some("E702")
         );
     }
 }

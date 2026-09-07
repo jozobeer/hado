@@ -70,7 +70,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
     let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
     checker.values.insert(
         "compare".into(),
-        checker.inference.generalize_constrained(&compare, &[], &[(comparable, "E705")]),
+        checker.inference.generalize_constrained(&compare, &[], &[(comparable, "E704")]),
     );
     for item in &ast.items {
         if let Item::TypeDef(def) = item {
@@ -126,13 +126,13 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         .values
         .get("main")
         .cloned()
-        .ok_or_else(|| checker.error(ast.span, Some("E205"), "main is not defined"))?;
+        .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
     let main = checker.inference.instantiate(&scheme);
     if !checker.inference.resolve(&main).is_monomorphic() {
-        checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main must have a monomorphic type"));
+        checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
     }
     if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
-        checker.deferred.push(checker.error(definitions["main"].span, Some("E703"), "main cannot return a value containing a function"));
+        checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
     }
     Ok((Checked {
         module_constructors: checker.module_constructors,
@@ -158,10 +158,10 @@ impl Checker<'_> {
         let name = module
             .sig
             .as_ref()
-            .ok_or_else(|| self.error(module.span, Some("E601"), "module requires a signature"))?;
+            .ok_or_else(|| self.error(module.span, Some("E113"), "module requires a signature"))?;
         let signature = signatures
             .get(name)
-            .ok_or_else(|| self.error(module.span, Some("E205"), "unknown signature"))?;
+            .ok_or_else(|| self.error(module.span, Some("E204"), "unknown signature"))?;
         let saved = self.values.clone();
         let saved_types = self.type_arities.clone();
         let saved_records = self.records.clone();
@@ -342,7 +342,7 @@ impl Checker<'_> {
         }
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
-            self.deferred.push(self.error(definitions[name].span, Some("E515"), &format!("unused module definition {name}")));
+            self.deferred.push(self.error(definitions[name].span, Some("E514"), &format!("unused module definition {name}")));
         }
         Ok(exports)
     }
@@ -418,7 +418,7 @@ impl Checker<'_> {
         if let (Ty::Fn(calls, _), Ty::Fn(parameters, _)) = (inference.resolve(calls), inference.resolve(definition)) {
             for (call, parameter) in calls.iter().zip(&parameters) {
                 if inference.unify(call, parameter) == Err(TypeError::Occurs) {
-                    return Err(self.error(span, Some("E701"), "recursive calls change the argument type"));
+                    return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
                 }
             }
         }
@@ -596,7 +596,7 @@ impl Checker<'_> {
                 if name.starts_with("__") {
                     return Err(self.error(
                         node.span,
-                        Some("E204"),
+                        Some("E203"),
                         "intrinsics cannot be used as values",
                     ));
                 }
@@ -611,7 +611,7 @@ impl Checker<'_> {
                             Some(if self.current_definition.as_deref() == Some(name) {
                                 "E201"
                             } else {
-                                "E205"
+                                "E204"
                             }),
                             &format!("unbound name {name}"),
                         )
@@ -693,7 +693,7 @@ impl Checker<'_> {
         if let NodeKind::Name(name) = &value.kind {
             if let Some(exports) = self.modules.get(name) {
                 let scheme = exports.get(field).cloned().ok_or_else(|| {
-                    self.error(value.span, Some("E205"), "module member is not exported")
+                    self.error(value.span, Some("E204"), "module member is not exported")
                 })?;
                 return Ok(self.inference.instantiate(&scheme));
             }
@@ -743,7 +743,7 @@ impl Checker<'_> {
 
     fn project_type(&mut self, ty: &Ty, field: &str, span: Span) -> Result<Ty, Diagnostic> {
         if matches!(self.inference.resolve(ty), Ty::Abstract(_, _)) {
-            return Err(self.error(span, Some("E602"), "abstract type has no accessible fields"));
+            return Err(self.error(span, Some("E601"), "abstract type has no accessible fields"));
         }
         self.infer_record_from_field(ty, field, span)?;
         if matches!(self.inference.resolve(ty), Ty::Var(_)) {
@@ -763,7 +763,7 @@ impl Checker<'_> {
         let index = names
             .iter()
             .position(|name| name == field)
-            .ok_or_else(|| self.error(span, Some("E205"), "unknown field"))?;
+            .ok_or_else(|| self.error(span, Some("E204"), "unknown field"))?;
         let Ty::Fn(payload, result) = self.inference.instantiate(&scheme) else {
             unreachable!()
         };
@@ -870,7 +870,7 @@ impl Checker<'_> {
             .constructors
             .get(name)
             .cloned()
-            .ok_or_else(|| self.error(span, Some("E205"), "unknown constructor"))?;
+            .ok_or_else(|| self.error(span, Some("E204"), "unknown constructor"))?;
         let ty = self.inference.instantiate(&scheme);
         match ty {
             Ty::Fn(payload, result) => {
@@ -963,13 +963,13 @@ impl Checker<'_> {
                 {
                     return Err(self.error(
                         node.span,
-                        Some("E203"),
+                        Some("E202"),
                         "intrinsics are restricted to stdlib",
                     ));
                 }
                 let function = crate::runtime_abi::RuntimeFunction::from_intrinsic(name)
-                    .ok_or_else(|| self.error(node.span, Some("E205"), "unknown intrinsic"))?;
-                let signature = function.value_signature().ok_or_else(|| self.error(node.span, Some("E205"), "intrinsic has no value signature"))?;
+                    .ok_or_else(|| self.error(node.span, Some("E204"), "unknown intrinsic"))?;
+                let signature = function.value_signature().ok_or_else(|| self.error(node.span, Some("E204"), "intrinsic has no value signature"))?;
                 return Ok(Ty::Fn(signature.parameters.iter().map(Ty::from).collect(), Box::new(Ty::from(&signature.result))));
             }
         }
@@ -1104,7 +1104,7 @@ impl Checker<'_> {
                 "Char" => Ok(Ty::Char),
                 "String" => Ok(Ty::String),
                 "Unit" => Ok(Ty::Unit),
-                _ => Err(self.error(span, Some("E205"), &format!("unknown type {name}"))),
+                _ => Err(self.error(span, Some("E204"), &format!("unknown type {name}"))),
             },
             _ => Err(self.error(span, None, "type annotation is not implemented")),
         }
@@ -1146,7 +1146,7 @@ impl Checker<'_> {
         self.unify(&left, &right, a.span)?;
         match op {
             BinOp::Eq | BinOp::Ne => {
-                self.comparison_constraints.push((left.clone(), a.span, "E704"));
+                self.comparison_constraints.push((left.clone(), a.span, "E703"));
                 Ok(Ty::Bool)
             }
             BinOp::And | BinOp::Or => {

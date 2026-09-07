@@ -228,6 +228,7 @@ pub enum Item {
 #[derive(Debug, Clone)]
 pub struct Def {
     pub name: String,
+    pub name_span: Span,
     pub rec: bool,
     pub kind: DefKind,
     pub span: Span,
@@ -249,6 +250,7 @@ pub enum DefKind {
 #[derive(Debug, Clone)]
 pub struct SigDef {
     pub name: String,
+    pub name_span: Span,
     pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
@@ -258,6 +260,7 @@ pub struct SigDef {
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: String,
+    pub name_span: Span,
     pub params: Vec<String>,
     pub ty: Option<TypeExpr>,
     pub span: Span,
@@ -266,6 +269,7 @@ pub struct TypeDef {
 #[derive(Debug, Clone)]
 pub struct ModuleSig {
     pub name: String,
+    pub name_span: Span,
     pub items: Vec<Item>,
     pub span: Span,
 }
@@ -273,6 +277,7 @@ pub struct ModuleSig {
 #[derive(Debug, Clone)]
 pub struct ModuleImpl {
     pub name: String,
+    pub name_span: Span,
     pub sig: Option<String>,
     pub items: Vec<Item>,
     pub span: Span,
@@ -437,10 +442,11 @@ impl Parser<'_> {
                 "operator overloading is forbidden; operators cannot be defined",
             ));
         }
+        let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
         if self.kind() == &TokKind::Pipe {
             let (params, body) = self.parse_arm_function(span)?;
-            return Ok(Item::Def(Def { name, rec, kind: DefKind::Function { params, ret: None, body }, span }));
+            return Ok(Item::Def(Def { name, name_span, rec, kind: DefKind::Function { params, ret: None, body }, span }));
         }
         if self.kind() == &TokKind::Eq {
             // E102: `def rec` is only allowed on function definitions.
@@ -455,6 +461,7 @@ impl Parser<'_> {
             let body = self.parse_expr()?;
             Ok(Item::Def(Def {
                 name,
+                name_span,
                 rec: false,
                 kind: DefKind::Value(body),
                 span,
@@ -474,6 +481,7 @@ impl Parser<'_> {
             let body = self.parse_expr()?;
             Ok(Item::Def(Def {
                 name,
+                name_span,
                 rec,
                 kind: DefKind::Function { params, ret, body },
                 span,
@@ -484,6 +492,7 @@ impl Parser<'_> {
     fn parse_sig_def(&mut self) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::Def)?;
+        let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
         let mut type_params = Vec::new();
         if self.kind() == &TokKind::Lt {
@@ -503,6 +512,7 @@ impl Parser<'_> {
         let ret = Some(self.parse_type()?);
         Ok(Item::SigDef(SigDef {
             name,
+                name_span,
             type_params,
             params,
             ret,
@@ -513,6 +523,7 @@ impl Parser<'_> {
     fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
+        let name_span = self.span();
         let name = self.expect_upper_name("a declaration name")?;
         let mut params = Vec::new();
         if self.kind() == &TokKind::Lt {
@@ -536,7 +547,7 @@ impl Parser<'_> {
             self.expect(&TokKind::Eq)?;
             Some(self.parse_type_body(context)?)
         };
-        Ok(Item::TypeDef(TypeDef { name, params, ty, span }))
+        Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, span }))
     }
 
     fn parse_module(&mut self) -> Result<Item, Diagnostic> {
@@ -545,6 +556,7 @@ impl Parser<'_> {
         if self.kind() == &TokKind::KwType {
             // module type NAME = sig ... end
             self.bump();
+            let name_span = self.span();
             let name = self.expect_upper_name("a module-type name")?;
             self.expect(&TokKind::Eq)?;
             self.expect(&TokKind::KwSig)?;
@@ -565,9 +577,10 @@ impl Parser<'_> {
                 }
             }
             self.bump();
-            Ok(Item::ModuleSig(ModuleSig { name, items, span }))
+            Ok(Item::ModuleSig(ModuleSig { name, name_span, items, span }))
         } else {
             // module NAME [: SIG] = struct ... end
+            let name_span = self.span();
             let name = self.expect_upper_name("a module name")?;
             let sig = if self.kind() == &TokKind::Colon {
                 self.bump();
@@ -597,6 +610,7 @@ impl Parser<'_> {
             self.bump();
             Ok(Item::ModuleImpl(ModuleImpl {
                 name,
+                name_span,
                 sig,
                 items,
                 span,
