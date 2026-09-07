@@ -186,8 +186,8 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
         if matches!(pat.kind, PatternKind::Underscore) {
             return Err(Diagnostic {
                 path: path.into(),
-                line: node.span.line,
-                col: node.span.col,
+                line: pat.span.line,
+                col: pat.span.col,
                 code: Some("E504".into()),
                 message: "use do? to discard a success value".into(),
             });
