@@ -48,7 +48,20 @@ pub enum TypeError {
 pub struct Scheme {
     variables: BTreeSet<u32>,
     ty: Ty,
-    constraints: Vec<(Ty, &'static str)>,
+    constraints: Vec<ComparisonConstraint>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComparisonConstraint {
+    pub ty: Ty,
+    pub code: &'static str,
+    pub span: Option<crate::lexer::Span>,
+}
+
+impl ComparisonConstraint {
+    fn with_type(&self, ty: Ty) -> Self {
+        Self { ty, code: self.code, span: self.span }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -211,16 +224,16 @@ impl Inference {
         &self,
         ty: &Ty,
         environment: &[Ty],
-        constraints: &[(Ty, &'static str)],
+        constraints: &[ComparisonConstraint],
     ) -> Scheme {
         let mut scheme = self.generalize(ty, environment);
         scheme.constraints = constraints
             .iter()
-            .filter_map(|(ty, code)| {
-                let ty = self.resolve(ty);
+            .filter_map(|constraint| {
+                let ty = self.resolve(&constraint.ty);
                 let mut variables = BTreeSet::new();
                 ty.free_variables(&mut variables);
-                (!variables.is_disjoint(&scheme.variables)).then_some((ty, *code))
+                (!variables.is_disjoint(&scheme.variables)).then_some(constraint.with_type(ty))
             })
             .collect();
         scheme
@@ -230,7 +243,7 @@ impl Inference {
         self.instantiate_constrained(scheme).0
     }
 
-    pub fn instantiate_constrained(&mut self, scheme: &Scheme) -> (Ty, Vec<(Ty, &'static str)>) {
+    pub fn instantiate_constrained(&mut self, scheme: &Scheme) -> (Ty, Vec<ComparisonConstraint>) {
         let replacements: HashMap<_, _> = scheme
             .variables
             .iter()
@@ -242,7 +255,7 @@ impl Inference {
             scheme
                 .constraints
                 .iter()
-                .map(|(ty, code)| (ty.map_variables(&replace), *code))
+                .map(|constraint| constraint.with_type(constraint.ty.map_variables(&replace)))
                 .collect(),
         )
     }
@@ -316,7 +329,7 @@ impl Scheme {
         Self {
             variables: self.variables.clone(),
             ty: self.ty.reveal(names),
-            constraints: self.constraints.iter().map(|(ty, code)| (ty.reveal(names), *code)).collect(),
+            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.reveal(names))).collect(),
         }
     }
 
@@ -324,7 +337,7 @@ impl Scheme {
         Self {
             variables: self.variables.clone(),
             ty: self.ty.qualify_data_types(names),
-            constraints: self.constraints.iter().map(|(ty, code)| (ty.qualify_data_types(names), *code)).collect(),
+            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.qualify_data_types(names))).collect(),
         }
     }
 }

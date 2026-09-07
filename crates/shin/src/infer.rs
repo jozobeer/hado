@@ -1,6 +1,6 @@
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
 use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
-use crate::types::{Inference, Scheme, Ty, TypeError};
+use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError};
 use crate::Checked;
 use std::collections::HashMap;
 
@@ -29,7 +29,8 @@ struct Checker<'a> {
     modules: HashMap<String, HashMap<String, Scheme>>,
     abstract_types: HashMap<String, (usize, String)>,
     projections: Vec<(Ty, FieldName, Ty, Span)>,
-    comparison_constraints: Vec<(Ty, Span, &'static str)>,
+    comparison_constraints: Vec<ComparisonConstraint>,
+    equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
 }
 
@@ -71,13 +72,15 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         abstract_types: HashMap::new(),
         projections: Vec::new(),
         comparison_constraints: Vec::new(),
+        equality_anchors: ast.equality_anchors.iter().map(|(left, right, operator)|
+            ((left.line, left.col, right.line, right.col), *operator)).collect(),
         recursive_calls: HashMap::new(),
     };
     let comparable = checker.inference.fresh();
     let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
     checker.values.insert(
         "compare".into(),
-        checker.inference.generalize_constrained(&compare, &[], &[(comparable, "E704")]),
+        checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
     );
     for item in &ast.items {
         if let Item::TypeDef(def) = item {
@@ -131,9 +134,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
     }
     checker.resolve_projections(true)?;
-    for (ty, span, code) in &checker.comparison_constraints {
-        if checker.contains_function(&checker.inference.resolve(ty), &mut Vec::new()) {
-            checker.deferred.push(checker.error(*span, Some(code), "values containing functions cannot be compared"));
+    for constraint in &checker.comparison_constraints {
+        if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
+            checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
         }
     }
     let scheme = checker
@@ -294,6 +297,7 @@ impl Checker<'_> {
             span: module.span,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
+            equality_anchors: Vec::new(),
         };
         crate::type_cycles::check(&ast, self.path)?;
         let mut signatures = signatures.clone();
@@ -388,7 +392,7 @@ impl Checker<'_> {
                 let known = self.invalid_definition_type(definitions[&declaration.name]);
                 actual = self.inference.freshen_errors(&known);
             }
-            self.comparison_constraints.extend(constraints.into_iter().map(|(ty, code)| (ty, declaration.span, code)));
+            self.record_comparisons(constraints, declaration.span);
             let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
             let expected = self.signature_type(declaration, &parameters)?;
             self.inference
@@ -406,7 +410,7 @@ impl Checker<'_> {
                 (name.clone(), Ty::Abstract(public.clone(), vec![]))).collect();
             public_parameters.extend(parameters);
             let public_type = self.signature_type(declaration, &public_parameters)?;
-            exports.insert(declaration.name.clone(), self.inference.generalize(&public_type, &[]));
+            exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints));
         }
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
@@ -493,9 +497,8 @@ impl Checker<'_> {
             .flat_map(|(input, _, output, _)| [input.clone(), output.clone()])
             .collect();
         for (name, ty) in placeholders {
-            let constraints = self.comparison_constraints.iter().map(|(ty, _, code)| (ty.clone(), *code)).collect::<Vec<_>>();
             self.values
-                .insert(name, self.inference.generalize_constrained(&ty, &environment, &constraints));
+                .insert(name, self.inference.generalize_constrained(&ty, &environment, &self.comparison_constraints));
         }
         Ok(())
     }
@@ -761,7 +764,7 @@ impl Checker<'_> {
                     })?;
                 let (ty, constraints) = self.inference.instantiate_constrained(&scheme);
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
-                self.comparison_constraints.extend(constraints.into_iter().map(|(ty, code)| (ty, node.span, code)));
+                self.record_comparisons(constraints, node.span);
                 Ok(ty)
             }
             NodeKind::Fn { params, body } => {
@@ -834,7 +837,9 @@ impl Checker<'_> {
                 let scheme = exports.get(&field.name).cloned().ok_or_else(|| {
                     self.error(field.span, Some("E204"), "module member is not exported")
                 })?;
-                return Ok(self.inference.instantiate(&scheme));
+                let (ty, constraints) = self.inference.instantiate_constrained(&scheme);
+                self.record_comparisons(constraints, field.span);
+                return Ok(ty);
             }
         }
         let ty = self.expression(value)?;
@@ -1381,7 +1386,8 @@ impl Checker<'_> {
         self.unify(&left, &right, a.span)?;
         match op {
             BinOp::Eq | BinOp::Ne => {
-                self.comparison_constraints.push((left.clone(), a.span, "E703"));
+                let span = self.equality_anchors.get(&(a.span.line, a.span.col, b.span.line, b.span.col)).copied().unwrap_or(a.span);
+                self.comparison_constraints.push(ComparisonConstraint { ty: left.clone(), code: "E703", span: Some(span) });
                 Ok(Ty::Bool)
             }
             BinOp::And | BinOp::Or => {
@@ -1390,6 +1396,11 @@ impl Checker<'_> {
             }
             _ => self.numeric_binary(op, &left, a.span),
         }
+    }
+
+    fn record_comparisons(&mut self, mut constraints: Vec<ComparisonConstraint>, span: Span) {
+        for constraint in &mut constraints { constraint.span.get_or_insert(span); }
+        self.comparison_constraints.extend(constraints);
     }
 
     fn contains_function(&self, ty: &Ty, visited: &mut Vec<Ty>) -> bool {

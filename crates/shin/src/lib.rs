@@ -116,6 +116,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);
+            ast.equality_anchors.extend(parsed.equality_anchors);
             ast.branches_after_fallback.extend(parsed.branches_after_fallback);
             prelude.extend(parsed.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
             line += module.lines().count() + 1;

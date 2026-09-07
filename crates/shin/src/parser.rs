@@ -240,6 +240,7 @@ pub struct Ast {
     pub span: Span,
     pub branches_after_fallback: Vec<Span>,
     pub branch_anchors: Vec<(Span, Span)>,
+    pub equality_anchors: Vec<(Span, Span, Span)>,
 }
 
 impl Ast {
@@ -379,6 +380,7 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
         path,
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
+        equality_anchors: Vec::new(),
     }
     .parse_program()
 }
@@ -392,6 +394,7 @@ struct Parser<'a> {
     path: &'a str,
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
+    equality_anchors: Vec<(Span, Span, Span)>,
 }
 
 impl Parser<'_> {
@@ -462,7 +465,7 @@ impl Parser<'_> {
                 }
             }
         }
-        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone() })
+        Ok(Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone() })
     }
 
     fn parse_definition(&mut self) -> Result<Item, Diagnostic> {
@@ -906,8 +909,12 @@ impl Parser<'_> {
         };
         match op {
             Some(op) => {
+                let operator = self.span();
                 self.bump();
                 let right = self.parse_add()?;
+                if matches!(op, BinOp::Eq | BinOp::Ne) {
+                    self.equality_anchors.push((left.span, right.span, operator));
+                }
                 // Comparisons are non-associative (§44): `1 < 2 < 3` is a
                 // syntax error and carries no E-code.
                 if matches!(
