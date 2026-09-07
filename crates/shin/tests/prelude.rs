@@ -34,17 +34,17 @@ fn scalar_prelude_is_implicit_without_exposing_intrinsics() {
 #[test]
 fn generic_prelude_operations_execute() {
     let cases = [
-        ("List.map [1, 2] (fn x => x + 1)", "Cons(2, Cons(3, Nil))\n"),
-        ("List.filter [1, 2, 3] (fn x => x > 1)", "Cons(2, Cons(3, Nil))\n"),
+        ("List.map [1, 2] (fn x => x + 1)", "[2, 3]\n"),
+        ("List.filter [1, 2, 3] (fn x => x > 1)", "[2, 3]\n"),
         ("List.fold [1, 2, 3] 0 (fn sum value => sum + value)", "6\n"),
-        ("List.reverse [1, 2, 3]", "Cons(3, Cons(2, Cons(1, Nil)))\n"),
-        ("List.append [1, 2] [3]", "Cons(1, Cons(2, Cons(3, Nil)))\n"),
-        ("[3, 1, 2, 1] |> List.sort compare", "Cons(1, Cons(1, Cons(2, Cons(3, Nil))))\n"),
-        ("Option.unwrap_or (Option.map (Some 41) (fn x => x + 1)) 0", "42\n"),
-        ("Option.is_some (Some true)", "true\n"),
-        ("Option.ok_or (Some 42) \"missing\"", "42\n"),
+        ("List.reverse [1, 2, 3]", "[3, 2, 1]\n"),
+        ("List.append [1, 2] [3]", "[1, 2, 3]\n"),
+        ("[3, 1, 2, 1] |> List.sort compare", "[1, 1, 2, 3]\n"),
+        ("Option.unwrap_or (Option.map (Some(41)) (fn x => x + 1)) 0", "42\n"),
+        ("Option.is_some (Some(true))", "true\n"),
+        ("Option.ok_or (Some(42)) \"missing\"", "42\n"),
         ("Result.map (7 / 2) (fn x => x + 1)", "4\n"),
-        ("Result.is_ok (Result.map_error (7 / 0) (fn error => \"division failed\"))", "false\n"),
+        ("Result.is_ok (Result.map_error (7 / 0) (fn | DivisionByZero => \"division failed\"))", "false\n"),
     ];
     for (index, (expression, expected)) in cases.iter().enumerate() {
         let path = std::env::temp_dir().join(format!("shin-generic-prelude-{}-{index}", std::process::id()));

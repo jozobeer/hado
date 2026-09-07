@@ -1811,6 +1811,39 @@ impl DisplayContext<'_> {
     }
 }
 
+fn display_list(value: Expression, element: Type, context: &mut DisplayContext<'_>) -> Result<Expression, String> {
+    let id = FunctionId(context.next);
+    context.next += 1;
+    let signature = Signature { parameters: vec![value.ty()], result: Type::String };
+    let parameter = Expression::Variable { id: 0, ty: value.ty() };
+    let body = display_list_items(parameter, element, id, &signature, context)?;
+    context.functions.push(Function { id, name: format!("format_list_items_{id:?}"), signature: signature.clone(), parameters: vec![0], captures: vec![], body });
+    let items = Expression::call_direct(id, &signature, vec![value])?;
+    concat_display(display_text("["), concat_display(items, display_text("]"))?)
+}
+
+fn display_text(text: &str) -> Expression {
+    Expression::Constant(Constant::String(text.into()))
+}
+
+fn concat_display(left: Expression, right: Expression) -> Result<Expression, String> {
+    Expression::call_runtime(crate::runtime_abi::RuntimeFunction::StringConcat, vec![left, right])
+}
+
+fn display_list_items(value: Expression, element: Type, id: FunctionId, signature: &Signature, context: &mut DisplayContext<'_>) -> Result<Expression, String> {
+    let head = context.format(Expression::Project { value: Box::new(value.clone()), constructor: "Cons".into(), index: 0, result: element })?;
+    let tail = Expression::Project { value: Box::new(value.clone()), constructor: "Cons".into(), index: 1, result: value.ty() };
+    let remaining = Expression::call_direct(id, signature, vec![tail.clone()])?;
+    let suffix = Expression::Switch { value: Box::new(tail), arms: vec![
+        ("Nil".into(), display_text("")),
+        ("Cons".into(), concat_display(display_text(", "), remaining)?),
+    ], fallback: None, result: Type::String };
+    Ok(Expression::Switch { value: Box::new(value), arms: vec![
+        ("Nil".into(), display_text("")),
+        ("Cons".into(), concat_display(head, suffix)?),
+    ], fallback: None, result: Type::String })
+}
+
 fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<Expression, String> {
     let checked = context.checked;
     use crate::runtime_abi::RuntimeFunction;
@@ -1822,6 +1855,9 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
         Type::Char => RuntimeFunction::CharToString,
         Type::Bool => return branch(value, text("true"), text("false")),
         Type::Unit => return Ok(text("()")),
+        Type::Data(name, parameters) if name == "List" && parameters.len() == 1 => {
+            return display_list(value, parameters[0].clone(), context);
+        }
         ty @ Type::Data(..) if matches!(&ty, Type::Data(name, _) if checked.records.contains_key(name)) => {
             let Type::Data(name, _) = &ty else { unreachable!() };
             let fields = &checked.records[name].0;

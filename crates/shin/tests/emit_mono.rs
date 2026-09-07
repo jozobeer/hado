@@ -498,7 +498,7 @@ fn recursive_list_main_uses_finite_formatter_functions() {
     shin::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"Cons(1, Cons(2, Cons(3, Nil)))\n");
+    assert_eq!(output.stdout, b"[1, 2, 3]\n");
     let dump = shin::dump_mono(source, "t").unwrap();
     assert!(dump.contains("format_Data"));
     assert!(!dump.contains("unavailable"));
