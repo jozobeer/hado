@@ -15,7 +15,7 @@ fn signature_matching_exports_only_declared_values() {
             .unwrap()
             .code
             .as_deref(),
-        Some("E205")
+        Some("E204")
     );
 }
 
@@ -34,14 +34,14 @@ fn abstract_types_hide_record_representation() {
     let source = format!("{prefix}def main = let item = M.make 1 -> item.value");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
-        Some("E602")
+        Some("E601")
     );
     assert!(check_source(&format!("{prefix}def main = {{ value = 1 }}"), "t").is_err());
 }
 
 #[test]
 fn recursive_type_restrictions_apply_inside_modules() {
-    let source = "module type S = sig def value(x: Int): Int end\nmodule M : S = struct type Nest<T> = Leaf(T) | Next(Nest<List<T>>) def value x => x end\ndef main = M.value 1";
+    let source = "module type S = sig def value(x: Int): Int end\nmodule M : S = struct type Nest<T> = | Leaf(T) | Next(Nest<List<T>>) def value x => x end\ndef main = M.value 1";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E302")
@@ -86,7 +86,7 @@ fn nested_modules_are_available_only_in_their_scope() {
             .unwrap()
             .code
             .as_deref(),
-        Some("E205")
+        Some("E204")
     );
 }
 
@@ -95,7 +95,7 @@ fn unused_private_module_definition_is_rejected() {
     let source = "module type S = sig def used(x: Int): Int end\nmodule M : S = struct def used x => x def dead x => x end\ndef main = M.used 1";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E515")
+        Some("E514")
     );
 }
 
@@ -104,7 +104,7 @@ fn signature_specialization_preserves_comparison_constraints() {
     let source = "module type S = sig def equal(f: Fn<Int, Int>): Bool end\nmodule M : S = struct def equal f => f == f end\ndef inc x => x + 1\ndef main = M.equal inc";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E704")
+        Some("E703")
     );
 }
 
@@ -119,7 +119,7 @@ fn checked_modules_retain_separate_internal_record_schemas() {
 
 #[test]
 fn checked_modules_retain_internal_constructor_tags_and_schemes() {
-    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = | Empty | Wrap(Int) def make x => Wrap x end\nmodule B : S = struct type T = | Wrap(Int) | Empty def make x => Wrap x end\ndef main = 0";
+    let source = "module type S = sig type T def make(x: Int): T end\nmodule A : S = struct type T = | Empty | Wrap(Int) def make x => Wrap(x) end\nmodule B : S = struct type T = | Wrap(Int) | Empty def make x => Wrap(x) end\ndef main = 0";
     let checked = check_source(source, "t").unwrap();
     assert_eq!(checked.module_constructors["A.Wrap"].0, 1);
     assert_eq!(checked.module_constructors["B.Wrap"].0, 0);

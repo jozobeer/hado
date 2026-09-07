@@ -170,27 +170,44 @@ struct Namespaces {
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
-    declarations(&ast.items, path)
+    let mut diagnostics = Vec::new();
+    if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
+    if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
+    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn entry_form(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
+    let main = ast.items.iter().find_map(|item| match item {
+        Item::Def(def) if def.name == "main" => Some(def),
+        _ => None,
+    });
+    if main.is_some_and(|def| matches!(def.kind, DefKind::Value(_))) { return Ok(()); }
+    let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
+    Err(crate::parser::Diagnostic { path: path.into(), line: span.line, col: span.col,
+        code: Some("E206".into()), message: "main must be a value definition".into() })
 }
 
 fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnostic> {
     let mut names = Namespaces::default();
     for item in items {
         match item {
-            Item::Def(def) => register(&mut names.values, &def.name, def.span, path)?,
-            Item::SigDef(def) => register(&mut names.values, &def.name, def.span, path)?,
+            Item::Def(def) => register(&mut names.values, &def.name, def.name_span, path)?,
+            Item::SigDef(def) => register(&mut names.values, &def.name, def.name_span, path)?,
             Item::TypeDef(def) => {
-                register(&mut names.types, &def.name, def.span, path)?;
+                register(&mut names.types, &def.name, def.name_span, path)?;
                 if let Some(body) = &def.ty {
                     register_constructors(body, &mut names.constructors, def.span, path)?;
                 }
             }
             Item::ModuleImpl(module) => {
-                register(&mut names.modules, &module.name, module.span, path)?;
+                register(&mut names.modules, &module.name, module.name_span, path)?;
                 declarations(&module.items, path)?;
             }
             Item::ModuleSig(signature) => {
-                register(&mut names.signatures, &signature.name, signature.span, path)?;
+                register(&mut names.signatures, &signature.name, signature.name_span, path)?;
                 declarations(&signature.items, path)?;
             }
         }
@@ -228,7 +245,7 @@ fn register(
             path: path.into(),
             line: span.line,
             col: span.col,
-            code: None,
+            code: Some("E205".into()),
             message: format!("duplicate declaration {name}"),
         });
     }
