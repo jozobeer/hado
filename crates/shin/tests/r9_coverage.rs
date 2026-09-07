@@ -28,6 +28,19 @@ fn unresolved_field_diagnostics_follow_source_order() {
 }
 
 #[test]
+fn unresolved_receivers_keep_diagnostic_stage_and_position_order() {
+    for (source, code, anchor) in [
+        ("def f x => x.absent\ndef g y => y.nope\ndef main = g 1", "E304", "x.absent"),
+        ("type R = { known: Int }\ndef f x => x.absent\ndef g (y: R) => y.nope\ndef main = g { known = 1 }", "E204", "nope"),
+    ] {
+        let prefix = &source[..source.find(anchor).unwrap()];
+        let error = check_source(source, "field-stage.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+        assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    }
+}
+
+#[test]
 fn catch_all_patterns_are_exhaustive_before_redundancy_checks() {
     for index in 0..20 {
         for (arms, argument) in [
