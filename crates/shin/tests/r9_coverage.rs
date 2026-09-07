@@ -1,6 +1,33 @@
 use shin::check_source;
 
 #[test]
+fn unresolved_field_receivers_report_e304_at_the_reference_start() {
+    for index in 0..20 {
+        let field = format!("member{index}");
+        for declarations in [String::new(), format!("type A = {{ {field}: Int; left: Bool }}\ntype B = {{ {field}: Int; right: Bool }}\n")] {
+            let prefix = format!("{declarations}def read x =>\n{}", " ".repeat(index));
+            let source = format!("{prefix}x . {field}\ndef main = read");
+            let error = check_source(&source, "field-receiver.shin").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E304"), "{error}");
+            assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, index + 1), "{error}");
+        }
+        let source = format!("type A = {{ {field}: Int; left: Bool }}\ntype B = {{ {field}: Int; right: Bool }}\ndef read x => x.{field}\ndef main = read {{ {field} = 1; left = true }} + {{ {field} = 2; right = false }}.{field}");
+        check_source(&source, "resolved-field.shin").unwrap();
+    }
+}
+
+#[test]
+fn unresolved_field_diagnostics_follow_source_order() {
+    for (first, second) in [("z", "a"), ("a", "z")] {
+        let prefix = format!("def {first} x => ");
+        let source = format!("{prefix}x.absent\ndef {second} x => x.missing\ndef main = 1");
+        let error = check_source(&source, "field-order.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E304"), "{error}");
+        assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
+    }
+}
+
+#[test]
 fn catch_all_patterns_are_exhaustive_before_redundancy_checks() {
     for index in 0..20 {
         for (arms, argument) in [

@@ -393,6 +393,8 @@ user.name
 
 型は field 集合から一意に決まる nominal 型である。一意に決まらない（該当する型が無い、または 2 つ以上ある）場合は注釈を要求する（E304）。record 式の中で同じ field を 2 回書くことは E205 とする。
 
+field 参照は、プログラム全体の型推論を終えても参照先の record 型が決まらなければ E304 とする。アンカーは field 参照式の先頭とする。後続の呼び出しや型注釈で型が決まる場合は受理する。型が既に決まっていて、その型に field が無い場合は E204 とする。
+
 パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）とする。書かない field は無視する。field 更新構文は持たない。
 
 record は必ず `type` で名前を持つ。ADTとの組み合わせは、名前で参照する。
@@ -1681,7 +1683,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E301 | arity-mismatch | §8 | 型 | 適用の先頭 |
 | E302 | recursive-type-arg | §10 | 型 | 宣言と異なる型引数 |
 | E303 | rail-type | §22 | 型 | `let?` `do?` の右辺の式 |
-| E304 | record-ambiguous | §12 | 型 | record 式か record パターンの `{` |
+| E304 | record-ambiguous | §12 | 型 | record 式か record パターンの `{`。型が未確定の field 参照では参照式の先頭 |
 | E305 | type-mismatch | §9 | 型 | 型が食い違った式の先頭。適用の引数については下記 |
 | E306 | occurs-check | §9 | 型 | 同上 |
 | E307 | poly-recursion | §4 | 型 | 再帰呼び出しの先頭 |
