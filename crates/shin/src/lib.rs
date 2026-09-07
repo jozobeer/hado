@@ -49,6 +49,7 @@ pub mod infer;
 
 #[derive(Clone)]
 pub struct Checked {
+    pub abstract_representations: std::collections::HashMap<String, types::Ty>,
     pub module_constructors: std::collections::HashMap<String, (u32, types::Scheme)>,
     pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
     pub module_definitions: std::collections::HashMap<String, types::Scheme>,
@@ -70,22 +71,15 @@ impl Checked {
             checked.constructors.insert(name.clone(), scheme.clone());
             checked.constructor_tags.insert(name.clone(), *tag);
         }
-        let mut names: std::collections::HashSet<_> = self.module_records.keys().cloned().collect();
-        for (_, scheme) in self.module_constructors.values() {
-            let result = match scheme.body() {
-                types::Ty::Fn(_, result) => result.as_ref(),
-                ty => ty,
-            };
-            if let types::Ty::Adt(name, _) = result { names.insert(name.clone()); }
-        }
+        let names = &self.abstract_representations;
         for scheme in checked.definitions.values_mut().chain(checked.module_definitions.values_mut()).chain(checked.constructors.values_mut()) {
-            *scheme = scheme.reveal(&names);
+            *scheme = scheme.reveal(names);
         }
-        for (_, scheme) in checked.records.values_mut() { *scheme = scheme.reveal(&names); }
+        for (_, scheme) in checked.records.values_mut() { *scheme = scheme.reveal(names); }
         for ty in checked.value_types.values_mut().chain(checked.composite_types.values_mut()) {
-            *ty = ty.reveal(&names);
+            *ty = ty.reveal(names);
         }
-        checked.main = checked.main.reveal(&names);
+        checked.main = checked.main.reveal(names);
         checked
     }
 }
