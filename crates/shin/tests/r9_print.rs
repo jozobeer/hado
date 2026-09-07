@@ -101,3 +101,32 @@ fn floats_print_shortest_fixed_notation_and_special_values() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn generated_finite_floats_match_an_independent_decimal_oracle() {
+    let oracle = Command::new("python3").args(["-c", r#"
+import struct, decimal, math
+state = 92741
+patterns = [1, (1 << 63) | 1, 0x7fefffffffffffff, 0xffefffffffffffff, 0x0010000000000000, 0x000fffffffffffff]
+for _ in range(128):
+    state = (state * 6364136223846793005 + 1) % (1 << 64)
+    patterns.append(state)
+for bits in patterns:
+    value = struct.unpack('>d', bits.to_bytes(8, 'big'))[0]
+    if not math.isfinite(value):
+        continue
+    text = format(decimal.Decimal(repr(value)), 'f')
+    print(text if '.' in text else text + '.0')
+"#]).output().unwrap();
+    assert!(oracle.status.success(), "{}", String::from_utf8_lossy(&oracle.stderr));
+    let values = String::from_utf8(oracle.stdout).unwrap();
+    assert!(values.lines().count() >= 128);
+    let expected = format!("[{}]", values.lines().collect::<Vec<_>>().join(", "));
+    let path = std::env::temp_dir().join(format!("shin-r9-generated-float-{}", std::process::id()));
+    shin::build::executable(&format!("def main = {expected}"), "generated-float.shin", &path).unwrap();
+    let output = Command::new(&path).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+    assert!(output.stderr.is_empty());
+    std::fs::remove_file(path).unwrap();
+}
