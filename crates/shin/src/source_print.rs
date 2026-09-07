@@ -109,11 +109,11 @@ fn return_type(ty: Option<&TypeExpr>) -> String {
 }
 
 fn type_source(ty: &TypeExpr) -> String {
-    match ty {
-        TypeExpr::Name(name) => name.clone(),
-        TypeExpr::Apply(name, args) => format!("{name}<{}>", type_list(args)),
-        TypeExpr::Group(args) => format!("({})", type_list(args)),
-        TypeExpr::Record(fields) => format!(
+    match &ty.kind {
+        TypeKind::Name(name) => name.clone(),
+        TypeKind::Apply(name, args) => format!("{name}<{}>", type_list(args)),
+        TypeKind::Group(args) => format!("({})", type_list(args)),
+        TypeKind::Record(fields) => format!(
             "{{ {} }}",
             fields
                 .iter()
@@ -121,11 +121,11 @@ fn type_source(ty: &TypeExpr) -> String {
                 .collect::<Vec<_>>()
                 .join("; ")
         ),
-        TypeExpr::Adt(variants) => variants
+        TypeKind::Adt(variants) => variants
             .iter()
-            .map(|variant| match variant {
-                TypeExpr::Apply(name, args) => format!("| {name}({})", type_list(args)),
-                TypeExpr::Name(name) => format!("| {name}"),
+            .map(|variant| match &variant.kind {
+                TypeKind::Apply(name, args) => format!("| {name}({})", type_list(args)),
+                TypeKind::Name(name) => format!("| {name}"),
                 _ => unreachable!("constructor definition"),
             })
             .collect::<Vec<_>>()

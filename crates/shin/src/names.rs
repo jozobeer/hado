@@ -221,14 +221,14 @@ fn register_constructors(
     span: crate::parser::Span,
     path: &str,
 ) -> Result<(), crate::parser::Diagnostic> {
-    use crate::parser::TypeExpr;
-    match body {
-        TypeExpr::Adt(variants) => {
+    use crate::parser::TypeKind;
+    match &body.kind {
+        TypeKind::Adt(variants) => {
             for variant in variants {
                 register_constructors(variant, names, span, path)?;
             }
         }
-        TypeExpr::Name(name) | TypeExpr::Apply(name, _) => register(names, name, span, path)?,
+        TypeKind::Name(name) | TypeKind::Apply(name, _) => register(names, name, span, path)?,
         _ => {}
     }
     Ok(())
