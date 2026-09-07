@@ -864,6 +864,15 @@ impl Checker<'_> {
         expected: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
+        if matches!(self.inference.resolve(expected), Ty::Var(_)) {
+            let candidates: Vec<_> = self.records.values().filter(|(names, _)|
+                fields.iter().all(|(field, _)| names.contains(field))).map(|(_, scheme)| scheme.clone()).collect();
+            let [scheme] = candidates.as_slice() else {
+                return Err(self.error(span, Some("E304"), "record pattern fields must identify one nominal type"));
+            };
+            let Ty::Fn(_, result) = self.inference.instantiate(scheme) else { unreachable!() };
+            self.unify(expected, &result, span)?;
+        }
         for (name, pattern) in fields {
             let ty = self.project_type(expected, name, span)?;
             match pattern {
