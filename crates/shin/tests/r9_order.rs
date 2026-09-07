@@ -488,3 +488,61 @@ fn independent_fields_survive_unresolved_payload_type_names() {
         assert_eq!((error.line, error.col), (2, field.find("missing").unwrap() + 1), "{error}");
     }
 }
+
+#[test]
+fn independent_fields_precede_later_duplicate_declarations() {
+    for index in 0..12 {
+        let field = format!("def field{index} (x: R) => x.missing{index}");
+        for duplicates in [
+            "def dup = 1\ndef dup = 2",
+            "type Dup = | One\ntype Dup = | Two",
+            "type First = | Same\ntype Second = | Same",
+        ] {
+            let source = format!("type R = {{ known: Int }}\n{field}\n{duplicates}\ndef main = field{index} {{ known = 1 }}");
+            let error = check_source(&source, SOURCE_PATH).err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+            assert_eq!((error.line, error.col), (2, field.find("missing").unwrap() + 1), "{error}");
+        }
+    }
+}
+
+#[test]
+fn ambiguous_declarations_do_not_create_speculative_field_errors() {
+    for source in [
+        "type R = { known: Int }\ndef early = dup.missing\ndef dup = 1\ndef dup = { known = 1 }\ndef main = early",
+        "def early (x: Dup) => x.missing\ntype Dup = { known: Int }\ntype Dup = { missing: Int }\ndef main = early",
+        "type R = { known: Int }\ndef early = let Same(x) = Same({ known = 1 }) -> x.missing\ntype First = | Same(R)\ntype Second = | Same(Int)\ndef main = early",
+    ] {
+        let error = check_source(source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
+    }
+}
+
+#[test]
+fn duplicate_recovery_respects_module_scopes() {
+    let cases = [
+        "module type S = sig end\nmodule M : S = struct\n type R = { known: Int }\n def field (x: R) => x.missing\n def dup = 1\n def dup = 2\nend\ndef main = 1",
+        "module type S = sig end\nmodule M : S = struct\n type R = { known: Int }\n def field (x: R) => x.missing\nend\ntype R = | First\ntype R = | Second\ndef main = 1",
+        "type R = { known: Int }\ndef field (x: R) => x.missing + M.get 1\nmodule type S = sig def get(x: Int): Int end\nmodule M : S = struct type R = | First type R = | Second def get x => x end\ndef main = field { known = 1 }",
+    ];
+    for source in cases {
+        let before = &source[..source.find("missing").unwrap()];
+        let error = check_source(source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+        assert_eq!((error.line, error.col), (before.lines().count(), before.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    }
+}
+
+#[test]
+fn duplicate_bodies_still_report_independent_field_errors() {
+    for first in [true, false] {
+        let broken = "def dup (x: R) => x.missing";
+        let other = "def dup x => x";
+        let (a, b) = if first { (broken, other) } else { (other, broken) };
+        let source = format!("type R = {{ known: Int }}\n{a}\n{b}\ndef main = dup {{ known = 1 }}");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        let (code, line, col) = if first { ("E204", 2, broken.find("missing").unwrap() + 1) } else { ("E205", 3, broken.find("dup").unwrap() + 1) };
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+        assert_eq!((error.line, error.col), (line, col), "{error}");
+    }
+}
