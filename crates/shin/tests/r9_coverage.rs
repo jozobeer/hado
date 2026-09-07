@@ -105,7 +105,7 @@ fn record_patterns_resolve_the_whole_field_set() {
         assert_eq!(error.code.as_deref(), Some("E304"));
         assert_eq!(error.col, source.find('{').unwrap() + 1);
     }
-    let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => let { x; y } = value -> x + y\ndef main = f { x = 1; y = 2 }";
+    let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => let { x; y } = value -> x + y\ndef main = f { x = 1; y = 2 } + { x = 1; z = 2 }.z + { y = 1; z = 2 }.z";
     check_source(source, "coverage.shin").unwrap();
 }
 

@@ -39,6 +39,6 @@ fn unique_fields_infer_record_parameters() {
 
 #[test]
 fn unresolved_projection_waits_for_call_site() {
-    let source = "type A = { value: Int } type B = { value: Bool; extra: Int } def get x => x.value def main = get { value = true; extra = 1 }";
+    let source = "type A = { value: Int } type B = { value: Bool; extra: Int } def get x => x.value def main = get { value = true; extra = 1 } && { value = 1 }.value == 1";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
 }

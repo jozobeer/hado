@@ -32,7 +32,7 @@ fn module_requires_signature_annotation() {
 
 #[test]
 fn namespaces_allow_type_module_coexistence_but_reject_duplicates() {
-    let source = "type M = | MkM module type S = sig def id(x: Int): Int end module M : S = struct def id x => x end def main = M.id 1";
+    let source = "type M = | MkM module type S = sig def id(x: Int): Int end module M : S = struct def id x => x end def main = if MkM == MkM => M.id 1 | 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
     let source = "module type S = sig def id(x: Int): Int end module M : S = struct def id x => x end module M : S = struct def id x => x end def main = M.id 1";
     assert!(check_source(source, "t").is_err());
