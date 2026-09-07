@@ -72,6 +72,7 @@ fn do_requires_a_rail_and_records_require_a_candidate() {
 
 #[test]
 fn unused_bindings_include_parameters_and_nested_patterns() {
+    assert_eq!(check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.shin").err().unwrap().code.as_deref(), Some("E100"));
     for (source, name) in [
         ("def f used unused => used + 1\ndef main = f 1 2", "unused"),
         ("def main = (fn used unused => used + 1) 1 2", "unused"),
@@ -88,7 +89,7 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
         assert_eq!((error.line, error.col), (expected_line, expected_col));
     }
     for source in [
-        "def f _ x => x + 1\ndef main = f 1 2",
+        "def f | Some(_) => 1 | 0\ndef main = f (Some(1))",
         "def f x => (fn y => x + y) 1\ndef main = f 1",
         "def f | Some(x) => (fn y => x + y) 1 | 0\ndef main = f (Some(1))",
     ] {

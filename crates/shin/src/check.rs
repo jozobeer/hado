@@ -24,6 +24,7 @@ fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
             Item::Def(def) => match &def.kind {
                 DefKind::Value(body) => check_node(body, path, diagnostics),
                 DefKind::Function { params, ret, body } => {
+                    check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
                     if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
                         diagnostics.push(error);
                     }
@@ -33,6 +34,17 @@ fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
             Item::ModuleImpl(module) => check_items(&module.items, path, diagnostics),
             _ => {}
         }
+    }
+}
+
+fn check_unused<'a>(
+    bindings: impl IntoIterator<Item = (&'a str, crate::parser::Span)>, body: &Node,
+    path: &str, diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (name, span) in bindings {
+        if name == "$argument" || crate::names::references(body, name) { continue; }
+        diagnostics.push(Diagnostic { path: path.into(), line: span.line, col: span.col,
+            code: Some("E505".into()), message: format!("binding {name} is unused") });
     }
 }
 
@@ -91,9 +103,21 @@ pub(crate) fn boolean_coverage(
 
 fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
     if let NodeKind::Fn { params, body } = &node.kind {
+        check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
         if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
             diagnostics.push(error);
         }
+    }
+    match &node.kind {
+        NodeKind::Let { pat, body, .. } | NodeKind::LetQ { pat, body, .. } => {
+            check_unused(crate::names::bindings(pat), body, path, diagnostics);
+        }
+        NodeKind::PatternBranch { arms, .. } => {
+            for (pattern, body) in arms {
+                check_unused(crate::names::bindings(pattern), body, path, diagnostics);
+            }
+        }
+        _ => {}
     }
     for check in [check_cons_tail, check_duplicate_patterns, check_conditions,
         check_literal_fallback, check_local_redundancy, check_rewrap, check_repropagation] {
@@ -190,19 +214,6 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
                         "binding {bound} is returned unchanged at {}:{}",
                         body.span.line, body.span.col
                     ),
-                });
-            }
-        }
-    }
-    if let NodeKind::Let { pat, body, .. } | NodeKind::LetQ { pat, body, .. } = &node.kind {
-        for name in crate::names::bound_names(pat) {
-            if !crate::names::references(body, &name) {
-                return Err(Diagnostic {
-                    path: path.into(),
-                    line: pat.span.line,
-                    col: pat.span.col,
-                    code: Some("E505".into()),
-                    message: format!("binding {name} is unused in its continuation"),
                 });
             }
         }
