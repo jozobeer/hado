@@ -219,3 +219,16 @@ fn unknown_module_signatures_point_to_the_signature_name() {
         }
     }
 }
+
+#[test]
+fn unknown_record_pattern_fields_point_to_the_field_name() {
+    for index in 0..20 {
+        for spacing in [" ", "  ", "\n    "] {
+            let prefix = format!("type R = {{ known: Int }}\ndef main = let {{{spacing}");
+            let source = format!("{prefix}missing{index} = _ }} = {{ known = 1 }} -> 1");
+            let error = shin::check_source(&source, "pattern-field.shin").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+            assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+        }
+    }
+}
