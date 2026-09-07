@@ -21,3 +21,25 @@ fn variable_arm_is_not_decomposition_and_reconstruction() {
         assert_eq!(check_source(&source, "coverage.shin").err().unwrap().code.as_deref(), Some("E512"));
     }
 }
+
+#[test]
+fn sole_parameter_branch_checks_all_four_conditions() {
+    for source in [
+        "def f value => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
+        "def f value => if value | Some(value) => value + 1 | 0\ndef main = f (Some(1))",
+        "def main = (fn value => if value | Some(x) => x + 1 | 0) (Some(1))",
+    ] {
+        assert_eq!(check_source(source, "coverage.shin").err().unwrap().code.as_deref(), Some("E515"));
+    }
+    for source in [
+        "def f value extra => if value | Some(x) => x + extra | extra\ndef main = f (Some(1)) 2",
+        "def f (value: Option<Int>) => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
+        "def f value: Int => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
+        "def f value => if value | Some(_) => Option.is_some value | false\ndef main = f (Some(1))",
+        "def f value => (if value | Some(x) => x | 0) + 1\ndef main = f (Some(1))",
+        "def f | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
+        "def main = (fn | Some(x) => x + 1 | 0) (Some(1))",
+    ] {
+        check_source(source, "coverage.shin").unwrap();
+    }
+}
