@@ -41,12 +41,12 @@ else
     fail 1 "deleted-headings=$del count-mismatch=$missing"
 fi
 
-# --- check 2: new sections 43..50 after 42 ---
+# --- check 2: new sections 43..52 after 42 ---
 line42=$(grep -nE '^# 42\.' "$SPEC" | head -n 1 | cut -d: -f1)
 line42=${line42:-0}
 ns_reasons=""
 n=43
-while [ "$n" -le 50 ]; do
+while [ "$n" -le 52 ]; do
     mapfile -t hits < <(grep -nE "^# ${n}\\." "$SPEC" || true)
     if [ "${#hits[@]}" -eq 0 ]; then
         ns_reasons="$ns_reasons missing-#$n"
