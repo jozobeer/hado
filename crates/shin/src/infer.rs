@@ -1,5 +1,5 @@
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
-use crate::parser::{Param, Pattern, PatternKind, TypeExpr, TypeKind};
+use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{Inference, Scheme, Ty, TypeError};
 use crate::Checked;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ struct Checker<'a> {
     records: HashMap<String, (Vec<String>, Scheme)>,
     modules: HashMap<String, HashMap<String, Scheme>>,
     abstract_types: HashMap<String, (usize, String)>,
-    projections: Vec<(Ty, String, Ty, Span, Span)>,
+    projections: Vec<(Ty, FieldName, Ty, Span)>,
     comparison_constraints: Vec<(Ty, Span, &'static str)>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
 }
@@ -176,7 +176,7 @@ impl Checker<'_> {
             .ok_or_else(|| self.error(module.span, Some("E113"), "module requires a signature"))?;
         let signature = signatures
             .get(name)
-            .ok_or_else(|| self.error(module.span, Some("E204"), "unknown signature"))?;
+            .ok_or_else(|| self.error(module.sig_span, Some("E204"), "unknown signature"))?;
         let saved = self.clone();
         let saved_value_spans: std::collections::HashSet<_> = self.value_types.keys().copied().collect();
         let saved_composite_spans: std::collections::HashSet<_> = self.composite_types.keys().copied().collect();
@@ -441,7 +441,7 @@ impl Checker<'_> {
         definitions: &HashMap<String, &crate::parser::Def>,
     ) -> Result<(), Diagnostic> {
         let inherited_projections: std::collections::HashSet<_> = self.projections.iter()
-            .map(|(_, _, _, span, _)| (span.line, span.col)).collect();
+            .map(|(_, field, _, _)| (field.dot.line, field.dot.col)).collect();
         let placeholders: HashMap<_, _> = group
             .iter()
             .map(|name| (name.clone(), self.inference.fresh()))
@@ -481,7 +481,7 @@ impl Checker<'_> {
         invalid_group |= self.recover_type_error(result.map(|()| false), true)?;
         invalid_group |= self.deferred[deferred_start..].iter().any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
-            self.projections.retain(|(_, _, _, span, _)| inherited_projections.contains(&(span.line, span.col)));
+            self.projections.retain(|(_, field, _, _)| inherited_projections.contains(&(field.dot.line, field.dot.col)));
             for name in group {
                 self.values.insert(name.clone(), Scheme::monomorphic(self.invalid_definition_type(definitions[name])));
             }
@@ -490,7 +490,7 @@ impl Checker<'_> {
         let environment: Vec<_> = self
             .projections
             .iter()
-            .flat_map(|(input, _, output, _, _)| [input.clone(), output.clone()])
+            .flat_map(|(input, _, output, _)| [input.clone(), output.clone()])
             .collect();
         for (name, ty) in placeholders {
             let constraints = self.comparison_constraints.iter().map(|(ty, _, code)| (ty.clone(), *code)).collect::<Vec<_>>();
@@ -772,7 +772,7 @@ impl Checker<'_> {
             NodeKind::List(items) => self.list(items),
             NodeKind::Record(fields) => self.record(fields, node.span),
             NodeKind::Field(value, field) => {
-                let ty = self.project(value, &field.name, field.dot)?;
+                let ty = self.project(value, field)?;
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
             },
@@ -828,30 +828,30 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&result))
     }
 
-    fn project(&mut self, value: &Node, field: &str, dot: Span) -> Result<Ty, Diagnostic> {
+    fn project(&mut self, value: &Node, field: &FieldName) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &value.kind {
             if let Some(exports) = self.modules.get(name) {
-                let scheme = exports.get(field).cloned().ok_or_else(|| {
-                    self.error(value.span, Some("E204"), "module member is not exported")
+                let scheme = exports.get(&field.name).cloned().ok_or_else(|| {
+                    self.error(field.span, Some("E204"), "module member is not exported")
                 })?;
                 return Ok(self.inference.instantiate(&scheme));
             }
         }
         let ty = self.expression(value)?;
-        self.project_type(&ty, field, dot, value.span)
+        self.project_type(&ty, field, value.span)
     }
 
     fn resolve_projections(&mut self, final_pass: bool) -> Result<(), Diagnostic> {
-        for (input, field, output, span, receiver) in std::mem::take(&mut self.projections) {
+        for (input, field, output, receiver) in std::mem::take(&mut self.projections) {
             if matches!(self.inference.resolve(&input), Ty::Var(_)) {
                 if final_pass {
-                    return Err(self.error(span, None, "record type could not be inferred"));
+                    return Err(self.error(field.dot, None, "record type could not be inferred"));
                 }
-                self.projections.push((input, field, output, span, receiver));
+                self.projections.push((input, field, output, receiver));
             } else {
-                let checked = self.project_type(&input, &field, span, receiver);
+                let checked = self.project_type(&input, &field, receiver);
                 let actual = self.recover_type_error(checked, Ty::Error)?;
-                let checked = self.unify(&output, &actual, span);
+                let checked = self.unify(&output, &actual, field.dot);
                 self.recover_type_error(checked, ())?;
             }
         }
@@ -882,16 +882,16 @@ impl Checker<'_> {
         self.unify(ty, &result, span)
     }
 
-    fn project_type(&mut self, ty: &Ty, field: &str, span: Span, receiver: Span) -> Result<Ty, Diagnostic> {
+    fn project_type(&mut self, ty: &Ty, field: &FieldName, receiver: Span) -> Result<Ty, Diagnostic> {
         if self.inference.resolve(ty) == Ty::Error { return Ok(Ty::Error); }
         if matches!(self.inference.resolve(ty), Ty::Abstract(_, _)) {
-            return Err(self.error(span, Some("E601"), "abstract type has no accessible fields"));
+            return Err(self.error(field.dot, Some("E601"), "abstract type has no accessible fields"));
         }
-        self.infer_record_from_field(ty, field, span)?;
+        self.infer_record_from_field(ty, &field.name, field.dot)?;
         if matches!(self.inference.resolve(ty), Ty::Var(_)) {
             let result = self.inference.fresh();
             self.projections
-                .push((ty.clone(), field.into(), result.clone(), span, receiver));
+                .push((ty.clone(), field.clone(), result.clone(), receiver));
             return Ok(result);
         }
         let Ty::Adt(name, _) = self.inference.resolve(ty) else {
@@ -904,12 +904,12 @@ impl Checker<'_> {
             .ok_or_else(|| self.error(receiver, Some("E305"), "field access requires a record"))?;
         let index = names
             .iter()
-            .position(|name| name == field)
-            .ok_or_else(|| self.error(span, Some("E204"), "unknown field"))?;
+            .position(|name| name == &field.name)
+            .ok_or_else(|| self.error(field.span, Some("E204"), "unknown field"))?;
         let Ty::Fn(payload, result) = self.inference.instantiate(&scheme) else {
             unreachable!()
         };
-        self.unify(ty, &result, span)?;
+        self.unify(ty, &result, field.dot)?;
         Ok(self.inference.resolve(&payload[index]))
     }
 
@@ -995,7 +995,8 @@ impl Checker<'_> {
             self.unify(expected, &result, span)?;
         }
         for (name, pattern) in fields {
-            let ty = self.project_type(expected, name, span, span)?;
+            let field = FieldName { name: name.clone(), dot: span, span };
+            let ty = self.project_type(expected, &field, span)?;
             match pattern {
                 Some(pattern) => self.pattern(pattern, &ty)?,
                 None => {

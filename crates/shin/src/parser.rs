@@ -187,6 +187,7 @@ pub struct Param {
 pub struct FieldName {
     pub name: String,
     pub dot: Span,
+    pub span: Span,
 }
 
 impl PartialEq for FieldName {
@@ -317,6 +318,7 @@ pub struct ModuleImpl {
     pub name: String,
     pub name_span: Span,
     pub sig: Option<String>,
+    pub sig_span: Span,
     pub items: Vec<Item>,
     pub span: Span,
 }
@@ -624,9 +626,10 @@ impl Parser<'_> {
             // module NAME [: SIG] = struct ... end
             let name_span = self.span();
             let name = self.expect_upper_name("a module name")?;
-            let sig = if self.kind() == &TokKind::Colon {
+            let (sig, sig_span) = if self.kind() == &TokKind::Colon {
                 self.bump();
-                Some(self.expect_upper_name("a signature name after `:`")?)
+                let sig_span = self.span();
+                (Some(self.expect_upper_name("a signature name after `:`")?), sig_span)
             } else {
                 return Err(self.error_at(span, Some("E113"), "module requires a signature"));
             };
@@ -654,6 +657,7 @@ impl Parser<'_> {
                 name,
                 name_span,
                 sig,
+                sig_span,
                 items,
                 span,
             }))
@@ -1022,9 +1026,10 @@ impl Parser<'_> {
         while self.kind() == &TokKind::Dot {
             let dot = self.span();
             self.bump();
+            let field_span = self.span();
             let field = self.expect_lower_name("a field name")?;
             let span = node.span;
-            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot }), span };
+            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot, span: field_span }), span };
         }
         Ok(node)
     }
@@ -1115,8 +1120,9 @@ impl Parser<'_> {
         while self.kind() == &TokKind::Dot {
             let dot = self.span();
             self.bump();
+            let field_span = self.span();
             let field = self.expect_lower_name("a field name after `.`")?;
-            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot }), span };
+            node = Node { kind: NodeKind::Field(Box::new(node), FieldName { name: field, dot, span: field_span }), span };
         }
         if !constructor_head(&node) {
             return Ok(node);
