@@ -20,6 +20,19 @@ fn application_type_errors_point_to_the_failing_argument() {
     }
 }
 
+#[test]
+fn application_arity_and_non_function_errors_keep_their_own_anchors() {
+    for (source, code, anchor) in [
+        ("type Holder = | Hold(Fn<Int, Int>)\ndef main = Hold(fn a b => a + b)", "E301", "Hold(fn"),
+        ("def main = 1 |> true", "E305", "true"),
+    ] {
+        let error = check_source(source, "application-anchor.shin").err().unwrap();
+        let prefix = &source[..source.find(anchor).unwrap()];
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+        assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    }
+}
+
 const SOURCE_PATH: &str = "generated-order.shin";
 
 fn code(source: &str) -> String {
