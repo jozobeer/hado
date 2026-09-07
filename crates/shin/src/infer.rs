@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 struct Checker<'a> {
     aliases: HashMap<String, TypeExpr>,
+    ambiguous_modules: HashSet<String>,
+    ambiguous_signatures: HashSet<String>,
     ambiguous_types: HashSet<String>,
     ambiguous_constructors: HashSet<String>,
     abstract_representations: HashMap<String, Ty>,
@@ -51,6 +53,8 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
 pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let mut checker = Checker {
         aliases: HashMap::new(),
+        ambiguous_modules: HashSet::new(),
+        ambiguous_signatures: HashSet::new(),
         ambiguous_types: HashSet::new(),
         ambiguous_constructors: HashSet::new(),
         abstract_representations: HashMap::new(),
@@ -141,6 +145,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
         }
         checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
+        checker.check_ambiguous_modules(&ast.items, &signatures);
         checker.resolve_projections(true)?;
         for constraint in &checker.comparison_constraints {
             if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
@@ -186,6 +191,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
 
 impl Checker<'_> {
     fn prepare_ambiguous_declarations(&mut self, items: &[Item]) -> HashSet<String> {
+        self.prepare_module_ambiguities(items);
         let ambiguous = crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
         for name in &ambiguous.declared_types {
             self.ambiguous_types.remove(name);
@@ -211,6 +217,21 @@ impl Checker<'_> {
         ambiguous.values
     }
 
+    fn prepare_module_ambiguities(&mut self, items: &[Item]) {
+        let ambiguous = crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
+        self.ambiguous_signatures.retain(|name| !ambiguous.declared_signatures.contains(name));
+        self.ambiguous_signatures.extend(ambiguous.signatures);
+        self.ambiguous_modules.retain(|name| !ambiguous.declared_modules.contains(name));
+        self.ambiguous_modules.extend(ambiguous.modules);
+        for item in items {
+            if let Item::ModuleImpl(module) = item {
+                if module.sig.as_ref().is_some_and(|name| self.ambiguous_signatures.contains(name)) {
+                    self.ambiguous_modules.insert(module.name.clone());
+                }
+            }
+        }
+    }
+
     fn check_ambiguous_definitions(&mut self, items: &[Item], ambiguous: &HashSet<String>) {
         for item in items {
             let Item::Def(def) = item else { continue };
@@ -225,11 +246,28 @@ impl Checker<'_> {
         }
     }
 
+    fn check_ambiguous_modules(&mut self, items: &[Item], signatures: &HashMap<String, &crate::parser::ModuleSig>) {
+        for item in items {
+            let Item::ModuleImpl(module) = item else { continue };
+            if !self.ambiguous_modules.contains(&module.name) { continue; }
+            let saved = self.clone();
+            self.module_path.push(module.name.clone());
+            let ast = Ast { items: module.items.clone(), span: module.span,
+                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), equality_anchors: Vec::new() };
+            let result = self.infer_module_items(&ast, signatures);
+            let mut diagnostics = self.deferred.split_off(saved.deferred.len());
+            if let Err(error) = result { diagnostics.push(error); }
+            *self = saved;
+            self.deferred.extend(diagnostics);
+        }
+    }
+
     fn module(
         &mut self,
         module: &crate::parser::ModuleImpl,
         signatures: &HashMap<String, &crate::parser::ModuleSig>,
     ) -> Result<(), Diagnostic> {
+        if self.ambiguous_modules.contains(&module.name) { return Ok(()); }
         let name = module
             .sig
             .as_ref()
@@ -302,6 +340,8 @@ impl Checker<'_> {
         self.type_arities = saved.type_arities;
         self.aliases = saved.aliases;
         self.ambiguous_types = saved.ambiguous_types;
+        self.ambiguous_modules = saved.ambiguous_modules;
+        self.ambiguous_signatures = saved.ambiguous_signatures;
         self.ambiguous_constructors = saved.ambiguous_constructors;
         self.records = saved.records;
         self.constructors = saved.constructors;
@@ -315,6 +355,7 @@ impl Checker<'_> {
     fn module_abstract_parameters(
         &mut self, module: &crate::parser::ModuleImpl, signature: &crate::parser::ModuleSig,
     ) -> HashMap<String, Ty> {
+        if self.ambiguous_modules.contains(&module.name) { return HashMap::new(); }
         let mut parameters = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
@@ -345,20 +386,11 @@ impl Checker<'_> {
         Ok(exports)
     }
 
-    fn module_body(
-        &mut self,
-        module: &crate::parser::ModuleImpl,
-        signature: &crate::parser::ModuleSig,
-        signatures: &HashMap<String, &crate::parser::ModuleSig>,
-    ) -> Result<HashMap<String, Scheme>, Diagnostic> {
-        let ast = Ast {
-            items: module.items.clone(),
-            span: module.span,
-            branches_after_fallback: Vec::new(),
-            branch_anchors: Vec::new(),
-            equality_anchors: Vec::new(),
-        };
-        crate::type_cycles::check(&ast, self.path)?;
+    fn infer_module_items<'a>(
+        &mut self, ast: &'a Ast, signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) -> Result<(HashMap<String, &'a crate::parser::Def>, HashSet<String>), Diagnostic> {
+        crate::type_cycles::check(ast, self.path)?;
+        self.prepare_module_ambiguities(&ast.items);
         let mut signatures = signatures.clone();
         for item in &ast.items {
             if let Item::ModuleSig(signature) = item {
@@ -393,14 +425,14 @@ impl Checker<'_> {
                 Item::ModuleImpl(_) | Item::ModuleSig(_) => {}
                 _ => {
                     return Err(self.error(
-                        module.span,
+                        ast.span,
                         None,
                         "unexpected signature member in module",
                     ))
                 }
             }
         }
-        for group in crate::names::definition_groups(&ast) {
+        for group in crate::names::definition_groups(ast) {
             let group: Vec<_> = group.into_iter().filter(|name| !ambiguous_values.contains(name)).collect();
             if !group.is_empty() { self.definition_group(&group, &definitions)?; }
         }
@@ -408,6 +440,24 @@ impl Checker<'_> {
         for name in definitions.keys() {
             self.module_definitions.insert(format!("{}.{}", self.module_path.join("."), name), self.values[name].clone());
         }
+        self.check_ambiguous_modules(&ast.items, &signatures);
+        Ok((definitions, ambiguous_values))
+    }
+
+    fn module_body(
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        signature: &crate::parser::ModuleSig,
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) -> Result<HashMap<String, Scheme>, Diagnostic> {
+        let ast = Ast {
+            items: module.items.clone(),
+            span: module.span,
+            branches_after_fallback: Vec::new(),
+            branch_anchors: Vec::new(),
+            equality_anchors: Vec::new(),
+        };
+        let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
@@ -899,6 +949,7 @@ impl Checker<'_> {
 
     fn project(&mut self, value: &Node, field: &FieldName) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &value.kind {
+            if self.ambiguous_modules.contains(name) { return Ok(Ty::Error); }
             if let Some(exports) = self.modules.get(name) {
                 let scheme = exports.get(&field.name).cloned().ok_or_else(|| {
                     self.error(field.span, Some("E204"), "module member is not exported")
@@ -1361,6 +1412,9 @@ impl Checker<'_> {
     }
 
     fn annotation_inner(&self, annotation: &TypeExpr, span: Span, visiting: &mut Vec<String>) -> Result<Ty, Diagnostic> {
+        if matches!(&annotation.kind, TypeKind::Name(name) | TypeKind::Apply(name, _) if name.split_once('.').is_some_and(|(module, _)| self.ambiguous_modules.contains(module))) {
+            return Ok(Ty::Error);
+        }
         if matches!(&annotation.kind, TypeKind::Name(name) | TypeKind::Apply(name, _) if self.ambiguous_types.contains(name)) {
             return Ok(Ty::Error);
         }
