@@ -1737,7 +1737,12 @@ pub fn derive_scalar_printer(id: FunctionId, ty: Type) -> Result<Function, Strin
         Type::Char => (RuntimeFunction::PrintChar, value),
         Type::Float => (RuntimeFunction::PrintFloat, value),
         Type::Bool => (RuntimeFunction::PrintString, branch(value, text("true"), text("false"))?),
-        Type::Unit => (RuntimeFunction::PrintString, text("()")),
+        Type::Unit => return Ok(Function {
+            id, name: format!("print_{ty:?}"),
+            signature: Signature { parameters: vec![ty], result: Type::Unit },
+            parameters: vec![0], captures: vec![],
+            body: Expression::Constant(Constant::Unit),
+        }),
         _ => return Err("scalar printer is not implemented".into()),
     };
     Ok(Function {
@@ -1764,8 +1769,12 @@ fn derive_printer(id: FunctionId, ty: Type, context: &mut DisplayContext<'_>) ->
             let mut arms = Vec::new();
             for (index, constructor, runtime) in [(0, "Ok", crate::runtime_abi::RuntimeFunction::PrintString), (1, "Error", crate::runtime_abi::RuntimeFunction::PrintErrorString)] {
                 let payload = Expression::Project { value: Box::new(Expression::Variable { id: 0, ty: ty.clone() }), constructor: constructor.into(), index: 0, result: parameters[index].clone() };
-                let text = context.format(payload)?;
-                let effect = Expression::call_runtime(runtime, vec![text])?;
+                let effect = if parameters[index] == Type::Unit {
+                    Expression::Constant(Constant::Unit)
+                } else {
+                    let text = context.format(payload)?;
+                    Expression::call_runtime(runtime, vec![text])?
+                };
                 arms.push((constructor.into(), Expression::Let { id: 1, value: Box::new(effect), body: Box::new(Expression::Constant(Constant::Int(index as i64))) }));
             }
             return Ok(Function { id, name: format!("print_{ty:?}"), signature: Signature { parameters: vec![ty.clone()], result: Type::Int }, parameters: vec![0], captures: vec![], body: Expression::Switch { value: Box::new(Expression::Variable { id: 0, ty }), arms, fallback: None, result: Type::Int } });
