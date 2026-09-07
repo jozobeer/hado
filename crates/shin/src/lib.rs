@@ -132,8 +132,12 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
     let ParsedSource { ast, trusted_start, prelude_items } = parse_with_prelude(source, path)?;
-    names::resolve_with_prelude(&ast, path, trusted_start)?;
-    let (checked, mut diagnostics) = infer::infer_with_diagnostics(&ast, path, trusted_start)?;
+    let name_error = names::resolve_with_prelude(&ast, path, trusted_start).err();
+    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(&ast, path, trusted_start) {
+        Ok(result) => result,
+        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).min_by_key(diagnostic_order).unwrap()),
+    };
+    diagnostics.extend(name_error);
     if let Err(error) = check::check_ast(&ast, path) {
         diagnostics.push(error);
     }

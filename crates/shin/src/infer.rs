@@ -76,88 +76,98 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             ((left.line, left.col, right.line, right.col), *operator)).collect(),
         recursive_calls: HashMap::new(),
     };
-    let comparable = checker.inference.fresh();
-    let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
-    checker.values.insert(
-        "compare".into(),
-        checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
-    );
-    for item in &ast.items {
-        if let Item::TypeDef(def) = item {
-            if checker
-                .type_arities
-                .insert(def.name.clone(), def.params.len())
-                .is_some()
-            {
-                return Err(checker.error(def.span, None, "duplicate type"));
-            }
-        }
-    }
-    let signatures: HashMap<_, _> = ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
-            _ => None,
-        })
-        .collect();
-    for item in &ast.items {
-        if let Item::ModuleImpl(module) = item {
-            if let Some(signature) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
-                checker.module_abstract_parameters(module, signature);
-            }
-        }
-    }
-    let violations = crate::type_cycles::violations(ast, path);
-    for item in &ast.items {
-        if let Item::TypeDef(def) = item {
-            let rejected: Vec<_> = violations.iter().filter(|violation| violation.definition == def.name)
-                .map(|violation| violation.reference).collect();
-            checker.register_type(def, &rejected)?;
-        }
-    }
-    checker.deferred.extend(violations.into_iter().map(|violation| violation.diagnostic));
     let mut definitions = HashMap::new();
-    for item in &ast.items {
-        match item {
-            Item::Def(def) => {
-                if definitions.insert(def.name.clone(), def).is_some() {
-                    return Err(checker.error(def.span, None, "duplicate definition"));
+    let inferred = (|| -> Result<Ty, Diagnostic> {
+        let comparable = checker.inference.fresh();
+        let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
+        checker.values.insert(
+            "compare".into(),
+            checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
+        );
+        for item in &ast.items {
+            if let Item::TypeDef(def) = item {
+                if checker
+                    .type_arities
+                    .insert(def.name.clone(), def.params.len())
+                    .is_some()
+                {
+                    return Err(checker.error(def.span, None, "duplicate type"));
                 }
             }
-            Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) => {}
-            _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
         }
-    }
-    for group in crate::dependencies::inference_groups(ast) {
-        let mut functions = Vec::new();
-        for item in group {
-            match item {
-                Item::ModuleImpl(module) => checker.module(module, &signatures)?,
-                Item::Def(def) => functions.push(def.name.clone()),
-                _ => {}
+        let signatures: HashMap<_, _> = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
+                _ => None,
+            })
+            .collect();
+        for item in &ast.items {
+            if let Item::ModuleImpl(module) = item {
+                if let Some(signature) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
+                    checker.module_abstract_parameters(module, signature);
+                }
             }
         }
-        if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
-    }
-    checker.resolve_projections(true)?;
-    for constraint in &checker.comparison_constraints {
-        if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
-            checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
+        let violations = crate::type_cycles::violations(ast, path);
+        for item in &ast.items {
+            if let Item::TypeDef(def) = item {
+                let rejected: Vec<_> = violations.iter().filter(|violation| violation.definition == def.name)
+                    .map(|violation| violation.reference).collect();
+                checker.register_type(def, &rejected)?;
+            }
         }
-    }
-    let scheme = checker
-        .values
-        .get("main")
-        .cloned()
-        .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
-    let main = checker.inference.instantiate(&scheme);
-    if !checker.inference.resolve(&main).is_monomorphic() {
-        checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
-    }
-    if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
-        checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
-    }
+        checker.deferred.extend(violations.into_iter().map(|violation| violation.diagnostic));
+        for item in &ast.items {
+            match item {
+                Item::Def(def) => {
+                    if definitions.insert(def.name.clone(), def).is_some() {
+                        return Err(checker.error(def.span, None, "duplicate definition"));
+                    }
+                }
+                Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) => {}
+                _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
+            }
+        }
+        for group in crate::dependencies::inference_groups(ast) {
+            let mut functions = Vec::new();
+            for item in group {
+                match item {
+                    Item::ModuleImpl(module) => checker.module(module, &signatures)?,
+                    Item::Def(def) => functions.push(def.name.clone()),
+                    _ => {}
+                }
+            }
+            if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
+        }
+        checker.resolve_projections(true)?;
+        for constraint in &checker.comparison_constraints {
+            if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
+                checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
+            }
+        }
+        let scheme = checker
+            .values
+            .get("main")
+            .cloned()
+            .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
+        let main = checker.inference.instantiate(&scheme);
+        if !checker.inference.resolve(&main).is_monomorphic() {
+            checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
+        }
+        if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
+            checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
+        }
+        Ok(main)
+    })();
+    let main = match inferred {
+        Ok(main) => main,
+        Err(error) => {
+            checker.deferred.push(error);
+            return Err(checker.deferred.into_iter().min_by_key(crate::diagnostic_order).unwrap());
+        }
+    };
     Ok((Checked {
         abstract_representations: checker.abstract_representations,
         module_constructors: checker.module_constructors,
@@ -197,7 +207,7 @@ impl Checker<'_> {
                 let diagnostics = self.deferred.split_off(saved.deferred.len());
                 *self = saved;
                 self.deferred.extend(diagnostics);
-                self.recover_type_error(Err(error), ())?;
+                self.recover_inference_error(Err(error), ())?;
                 let exports = self.module_signature_exports(module, signature)?;
                 self.modules.insert(module.name.clone(), exports);
                 return Ok(());
@@ -478,7 +488,7 @@ impl Checker<'_> {
             if let Some(scheme) = removed {
                 self.values.insert(name.clone(), scheme);
             }
-            let invalid = self.recover_type_error(result.map(|()| false), true)?;
+            let invalid = self.recover_inference_error(result.map(|()| false), true)?;
             invalid_group |= invalid;
             if invalid {
                 self.values.insert(name.clone(), Scheme::monomorphic(self.invalid_definition_type(def)));
@@ -487,9 +497,9 @@ impl Checker<'_> {
         self.current_definition = None;
         let deferred_start = self.deferred.len();
         let result = self.default_numbers();
-        invalid_group |= self.recover_type_error(result.map(|()| false), true)?;
+        invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
         let result = self.resolve_projections(false);
-        invalid_group |= self.recover_type_error(result.map(|()| false), true)?;
+        invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
         invalid_group |= self.deferred[deferred_start..].iter().any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
             self.projections.retain(|(_, field, _, _)| inherited_projections.contains(&(field.dot.line, field.dot.col)));
@@ -588,7 +598,7 @@ impl Checker<'_> {
         if let TypeKind::Record(fields) = &body.kind {
             let payload = fields
                 .iter()
-                .map(|field| self.recovering_payload_type(&field.ty, &parameters, def.span, rejected))
+                .map(|field| self.registered_payload_type(&field.ty, &parameters, def.span, rejected))
                 .collect::<Result<Vec<_>, _>>()?;
             let scheme = self
                 .inference
@@ -631,7 +641,7 @@ impl Checker<'_> {
             TypeKind::Apply(name, args) => (
                 name,
                 args.iter()
-                    .map(|arg| self.recovering_payload_type(arg, parameters, span, rejected))
+                    .map(|arg| self.registered_payload_type(arg, parameters, span, rejected))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => return Err(self.error(span, None, "record definitions are not implemented")),
@@ -646,6 +656,13 @@ impl Checker<'_> {
             return Err(self.error(span, None, "duplicate constructor"));
         }
         Ok(())
+    }
+
+    fn registered_payload_type(
+        &mut self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
+    ) -> Result<Ty, Diagnostic> {
+        let result = self.recovering_payload_type(expr, parameters, span, rejected);
+        self.recover_inference_error(result, Ty::Error)
     }
 
     fn payload_type(
@@ -705,9 +722,9 @@ impl Checker<'_> {
         })
     }
 
-    fn recover_type_error<T>(&mut self, result: Result<T, Diagnostic>, fallback: T) -> Result<T, Diagnostic> {
+    fn recover_inference_error<T>(&mut self, result: Result<T, Diagnostic>, fallback: T) -> Result<T, Diagnostic> {
         match result {
-            Err(error) if crate::diagnostic_order(&error).0 == 3 => {
+            Err(error) if matches!(crate::diagnostic_order(&error).0, 2 | 3) => {
                 self.deferred.push(error);
                 Ok(fallback)
             }
@@ -717,7 +734,7 @@ impl Checker<'_> {
 
     fn expression(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
         let result = self.expression_inner(node);
-        let ty = self.recover_type_error(result, Ty::Error)?;
+        let ty = self.recover_inference_error(result, Ty::Error)?;
         if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..)) {
             self.composite_types.insert((node.span.line, node.span.col), ty.clone());
         }
@@ -862,9 +879,9 @@ impl Checker<'_> {
                 self.projections.push((input, field, output, receiver));
             } else {
                 let checked = self.project_type(&input, &field, receiver);
-                let actual = self.recover_type_error(checked, Ty::Error)?;
+                let actual = self.recover_inference_error(checked, Ty::Error)?;
                 let checked = self.unify(&output, &actual, field.dot);
-                self.recover_type_error(checked, ())?;
+                self.recover_inference_error(checked, ())?;
             }
         }
         Ok(())
@@ -1345,7 +1362,7 @@ impl Checker<'_> {
                 "Char" => Ok(Ty::Char),
                 "String" => Ok(Ty::String),
                 "Unit" => Ok(Ty::Unit),
-                _ => Err(self.error(span, Some("E204"), &format!("unknown type {name}"))),
+                _ => Err(self.error(annotation.span, Some("E204"), &format!("unknown type {name}"))),
             },
             _ => Err(self.error(span, None, "type annotation is not implemented")),
         }
@@ -1354,7 +1371,7 @@ impl Checker<'_> {
     fn default_numbers(&mut self) -> Result<(), Diagnostic> {
         for (op, operand, result, span) in std::mem::take(&mut self.divisions) {
             let checked = self.default_division(op, &operand, &result, span);
-            self.recover_type_error(checked, ())?;
+            self.recover_inference_error(checked, ())?;
         }
         for (ty, span) in std::mem::take(&mut self.numeric_constraints) {
             let checked = match self.inference.resolve(&ty) {
@@ -1362,7 +1379,7 @@ impl Checker<'_> {
                 Ty::Int | Ty::Float | Ty::Error => Ok(()),
                 _ => Err(self.error(span, Some("E305"), "expected Int or Float")),
             };
-            self.recover_type_error(checked, ())?;
+            self.recover_inference_error(checked, ())?;
         }
         Ok(())
     }
