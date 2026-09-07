@@ -291,7 +291,7 @@ impl Checker<'_> {
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
                 if !ast.items.iter().any(|item| matches!(item, Item::TypeDef(actual) if actual.name == def.name && actual.params.len() == def.params.len())) {
-                    return Err(self.error(module.span, None, "missing signature type"));
+                    return Err(self.error(module.span, Some("E602"), "missing signature type"));
                 }
                 if def.ty.is_some() {
                     return Err(self.error(
@@ -316,7 +316,7 @@ impl Checker<'_> {
                 ));
             };
             if !definitions.contains_key(&declaration.name) {
-                return Err(self.error(module.span, None, "missing signature member"));
+                return Err(self.error(module.span, Some("E602"), "missing signature member"));
             }
             let scheme = self.values[&declaration.name].clone();
             let (actual, constraints) = self.inference.instantiate_constrained(&scheme);
@@ -325,12 +325,12 @@ impl Checker<'_> {
             let expected = self.signature_type(declaration, &parameters)?;
             self.inference
                 .unify(&actual, &expected)
-                .map_err(|_| self.error(module.span, None, "signature type mismatch"))?;
+                .map_err(|_| self.error(module.span, Some("E602"), "signature type mismatch"))?;
             let mut resolved_parameters = Vec::new();
             for parameter in parameters.values() {
                 let resolved = self.inference.resolve(parameter);
                 if !matches!(resolved, Ty::Var(_)) || resolved_parameters.contains(&resolved) {
-                    return Err(self.error(module.span, None, "signature implementation is not sufficiently polymorphic"));
+                    return Err(self.error(module.span, Some("E602"), "signature implementation is not sufficiently polymorphic"));
                 }
                 resolved_parameters.push(resolved);
             }
