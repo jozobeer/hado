@@ -5,6 +5,8 @@ use crate::Checked;
 use std::collections::HashMap;
 
 struct Checker<'a> {
+    aliases: HashMap<String, TypeExpr>,
+    abstract_representations: HashMap<String, Ty>,
     deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
     module_records: HashMap<String, (Vec<String>, Scheme)>,
@@ -43,6 +45,8 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
 
 pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let mut checker = Checker {
+        aliases: HashMap::new(),
+        abstract_representations: HashMap::new(),
         deferred: Vec::new(),
         module_constructors: HashMap::new(),
         module_records: HashMap::new(),
@@ -135,6 +139,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
     }
     Ok((Checked {
+        abstract_representations: checker.abstract_representations,
         module_constructors: checker.module_constructors,
         module_records: checker.module_records,
         module_definitions: checker.module_definitions.clone(),
@@ -164,6 +169,7 @@ impl Checker<'_> {
             .ok_or_else(|| self.error(module.span, Some("E204"), "unknown signature"))?;
         let saved = self.values.clone();
         let saved_types = self.type_arities.clone();
+        let saved_aliases = self.aliases.clone();
         let saved_records = self.records.clone();
         let saved_constructors = self.constructors.clone();
         let saved_tags = self.constructor_tags.clone();
@@ -179,6 +185,11 @@ impl Checker<'_> {
                 _ => None,
             }).collect();
             let prefix = format!("{}.", self.module_path.join("."));
+            for (name, representation) in &mut self.abstract_representations {
+                if name.starts_with(&prefix) {
+                    *representation = representation.qualify_data_types(&type_names);
+                }
+            }
             for (name, scheme) in &mut self.module_definitions {
                 if name.starts_with(&prefix) {
                     *scheme = scheme.qualify_data_types(&type_names);
@@ -215,6 +226,7 @@ impl Checker<'_> {
         self.modules = saved_modules;
         self.abstract_types = saved_abstracts;
         self.type_arities = saved_types;
+        self.aliases = saved_aliases;
         self.records = saved_records;
         self.constructors = saved_constructors;
         self.constructor_tags = saved_tags;
@@ -261,6 +273,12 @@ impl Checker<'_> {
                     return Err(self.error(def.span, None, "duplicate module type"));
                 }
                 self.type_arities.insert(def.name.clone(), def.params.len());
+                self.aliases.remove(&def.name);
+                if let Some(ty) = &def.ty {
+                    if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
+                        self.aliases.insert(def.name.clone(), ty.clone());
+                    }
+                }
             }
         }
         for item in &ast.items {
@@ -300,7 +318,11 @@ impl Checker<'_> {
                         "manifest signature types are not implemented",
                     ));
                 }
-                abstract_names.insert(def.name.clone(), format!("{}.{}", self.module_path.join("."), def.name));
+                let qualified = format!("{}.{}", self.module_path.join("."), def.name);
+                let reference = TypeExpr { kind: TypeKind::Name(def.name.clone()), span: def.name_span };
+                let representation = self.annotation(&reference, def.name_span)?;
+                self.abstract_representations.insert(qualified.clone(), representation);
+                abstract_names.insert(def.name.clone(), qualified);
             }
         }
         let mut exports = HashMap::new();
@@ -334,11 +356,11 @@ impl Checker<'_> {
                 }
                 resolved_parameters.push(resolved);
             }
-            exports.insert(
-                declaration.name.clone(),
-                self.inference
-                    .generalize(&expected.seal(&abstract_names), &[]),
-            );
+            let mut public_parameters: HashMap<_, _> = abstract_names.iter().map(|(name, public)|
+                (name.clone(), Ty::Abstract(public.clone(), vec![]))).collect();
+            public_parameters.extend(parameters);
+            let public_type = self.signature_type(declaration, &public_parameters)?;
+            exports.insert(declaration.name.clone(), self.inference.generalize(&public_type, &[]));
         }
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
@@ -440,6 +462,7 @@ impl Checker<'_> {
     }
 
     fn register_type(&mut self, def: &crate::parser::TypeDef) -> Result<(), Diagnostic> {
+        if self.aliases.contains_key(&def.name) { return Ok(()); }
         let parameters: HashMap<_, _> = def
             .params
             .iter()
@@ -530,6 +553,7 @@ impl Checker<'_> {
                 Ok(Ty::Fn(inputs.iter().map(|ty| self.payload_type(ty, parameters, span)).collect::<Result<_, _>>()?, Box::new(self.payload_type(&args[1], parameters, span)?)))
             }
             TypeKind::Name(name) if parameters.contains_key(name) => Ok(parameters[name].clone()),
+            TypeKind::Name(name) if self.aliases.contains_key(name) => self.annotation(expr, span),
             TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
                 Ok(Ty::Adt(name.clone(), vec![]))
             }
@@ -1090,6 +1114,21 @@ impl Checker<'_> {
     }
 
     fn annotation(&self, annotation: &TypeExpr, span: Span) -> Result<Ty, Diagnostic> {
+        self.annotation_inner(annotation, span, &mut Vec::new())
+    }
+
+    fn annotation_inner(&self, annotation: &TypeExpr, span: Span, visiting: &mut Vec<String>) -> Result<Ty, Diagnostic> {
+        if let TypeKind::Name(name) = &annotation.kind {
+            if let Some(target) = self.aliases.get(name) {
+                if visiting.contains(name) {
+                    return Err(self.error(annotation.span, None, "cyclic abstract type instantiation has no specified diagnostic"));
+                }
+                visiting.push(name.clone());
+                let result = self.annotation_inner(target, target.span, visiting);
+                visiting.pop();
+                return result;
+            }
+        }
         match &annotation.kind {
             TypeKind::Name(name) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == 0) => {
                 Ok(Ty::Abstract(self.abstract_types[name].1.clone(), vec![]))
@@ -1097,7 +1136,7 @@ impl Checker<'_> {
             TypeKind::Apply(name, args) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == args.len()) => {
                 let args = args
                     .iter()
-                    .map(|arg| self.annotation(arg, span))
+                    .map(|arg| self.annotation_inner(arg, span, visiting))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Abstract(self.abstract_types[name].1.clone(), args))
             }
@@ -1108,9 +1147,9 @@ impl Checker<'_> {
                 };
                 let inputs = inputs
                     .iter()
-                    .map(|input| self.annotation(input, span))
+                    .map(|input| self.annotation_inner(input, span, visiting))
                     .collect::<Result<Vec<_>, _>>()?;
-                let output = self.annotation(&args[1], span)?;
+                let output = self.annotation_inner(&args[1], span, visiting)?;
                 Ok(Ty::Fn(inputs, Box::new(output)))
             }
             TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
@@ -1119,7 +1158,7 @@ impl Checker<'_> {
             TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
                 let args = args
                     .iter()
-                    .map(|arg| self.annotation(arg, span))
+                    .map(|arg| self.annotation_inner(arg, span, visiting))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Adt(name.clone(), args))
             }
@@ -1187,8 +1226,16 @@ impl Checker<'_> {
         if matches!(ty, Ty::Fn(..)) { return true; }
         if visited.contains(ty) { return false; }
         visited.push(ty.clone());
+        if let Ty::Abstract(name, _) = ty {
+            return self.abstract_representations.get(name).is_some_and(|representation|
+                self.contains_function(representation, visited));
+        }
         let Ty::Adt(name, _) = ty else { return false; };
-        self.constructors.values().chain(self.records.values().map(|(_, scheme)| scheme)).any(|scheme| {
+        self.constructors.values()
+            .chain(self.records.values().map(|(_, scheme)| scheme))
+            .chain(self.module_constructors.values().map(|(_, scheme)| scheme))
+            .chain(self.module_records.values().map(|(_, scheme)| scheme))
+            .any(|scheme| {
             let mut inference = self.inference.clone();
             let instantiated = inference.instantiate(scheme);
             let Ty::Fn(payload, result) = instantiated else { return false; };
