@@ -166,7 +166,7 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
-    signature_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
+    declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
     match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
@@ -200,7 +200,7 @@ fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<cr
     }
 }
 
-fn signature_types(
+fn declaration_types(
     items: &[Item], inherited: &BTreeSet<String>, inherited_signatures: &BTreeMap<String, Vec<String>>, path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
@@ -229,8 +229,8 @@ fn signature_types(
     }
     for item in items {
         match item {
-            Item::ModuleSig(signature) => signature_types(&signature.items, &types, &signatures, path, diagnostics),
-            Item::ModuleImpl(module) => signature_types(&module.items, &types, &signatures, path, diagnostics),
+            Item::ModuleSig(signature) => declaration_types(&signature.items, &types, &signatures, path, diagnostics),
+            Item::ModuleImpl(module) => declaration_types(&module.items, &types, &signatures, path, diagnostics),
             Item::SigDef(def) => {
                 let mut local = types.clone();
                 local.extend(def.type_params.iter().map(|param| param.name.clone()));
@@ -238,9 +238,37 @@ fn signature_types(
                     resolve_type_names(ty, &local, path, diagnostics);
                 }
             }
-            _ => {}
+            Item::TypeDef(def) => {
+                let mut local = types.clone();
+                local.extend(def.params.iter().map(|param| param.name.clone()));
+                if let Some(ty) = &def.ty { resolve_type_names(ty, &local, path, diagnostics); }
+            }
+            Item::Def(def) => {
+                let body = match &def.kind {
+                    DefKind::Value(body) => body,
+                    DefKind::Function { params, ret, body } => {
+                        for ty in params.iter().filter_map(|param| param.ty.as_ref()).chain(ret.iter()) {
+                            resolve_type_names(ty, &types, path, diagnostics);
+                        }
+                        body
+                    }
+                };
+                expression_type_names(body, &types, path, diagnostics);
+            }
         }
     }
+}
+
+fn expression_type_names(
+    node: &Node, types: &BTreeSet<String>, path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    if let NodeKind::Fn { params, .. } = &node.kind {
+        for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
+            resolve_type_names(ty, types, path, diagnostics);
+        }
+    }
+    for child in crate::check::children(node) { expression_type_names(child, types, path, diagnostics); }
 }
 
 fn resolve_type_names(
