@@ -77,3 +77,66 @@ fn opaque_projection_reports_the_dot() {
         assert_eq!((error.line, error.col), (3, before_dot.len() + 1));
     }
 }
+
+#[test]
+fn data_declarations_can_reference_module_abstract_types_in_any_order() {
+    for index in 1..12 {
+        for data in ["type Box = | Wrap(M.T)", "type Box = { value: M.T }"] {
+            let declarations = [data.to_string(), SIGNATURE.to_string(), module("M", "Int", "x", "value + 1")];
+            for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+                let body = if data.contains("Wrap") {
+                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                } else {
+                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                };
+                let source = format!("{}\n{}\n{}\ndef main = {body}", declarations[order[0]], declarations[order[1]], declarations[order[2]]);
+                assert_eq!(check_source(&source, "module-types.shin").unwrap_or_else(|error| panic!("{error}: {source}")).main, Ty::Int);
+            }
+        }
+    }
+}
+
+#[test]
+fn abstract_types_in_data_preserve_identity_and_opacity() {
+    let prefix = format!("type Box = {{ value: M.T }}\n{SIGNATURE}\n{}\n{}", module("M", "{ number: Int }", "{ number = x }", "value.number + 1"), module("N", "{ number: Int }", "{ number = x }", "value.number + 1"));
+    for (body, code) in [
+        ("let box = { value = N.make 1 } -> M.get box.value", "E305"),
+        ("let box = { value = M.make 1 } -> box.value.number", "E601"),
+    ] {
+        let error = check_source(&format!("{prefix}\ndef main = {body}"), "module-types.shin").err().unwrap();
+        assert_eq!(error.code.as_deref(), Some(code), "{error}");
+    }
+    let source = "type Box = | Wrap(M.Private)\nmodule type S = sig end\nmodule M : S = struct type Private = | Hidden end\ndef main = 1";
+    assert_eq!(check_source(source, "module-types.shin").err().unwrap().code.as_deref(), Some("E204"));
+}
+
+#[test]
+fn native_data_payloads_use_module_abstract_representations() {
+    let dir = std::env::temp_dir().join(format!("shin-abstract-payload-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (case, (representation, make, get)) in [
+        ("Int", "x", "value + 1"),
+        ("{ number: Int }", "{ number = x }", "value.number + 1"),
+    ].into_iter().enumerate() {
+        for record in [false, true] {
+            for index in 1..4 {
+                let data = if record { "type Box = { value: M.T }" } else { "type Box = | Wrap(M.T)" };
+                let body = if record {
+                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                } else {
+                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                };
+                let path = dir.join(format!("case{case}_{record}_{index}.shin"));
+                let source = format!("{data}\n{}\n{SIGNATURE}\ndef main = {body}", module("M", representation, make, get));
+                std::fs::write(&path, source).unwrap();
+                let built = Command::new(env!("CARGO_BIN_EXE_shin")).arg("build").arg(&path).output().unwrap();
+                assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+                let output = Command::new(path.with_extension("")).output().unwrap();
+                assert!(output.status.success());
+                assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
+                assert!(output.stderr.is_empty());
+            }
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
