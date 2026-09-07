@@ -183,3 +183,39 @@ fn unresolved_value_names_report_the_first_reference() {
         assert_eq!((error.line, error.col), (1, prefix.len() + 1));
     }
 }
+
+#[test]
+fn unknown_fields_and_module_members_point_to_the_name() {
+    for padding in 0..20 {
+        for (prefix, suffix) in [
+            ("type R = { value: Int }\ndef main = { value = 1 } .", ""),
+            ("type R = { value: Int }\ndef get r => r .", "\ndef main = get { value = 1 }"),
+            ("module type S = sig def run(x: Int): Int end\nmodule M : S = struct def run x => x end\ndef main = M .", ""),
+        ] {
+            for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
+                let prefix = format!("{prefix}{spacing}");
+                let source = format!("{prefix}missing{padding}{suffix}");
+                let diagnostic = error(&source);
+                assert_eq!(diagnostic.code.as_deref(), Some("E204"), "{diagnostic}");
+                let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+                let col = prefix.rsplit('\n').next().unwrap().len() + 1;
+                assert_eq!((diagnostic.line, diagnostic.col), (line, col), "{diagnostic}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_module_signatures_point_to_the_signature_name() {
+    for padding in 0..20 {
+        for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
+            let prefix = format!("module M :{spacing}");
+            let source = format!("{prefix}Missing{padding} = struct end\ndef main = 1");
+            let diagnostic = error(&source);
+            assert_eq!(diagnostic.code.as_deref(), Some("E204"), "{diagnostic}");
+            let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let col = prefix.rsplit('\n').next().unwrap().len() + 1;
+            assert_eq!((diagnostic.line, diagnostic.col), (line, col), "{diagnostic}");
+        }
+    }
+}
