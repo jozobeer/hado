@@ -2,5 +2,5 @@
 -- error: E504
 def f x =>
   let? _ = Some(x) ->
-  1
+  Some(1)
 def main = f 1
