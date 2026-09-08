@@ -27,7 +27,7 @@ fn list_hado(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Value of the first header line starting with `marker`
-/// (e.g. `-- expect:` or `-- error:`), if it is non-empty.
+/// (e.g. `// expect:` or `// error:`), if it is non-empty.
 fn header_value(text: &str, marker: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let rest = line.strip_prefix(marker)?;
@@ -71,7 +71,7 @@ fn corpus_counts() {
 
     for rel in &rels {
         let text = read_rel(&root, rel);
-        let code = header_value(&text, "-- error:").unwrap_or_default();
+        let code = header_value(&text, "// error:").unwrap_or_default();
         if rel.starts_with("tests/accept/") {
             match parse_source(&text, rel) {
                 Ok(_) => {
@@ -116,7 +116,7 @@ fn corpus_counts() {
             continue;
         }
         let text = read_rel(&root, rel);
-        let code = header_value(&text, "-- error:").unwrap_or_default();
+        let code = header_value(&text, "// error:").unwrap_or_default();
         let obj = work.join(rel.replace('/', "_"));
         match hado::compile_source_to_object(&text, rel, &obj) {
             Err(msg) if is_e1xx(&code) => assert!(msg.contains(&format!("error[{code}]")), "{rel}: {msg}"),
@@ -139,7 +139,7 @@ fn corpus_counts() {
     assert!(!codes.is_empty(), "spec diagnostic table is empty");
     let rejects = list_hado(&root.join("tests/reject"));
     let declared: std::collections::BTreeSet<_> = rejects.iter().map(|path| {
-        header_value(&std::fs::read_to_string(path).unwrap(), "-- error:").expect("reject header")
+        header_value(&std::fs::read_to_string(path).unwrap(), "// error:").expect("reject header")
     }).collect();
     assert_eq!(declared, codes, "reject codes must match the specification");
     assert_eq!(rejects.len(), codes.len(), "one reject per diagnostic code");
@@ -313,7 +313,7 @@ fn ws(rng: &mut Rng, indent: usize) -> String {
         _ => {
             let pad = "  ".repeat(indent);
             if rng.chance(50) {
-                format!("\n{pad}-- t{}\n{pad}", rng.below(100))
+                format!("\n{pad}// t{}\n{pad}", rng.below(100))
             } else {
                 format!("\n{pad}")
             }

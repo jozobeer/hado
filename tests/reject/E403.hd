@@ -1,5 +1,5 @@
--- spec: §31
--- error: E403
+// spec: §31
+// error: E403
 def f x =>
   if x
   | Some(v) => v

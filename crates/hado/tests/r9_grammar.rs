@@ -433,7 +433,7 @@ impl Generator {
                 1 => "\n\t".into(),
                 _ => {
                     self.mark("comment", 1, 0);
-                    format!(" -- generated {}\n", self.random(10000))
+                    format!(" // generated {}\n", self.random(10000))
                 }
             };
             format!("{token}{separator}")

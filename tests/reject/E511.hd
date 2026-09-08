@@ -1,6 +1,6 @@
--- spec: §16
--- error: E511
--- item: リテラルパターン
+// spec: §16
+// error: E511
+// item: リテラルパターン
 def f x =>
   if
   | x == 1 => "one"

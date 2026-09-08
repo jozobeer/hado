@@ -1,6 +1,6 @@
--- spec: §35
--- error: E601
--- item: module
+// spec: §35
+// error: E601
+// item: module
 module type S = sig
   type T
   def make(x: Int): T

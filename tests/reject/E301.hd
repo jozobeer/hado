@@ -1,6 +1,6 @@
--- spec: §8
--- error: E301
--- item: 関数適用
--- item: パイプ
+// spec: §8
+// error: E301
+// item: 関数適用
+// item: パイプ
 def add x y => x + y
 def main = 1 |> add 2 3

@@ -1,5 +1,5 @@
--- spec: §33
--- error: E507
+// spec: §33
+// error: E507
 def f
   | Some(v) => Some(v)
   | None => None

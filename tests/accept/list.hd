@@ -1,5 +1,5 @@
--- spec: §46
--- expect: 3
--- needs: prelude
--- item: List リテラル
+// spec: §46
+// expect: 3
+// needs: prelude
+// item: List リテラル
 def main = List.length [1, 2, 3]

@@ -1,6 +1,6 @@
--- spec: §47
--- expect: 3
--- item: 名前空間
+// spec: §47
+// expect: 3
+// item: 名前空間
 module type S = sig
   def inc(x: Int): Int
 end

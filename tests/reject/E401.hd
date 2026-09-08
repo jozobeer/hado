@@ -1,6 +1,6 @@
--- spec: §15
--- error: E401
--- item: 条件列の判別
+// spec: §15
+// error: E401
+// item: 条件列の判別
 def grade score =>
   if
   | score >= 90 => 3

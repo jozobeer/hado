@@ -60,7 +60,7 @@ fn parens_override_precedence() {
 #[test]
 fn comments_and_newlines_are_ignored() {
     assert_eq!(
-        parse_expr_ok("def main = 1 -- hi\n + 2"),
+        parse_expr_ok("def main = 1 // hi\n + 2"),
         "(1 + 2)"
     );
 }

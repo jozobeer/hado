@@ -62,17 +62,17 @@ fi
 : >"$TMPD/corpus_codes.txt"
 for f in tests/reject/*.hd; do
     [ -e "$f" ] || continue
-    n_err=$(grep -cE '^-- error: E[1-7][0-9][0-9]$' "$f" || true)
+    n_err=$(grep -cE '^// error: E[1-7][0-9][0-9]$' "$f" || true)
     if [ "$n_err" -ne 1 ]; then
         c1_reasons="$c1_reasons $f:error-lines=$n_err"
     fi
-    grep -E '^-- error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's/^-- error: //' >>"$TMPD/corpus_codes.txt" || true
-    n_spec=$(grep -cE '^-- spec: §[0-9]+$' "$f" || true)
+    grep -E '^// error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's|^// error: ||' >>"$TMPD/corpus_codes.txt" || true
+    n_spec=$(grep -cE '^// spec: §[0-9]+$' "$f" || true)
     if [ "$n_spec" -ne 1 ]; then
         c1_reasons="$c1_reasons $f:spec-lines=$n_spec"
     else
-        specval=$(grep -E '^-- spec: §[0-9]+$' "$f" | sed 's/^-- spec: //')
-        errcode=$(grep -E '^-- error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's/^-- error: //' | head -n 1)
+        specval=$(grep -E '^// spec: §[0-9]+$' "$f" | sed 's|^// spec: ||')
+        errcode=$(grep -E '^// error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's|^// error: ||' | head -n 1)
         if [ -n "$errcode" ]; then
             wantsec=$(awk -F '\t' -v c="$errcode" '$1==c {print $3}' "$TMPD/codes.tsv" | head -n 1)
             if [ -z "$wantsec" ]; then
@@ -124,14 +124,14 @@ for f in tests/accept/*.hd; do
         fi
     done <"$TMPD/sec39.txt"
     if [ "$hit" -eq 1 ]; then
-        grep -qE '^-- spec: §39$' "$f" || c2_reasons="$c2_reasons $f:not-sec39"
+        grep -qE '^// spec: §39$' "$f" || c2_reasons="$c2_reasons $f:not-sec39"
     fi
     if grep -qxF 'def display' "$f"; then
         grep -qF '| Guest => "guest"' "$f" || c2_reasons="$c2_reasons $f:missing-guest-branch"
-        grep -qE '^-- expect: guest$' "$f" || c2_reasons="$c2_reasons $f:missing-expect-guest"
+        grep -qE '^// expect: guest$' "$f" || c2_reasons="$c2_reasons $f:missing-expect-guest"
     fi
     if grep -qxF 'def active_names users =>' "$f"; then
-        grep -qE '^-- needs: prelude$' "$f" || c2_reasons="$c2_reasons $f:missing-needs-prelude"
+        grep -qE '^// needs: prelude$' "$f" || c2_reasons="$c2_reasons $f:missing-needs-prelude"
     fi
 done
 if [ -z "$c2_reasons" ]; then
@@ -163,11 +163,11 @@ while IFS= read -r name || [ -n "$name" ]; do
     nr=0
     for f in tests/accept/*.hd; do
         [ -e "$f" ] || continue
-        grep -qFx -- "-- item: $name" "$f" && na=$((na + 1))
+        grep -qFx -- "// item: $name" "$f" && na=$((na + 1))
     done
     for f in tests/reject/*.hd; do
         [ -e "$f" ] || continue
-        grep -qFx -- "-- item: $name" "$f" && nr=$((nr + 1))
+        grep -qFx -- "// item: $name" "$f" && nr=$((nr + 1))
     done
     [ "$na" -ge 1 ] || c3_reasons="$c3_reasons accept-missing:$name"
     # Reject-exempt (no rejectable form by definition, docs/plan.md M1):
@@ -180,7 +180,7 @@ done <"$TMPD/items22.txt"
 : >"$TMPD/all_items.txt"
 for f in tests/accept/*.hd tests/reject/*.hd; do
     [ -e "$f" ] || continue
-    grep -E '^-- item: ' "$f" 2>/dev/null | sed 's/^-- item: //' >>"$TMPD/all_items.txt" || true
+    grep -E '^// item: ' "$f" 2>/dev/null | sed 's|^// item: ||' >>"$TMPD/all_items.txt" || true
 done
 sort -u "$TMPD/all_items.txt" >"$TMPD/all_items_uniq.txt"
 sort -u "$TMPD/items22.txt" >"$TMPD/items22_uniq.txt"
@@ -200,10 +200,10 @@ and_ok=0
 or_ok=0
 for f in tests/accept/*.hd; do
     [ -e "$f" ] || continue
-    if grep -qE '^-- short-circuit: &&$' "$f" && grep -qF 'def rec' "$f" && grep -qF 'false &&' "$f"; then
+    if grep -qE '^// short-circuit: &&$' "$f" && grep -qF 'def rec' "$f" && grep -qF 'false &&' "$f"; then
         and_ok=1
     fi
-    if grep -qE '^-- short-circuit: \|\|$' "$f" && grep -qF 'def rec' "$f" && grep -qF 'true ||' "$f"; then
+    if grep -qE '^// short-circuit: \|\|$' "$f" && grep -qF 'def rec' "$f" && grep -qF 'true ||' "$f"; then
         or_ok=1
     fi
 done
@@ -249,7 +249,7 @@ else
         [ -z "$d_only_disk" ] || c5_reasons="$c5_reasons missing-from-output:$d_only_disk"
         [ -z "$d_only_out" ] || c5_reasons="$c5_reasons extra-in-output:$d_only_out"
     fi
-    for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_source_to_object' 'link_executable' '-- expect:' '-- error:'; do
+    for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_source_to_object' 'link_executable' '// expect:' '// error:'; do
         grep -qF -- "$lit" "$CORPUS_RS" || c5_reasons="$c5_reasons corpus.rs-missing:$lit"
     done
     for f in tests/accept/*.hd tests/reject/*.hd; do
@@ -260,7 +260,7 @@ else
         fi
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
-    printf -- '-- spec: §39\n-- expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__.hd
+    printf -- '// spec: §39\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__.hd
     cargo test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__.hd
@@ -287,7 +287,7 @@ else
     fail 5 "corpus-enumeration:$c5_reasons"
 fi
 
-# --- check 6: header conventions and -- needs: prelude ---
+# --- check 6: header conventions and // needs: prelude ---
 c6_reasons=""
 total_hado=$(ls tests/accept/*.hd tests/reject/*.hd 2>/dev/null | wc -l | tr -d ' ')
 if [ "${total_hado:-0}" -eq 0 ]; then
@@ -296,7 +296,7 @@ fi
 for f in tests/accept/*.hd tests/reject/*.hd; do
     [ -e "$f" ] || continue
     first=$(grep -vE '^[[:space:]]*$' "$f" | head -n 1)
-    if ! printf '%s' "$first" | grep -qE '^-- spec: §[0-9]+$'; then
+    if ! printf '%s' "$first" | grep -qE '^// spec: §[0-9]+$'; then
         c6_reasons="$c6_reasons $f:first-line-not-spec"
     else
         num=$(printf '%s' "$first" | grep -oE '§[0-9]+' | tr -d '§')
@@ -307,19 +307,19 @@ for f in tests/accept/*.hd tests/reject/*.hd; do
     fi
     case "$f" in
         tests/accept/*)
-            nexpect=$(grep -cE '^-- expect:( .*)?$' "$f" || true)
-            nexpect_err=$(grep -cE '^-- expect-error: .+$' "$f" || true)
-            nerror=$(grep -cE '^-- error:' "$f" || true)
+            nexpect=$(grep -cE '^// expect:( .*)?$' "$f" || true)
+            nexpect_err=$(grep -cE '^// expect-error: .+$' "$f" || true)
+            nerror=$(grep -cE '^// error:' "$f" || true)
             [ $((nexpect + nexpect_err)) -eq 1 ] || c6_reasons="$c6_reasons $f:accept-expect-lines=$((nexpect + nexpect_err))"
             [ "$nerror" -eq 0 ] || c6_reasons="$c6_reasons $f:accept-has-error"
             for m in 'List.map' 'List.filter' 'List.fold' 'List.length' 'List.reverse' 'List.append' 'List.sort' 'Option.map' 'Option.unwrap_or' 'Option.is_some' 'Option.ok_or' 'Result.map' 'Result.map_error' 'Result.is_ok' 'String.length' 'String.concat' 'Int.to_string' 'Float.to_string'; do
                 if grep -qF -- "$m" "$f"; then
-                    grep -qE '^-- needs: prelude$' "$f" || c6_reasons="$c6_reasons $f:uses-$m-without-needs-prelude"
+                    grep -qE '^// needs: prelude$' "$f" || c6_reasons="$c6_reasons $f:uses-$m-without-needs-prelude"
                 fi
             done
             ;;
         tests/reject/*)
-            nexpect=$(grep -cE '^-- expect(-error)?:' "$f" || true)
+            nexpect=$(grep -cE '^// expect(-error)?:' "$f" || true)
             [ "$nexpect" -eq 0 ] || c6_reasons="$c6_reasons $f:reject-has-expect"
             ;;
     esac

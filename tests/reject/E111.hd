@@ -1,3 +1,3 @@
--- spec: §43
--- error: E111
+// spec: §43
+// error: E111
 def main = ''

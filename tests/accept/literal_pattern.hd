@@ -1,6 +1,6 @@
--- spec: §16
--- expect: one
--- item: リテラルパターン
+// spec: §16
+// expect: one
+// item: リテラルパターン
 def describe
   | 1 => "one"
   | 2 => "two"

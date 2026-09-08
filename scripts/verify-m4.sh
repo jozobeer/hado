@@ -21,7 +21,7 @@ for kind, files in [
         total += 1
         result = subprocess.run([sys.argv[1], "check", str(path)], capture_output=True, text=True)
         if kind == "reject":
-            expected = re.search(r"^-- error: (E\d+)\s*$", source, re.M)
+            expected = re.search(r"^// error: (E\d+)\s*$", source, re.M)
             diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)
             ok = result.returncode == 1 and not result.stdout and expected and diagnostic and expected[1] == diagnostic[1]
         else:

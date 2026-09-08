@@ -1,4 +1,4 @@
--- spec: §48
--- expect: 42
+// spec: §48
+// expect: 42
 def rec loop offset n => if n == 0 => offset | let f = fn x => loop offset x -> f (n - 1)
 def main = loop 42 100000000

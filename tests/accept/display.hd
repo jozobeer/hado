@@ -1,5 +1,5 @@
--- spec: §39
--- expect: guest
+// spec: §39
+// expect: guest
 type Profile = { name: String }
 type User = | Guest | Member(Profile)
 def display
