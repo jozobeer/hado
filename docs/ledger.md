@@ -716,3 +716,39 @@ R14〜R17 で green に戻す。
 仕様への疑義は無い。最終削りで追加の削除対象は無かった。
 
 最終の実測審査も **PASS — 15-a, 15-b, 15-c all satisfied**（`/tmp/hado-v012/review-r15-final.jsonl`、同セッション）。次は R16 の節構文。
+
+## R16 節構文（2026-09-09）
+
+`module X` / `implement X as Y` を次の見出しかEOFまでの節として解析する。契約名を必須にし、`sig`・`struct`・`end` を通常の名前に戻した。契約内の実装修飾型、未知の抽象型の実体化、内側型の衝突を仕様の段階とトークン位置で拒否する。局所ADT・recordの使用は、契約の公開定義と抽象型から依存関係をたどって判定する。
+
+既存テストは外の宣言を見出しより前に置き、旧構文の診断アンカーを新構文に移した。抽象型のrecord・ADT表現は実装内に保った。未知の実体化はE204なので構文エラーが先になる。外の同名宣言が実装内の式より先になるケースは、そのソース順を明示して検査する。全文法の生成器も `outer_item* section*` に移した。
+
+E601の最初の移行案では表現recordを外へ出し、fieldから具体型が推論されてE305になった。元の局所性を保つ形へコーパス工程を戻し、再審査PASS後にlockを固定し直した（`eff63c7`）。実装内の未使用ADT・recordを受理する欠陥は生成テストの赤で再現し、使用されるrecord・constructor・抽象型の表現と区別して修正した。
+
+実行環境はR14と同じRust 1.98.0、`CARGO_TARGET_DIR=/tmp/hado-v012/target`。`cargo test --offline --no-fail-fast` は **429 passed / 0 failed**。全門番の実測は以下の通り（すべてexit 0）。ログは `/tmp/hado-v012/r16/`。
+
+| コマンド | 出力末尾 |
+|---|---|
+| `bash scripts/verify-m0.sh` | `PASSED: 7/7` |
+| `bash scripts/verify-m1-spec.sh` | `PASSED: 6/6` |
+| `bash scripts/verify-m1-corpus.sh` | `PASSED: 7/7` |
+| `bash scripts/verify-m2.sh` | `PASSED: 8/8` |
+| `bash scripts/verify-m3.sh` | `PASSED: 12/12` |
+| `bash scripts/verify-m4.sh` | `PASSED: 56/56` |
+| `bash scripts/verify-m5.sh` | `PASSED: 90/90` |
+| `bash scripts/verify-m6.sh` | `PASSED: 28/28` |
+| `bash scripts/verify-m7.sh` | `PASSED: 3/3` |
+| `bash scripts/verify-r9.sh` | `PASSED: 5/5` |
+| `bash scripts/verify-r11.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r12.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r13.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r14.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r16.sh` | `PASSED: 1/1` |
+
+16-a: 全件通過、R17へ持ち越す赤なし。16-b: 契約・実装の数と順序、CLI実行、旧構文の拒否、名前空間・不透明性・局所型を生成判定器で確認。16-c: stdlibの旧キーワード検索は0件。16-d: コーパス再審査後のlockとディスクが一致（`sha256sum --status -c tests/corpus.sha256` exit 0）。16-e: R9の拒否コーパス位置摂動とR16のE602・E514位置検査が通過。
+
+m3のstdlib述語は外のdefを拒否し、m7は同名の契約・実装の見出しを照合する。契約だけを改名する変異を拒否することを確認し、変更後のm7も単独再実行で3/3だった。審査側の重複門番はコーパスの一時変更が競合しないよう停止した。本体側の全門番が完走し、lockの一致を再確認した。
+
+審査は `opencode/deepseek-v4-flash`。コーパスのセッション `ses_f7e9e945effeCOscKQkGcAudfQ`、実装のセッション `ses_f7e7cbcc3ffemASNBTOxvYimAm` ともPASS。実装審査は既存テストの意図保全とE601・E204・E205・E602の独立プローブも確認した。新たな仕様への疑義、未対応の指摘、赤の門番はない。最終削りでは余剰成果物を残さず、一時プローブとログは `/tmp` に置いた。
+
+工程コミット: `dffeac9`（コーパス・判定器）、`2e72208`（修飾型アンカー）、`eff63c7`（E601局所表現の保持）、`3478e35`（既存判定の移行・局所型の未使用）。実装は直後の `feat: 契約と実装の節構文を実装する`。本記録以外の作業ツリー差分はない。
