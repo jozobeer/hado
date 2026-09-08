@@ -1,5 +1,5 @@
 #!/bin/bash
-# M1 spec acceptance checks 1..6 (see docs/plan.0.1.md, M1). Run from the repository root.
+# M1 spec acceptance checks 1..6 (see docs/0.1.1/plan.md, M1). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,9 +9,9 @@ total=6
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
-SPEC="docs/spec.0.1.md"
-PLAN="docs/plan.0.1.md"
-COV="docs/spec-coverage.0.1.md"
+SPEC="docs/0.1.1/spec.md"
+PLAN="docs/0.1.1/plan.md"
+COV="docs/0.1.1/spec-coverage.md"
 
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT

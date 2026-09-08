@@ -1,6 +1,6 @@
 # Cranelift 0.135 の呼び出し形
 
-M0（`docs/plan.0.1.md` の M0）で確定させた、`emit` が依存する Cranelift API の実際の形。
+M0（`docs/0.1.1/plan.md` の M0）で確定させた、`emit` が依存する Cranelift API の実際の形。
 **docs.rs の `latest` は 0.135 と食い違う**（`FunctionBuilder::finalize` が latest では引数を取らない）。
 迷ったら `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cranelift-*-0.135.1` の実物を読む。
 
@@ -84,7 +84,7 @@ let isa = cranelift_native::builder()?.finish(flags)?;
 
 既定（`settings.rs` テストが文字列比較で固定、491–510 行）: `opt_level = "none"`、`enable_verifier = true`、`is_pic = false`、`preserve_frame_pointers = false`。`enable_verifier` は触らない。`is_pic` と `preserve_frame_pointers` は true に上げる。`opt_level` は既定が `none` でも `set("opt_level", "none")` を書く。
 
-歩く骨格と手組み CLIF の両方で同じ 3 flags。`preserve_frame_pointers=false` では `tail` + `return_call` の emit が panic する（`docs/plan.0.1.md:240`）。
+歩く骨格と手組み CLIF の両方で同じ 3 flags。`preserve_frame_pointers=false` では `tail` + `return_call` の emit が panic する（`docs/0.1.1/plan.md:240`）。
 
 ### `iadd_imm` / `icmp_imm`
 
@@ -96,4 +96,4 @@ fn iconst<T1: Into<Imm64>>(self, NarrowInt: Type, N: T1) -> Value
 fn icmp(self, Cond: IntCC, x: Value, y: Value) -> Value
 ```
 
-Int は `i64`（`docs/plan.0.1.md:27`）。Cranelift 型は `types::I64`。
+Int は `i64`（`docs/0.1.1/plan.md:27`）。Cranelift 型は `types::I64`。
