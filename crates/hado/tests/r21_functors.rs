@@ -217,7 +217,27 @@ fn two_application_results_make_contract_qualified_type_ambiguous() {
     let case = base();
     case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\nimplement Id as J\ntype T = Int\ndef make x => x + 11\ndef read x => x");
     case.write("apply.hd", "implement Box as A = Make(I)\nimplement Box as B = Make(J)");
-    case.write("consumer.hd", "implement Consumer as C\ndef consume x => A.read x");
-    case.write("main.hd", "def main = C.consume (A.make 7) + B.read (B.make 8)");
+    case.write("consumer.hd", "implement Consumer as C\ndef consume _ => 1");
+    case.write("main.hd", "def main = A.read (A.make 7) + B.read (B.make 8)");
     reject_shifted(&case, "consumer.hdi", "module Consumer\ndef consume(x: Box.T): Int", "E603", "Box.T");
+}
+
+#[test]
+fn parameter_types_remain_opaque_even_when_actual_representations_support_the_operation() {
+    for (representation, make, body, code) in [
+        ("type T = Int", "x", "Arg.make x + 1", "E305"),
+        ("type Payload = { number: Int }\ntype T = Payload", "{ number = x }", "(Arg.make x).number", "E601"),
+    ] {
+        let case = Case::new();
+        case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int");
+        case.write("argument.hd", &format!("implement Input as Concrete\n{representation}\ndef make x => {make}"));
+        let source = format!("implement Output as Make(Arg: Input)\ndef run x => {body}");
+        case.write("functor.hd", &source);
+        case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
+        case.write("main.hd", "def main = Applied.run 7");
+        for command in ["check", "build", "dump-mono"] {
+            let anchor = if code == "E601" { source.find(".number") } else { source.find("Arg.make") }.unwrap();
+            case.reject(command, "main.hd", "functor.hd", code, anchor);
+        }
+    }
 }
