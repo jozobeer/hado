@@ -227,12 +227,10 @@ impl PartialEq for TypeExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
     Name(String),
-    /// `Option<T>` / `Cons2(T, List2<T>)` — type arguments or payloads.
     Apply(String, Vec<TypeExpr>),
     /// `(Int, Int)` argument group inside `Fn(...)`.
     Group(Vec<TypeExpr>),
     Record(Vec<TypeField>),
-    /// `Nil2 | Cons2(T, List2<T>)` — ADT alternatives.
     Adt(Vec<TypeExpr>),
 }
 
