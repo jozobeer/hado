@@ -586,3 +586,35 @@ R11〜R13 で green に戻す。手順書 10 節の「着手時点で赤の門�
 R13 コーパス審査は新設・classify 移行と、既存拒否 E401/E404/E406/E511 の短縮形移行の両方で PASS（同セッション、`review-r13-corpus-followup.jsonl`）。既存拒否の移行は E517 との二重欠陥を避けるため。腕と期待するコードは維持した。審査後に lock を更新した。
 
 実装前の `bash scripts/verify-r13.sh` は `PASSED: 0/1`。旧表記を受理すること、短縮形を parse できないこと、条件腕ゼロの条件列を受理することで失敗した（`r13-red.log`）。文法生成器も短縮形を生成して失敗を確認した（`r13-grammar-red.log`）。既存の冗長検査用入力は短縮形へ移し、元の検査対象を維持する。
+
+### R13 — 引数の条件列（2026-09-08）
+
+引数列の直後の `|` を条件列として解析する。元の `=> if | ...` は AST に関数の位置を残し、E517 を `def` / `fn` に出す。正規形は短縮形で印字する。引数名のない pattern 腕、E515、継続を挟む条件列は従来の判定を維持した。
+
+- **13-a:** `cargo test --offline --no-fail-fast` は 417 passed / 0 failed、exit 0。全門番も exit 0。ログは `/tmp/hado-011-evidence/r13-final/`。追加修正後に全テストと m3 を再実行し、m3 内部の m0・m1-spec・m1-corpus・m2 も全て通過した。
+
+| コマンド（`bash scripts/verify-*.sh`） | 出力の末尾 |
+|---|---|
+| m0 | `PASSED: 7/7` |
+| m1-spec | `PASSED: 6/6` |
+| m1-corpus | `PASSED: 7/7` |
+| m2 | `PASSED: 8/8` |
+| m3 | `PASSED: 12/12` |
+| m4 | `PASSED: 54/54` |
+| m5 | `PASSED: 89/89` |
+| m6 | `PASSED: 26/26` |
+| m7 | `PASSED: 3/3` |
+| r9 | `PASSED: 5/5` |
+| r11 | `PASSED: 1/1`（2 tests） |
+| r12 | `PASSED: 1/1`（6 tests） |
+| r13 | `PASSED: 1/1`（5 tests） |
+
+- **13-b:** arity 1〜3 × 注釈あり/なしの全組み合わせを生成し、旧表記と括弧で囲んだ旧表記を E517・関数先頭位置で拒否。同じ腕の短縮形 72 本を CLI で build し、実行値を独立計算した和と閾値から照合した。継続の許可、引数なし pattern 形の E206、名前付き pattern の誤用の E204、正規形往復、モジュール内の E517 も通過した。
+- **13-c:** 審査後の `b34154b` で lock を更新し、実装では変更していない。`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。
+- **13-d:** `every_reject_preserves_code_and_column_after_header_line_insertion` は E517 を含む全拒否を列挙して通過。生成検査でも E517 の行・列を照合した。
+
+**審査と対応:** 指定モデル `opencode/muse-spark-1.3-contributor-free` の実装審査と追審は PASS（`ses_f801be035ffeEMJb7M9EwdjY4C`、`review-r13-implementation.jsonl`、`review-r13-refinements.jsonl`）。自己検査で引数ゼロの型注釈付き短縮形を parse が受理する問題を再現し、回帰テストと拒否処理を追加した。審査で挙がった短縮形 E511 と条件腕不足 E100 の位置検査も追加し、後者を関数先頭から文法に合わないトークンへ修正した。いずれも red→green を保存した（`r13-zero-red.log`、`r13-empty-anchor-red.log`、`r13-refined-green.log`）。
+
+赤の門番は無い。型付き引数の疑義はユーザー承認で解消済み。既知の文書上の残存は §50 導入文の `-- spec:` 表記で、現行の字句規則（§41/§43）とコーパス規約は `// spec:` に統一されている。仕様本文の変更は承認された §53 の例に限定した。最終削りでは、この工程に不要な追加成果物・コメントは見つからなかった。
+
+最終受入審査も 13-a〜13-d と 0.1.1 の完了条件を PASS と判定した（`review-r13-final.jsonl`、同セッション）。R10〜R13 の全工程を完了し、この実装・検証記録のコミットを `v0.1.1` とする。

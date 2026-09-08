@@ -253,7 +253,7 @@ impl Checker<'_> {
             let saved = self.clone();
             self.module_path.push(module.name.clone());
             let ast = Ast { items: module.items.clone(), span: module.span,
-                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), equality_anchors: Vec::new() };
+                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new() };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
             if let Err(error) = result { diagnostics.push(error); }
@@ -455,7 +455,7 @@ impl Checker<'_> {
             span: module.span,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
-            written_list_patterns: Vec::new(), equality_anchors: Vec::new(),
+            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();
