@@ -1,3 +1,4 @@
 // spec: §47
 // error: E204
-def main = undefined_name 1
+// item: 名前空間
+def main = store::MemoryStore.run 1

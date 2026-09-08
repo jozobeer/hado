@@ -1,0 +1,2 @@
+implement store::Store as Disk
+def find id => store::Found(id * 2)

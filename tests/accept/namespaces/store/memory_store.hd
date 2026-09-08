@@ -1,0 +1,2 @@
+implement Store as MemoryStore
+def find id => Found(id::IntId.value (id::IntId.make id))

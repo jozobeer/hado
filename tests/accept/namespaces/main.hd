@@ -1,0 +1,6 @@
+// spec: §55
+// expect: 40
+// item: 名前空間
+def extract (status: store::Status): Int => if status | store::Found(value) => value | store::NotFound => 0
+def value (id: id::IntId.T): Int => id::IntId.value id
+def main = extract (store::MemoryStore.find 5) + extract (store::backend::Disk.find 7) + extract store::NotFound + value (id::IntId.make 1)
