@@ -474,3 +474,44 @@ commander が本セッションで `docs/0.1.1/spec.md` に反映した。`verif
 **成果物:** `docs/0.1.1/spec.md`（R7 反映済み）、`PLAN.md`（R8〜R9）。
 
 **次の一手:** `PLAN.md` をエージェントに渡す。手順 0（仕様の審査）から R9 まで一続きで進む。
+
+
+### 0.1.1 の計画 — grilling と文書再編（2026-09-08）
+
+v0.1 は R9 で完了し、全門番と `cargo test` が通過していた。本ラウンドは commander（Claude Fable 5.1、本セッション）が `docs/wants.md` の 6 項目をユーザーに grilling 形式で問い、0.1.1 の範囲と仕様を決めた。決定の一覧は `docs/0.1.1/plan.md` 9 節。
+
+**役割:** R7 と同じく、仕様の改訂と手順書は commander が書いた。R10 以降の実行と審査は 10 節の手順書でエージェントに渡す。
+
+**決めたこと（14 問）:** 範囲（4 項目を入れ、ファイル名 module と `let value? =` を送る）、改名を最初のラウンドに置くこと、文書を版ディレクトリ `docs/0.1.1/` に移すこと、`PLAN.md` の廃止、`//` への置き換えと `--` の E104、List の `[]` `[x, ...xs]` を式とパターンの唯一の形にすること（`Nil` `Cons` は E510 / E516）、展開は末尾のみ、条件列の短縮形 `def f x | ...` と従来形の E517。途中でユーザーがコードサンプルの OK / NG を確認し、式側の `Cons(x, xs)` を許す案を「NG にして `[x, ...xs]` で書けるようにしたい」と改めた（Q9 の改訂と Q14）。
+
+**実施したこと**
+
+| 手順 | 内容 | コミット |
+|---|---|---|
+| 1 | `PLAN.md` を廃止して 8 節へ移し、`AGENTS.md` `README.md` から進行中の開発への依存を消す | `21132db` |
+| 2 | `git tag v0.1`（手順 1 の後） | — |
+| 3 | 版付き 6 文書を `docs/0.1.1/` へ `git mv`。パス参照を更新 | `4ec9b56` |
+| 4 | 仕様の改訂、9 節と 10 節、コーパス規約、追跡表、対応表、`wants.md` の整理 | `35582be` |
+| 5 | 門番の項目数を計画の表から導く形にし、9.2 と §53 を対象に含める | `db895f0` |
+
+手順 1 の後の門番は全通過。1 回だけ `verify-m3.sh` が 11/12 になったが、これは 2 系統の門番を同時に走らせて cargo の target を取り合ったときで、単独で回すと 12/12 だった。
+
+**手順 5 の時点で赤の門番（実測）**
+
+| 門番 | 赤のチェック | 原因 | 戻すラウンド |
+|---|---|---|---|
+| `cargo test` | `parse_corpus::corpus_counts`、`r9_grammar::grammar_generated_programs_preserve_every_declaration`（402 passed / 2 failed） | §50 が 58 行で拒否が 56 本。§41 の EBNF から生成した `//` `[x, ...xs]` `def f x \| ...` を現行パーサが読めない | R11〜R13 |
+| `verify-m0.sh` | 2 cargo-test、3 walk、4 tail（4/7） | `cargo test` の終了コードを見る | 同上 |
+| `verify-m1-corpus.sh` | 1 reject-1:1（E516 E517 が無い）、2 sec39（`def classify score` が受理に無い）、3 pairs（9.2 の 2 項目に受理と拒否が無い）、7 no-regressions（m0 が赤）（3/7） | 仕様先行 | R12, R13 |
+| `verify-m2.sh` | 1 accept-27（`cargo` が exit 101）、3 non-e1xx-44（非 E1xx が 44 → 46）、5 gates（5/8） | 同上 | R12, R13 |
+| `verify-m3.sh` | 9 gates（11/12） | m0 m1-corpus m2 が赤 | R13 |
+| `verify-r9.sh` | R9-1 字句・全文法の往復（4/5） | §41 の新形式 | R13 |
+| `verify-m1-spec.sh` `verify-m4`〜`m7` | 無し | — | — |
+
+`verify-m4`〜`m7` は 0.1 の実装だけを見るので、本ラウンドの後も green のはずである（未実測。R10 の 10-b で改名前後の同数通過として実測する）。
+
+R11〜R13 で green に戻す。手順書 10 節の「着手時点で赤の門番」がこれを指す。
+
+**成果物:** `docs/0.1.1/spec.md`（v0.1.1）、`docs/0.1.1/plan.md` 9〜10 節、`docs/0.1.1/corpus.md`、`docs/0.1.1/spec-trace.md`、`docs/0.1.1/spec-coverage.md`、`scripts/verify-m1-spec.sh` `verify-m1-corpus.sh`。
+
+**次の一手:** `docs/0.1.1/plan.md` 10 節をエージェントに渡す。R10（改名）から R13 まで一続きで進む。
