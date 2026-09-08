@@ -193,7 +193,7 @@ fn lambdas_may_branch_but_cannot_hide_nested_branches() {
     for source in [
         "def main = if true => fn x => if x => 1 | 0 | fn x => x",
         "def main = if true => let x = 1 -> if x > 0 => 1 | 0 | 0",
-        "def main = if true => do? Ok() -> if true => 1 | 0 | 0",
+        "def main = if true => do Ok() -> if true => 1 | 0 | 0",
     ] {
         assert_eq!(
             parse_source(source, "generated")

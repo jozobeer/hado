@@ -116,12 +116,12 @@ fn bindings_and_fn() {
         "(let x = 1 -> (x + 1))"
     );
     assert_eq!(
-        parse_expr_ok("def main = let? x = f y -> x"),
-        "(let? x = f y -> x)"
+        parse_expr_ok("def main = let x? = f y -> x"),
+        "(let x? = f y -> x)"
     );
     assert_eq!(
-        parse_expr_ok("def main = do? g x -> x"),
-        "(do? g x -> x)"
+        parse_expr_ok("def main = do g x -> x"),
+        "(do g x -> x)"
     );
     assert_eq!(
         parse_expr_ok("def main = fn x => x + 1"),

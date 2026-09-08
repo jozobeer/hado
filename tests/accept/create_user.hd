@@ -6,9 +6,9 @@ def validate | [] => Ok() | [_, ..._] => Error("invalid")
 def authorize | [] => Ok() | [_, ..._] => Error("denied")
 def save | [] => Ok("ok") | [_, ..._] => Error("save failed")
 def create_user input =>
-  let? parsed = parse input ->
-  do? validate parsed ->
-  do? authorize parsed ->
-  let? saved = save parsed ->
+  let parsed? = parse input ->
+  do validate parsed ->
+  do authorize parsed ->
+  let saved? = save parsed ->
   Ok(saved)
 def main = create_user []

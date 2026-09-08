@@ -5,8 +5,8 @@ def find_user (id: Int): Result<Int, String> => Ok(id)
 def authorize_delete user => if user == 1 => Ok() | Error("denied")
 def delete user => if user == 1 => Ok() | Error("delete failed")
 def delete_user id =>
-  let? user = find_user id ->
-  do? authorize_delete user ->
-  do? delete user ->
+  let user? = find_user id ->
+  do authorize_delete user ->
+  do delete user ->
   Ok()
 def main = delete_user 1

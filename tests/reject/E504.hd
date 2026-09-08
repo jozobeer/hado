@@ -1,6 +1,6 @@
 // spec: §23
 // error: E504
 def f x =>
-  let? _ = Some(x) ->
+  let _? = Some(x) ->
   Some(1)
 def main = f 1

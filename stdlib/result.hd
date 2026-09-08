@@ -5,7 +5,7 @@ module type RESULT = sig
   def is_ok<A, E>(value: Result<A, E>): Bool
 end
 module Result : RESULT = struct
-  def map value f => let? x = value -> Ok(f x)
+  def map value f => let x? = value -> Ok(f x)
   def map_error value f => if value | Ok(x) => Ok(x) | Error(error) => Error(f error)
   def is_ok | Ok(_) => true | Error(_) => false
 end

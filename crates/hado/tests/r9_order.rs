@@ -225,7 +225,7 @@ fn type_errors_are_ordered_independently_of_definition_dependencies() {
 
 #[test]
 fn broken_dependencies_do_not_create_earlier_type_errors() {
-    for use_site in ["later + 1", "later 1", "later.value", "let? x = later -> Some(x + 1)"] {
+    for use_site in ["later + 1", "later 1", "later.value", "let x? = later -> Some(x + 1)"] {
         let source = format!("def first = {use_site}\ndef later = 1 + \"bad\"\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");

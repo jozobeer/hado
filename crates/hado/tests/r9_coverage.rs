@@ -89,7 +89,7 @@ fn let_patterns_must_cover_the_entire_payload_type() {
     for index in 0..20 {
         for (prefix, tail) in [
             ("def main = let ", format!("Some(value) = Some({index}) -> value + 1")),
-            ("def main = let? ", format!("Some(value) = Some(Some({index})) -> Some(value + 1)")),
+            ("def main = let ", format!("Some(value)? = Some(Some({index})) -> Some(value + 1)")),
         ] {
             let error = check_source(&format!("{prefix}{tail}"), "coverage.hd").err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E402"));
@@ -103,7 +103,7 @@ fn let_patterns_must_cover_the_entire_payload_type() {
 #[test]
 fn do_requires_a_rail_and_records_require_a_candidate() {
     for index in 0..20 {
-        let source = format!("def main = do? {index} -> Some(1)");
+        let source = format!("def main = do {index} -> Some(1)");
         assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E303"));
         let source = format!("def main = {{ missing{index} = 1 }}");
         assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E304"));
@@ -152,8 +152,8 @@ fn record_patterns_resolve_the_whole_field_set() {
 #[test]
 fn discarded_rail_binding_points_to_the_underscore() {
     for padding in 0..20 {
-        let prefix = format!("def main = let?{}", " ".repeat(padding + 1));
-        let source = format!("{prefix}_ = Some(1) -> Some(2)");
+        let prefix = format!("def main = let{}", " ".repeat(padding + 1));
+        let source = format!("{prefix}_? = Some(1) -> Some(2)");
         let error = check_source(&source, "coverage.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E504"));
         assert_eq!((error.line, error.col), (1, prefix.len() + 1));

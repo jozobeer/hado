@@ -693,7 +693,7 @@ fn record_pattern_columns_match_fields_in_source_order() {
 
 #[test]
 fn option_propagation_branches_before_the_continuation() {
-    let source = "def main = let? x = Some(1) -> Some(x + 2)";
+    let source = "def main = let x? = Some(1) -> Some(x + 2)";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("arms: [(\"Some\", Let {"));
     assert!(output.contains("(\"None\", Construct { constructor: \"None\", fields: [], result: Data(\"Option\", [Int]) })"));
@@ -703,7 +703,7 @@ fn option_propagation_branches_before_the_continuation() {
 #[test]
 fn result_propagation_preserves_error_when_success_type_changes() {
     use hado::mono::Expression;
-    let source = "def main = do? (1 / 2) -> Ok(true)";
+    let source = "def main = do (1 / 2) -> Ok(true)";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();

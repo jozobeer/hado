@@ -1,0 +1,13 @@
+// spec: §22
+// expect: 42
+// item: let p? =
+type Box = | Box(Int)
+type Entry = { value: Box }
+def pass (n: Int): Result<Unit, String> => if n > 0 => Ok() | Error("negative")
+def read (entry: Result<Entry, String>): Result<Int, String> =>
+  let { value = Box(n) }? = entry ->
+  do pass n ->
+  do pass (n + 1) ->
+  let Box(m)? = Ok(Box(n + 2)) ->
+  Ok(m)
+def main = read (Ok({ value = Box(40) }))

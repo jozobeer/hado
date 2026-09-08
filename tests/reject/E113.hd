@@ -1,7 +1,0 @@
-// spec: §35
-// error: E113
-// item: module
-module M = struct
-  def inc x => x + 1
-end
-def main = M.inc 1

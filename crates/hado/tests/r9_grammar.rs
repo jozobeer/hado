@@ -204,11 +204,11 @@ impl Generator {
             0 => self.lambda(depth, in_arm),
             1 | 2 => {
                 self.mark(if choice == 1 { "binding" } else { "rail_binding" }, 1, 0);
-                format!("{} {} = ( {} ) -> {}", if choice == 1 { "let" } else { "let?" }, self.pattern(2), self.expression(depth, in_arm), self.expression(depth, in_arm))
+                format!("let {}{} = ( {} ) -> {}", self.pattern(2), if choice == 1 { "" } else { "?" }, self.expression(depth, in_arm), self.expression(depth, in_arm))
             }
             3 => {
                 self.mark("rail_discard", 1, 0);
-                format!("do? ( {} ) -> {}", self.expression(depth, in_arm), self.expression(depth, in_arm))
+                format!("do ( {} ) -> {}", self.expression(depth, in_arm), self.expression(depth, in_arm))
             }
             _ => self.branch(depth),
         }
