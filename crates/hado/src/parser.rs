@@ -229,7 +229,7 @@ pub enum TypeKind {
     Name(String),
     /// `Option<T>` / `Cons2(T, List2<T>)` — type arguments or payloads.
     Apply(String, Vec<TypeExpr>),
-    /// `(Int, Int)` argument group inside `Fn<...>`.
+    /// `(Int, Int)` argument group inside `Fn(...)`.
     Group(Vec<TypeExpr>),
     Record(Vec<TypeField>),
     /// `Nil2 | Cons2(T, List2<T>)` — ADT alternatives.
@@ -611,19 +611,9 @@ impl Parser<'_> {
     fn parse_sig_def(&mut self) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::Def)?;
+        let type_params = self.parse_type_parameters()?;
         let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
-        let mut type_params = Vec::new();
-        if self.kind() == &TokKind::Lt {
-            self.bump();
-            loop {
-                let span = self.span();
-                type_params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
-                if self.kind() != &TokKind::Comma { break; }
-                self.bump();
-            }
-            self.expect(&TokKind::Gt)?;
-        }
         if self.kind() != &TokKind::LParen {
             return Err(self.error(None, "signature parameters require type annotations"));
         }
@@ -643,23 +633,16 @@ impl Parser<'_> {
     fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
-        let name_span = self.span();
-        let name = self.expect_upper_name("a declaration name")?;
         let parameter_start = self.span();
         let mut params = Vec::new();
-        if self.kind() == &TokKind::Lt {
-            self.bump();
-            loop {
-                let span = self.span();
-                params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
-                if self.kind() == &TokKind::Comma {
-                    self.bump();
-                } else {
-                    break;
-                }
-            }
-            self.expect(&TokKind::Gt)?;
+        if self.kind() == &TokKind::LParen {
+            params = self.parse_type_parameters()?;
+        } else if self.toks.get(self.pos + 1).is_some_and(|token| matches!(&token.kind, TokKind::Name(name) if name.starts_with(char::is_uppercase))) {
+            let span = self.span();
+            params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
         }
+        let name_span = self.span();
+        let name = self.expect_upper_name("a declaration name")?;
         let ty = if context == TypeContext::Signature {
             if !params.is_empty() || self.kind() == &TokKind::Eq {
                 return Err(self.error(None, "signature types are abstract and have no parameters"));
@@ -844,36 +827,81 @@ impl Parser<'_> {
         Ok(args)
     }
 
-    fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+    fn parse_type_parameter(&mut self) -> Result<DeclaredName, Diagnostic> {
         let span = self.span();
-        let mut name = self.expect_name("a type name")?;
-        if !name.chars().next().is_some_and(char::is_uppercase) {
-            return Err(self.error(None, "type names start with an uppercase letter"));
+        Ok(DeclaredName { name: self.expect_upper_name("a type parameter")?, span })
+    }
+
+    fn parse_type_parameters(&mut self) -> Result<Vec<DeclaredName>, Diagnostic> {
+        if self.kind() != &TokKind::LParen {
+            return if matches!(self.kind(), TokKind::Name(name) if name.starts_with(char::is_uppercase)) {
+                Ok(vec![self.parse_type_parameter()?])
+            } else { Ok(Vec::new()) };
         }
+        let start = self.span();
+        self.bump();
+        let mut params = vec![self.parse_type_parameter()?];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            params.push(self.parse_type_parameter()?);
+        }
+        if params.len() < 2 { return Err(self.error_at(start, Some("E100"), "type parameter groups require at least two names")); }
+        self.expect(&TokKind::RParen)?;
+        Ok(params)
+    }
+
+    fn parse_type_ref(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
+        let mut name = self.expect_upper_name("a type name")?;
         if self.kind() == &TokKind::Dot {
             self.bump();
             self.qualified_type_anchors.push((DeclaredName { name: name.clone(), span }, self.span()));
             name.push('.');
             name.push_str(&self.expect_upper_name("a qualified type name")?);
-            return Ok(TypeExpr { kind: TypeKind::Name(name), span });
         }
-        if self.kind() != &TokKind::Lt { return Ok(TypeExpr { kind: TypeKind::Name(name), span }); }
-        self.bump();
-        if name == "Fn" { return self.parse_function_type(span); }
-        Ok(TypeExpr { kind: TypeKind::Apply(name, self.parse_type_list(&TokKind::Gt)?), span })
+        Ok(TypeExpr { kind: TypeKind::Name(name), span })
+    }
+
+    fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let mut ty = self.parse_type_atom()?;
+        while matches!(self.kind(), TokKind::Name(name) if name.starts_with(char::is_uppercase)) {
+            let reference = self.parse_type_ref()?;
+            let TypeKind::Name(name) = reference.kind else { unreachable!() };
+            let span = ty.span;
+            let args = match ty.kind { TypeKind::Group(args) => args, _ => vec![ty] };
+            ty = TypeExpr { kind: TypeKind::Apply(name, args), span };
+        }
+        Ok(ty)
+    }
+
+    fn parse_type_atom(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let span = self.span();
+        match self.kind() {
+            TokKind::FnType => {
+                self.bump();
+                self.parse_function_type(span)
+            }
+            TokKind::LParen => {
+                self.bump();
+                let args = self.parse_type_list(&TokKind::RParen)?;
+                if args.len() < 2 { return Err(self.error_at(span, Some("E100"), "type argument groups require at least two types")); }
+                Ok(TypeExpr { kind: TypeKind::Group(args), span })
+            }
+            _ => self.parse_type_ref(),
+        }
     }
 
     fn parse_function_type(&mut self, span: Span) -> Result<TypeExpr, Diagnostic> {
-        let params = if self.kind() == &TokKind::LParen {
-            let span = self.span();
+        self.expect(&TokKind::LParen)?;
+        let mut args = vec![self.parse_type()?];
+        while self.kind() == &TokKind::Comma {
             self.bump();
-            TypeExpr { kind: TypeKind::Group(self.parse_type_list(&TokKind::RParen)?), span }
-        } else {
-            self.parse_type()?
-        };
-        self.expect(&TokKind::Comma)?;
+            args.push(self.parse_type()?);
+        }
+        self.expect(&TokKind::Arrow)?;
         let result = self.parse_type()?;
-        self.expect(&TokKind::Gt)?;
+        self.expect(&TokKind::RParen)?;
+        let params = if args.len() == 1 { args.remove(0) } else { TypeExpr { kind: TypeKind::Group(args), span } };
         Ok(TypeExpr { kind: TypeKind::Apply("Fn".into(), vec![params, result]), span })
     }
 
@@ -882,7 +910,6 @@ impl Parser<'_> {
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         match self.kind() {
             TokKind::KwIf => self.parse_branch(),
-            TokKind::KwFn => self.parse_fun(),
             TokKind::KwLet => self.parse_let(),
             TokKind::KwDo => self.parse_do(),
             _ => self.parse_pipe(),
@@ -1072,6 +1099,7 @@ impl Parser<'_> {
                 | TokKind::LParen
                 | TokKind::LBrace
                 | TokKind::LBracket
+                | TokKind::KwFn
         )
     }
 
@@ -1123,6 +1151,7 @@ impl Parser<'_> {
                 self.bump();
                 NodeKind::Unit
             }
+            TokKind::KwFn => return self.parse_fun(),
             TokKind::Name(_) => return self.parse_name_or_call(),
             TokKind::LParen => {
                 let lp = self.span();
@@ -1286,6 +1315,7 @@ impl Parser<'_> {
     }
 
     fn parse_pattern_branch(&mut self, span: Span, scrutinee: Node) -> Result<Node, Diagnostic> {
+        let first_pipe = self.span();
         let mut arms = Vec::new();
         let mut fallback = None;
         while self.kind() == &TokKind::Pipe {
@@ -1310,7 +1340,7 @@ impl Parser<'_> {
             self.record_fallback_end();
         }
         if arms.is_empty() {
-            return Err(self.error_at(span, None, "pattern branch requires at least one arm"));
+            return Err(self.error_at(first_pipe, None, "pattern branch requires at least one arm"));
         }
         Ok(Node {
             kind: NodeKind::PatternBranch {
@@ -1330,7 +1360,7 @@ impl Parser<'_> {
             self.bump();
             let head = self.parse_branch_expr()?;
             if arms.is_empty() && self.kind() != &TokKind::Arrow {
-                return Err(self.error(Some("E100"), "condition column requires a condition arm"));
+                return Err(self.error_at(pipe, Some("E100"), "condition column requires a condition arm"));
             }
             if self.kind() == &TokKind::Arrow {
                 self.bump();
@@ -1368,23 +1398,43 @@ impl Parser<'_> {
         Ok(body)
     }
 
+    fn parse_lambda_param(&mut self, typed: Option<bool>) -> Result<Param, Diagnostic> {
+        let span = self.span();
+        let name = self.expect_lower_name("a parameter name")?;
+        let annotated = self.kind() == &TokKind::Colon;
+        if typed.is_some_and(|expected| expected != annotated) {
+            return Err(self.error(Some("E100"), "lambda parameters must all have annotations or all omit them"));
+        }
+        let ty = if annotated {
+            self.bump();
+            Some(self.parse_type()?)
+        } else { None };
+        Ok(Param { name, ty, span })
+    }
+
+    fn parse_lambda_params(&mut self) -> Result<Vec<Param>, Diagnostic> {
+        let mut params = vec![self.parse_lambda_param(None)?];
+        let typed = params[0].ty.is_some();
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            params.push(self.parse_lambda_param(Some(typed))?);
+        }
+        Ok(params)
+    }
+
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
-        self.bump(); // `fn`
-        if self.kind() == &TokKind::Pipe {
-            let (params, body) = self.parse_arm_function(span)?;
-            return Ok(Node { kind: NodeKind::Fn { params, body: Box::new(body) }, span });
-        }
-        let params = self.parse_params()?;
-        if params.is_empty() { return Err(self.error(None, "lambda requires a parameter")); }
-        let body = self.parse_function_body(span)?;
-        Ok(Node {
-            kind: NodeKind::Fn {
-                params,
-                body: Box::new(body),
-            },
-            span,
-        })
+        self.bump();
+        self.expect(&TokKind::LParen)?;
+        let (params, body) = if self.kind() == &TokKind::Pipe {
+            self.parse_arm_function(span)?
+        } else {
+            let params = self.parse_lambda_params()?;
+            let body = self.parse_function_body(span)?;
+            (params, body)
+        };
+        self.expect(&TokKind::RParen)?;
+        Ok(Node { kind: NodeKind::Fn { params, body: Box::new(body) }, span })
     }
 
     fn parse_let(&mut self) -> Result<Node, Diagnostic> {
@@ -1688,7 +1738,7 @@ pub fn canonical(node: &Node) -> String {
             format!("(do {} -> {})", canonical(value), canonical(body))
         }
         NodeKind::Fn { params, body } => {
-            format!("(fn{})", source_print::function_tail(params, None, body))
+            format!("fn({})", source_print::lambda_tail(params, body))
         }
         NodeKind::BoolBranch { cond, then, els } => format!(
             "(if {} => {} | {})",

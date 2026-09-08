@@ -18,6 +18,7 @@ pub enum TokKind {
     Question,
     KwDo,
     KwFn,
+    FnType,
     KwIf,
     KwModule,
     KwType,
@@ -41,6 +42,7 @@ pub enum TokKind {
     Comma,
     Semicolon,
     Colon,
+    DoubleColon,
     Dot,
     Ellipsis,
     Plus,
@@ -73,6 +75,7 @@ impl std::fmt::Display for TokKind {
             TokKind::Question => write!(f, "?"),
             TokKind::KwDo => write!(f, "do"),
             TokKind::KwFn => write!(f, "fn"),
+            TokKind::FnType => write!(f, "Fn"),
             TokKind::KwIf => write!(f, "if"),
             TokKind::KwModule => write!(f, "module"),
             TokKind::KwType => write!(f, "type"),
@@ -96,6 +99,7 @@ impl std::fmt::Display for TokKind {
             TokKind::Comma => write!(f, ","),
             TokKind::Semicolon => write!(f, ";"),
             TokKind::Colon => write!(f, ":"),
+            TokKind::DoubleColon => write!(f, "::"),
             TokKind::Dot => write!(f, "."),
             TokKind::Ellipsis => write!(f, "..."),
             TokKind::Plus => write!(f, "+"),
@@ -281,7 +285,12 @@ impl Lexer<'_> {
             }
             ':' => {
                 self.bump();
-                Ok(TokKind::Colon)
+                if self.peek() == Some(':') {
+                    self.bump();
+                    Ok(TokKind::DoubleColon)
+                } else {
+                    Ok(TokKind::Colon)
+                }
             }
             '.' if self.rest().starts_with("...") => {
                 self.bump();
@@ -515,6 +524,7 @@ impl Lexer<'_> {
             "let" => TokKind::KwLet,
             "do" => TokKind::KwDo,
             "fn" => TokKind::KwFn,
+            "Fn" => TokKind::FnType,
             "if" => TokKind::KwIf,
             "module" => TokKind::KwModule,
             "type" => TokKind::KwType,

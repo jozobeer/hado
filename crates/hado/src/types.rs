@@ -265,26 +265,19 @@ impl std::fmt::Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Ty::Var(id) => write!(f, "t{id}"),
-            Ty::Fn(args, ret) => {
-                let args = args
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                write!(f, "Fn<({args}),{ret}>")
-            }
-            Ty::Adt(name, args) if !args.is_empty() => {
-                let args = args
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                write!(f, "{name}<{args}>")
-            }
-            Ty::Adt(name, _) => write!(f, "{name}"),
+            Ty::Fn(args, ret) => write!(f, "Fn({} => {ret})", display_arguments(args)),
+            Ty::Adt(name, args) | Ty::Abstract(name, args) => match args.as_slice() {
+                [] => write!(f, "{name}"),
+                [argument] => write!(f, "{argument} {name}"),
+                _ => write!(f, "({}) {name}", display_arguments(args)),
+            },
             ty => write!(f, "{ty:?}"),
         }
     }
+}
+
+fn display_arguments(types: &[Ty]) -> String {
+    types.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
 }
 
 impl Scheme {

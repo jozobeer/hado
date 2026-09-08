@@ -46,12 +46,12 @@ fn item(value: &Item) -> String {
                 .as_ref()
                 .map(|ty| format!(" = {}", type_source(ty)))
                 .unwrap_or_default();
-            format!("type {}{}{body}", def.name, type_parameters(&def.params))
+            format!("type {}{}{body}", type_parameters(&def.params), def.name)
         }
         Item::SigDef(def) => format!(
             "def {}{}{}{}",
-            def.name,
             type_parameters(&def.type_params),
+            def.name,
             parameters(&def.params),
             return_type(def.ret.as_ref())
         ),
@@ -70,14 +70,29 @@ fn item(value: &Item) -> String {
 }
 
 fn type_parameters(names: &[DeclaredName]) -> String {
-    if names.is_empty() {
-        String::new()
-    } else {
-        format!("<{}>", names.iter().map(|name| name.name.as_str()).collect::<Vec<_>>().join(", "))
+    let names = names.iter().map(|name| name.name.as_str()).collect::<Vec<_>>();
+    match names.as_slice() {
+        [] => String::new(),
+        [name] => format!("{name} "),
+        _ => format!("({}) ", names.join(", ")),
     }
 }
 
+pub(super) fn lambda_tail(params: &[Param], body: &Node) -> String {
+    let arguments = params.iter().map(|param| {
+        match &param.ty {
+            Some(ty) => format!("{}: {}", param.name, type_source(ty)),
+            None => param.name.clone(),
+        }
+    }).collect::<Vec<_>>().join(", ");
+    function_tail_with_parameters(params, None, body, &arguments).trim_start().into()
+}
+
 pub(super) fn function_tail(params: &[Param], ret: Option<&TypeExpr>, body: &Node) -> String {
+    function_tail_with_parameters(params, ret, body, &parameters(params))
+}
+
+fn function_tail_with_parameters(params: &[Param], ret: Option<&TypeExpr>, body: &Node, arguments: &str) -> String {
     if params.len() == 1 && params[0].name == "$argument" {
         if let NodeKind::PatternBranch { arms, fallback, .. } = &body.kind {
             let mut output = String::new();
@@ -91,7 +106,7 @@ pub(super) fn function_tail(params: &[Param], ret: Option<&TypeExpr>, body: &Nod
         }
     }
     if let NodeKind::CondBranch { arms, fallback } = &body.kind {
-        let mut output = format!("{}{}", parameters(params), return_type(ret));
+        let mut output = format!("{}{}", arguments, return_type(ret));
         for (condition, value) in arms {
             output.push_str(&format!(" | {} => {}", canonical(condition), canonical(value)));
         }
@@ -102,7 +117,7 @@ pub(super) fn function_tail(params: &[Param], ret: Option<&TypeExpr>, body: &Nod
     }
     format!(
         "{}{} => {}",
-        parameters(params),
+        arguments,
         return_type(ret),
         canonical(body)
     )
@@ -141,7 +156,15 @@ fn return_type(ty: Option<&TypeExpr>) -> String {
 fn type_source(ty: &TypeExpr) -> String {
     match &ty.kind {
         TypeKind::Name(name) => name.clone(),
-        TypeKind::Apply(name, args) => format!("{name}<{}>", type_list(args)),
+        TypeKind::Apply(name, args) if name == "Fn" => {
+            let inputs = match &args[0].kind {
+                TypeKind::Group(inputs) => type_list(inputs),
+                _ => type_source(&args[0]),
+            };
+            format!("Fn({inputs} => {})", type_source(&args[1]))
+        }
+        TypeKind::Apply(name, args) if args.len() == 1 => format!("{} {name}", type_source(&args[0])),
+        TypeKind::Apply(name, args) => format!("({}) {name}", type_list(args)),
         TypeKind::Group(args) => format!("({})", type_list(args)),
         TypeKind::Record(fields) => format!(
             "{{ {} }}",

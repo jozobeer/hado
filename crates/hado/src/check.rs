@@ -58,13 +58,13 @@ fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
     for item in items {
         match item {
             Item::Def(def) => match &def.kind {
-                DefKind::Value(body) => check_node(body, path, diagnostics),
+                DefKind::Value(body) => check_node(body, path, diagnostics, false),
                 DefKind::Function { params, ret, body } => {
                     check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
                     if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
                         diagnostics.push(error);
                     }
-                    check_node(body, path, diagnostics);
+                    check_node(body, path, diagnostics, body.span == def.span);
                 }
             },
             Item::ModuleImpl(module) => check_items(&module.items, path, diagnostics),
@@ -137,7 +137,22 @@ pub(crate) fn boolean_coverage(
     })
 }
 
-fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn check_boolean_form(node: &Node, path: &str, direct_condition: bool) -> Result<(), Diagnostic> {
+    let redundant = match &node.kind {
+        NodeKind::PatternBranch { arms, .. } => !arms.is_empty() && arms.iter().all(|(pattern, _)|
+            matches!(&pattern.kind, PatternKind::Literal(value) if matches!(value.kind, NodeKind::Bool(_)))),
+        NodeKind::CondBranch { arms, .. } => arms.len() == 1 && !direct_condition,
+        _ => false,
+    };
+    if !redundant { return Ok(()); }
+    Err(Diagnostic { path: path.into(), line: node.span.line, col: node.span.col,
+        code: Some("E520".into()), message: "use a Boolean branch instead of Boolean pattern arms or a single condition arm".into() })
+}
+
+fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct_condition: bool) {
+    if let Err(error) = check_boolean_form(node, path, direct_condition) {
+        diagnostics.push(error);
+    }
     if let NodeKind::Fn { params, body } = &node.kind {
         check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
         if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
@@ -162,7 +177,7 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
         }
     }
     for child in children(node) {
-        check_node(child, path, diagnostics);
+        check_node(child, path, diagnostics, matches!(node.kind, NodeKind::Fn { .. }) && child.span == node.span);
     }
 }
 
