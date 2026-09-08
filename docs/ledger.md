@@ -929,3 +929,28 @@ e09b52e feat: 同じディレクトリのhdとhdiを結合する
 既存r17の役割テストは根の外defをE513、空の選択ファイルをE206、サブディレクトリの外defをE100へ移した（2580342）。禁止hdiの例から未使用契約などの余分な欠陥を除き、元ファイルの診断位置と全ファイル検査を保持した。
 
 仮説は「値の名前だけをファイル単位に分け、使用判定の起点を全入口にすれば、既存の型・単相化経路を保てる」。16件の生成・位置検証と独立実走で確認した。`less-is-more`による余剰成果物・コメントの削除対象は無かった。次はR21のFunctorへ進む。
+
+## R21 Functor基礎実装とconstructor追加への移行（2026-09-09）
+
+基礎実装を `2a7b1ef` に保存した。本文を引数の契約型で一度検査し、適用ごとに型・比較制約・コード生成用ASTを置換する。引数と同名の大域実装の型を分離し、元ソースの診断位置を保持する。コーパスは `a8bd12d` で独立審査後にlock、判定器と追加再現は `c7ccb53`〜`0fe8f74` に先行して保存した。
+
+Cursorの初回実装審査は診断文に内部型名が漏れる点でFAIL。CLIと単一ソースAPIの再現テストを固定し、型の同一性を保持して表示だけを元の名前へ戻した。追審は既知record疑義を除く範囲でPASS（`/tmp/hado-v013/review/r21-implementation-followup.log`）。レビュアーは不透明性、異種/generic適用、局所ADT、比較制約、定義元の値の可視性、依存順、E521/E604/E603と各CLI診断を実走した。文法生成の独立審査もPASS（`r21-grammar.log`）。
+
+ソース固定後の実測は `/tmp/hado-v013/r21-gates-after-review/`。実行環境はR18と同じ。
+
+| コマンド | 結果・出力末尾 |
+|---|---|
+| `cargo test --offline --no-fail-fast` | 合計491 passed / 16 failed、exit101 |
+| `verify-m1-spec.sh` / `verify-m5.sh` / `verify-m6.sh` | 6/6、101/101、32/32、全てexit0 |
+| `verify-r11.sh`〜`r14.sh`、`r16.sh`〜`r20.sh` | 各 `PASSED: 1/1`、exit0 |
+| `verify-r21.sh` | `PASSED: 0/1`、exit1。正式14 passed / 14 failed |
+| `sha256sum --check --strict tests/corpus.sha256` | exit0。実装中のlock変更なし |
+| 別名形式の補助判定器 | 28 passed / 0 failed。正式判定器の合格ではない |
+
+赤はm0 4/7、m1-corpus 5/7、m2 7/8、m3 10/12、m4 67/68、m7 1/3、r9 3/5、r21 0/1。受理Functorの旧 `type T = {...}` がE205となる1件、同じ形式を生成するR21判定器14件、R22のpath未訪問1件とそれらに依存する門番である。21-aは未達。門番を緩めていない。
+
+§35/47の同名record禁止と§39/56例の矛盾について、ユーザーは局所record＋型別名の案ではなく、`type T = Payload {...}` を承認した。Tは型名、Payloadはconstructor名であり、名前付きfieldを直接宣言し、生成とパターンにも使う。計画§15の追加工程として仕様・コーパス・実装を改訂し、その後R21を再判定する。§53のBool分岐とE517の別件疑義は未解決。
+
+R22のコーパス候補と判定器候補はCursor審査PASS（`r22-corpus.log`、`r22-tests.log`）。候補は `/tmp/hado-v013/` のみで、未採用。名前空間未実装の現行CLIで判定器17件は全て赤。R21追加工程を終えてから採用へ進む。
+
+constructor宣言の構造整理は `b4c02a7`。型参照から名前とpayloadを分離し、新構文は加えていない。Cursorが基準と候補のCLI・診断・Functor実行を比較してPASS（`constructor-ast.log`）、隔離コピーの全cargoは同じ491/16、採用後のcheck_adtsは9/9。新構文のコーパスlockに依存しない振る舞い不変の整理として、追加実装とは別コミットにした。

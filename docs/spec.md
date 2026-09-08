@@ -282,9 +282,9 @@ Fn(Int, Int => Int)
 
 `def` で定義した関数名を引数なしで参照すると、`Fn(...)` 型の値になる。
 
-関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。constructor を先頭に置く並置（`Some 1`）は E106 とする。`inc(1)` は `inc (1)` と同じ並置である（空白は意味を持たない。第41節）。
+関数の呼び出しは並置 `f x y`、位置payloadのconstructorは `Some(x)`、名前付きfieldのconstructorは `Payload { id = 1 }` と呼び出す。大文字で始まる名前は constructor である。constructor を先頭に置く並置（`Some 1`）は E106 とする。`inc(1)` は `inc (1)` と同じ並置である（空白は意味を持たない。第41節）。
 
-constructor は関数値ではない。payload を持つ constructor は必ず payload を伴い、payload の数と引数の数が異なる形（単独の `Some`、`Some(1, 2)`、`apply Some`）は E301 とする。
+constructor は関数値ではない。payload を持つ constructor は必ず payload を伴い、payload の数と引数の数が異なる形（単独の `Some`、`Some(1, 2)`、`apply Some`）は E301 とする。宣言されたpayloadの形式（位置の `()` と名前付きの `{}`）と呼出し・パターンの形式が違う場合も E301（constructor名）とし、constructorを解決した後の型段階で検査する。
 
 ---
 
@@ -365,9 +365,9 @@ type Shape =
   | Rectangle(Float, Float)
 ```
 
-`of` は使わない。constructor の列は先頭の `|` を必須とする。1 行に書く場合も同じである（`type Color = | Red | Green | Blue`）。先頭の `|` が無い型定義は E108 とする。
+`of` は使わない。constructor の列は先頭の `|` を必須とする。ただし名前付きfieldを持つconstructorが1つだけなら `type T = Payload { id: Int; name: String }` と先頭の `|` を省ける。1 行に書く場合も同じである（`type Color = | Red | Green | Blue`）。この省略形以外で先頭の `|` が無いconstructorの列は E108 とする。省略形の `{...}` の後に `|` が続けば、省略形として確定せず E108 とし、最初のconstructor名を指す。
 
-payload は型を名前で参照する。無名の record を payload に書くことはできない（第12節）。
+位置で渡すpayloadは `Circle(Float)` のように `()` に型を書く。名前で渡すpayloadは `Rectangle { width: Float; height: Float }` のようにconstructor名の後へ直接 `{}` で書く。同じ型のconstructor列に両方の形を置ける。`Member({ name: String })` のように `()` の中へ無名record型を書くと E100 とする。
 
 値生成も同じ形。
 
@@ -423,6 +423,22 @@ type User =
   | Guest
   | Member(Profile)
 ```
+
+名前付きfieldを持つconstructorは、型名とconstructor名を分けて宣言する。`Payload`は予約語ではなくconstructor名である。
+
+```ocaml
+type T = Payload { id: Int; name: String }
+def make n => Payload { id = n; name = "a" }
+def describe user => let Payload { name } = user -> name
+```
+
+宣言・生成・パターンのfield区切りは `;`、末尾の区切りは置かない。宣言と生成は1つ以上のfieldを持つ。生成では宣言の全fieldを1回ずつ書き、順序は自由とする。式の評価順は書かれた順である。名前付きfieldのconstructorを `Payload(1, "a")` と呼ぶこと、位置payloadやpayload無しのconstructorを `Some { value = 1 }` や `Guest { x = 1 }` と呼ぶことは E301 とし、constructor名を指す。payloadを伴わないconstructor参照は従来どおり E301 とする。
+
+生成・パターンの未知fieldは E204（field名）、重複fieldは E205（2回目のfield名）、生成のfield不足は E301（constructor名）、field値の型不一致は E305（値の先頭）とする。宣言の重複fieldも E205 で2回目のfield名を指す。constructor名で型が決まるため、同じfield集合を持つ別型があっても E304 にはならない。
+
+パターンは `Payload { id; name = n }` と書く。fieldを1つ以上書き、同名束縛・別名・入れ子と、書かないfieldの無視はrecordパターンと同じである。名前付きfieldを持つconstructorを `Payload(...)` と位置形式で分解すること、位置payloadやpayload無しのconstructorを `{}` 形式で分解することは E301（constructor名）。payloadを持つconstructorを裸の `Payload` でパターンに書くことも E301 とする。複数constructorを持つ型の分岐網羅性とletの全域性は第18節・第22節の規則で判定する。
+
+constructorが1つだけで名前付きfieldを持つ型は `user.name` でfieldを参照できる。存在しないfieldは E204（field名）。参照先の型が未確定なら、通常のrecordと単一の名前付きfield constructorの型を候補とし、後続の型注釈・呼出しによる制約も反映する。全体の推論後も一意に決まらなければ E304（参照式の先頭）である。複数constructorの型は先にパターンで分解する。複数constructorの型への直接のfield参照は E204（field名）である。契約の抽象型を実装の外からfield参照すると、constructorの形によらず E601（`.`）とする。constructor付きの値を裸のrecord式・パターンからfield集合で選ぶことはしない。
 
 型の別名（`type Id = Int`）は持たない。値を区別したいときは constructor が 1 つの ADT を使う（`type Id = | Id(Int)`）。型 `Id` と constructor `Id` は別の名前空間にある（第47節）。
 
@@ -950,7 +966,7 @@ E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛し�
 
 引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 2 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => Ok()`、`def save(_: T): (Unit, Error) Result => Ok()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
 
-未使用の判定は、外の `def` と `type`、契約、実装、functor、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第54節）ので、ファイルの中で数える。契約の抽象型の実体化 `type T = User` は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。functor の引数は E521（第56節）。型変数は E518（第10節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
+未使用の判定は、外の `def` と `type`、契約、実装、functor、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第54節）ので、ファイルの中で数える。契約の抽象型の実体化（`type T = User` やconstructor付き本体）は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。functor の引数は E521（第56節）。型変数は E518（第10節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
 
 ---
 
@@ -1163,7 +1179,7 @@ def top | [] => None | [value, ..._] => Some(value)
 
 契約が `type A T` なら実体化も型引数 1 つで、数が違えば E602 とする。右辺に現れない型変数（`type A T = Int`）は E518 とする。契約が宣言していない抽象型を実体化する `type U = Int` は E204 とし、`U` を指す。
 
-実装の中の ADT と record は実装ごとの局所名前空間にあり、2 つの実装が同名の型を持ってよい。その constructor も実装ごとの局所名前空間にあり、2 つの実装が `Idle` を持ってよい。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す。
+実装の中の ADT と record は実装ごとの局所名前空間にあり、2 つの実装が同名の型を持ってよい。その constructor も実装ごとの局所名前空間にあり、2 つの実装が `Idle` を持ってよい。外の型と同名なら E205 とし、実装の中の宣言を指す。契約の抽象型と同名のconstructor付き型定義は、その抽象型の実体化とする（`type T = Payload { id: Int }`、`type T = | Payload(Int)`）。型引数の個数と公開memberの型は別名による実体化と同じ規則で照合する。constructorと本体は実装の外へ公開しない。外からconstructorを参照すると E204（constructor名）とする。constructorを持たないrecord型定義が契約の抽象型と同名なら E205 とする。
 
 抽象型の実体化で別名を展開した結果、同じ別名へ戻って実体が確定しない場合（`type T = T`、`type T = U` と `type U = T` など）は E602 とし、その `implement` を指す。名前を持つ ADT や record の再帰型は、この別名の循環とは区別する。
 
@@ -1393,8 +1409,8 @@ Functor：
 
 ```ocaml
 implement Store as MakeStore(Id: UserId)
-type T = { id: Id.T; name: String }
-def create name number => { id = Id.make number; name = name }
+type T = Payload { id: Id.T; name: String }
+def create name number => Payload { id = Id.make number; name = name }
 
 implement Store as PlainStore = MakeStore(IntId)
 ```
@@ -1495,14 +1511,15 @@ return_type     := ":" type_expr
 ```text
 type_definition := "type" type_vars? upper_name "=" ("|" constructor)+
                  | "type" type_vars? upper_name "=" record_type
+                 | "type" type_vars? upper_name "=" upper_name record_type
 type_vars       := upper_name
                  | "(" upper_name ("," upper_name)* ")"                   2 つ以上
-constructor     := upper_name ["(" type_expr ("," type_expr)* ")"]
+constructor     := upper_name ["(" type_expr ("," type_expr)* ")" | record_type]
 record_type     := "{" field_type (";" field_type)* "}"
 field_type      := name ":" type_expr
 ```
 
-型変数は名前の前で宣言する（`type T Option = ...`、`type (T, E) Result = ...`）。型の右辺はこの 2 形に限る。別名（`type Id = Int`）は無い（第12節）。
+型変数は名前の前で宣言する（`type T Option = ...`、`type (T, E) Result = ...`）。型の右辺はconstructor列、record型、単一の名前付きfield constructorの3形に限る。別名（`type Id = Int`）は無い（第12節）。
 
 型式:
 
@@ -1562,11 +1579,13 @@ primary         := int | float | char | string | bool | unit
                  | lambda                                                 `fn(` で始まり `)` で閉じる
                  | "(" expression ")"
 constructor_expr := "Ok" "(" ")"                                          Unit payload の正準形（第21節）
-                 | path? upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
+                 | path? upper_name ["(" expression ("," expression)* ")" | record_expr]
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
 list_expr       := "[" "]"
                  | "[" expression ("," expression)* ["," "..." expression] "]"
 ```
+
+constructor名に続く `()` または `{}` は空白によらずconstructorのpayloadとして先に読み、constructor名とrecord式の並置には分けない。
 
 `...` の後は `]` まで 1 つの式である。
 
@@ -1609,7 +1628,7 @@ arm_body        := pipe | binding | rail_binding | rail_discard            branc
 ```text
 pattern         := "_"
                  | name
-                 | path? upper_name ["(" pattern ("," pattern)* ")"]
+                 | path? upper_name ["(" pattern ("," pattern)* ")" | record_pattern]
                  | record_pattern
                  | list_pattern
                  | literal_pattern
@@ -1730,7 +1749,7 @@ def rec map values f =>
 
 名前空間は型・契約・実装・constructor・値の 5 つとする。型・契約・実装・constructor の 4 つはディレクトリごとに持ち、値の空間はファイルごとに持つ（第54節、第55節）。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
 
-型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record とその constructor は、その実装だけの局所的な空間にあり、実装同士の同名は E205 にならない。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す（第35節）。修飾した参照 `A.B` と `a::B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
+型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record とその constructor は、その実装だけの局所的な空間にあり、実装同士の同名は E205 にならない。外の型と同名なら E205 とし、実装の中の宣言を指す。契約の抽象型と同名のconstructor付き型定義は実体化であり、constructorを持たないrecord型定義は E205 である（第35節）。修飾した参照 `A.B` と `a::B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
 prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照できる。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。`compare` は値の空間の組み込みで、修飾なしで参照できる（第45節）。
 
@@ -1878,6 +1897,7 @@ Result の外側だけ剥がす。`Ok(x)` は `x` を stdout に印字して終�
 | ADT | `Some(1)` `Guest` |
 | List | `[1, 2]` `[]`。`Cons` の形では出さない |
 | record | `{ name = "a"; age = 3 }` |
+| 名前付きfieldのconstructor | `Payload { id = 3; name = "a" }`。fieldは宣言順 |
 
 最上位（Result を剥がした後の値そのもの）だけ 2 つの例外を置く。String と Char は引用符もエスケープも付けずに生の文字列を出す。Unit は何も出さない（改行も出さない）。
 
@@ -1995,8 +2015,8 @@ def main = ... store::MemoryStore.find 1 ... store::NotFound ...
 
 ```ocaml
 implement Store as MakeStore(Id: UserId)
-type T = { id: Id.T; name: String }
-def create name number => { id = Id.make number; name = name }
+type T = Payload { id: Id.T; name: String }
+def create name number => Payload { id = Id.make number; name = name }
 def describe user => String.concat user.name (Int.to_string (Id.value user.id))
 ```
 
