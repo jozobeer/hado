@@ -1,4 +1,4 @@
-use crate::parser::{Ast, Diagnostic, Item, TypeExpr, TypeKind};
+use crate::parser::{Ast, Diagnostic, ImplementationForm, Item, TypeExpr, TypeKind};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Default)]
@@ -12,7 +12,9 @@ impl Contracts {
         let mut result = Self::default();
         for item in items {
             if let Item::ModuleImpl(module) = item {
-                result.implementations.entry(module.sig.clone()).or_default().push(module.name.clone());
+                if !matches!(&module.form, ImplementationForm::Functor(_)) {
+                    result.implementations.entry(module.sig.clone()).or_default().push(module.name.clone());
+                }
             }
         }
         for item in items {

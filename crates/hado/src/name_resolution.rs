@@ -1,4 +1,4 @@
-use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, PatternKind, Span, TypeKind};
+use crate::parser::{Ast, DefKind, Diagnostic, ImplementationForm, Item, Node, NodeKind, Pattern, PatternKind, Span, TypeKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Default)]
@@ -7,6 +7,7 @@ struct Scope {
     constructors: BTreeSet<String>,
     signatures: BTreeMap<String, BTreeSet<String>>,
     modules: BTreeMap<String, BTreeSet<String>>,
+    functors: BTreeSet<String>,
 }
 
 impl Scope {
@@ -40,8 +41,12 @@ impl Scope {
         let mut modules: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for item in items {
             if let Item::ModuleImpl(module) = item {
-                let members = scope.signatures.get(&module.sig).cloned().unwrap_or_default();
-                modules.entry(module.name.clone()).or_default().extend(members);
+                if matches!(&module.form, ImplementationForm::Functor(_)) {
+                    scope.functors.insert(module.name.clone());
+                } else {
+                    let members = scope.signatures.get(&module.sig).cloned().unwrap_or_default();
+                    modules.entry(module.name.clone()).or_default().extend(members);
+                }
             }
         }
         scope.modules.extend(modules);
@@ -87,11 +92,40 @@ impl Resolver<'_> {
                 }
                 Item::ModuleImpl(module) => {
                     if !scope.signatures.contains_key(&module.sig) { self.report(module.sig_span, "E204", &module.sig); }
-                    self.items(&module.items, &scope);
+                    let local = self.implementation_scope(module, &scope);
+                    self.items(&module.items, &local);
                 }
                 _ => {}
             }
         }
+    }
+
+    fn implementation_scope(&mut self, module: &crate::parser::ModuleImpl, scope: &Scope) -> Scope {
+        let mut local = scope.clone();
+        match &module.form {
+            ImplementationForm::Ordinary => {}
+            ImplementationForm::Functor(params) => {
+                for param in params {
+                    if let Some(members) = scope.signatures.get(&param.contract) {
+                        local.modules.insert(param.name.clone(), members.clone());
+                        local.functors.remove(&param.name);
+                    } else {
+                        self.report(param.contract_span, "E204", &param.contract);
+                    }
+                }
+            }
+            ImplementationForm::Application { functor, arguments } => {
+                if !scope.functors.contains(&functor.name) {
+                    self.report(functor.span, "E204", &functor.name);
+                }
+                for argument in arguments {
+                    if !scope.modules.contains_key(&argument.name) {
+                        self.report(argument.span, "E204", &argument.name);
+                    }
+                }
+            }
+        }
+        local
     }
 
     fn expression(&mut self, node: &Node, scope: &Scope, current: Option<&str>, called: bool) {
@@ -110,6 +144,10 @@ impl Resolver<'_> {
             }
             NodeKind::Field(base, field) => {
                 if let NodeKind::Name(name) = &base.kind {
+                    if scope.functors.contains(name) {
+                        self.report(base.span, "E204", name);
+                        return;
+                    }
                     if let Some(members) = scope.modules.get(name) {
                         if !members.contains(&field.name) { self.report(field.span, "E204", &field.name); }
                         return;

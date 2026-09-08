@@ -235,8 +235,10 @@ fn declaration_types(
     }
     for item in items {
         if let Item::ModuleImpl(module) = item {
-            if let Some(exported) = signatures.get(&module.sig) {
-                types.extend(exported.iter().map(|name| format!("{}.{name}", module.name)));
+            if !matches!(&module.form, crate::parser::ImplementationForm::Functor(_)) {
+                if let Some(exported) = signatures.get(&module.sig) {
+                    types.extend(exported.iter().map(|name| format!("{}.{name}", module.name)));
+                }
             }
         }
     }
@@ -249,7 +251,19 @@ fn declaration_types(
                 }
                 declaration_types(&signature.items, &contract_types, &signatures, path, diagnostics);
             }
-            Item::ModuleImpl(module) => declaration_types(&module.items, &types, &signatures, path, diagnostics),
+            Item::ModuleImpl(module) => {
+                let mut local = types.clone();
+                if let crate::parser::ImplementationForm::Functor(params) = &module.form {
+                    for param in params {
+                        let prefix = format!("{}.", param.name);
+                        local.retain(|name| !name.starts_with(&prefix));
+                        if let Some(exported) = signatures.get(&param.contract) {
+                            local.extend(exported.iter().map(|name| format!("{}.{name}", param.name)));
+                        }
+                    }
+                }
+                declaration_types(&module.items, &local, &signatures, path, diagnostics);
+            }
             Item::SigDef(def) => {
                 let mut local = types.clone();
                 local.extend(def.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
@@ -352,6 +366,10 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
             }
             Item::ModuleImpl(module) => {
                 register(&mut names.modules, &module.name, module.name_span, path)?;
+                if let crate::parser::ImplementationForm::Functor(params) = &module.form {
+                    let mut parameters = BTreeSet::new();
+                    for param in params { register(&mut parameters, &param.name, param.name_span, path)?; }
+                }
                 declarations(&module.items, path)?;
             }
             Item::ModuleSig(signature) => {

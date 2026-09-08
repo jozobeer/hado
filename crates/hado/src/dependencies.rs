@@ -1,5 +1,6 @@
 use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Span, TypeExpr, TypeKind};
 use crate::types::Ty;
+use crate::parser::ImplementationForm;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,7 +29,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
         let (key, span) = declaration(item)?;
         let referenced = match &key {
             Key::Signature(name) => ast.items.iter().any(|item|
-                matches!(item, Item::ModuleImpl(module) if &module.sig == name)),
+                matches!(item, Item::ModuleImpl(module) if &module.sig == name && !matches!(module.form, ImplementationForm::Functor(_)))),
             _ => used.contains(&key),
         };
         (!referenced).then(|| Diagnostic { path: path.into(), line: span.line, col: span.col,
@@ -37,6 +38,17 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     for item in ast.items.iter().skip(prelude_items) {
         if let Item::ModuleImpl(module) = item {
             diagnostics.extend(local_data_diagnostics(ast, module, checked, path));
+            if let ImplementationForm::Functor(parameters) = &module.form {
+                let mut references = References::new();
+                collector.items(&module.items, &Scope::default(), &mut references);
+                for parameter in parameters {
+                    if !references.contains(&Key::Module(parameter.name.clone())) {
+                        diagnostics.push(Diagnostic { path: path.into(), line: parameter.name_span.line,
+                            col: parameter.name_span.col, code: Some("E521".into()),
+                            message: "unused functor parameter".into() });
+                    }
+                }
+            }
         }
     }
     diagnostics
@@ -187,7 +199,21 @@ impl Collector<'_> {
             Item::ModuleSig(def) => self.items(&def.items, scope, references),
             Item::ModuleImpl(def) => {
                 if !scope.signatures.contains(&def.sig) { references.insert(Key::Signature(def.sig.clone())); }
-                self.items(&def.items, scope, references);
+                let mut body_scope = scope.clone();
+                match &def.form {
+                    ImplementationForm::Ordinary => {}
+                    ImplementationForm::Functor(parameters) => {
+                        for parameter in parameters {
+                            body_scope.modules.insert(parameter.name.clone());
+                            references.insert(Key::Signature(parameter.contract.clone()));
+                        }
+                    }
+                    ImplementationForm::Application { functor, arguments } => {
+                        references.insert(Key::Module(functor.name.clone()));
+                        references.extend(arguments.iter().map(|argument| Key::Module(argument.name.clone())));
+                    }
+                }
+                self.items(&def.items, &body_scope, references);
             }
         }
     }

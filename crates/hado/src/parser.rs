@@ -330,7 +330,23 @@ pub struct ModuleSig {
 }
 
 #[derive(Debug, Clone)]
+pub struct FunctorParam {
+    pub name: String,
+    pub name_span: Span,
+    pub contract: String,
+    pub contract_span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImplementationForm {
+    Ordinary,
+    Functor(Vec<FunctorParam>),
+    Application { functor: DeclaredName, arguments: Vec<DeclaredName> },
+}
+
+#[derive(Debug, Clone)]
 pub struct ModuleImpl {
+    pub form: ImplementationForm,
     pub name: String,
     pub name_span: Span,
     pub sig: String,
@@ -670,8 +686,65 @@ impl Parser<'_> {
         self.expect(&TokKind::KwAs)?;
         let name_span = self.span();
         let name = self.expect_upper_name("an implementation name")?;
-        let items = self.parse_items(TypeContext::Implementation);
-        Ok(Item::ModuleImpl(ModuleImpl { name, name_span, sig, sig_span, items, span }))
+        let mut module = ModuleImpl {
+            name, name_span, sig, sig_span, span,
+            form: self.parse_implementation_form()?, items: Vec::new(),
+        };
+        if matches!(&module.form, ImplementationForm::Application { .. }) {
+            if !self.section_boundary() {
+                return Err(self.error(Some("E100"), "functor applications cannot have a body"));
+            }
+        } else {
+            module.items = self.parse_items(TypeContext::Implementation);
+        }
+        Ok(Item::ModuleImpl(module))
+    }
+
+    fn parse_implementation_form(&mut self) -> Result<ImplementationForm, Diagnostic> {
+        match self.kind() {
+            TokKind::LParen => self.parse_functor_parameters().map(ImplementationForm::Functor),
+            TokKind::Eq => self.parse_functor_application(),
+            _ => Ok(ImplementationForm::Ordinary),
+        }
+    }
+
+    fn parse_functor_parameter(&mut self) -> Result<FunctorParam, Diagnostic> {
+        let name_span = self.span();
+        let name = self.expect_upper_name("a functor parameter name")?;
+        self.expect(&TokKind::Colon)?;
+        let contract_span = self.span();
+        let contract = self.expect_upper_name("a parameter contract")?;
+        Ok(FunctorParam { name, name_span, contract, contract_span })
+    }
+
+    fn parse_functor_parameters(&mut self) -> Result<Vec<FunctorParam>, Diagnostic> {
+        self.expect(&TokKind::LParen)?;
+        let mut parameters = vec![self.parse_functor_parameter()?];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            parameters.push(self.parse_functor_parameter()?);
+        }
+        self.expect(&TokKind::RParen)?;
+        Ok(parameters)
+    }
+
+    fn parse_implementation_name(&mut self) -> Result<DeclaredName, Diagnostic> {
+        let span = self.span();
+        let name = self.expect_upper_name("an implementation name")?;
+        Ok(DeclaredName { name, span })
+    }
+
+    fn parse_functor_application(&mut self) -> Result<ImplementationForm, Diagnostic> {
+        self.expect(&TokKind::Eq)?;
+        let functor = self.parse_implementation_name()?;
+        self.expect(&TokKind::LParen)?;
+        let mut arguments = vec![self.parse_implementation_name()?];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            arguments.push(self.parse_implementation_name()?);
+        }
+        self.expect(&TokKind::RParen)?;
+        Ok(ImplementationForm::Application { functor, arguments })
     }
 
     fn expect_name(&mut self, what: &str) -> Result<String, Diagnostic> {

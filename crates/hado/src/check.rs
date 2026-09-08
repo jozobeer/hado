@@ -53,7 +53,9 @@ fn qualified_type_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
         });
         let known = ast.items.iter().any(|item| match item {
             Item::ModuleSig(signature) if in_contract => signature.name == module.name,
-            Item::ModuleImpl(implementation) if !in_contract => implementation.name == module.name,
+            Item::ModuleImpl(implementation) if !in_contract => implementation.name == module.name
+                && !matches!(implementation.form, crate::parser::ImplementationForm::Functor(_))
+                || (!in_contract && known_parameter_type_scope(implementation, &module.name, module.span, &ast.items)),
             _ => false,
         });
         (module.span.line == error.line && module.span.col == error.col && known).then_some(*member)
@@ -65,10 +67,37 @@ fn qualified_type_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
     error
 }
 
+fn known_parameter_type_scope(module: &crate::parser::ModuleImpl, name: &str, span: crate::parser::Span, items: &[Item]) -> bool {
+    let crate::parser::ImplementationForm::Functor(parameters) = &module.form else { return false; };
+    parameters.iter().any(|parameter| parameter.name == name && items.iter().any(|item|
+        matches!(item, Item::ModuleSig(signature) if signature.name == parameter.contract)))
+        && module.items.iter().any(|item| item_type_has_span(item, span))
+}
+
+fn item_type_has_span(item: &Item, span: crate::parser::Span) -> bool {
+    match item {
+        Item::TypeDef(definition) => definition.ty.as_ref().is_some_and(|ty| type_has_span(ty, span)),
+        Item::Def(definition) => match &definition.kind {
+            DefKind::Value(body) => node_type_has_span(body, span),
+            DefKind::Function { params, ret, body } => params.iter().filter_map(|param| param.ty.as_ref()).chain(ret.iter())
+                .any(|ty| type_has_span(ty, span)) || node_type_has_span(body, span),
+        },
+        _ => false,
+    }
+}
+
+fn node_type_has_span(node: &Node, span: crate::parser::Span) -> bool {
+    if let NodeKind::Fn { params, .. } = &node.kind {
+        if params.iter().filter_map(|param| param.ty.as_ref()).any(|ty| type_has_span(ty, span)) { return true; }
+    }
+    children(node).iter().any(|child| node_type_has_span(child, span))
+}
+
 fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
     if ty.span == span { return true; }
     match &ty.kind {
-        crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => args.iter().any(|ty| type_has_span(ty, span)),
+        crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) | crate::parser::TypeKind::Adt(args) => args.iter().any(|ty| type_has_span(ty, span)),
+        crate::parser::TypeKind::Record(fields) => fields.iter().any(|field| type_has_span(&field.ty, span)),
         _ => false,
     }
 }

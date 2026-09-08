@@ -1,4 +1,5 @@
 mod file_scopes;
+mod functor_instances;
 pub mod build;
 pub mod project;
 pub mod emit;
@@ -56,6 +57,7 @@ mod name_resolution;
 
 #[derive(Clone)]
 pub struct Checked {
+    pub instantiated_modules: Vec<parser::ModuleImpl>,
     pub abstract_representations: std::collections::HashMap<String, types::TypeRealization>,
     pub module_constructors: std::collections::HashMap<String, (u32, types::Scheme)>,
     pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,

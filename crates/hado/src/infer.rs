@@ -1,3 +1,4 @@
+mod functors;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
 use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError, TypeRealization};
@@ -6,6 +7,10 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
+    functors: HashMap<String, functors::Template>,
+    source_modules: HashMap<String, crate::parser::ModuleImpl>,
+    instantiated_modules: Vec<crate::parser::ModuleImpl>,
+    next_instance_line: usize,
     contract_types: crate::contract_types::Contracts,
     aliases: HashMap<String, (Vec<crate::parser::DeclaredName>, TypeExpr, Span)>,
     ambiguous_modules: HashSet<String>,
@@ -55,6 +60,10 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
     let contracts = crate::contract_types::Contracts::collect(&ast.items);
     let contract_diagnostics = contracts.diagnostics(ast, path);
     let mut checker = Checker {
+        functors: HashMap::new(),
+        source_modules: ast.items.iter().filter_map(|item| match item { Item::ModuleImpl(module) => Some((module.name.clone(), module.clone())), _ => None }).collect(),
+        instantiated_modules: Vec::new(),
+        next_instance_line: crate::functor_instances::max_line(ast) + 1,
         contract_types: contracts,
         aliases: HashMap::new(),
         ambiguous_modules: HashSet::new(),
@@ -88,6 +97,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             ((left.line, left.col, right.line, right.col), *operator)).collect(),
         recursive_calls: HashMap::new(),
     };
+    checker.deferred.extend(functors::duplicate_applications(ast, path));
     let mut definitions = HashMap::new();
     let inferred = (|| -> Result<Ty, Diagnostic> {
         let comparable = checker.inference.fresh();
@@ -114,8 +124,10 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             .collect();
         for item in &ast.items {
             if let Item::ModuleImpl(module) = item {
-                if let Some(signature) = signatures.get(&module.sig) {
-                    checker.module_abstract_parameters(module, signature);
+                if !matches!(module.form, crate::parser::ImplementationForm::Functor(_)) {
+                    if let Some(signature) = signatures.get(&module.sig) {
+                        checker.module_abstract_parameters(module, signature);
+                    }
                 }
             }
         }
@@ -182,6 +194,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         }
     };
     Ok((Checked {
+        instantiated_modules: checker.instantiated_modules,
         abstract_representations: checker.abstract_representations,
         module_constructors: checker.module_constructors,
         module_records: checker.module_records,
@@ -270,7 +283,7 @@ impl Checker<'_> {
         }
     }
 
-    fn module(
+    fn ordinary_module(
         &mut self,
         module: &crate::parser::ModuleImpl,
         signatures: &HashMap<String, &crate::parser::ModuleSig>,

@@ -523,6 +523,8 @@ pub fn lower_program(
         ..Lowerer::default()
     };
     lowerer.collect_modules(&ast.items, "");
+    let instances: Vec<_> = checked.instantiated_modules.iter().cloned().map(Item::ModuleImpl).collect();
+    lowerer.collect_modules(&instances, "");
     lowerer.schemes.extend(checked.module_definitions.clone());
     let body = lowerer.expression(ast.main().ok_or("main must be a value definition")?)?;
     Ok(Program {
@@ -1440,6 +1442,7 @@ impl Lowerer {
     fn collect_modules(&mut self, items: &[crate::parser::Item], prefix: &str) {
         for item in items {
             if let crate::parser::Item::ModuleImpl(module) = item {
+                if !matches!(module.form, crate::parser::ImplementationForm::Ordinary) { continue; }
                 let path = if prefix.is_empty() {
                     module.name.clone()
                 } else {

@@ -266,10 +266,13 @@ impl std::fmt::Display for Ty {
         match self {
             Ty::Var(id) => write!(f, "t{id}"),
             Ty::Fn(args, ret) => write!(f, "Fn({} => {ret})", display_arguments(args)),
-            Ty::Adt(name, args) | Ty::Abstract(name, args) => match args.as_slice() {
-                [] => write!(f, "{name}"),
-                [argument] => write!(f, "{argument} {name}"),
-                _ => write!(f, "({}) {name}", display_arguments(args)),
+            Ty::Adt(name, args) | Ty::Abstract(name, args) => {
+                let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
+                match args.as_slice() {
+                    [] => write!(f, "{name}"),
+                    [argument] => write!(f, "{argument} {name}"),
+                    _ => write!(f, "({}) {name}", display_arguments(args)),
+                }
             },
             ty => write!(f, "{ty:?}"),
         }
@@ -336,6 +339,15 @@ impl Ty {
         }
     }
 
+    pub(crate) fn rename_modules(&self, names: &HashMap<String, String>) -> Self {
+        match self {
+            Self::Adt(name, args) => Self::Adt(crate::functor_instances::rename(name, names), args.iter().map(|ty| ty.rename_modules(names)).collect()),
+            Self::Abstract(name, args) => Self::Abstract(crate::functor_instances::rename(name, names), args.iter().map(|ty| ty.rename_modules(names)).collect()),
+            Self::Fn(args, result) => Self::Fn(args.iter().map(|ty| ty.rename_modules(names)).collect(), Box::new(result.rename_modules(names))),
+            ty => ty.clone(),
+        }
+    }
+
     pub(crate) fn qualify_data_types(&self, names: &HashMap<String, String>) -> Self {
         match self {
             Self::Adt(name, arguments) => Self::Adt(names.get(name).unwrap_or(name).clone(), arguments.iter().map(|ty| ty.qualify_data_types(names)).collect()),
@@ -353,6 +365,11 @@ impl Scheme {
             ty: self.ty.reveal(names),
             constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.reveal(names))).collect(),
         }
+    }
+
+    pub(crate) fn rename_modules(&self, names: &HashMap<String, String>) -> Self {
+        Self { variables: self.variables.clone(), ty: self.ty.rename_modules(names),
+            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.rename_modules(names))).collect() }
     }
 
     pub(crate) fn qualify_data_types(&self, names: &HashMap<String, String>) -> Self {

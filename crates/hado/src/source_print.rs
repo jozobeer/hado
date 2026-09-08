@@ -60,12 +60,24 @@ fn item(value: &Item) -> String {
             module.name,
             items(&module.items)
         ),
-        Item::ModuleImpl(module) => format!(
-            "implement {} as {}\n{}",
-            module.sig,
-            module.name,
-            items(&module.items)
-        ),
+        Item::ModuleImpl(module) => implementation(module),
+    }
+}
+
+fn implementation(module: &ModuleImpl) -> String {
+    let header = format!("implement {} as {}", module.sig, module.name);
+    match &module.form {
+        ImplementationForm::Ordinary => format!("{header}\n{}", items(&module.items)),
+        ImplementationForm::Functor(parameters) => {
+            let parameters = parameters.iter().map(|parameter| {
+                format!("{}: {}", parameter.name, parameter.contract)
+            }).collect::<Vec<_>>().join(", ");
+            format!("{header}({parameters})\n{}", items(&module.items))
+        }
+        ImplementationForm::Application { functor, arguments } => {
+            let arguments = arguments.iter().map(|argument| argument.name.as_str()).collect::<Vec<_>>().join(", ");
+            format!("{header} = {}({arguments})", functor.name)
+        }
     }
 }
 
