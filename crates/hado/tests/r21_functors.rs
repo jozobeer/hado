@@ -265,3 +265,17 @@ fn a_functors_type_is_not_an_implementation_type() {
         case.reject(command, "main.hd", "main.hd", "E204", source.find("Make.T").unwrap());
     }
 }
+
+#[test]
+fn earlier_type_errors_precede_application_contract_errors() {
+    let case = Case::new();
+    case.write("contracts.hdi", "module Input\ndef id(x: Int): Int\nmodule Output\ndef run(x: Int): Int\nmodule Other\ndef run(x: Int): Int");
+    case.write("argument.hd", "implement Input as Concrete\ndef id x => x");
+    case.write("functor.hd", "implement Output as Make(Arg: Input)\ndef run x => Arg.id x");
+    case.write("apply.hd", "implement Other as Applied = Make(Concrete)");
+    let source = "def main = true + Applied.run 7";
+    case.write("main.hd", source);
+    for command in ["check", "build", "dump-mono"] {
+        case.reject(command, "main.hd", "main.hd", "E305", source.find("true").unwrap());
+    }
+}
