@@ -1,0 +1,9 @@
+// spec: §27
+// expect: [0, 0, 0, 0]
+// item: 契約の拡張
+// needs: prelude
+def main = [Null.save 42, ...List.map [1, 2, 3] fn(_ => 0)]
+module Store
+def save(value: Int): Int
+implement Store as Null
+def save _ => 0

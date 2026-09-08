@@ -1,0 +1,16 @@
+// spec: §34
+// expect: 41
+// item: 契約の拡張
+def main = Store.find (IntId.make 41)
+module UserId
+type T
+def make(value: Int): T
+def value(id: T): Int
+module UserStore
+def find(id: UserId.T): Int
+implement UserId as IntId
+type T = Int
+def make value => value
+def value id => id
+implement UserStore as Store
+def find id => IntId.value id

@@ -1,0 +1,20 @@
+// spec: §34
+// error: E603
+// item: 契約の拡張
+def main = (Store.find (FirstId.make 1)) + (SecondId.value (SecondId.make 2))
+module UserId
+type T
+def make(value: Int): T
+def value(id: T): Int
+module UserStore
+def find(id: UserId.T): Int
+implement UserId as FirstId
+type T = Int
+def make value => value
+def value id => id
+implement UserId as SecondId
+type T = Int
+def make value => value
+def value id => id
+implement UserStore as Store
+def find _ => 1

@@ -1,0 +1,12 @@
+// spec: §10
+// error: E518
+// item: 契約の拡張
+def main = Phantom.read (Phantom.make 1)
+module Shape
+type A T
+def make(value: Int): Int T
+def read(value: Int T): Int
+implement Shape as Phantom
+type A T = Int
+def make value => value
+def read value => value

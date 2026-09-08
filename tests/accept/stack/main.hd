@@ -1,0 +1,14 @@
+// spec: §34
+// expect: [7]
+// item: 契約の拡張
+def main = Stack.contents (Stack.push Stack.empty 7)
+module Stack
+type A T
+def A empty: A T
+def A push(stack: A T, value: A): A T
+def A contents(stack: A T): A List
+implement Stack as Stack
+type A T = A List
+def empty = []
+def push stack value => [value, ...stack]
+def contents stack => stack

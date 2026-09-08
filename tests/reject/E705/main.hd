@@ -1,0 +1,10 @@
+// spec: §5
+// error: E705
+// item: 契約の拡張
+def main = Store.find 1
+module Store
+type T
+def find(id: Int): T Option
+implement Store as Store
+type T = Int
+def find id => Some(id)

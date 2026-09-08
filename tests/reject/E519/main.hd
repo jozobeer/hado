@@ -1,0 +1,5 @@
+// spec: §27
+// error: E519
+// item: 契約の拡張
+def f _ => 1
+def main = f 0
