@@ -1,5 +1,5 @@
--- spec: §35
--- error: E602
+// spec: §35
+// error: E602
 module type S = sig
   def inc(x: Int): Int
   def dec(x: Int): Int

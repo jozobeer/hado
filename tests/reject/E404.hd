@@ -1,5 +1,5 @@
--- spec: §31
--- error: E404
+// spec: §31
+// error: E404
 def f x =>
   if
   | x > 1 => 1

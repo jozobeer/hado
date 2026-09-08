@@ -1,6 +1,6 @@
--- spec: §35
--- error: E514
--- item: module
+// spec: §35
+// error: E514
+// item: module
 module type S = sig
   def used(x: Int): Int
 end

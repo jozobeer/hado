@@ -1,5 +1,5 @@
--- spec: §52
--- error: E515
+// spec: §52
+// error: E515
 type Profile = { name: String }
 type User = | Guest | Member(Profile)
 def display user => if user | Guest => "guest" | Member(m) => m.name

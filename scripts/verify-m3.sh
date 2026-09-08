@@ -56,7 +56,7 @@ shifted = 0
 for code,p in zip(codes,reject):
     original = p.read_bytes()
     try:
-        p.write_text(re.sub(r'(^-- error:[^\n]*\n)', r'\1\n', original.decode(), count=1, flags=re.M))
+        p.write_text(re.sub(r'(^// error:[^\n]*\n)', r'\1\n', original.decode(), count=1, flags=re.M))
         r = check(p)
         match = re.match(re.escape(str(p))+r':(\d+):',r.stderr)
         shifted += bool(match and code in lines and int(match[1]) == lines[code]+1)

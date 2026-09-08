@@ -31,7 +31,7 @@ fn list_hado(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Value of the first header line starting with `marker`
-/// (e.g. `-- expect:` or `-- error:`), if it is non-empty.
+/// (e.g. `// expect:` or `// error:`), if it is non-empty.
 fn header_value(text: &str, marker: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let rest = line.strip_prefix(marker)?;
@@ -42,8 +42,8 @@ fn header_value(text: &str, marker: &str) -> Option<String> {
 
 fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     let headers: Vec<_> = text.lines().filter_map(|line| {
-        line.strip_prefix("-- expect:").map(|value| (0, value))
-            .or_else(|| line.strip_prefix("-- expect-error:").map(|value| (1, value)))
+        line.strip_prefix("// expect:").map(|value| (0, value))
+            .or_else(|| line.strip_prefix("// expect-error:").map(|value| (1, value)))
     }).collect();
     let [(status, value)] = headers.as_slice() else {
         return Err("expected exactly one output header".into());
@@ -76,7 +76,7 @@ fn try_accept(rel: &str, text: &str) -> Result<(), String> {
 }
 
 fn try_reject(rel: &str, text: &str) -> Result<(), String> {
-    let code = header_value(text, "-- error:").ok_or("missing error code")?;
+    let code = header_value(text, "// error:").ok_or("missing error code")?;
     match hado::check_source(text, rel) {
         Err(error) if error.code.as_deref() == Some(code.as_str()) => Ok(()),
         Err(error) => Err(format!("expected {code}, got {error}")),
@@ -125,16 +125,16 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
         let failure = format!("def identity (x: Result<Unit, Int>): Result<Unit, Int> => x\ndef main = identity (Error({number}))");
         let empty_failure = "def identity (x: Result<Int, Unit>) => x\ndef main = identity (Error(()))";
         for (case, source, header, accepted) in [
-            ("stdout", success.clone(), format!("-- expect: {number}"), true),
-            ("stderr", failure.clone(), format!("-- expect-error: {number}"), true),
-            ("wrong-stream", failure, format!("-- expect: {number}"), false),
-            ("wrong-status", success.clone(), format!("-- expect-error: {number}"), false),
-            ("wrong-value", success.clone(), format!("-- expect: {}", number + 1), false),
-            ("empty", "def main = ()".into(), "-- expect:".into(), true),
-            ("empty-error", empty_failure.into(), "-- expect-error:".into(), true),
-            ("empty-error-wrong-status", empty_failure.into(), "-- expect:".into(), false),
+            ("stdout", success.clone(), format!("// expect: {number}"), true),
+            ("stderr", failure.clone(), format!("// expect-error: {number}"), true),
+            ("wrong-stream", failure, format!("// expect: {number}"), false),
+            ("wrong-status", success.clone(), format!("// expect-error: {number}"), false),
+            ("wrong-value", success.clone(), format!("// expect: {}", number + 1), false),
+            ("empty", "def main = ()".into(), "// expect:".into(), true),
+            ("empty-error", empty_failure.into(), "// expect-error:".into(), true),
+            ("empty-error-wrong-status", empty_failure.into(), "// expect:".into(), false),
             ("missing", success.clone(), String::new(), false),
-            ("both", success, format!("-- expect: {number}\n-- expect-error: {number}"), false),
+            ("both", success, format!("// expect: {number}\n// expect-error: {number}"), false),
         ] {
             let result = try_accept(&format!("generated-{index}-{case}"), &format!("{header}\n{source}"));
             assert_eq!(result.is_ok(), accepted, "{case}: {result:?}");

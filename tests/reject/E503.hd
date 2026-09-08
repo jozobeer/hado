@@ -1,5 +1,5 @@
--- spec: §19
--- error: E503
+// spec: §19
+// error: E503
 def f
   | Some(v) => v
   | _ => 0

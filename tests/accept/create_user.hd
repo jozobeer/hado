@@ -1,6 +1,6 @@
--- spec: §39
--- expect: ok
--- item: 関数適用
+// spec: §39
+// expect: ok
+// item: 関数適用
 def parse (input: List<Int>): Result<List<Int>, String> => Ok(input)
 def validate | Nil => Ok() | Cons(_, _) => Error("invalid")
 def authorize | Nil => Ok() | Cons(_, _) => Error("denied")

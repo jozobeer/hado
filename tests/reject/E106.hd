@@ -1,4 +1,4 @@
--- spec: §8
--- error: E106
--- item: 呼び出し構文
+// spec: §8
+// error: E106
+// item: 呼び出し構文
 def main = Some 1

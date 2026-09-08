@@ -42,13 +42,13 @@ def valid_ir(result):
     return True
 
 for path in sorted(Path("tests/accept").glob("*.hd")):
-    if re.search(r"^-- needs: prelude\s*$", path.read_text(), re.M):
+    if re.search(r"^// needs: prelude\s*$", path.read_text(), re.M):
         continue
     result = dump(path)
     report(path, valid_ir(result), result.stderr.strip() or result.stdout)
 
 for path in sorted(Path("tests/reject").glob("*.hd")):
-    expected = re.search(r"^-- error: (E\d+)\s*$", path.read_text(), re.M)
+    expected = re.search(r"^// error: (E\d+)\s*$", path.read_text(), re.M)
     result = dump(path)
     diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)
     report(path, result.returncode == 1 and not result.stdout and expected and diagnostic and expected[1] == diagnostic[1], result.stderr.strip())

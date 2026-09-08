@@ -42,7 +42,7 @@ for f in tests/accept/*.hd; do
 done
 [ "$(grep -cF "parse_accept_ok_n: $n_accept" "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=$n_accept"
 # Probe: `def main = )` must not be accepted.
-printf -- '-- spec: §41\n-- expect: 0\ndef main = )\n' > tests/accept/__probe_bad__.hd
+printf -- '// spec: §41\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__.hd
 cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
 rm -f tests/accept/__probe_bad__.hd
 n_probe=$(grep -cF 'parse_accept_ok: tests/accept/__probe_bad__.hd' "$TMPD/probe1.log")
@@ -71,7 +71,7 @@ done
 [ "$(grep -cF "parse_e1xx_ok_n: $n_e1xx" "$TMPD/base.log")" -ge 1 ] || c2_reasons="$c2_reasons e1xx-n!=$n_e1xx"
 # Content-swap probe: keep the E103 header, put the E104 defect in the body.
 cp tests/reject/E103.hd "$TMPD/E103.orig"
-printf -- '-- spec: §43\n-- error: E103\n-- item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103.hd
+printf -- '// spec: §43\n// error: E103\n// item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103.hd
 cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/swap.log" 2>&1
 want_line=$(grep -nF '# trailing comment in the wrong form' tests/reject/E103.hd | head -n 1 | cut -d: -f1)
 want_col=$(awk '/# trailing comment/{print index($0, "#"); exit}' tests/reject/E103.hd)
@@ -97,7 +97,7 @@ c3_reasons=""
 for f in tests/reject/*.hd; do
     [ -e "$f" ] || continue
     rel="tests/reject/$(basename "$f")"
-    code=$(grep -m1 '^-- error: ' "$f" | sed 's/^-- error: //')
+    code=$(grep -m1 '^// error: ' "$f" | sed 's|^// error: ||')
     n=$(grep -cF "parse_non_e1xx_ok: $rel" "$TMPD/base.log")
     if printf '%s' "$code" | grep -qE '^E1[0-9][0-9]$'; then
         [ "$n" -eq 0 ] || c3_reasons="$c3_reasons e1xx-has-non($rel:$n)"
@@ -141,11 +141,11 @@ for pair in "E103:12" "E105:12" "E107:6"; do
 done
 n_cols=$(for n in 101 102 103 104 105 106 107; do diag_col "$TMPD/base.log" "tests/reject/E$n.hd"; done | sort -u | wc -l | tr -d ' ')
 [ "$n_cols" -ge 2 ] || c4_reasons="$c4_reasons distinct-cols=$n_cols"
-# Line-shift probe: a blank line after `-- error:` moves <line> by exactly 1.
+# Line-shift probe: a blank line after `// error:` moves <line> by exactly 1.
 for n in 101 102 103 104 105 106 107; do
     f="tests/reject/E$n.hd"
     cp "$f" "$TMPD/ls$n.orig"
-    awk '/^-- error: E[0-9]/ { print; print ""; next } { print }' "$f" >"$TMPD/ls$n.new"
+    awk '/^\/\/ error: E[0-9]/ { print; print ""; next } { print }' "$f" >"$TMPD/ls$n.new"
     cp "$TMPD/ls$n.new" "$f"
     cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/ls$n.log" 2>&1
     cp "$TMPD/ls$n.orig" "$f"

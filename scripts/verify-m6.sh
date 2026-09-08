@@ -34,12 +34,12 @@ def verify(name, copied, stdout, stderr=b"", status=0):
 with tempfile.TemporaryDirectory(prefix="hado-m6-") as temporary:
     for source in sorted(Path("tests/accept").glob("*.hd")):
         text = source.read_text()
-        if not include_prelude and re.search(r"^-- needs: prelude\s*$", text, re.M):
+        if not include_prelude and re.search(r"^// needs: prelude\s*$", text, re.M):
             continue
         total += 1
-        headers = [(line.startswith("-- expect-error:"), line.split(":", 1)[1].strip())
+        headers = [(line.startswith("// expect-error:"), line.split(":", 1)[1].strip())
                    for line in text.splitlines()
-                   if line.startswith(("-- expect:", "-- expect-error:"))]
+                   if line.startswith(("// expect:", "// expect-error:"))]
         if len(headers) != 1:
             print(f"NG: {source}: expected exactly one output header")
             continue

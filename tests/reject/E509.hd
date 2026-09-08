@@ -1,5 +1,5 @@
--- spec: §21
--- error: E509
--- item: Unit payload
+// spec: §21
+// error: E509
+// item: Unit payload
 def f x => if x > 0 => Ok(()) | Error("neg")
 def main = f 1

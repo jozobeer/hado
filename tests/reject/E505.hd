@@ -1,5 +1,5 @@
--- spec: §27
--- error: E505
+// spec: §27
+// error: E505
 def f x =>
   let unused = 1 ->
   x

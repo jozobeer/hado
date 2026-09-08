@@ -1,6 +1,6 @@
--- spec: §12
--- expect: a
--- item: record
+// spec: §12
+// expect: a
+// item: record
 type User = { name: String; age: Int }
 def get_name
   | { name = n } => n

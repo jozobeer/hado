@@ -1,6 +1,6 @@
--- spec: §39
--- expect: anonymous
--- item: 変数パターン
+// spec: §39
+// expect: anonymous
+// item: 変数パターン
 type User = { name: Option<String> }
 def display_name user =>
   if user.name

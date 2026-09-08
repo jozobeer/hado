@@ -1,6 +1,6 @@
--- spec: §39
--- expect: 1
--- item: module
+// spec: §39
+// expect: 1
+// item: module
 type Error = | NotFound
 module type USER_STORE = sig
   type T

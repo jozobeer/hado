@@ -1,5 +1,5 @@
--- spec: §22
--- error: E303
+// spec: §22
+// error: E303
 def f x =>
   let? n = 1 ->
   n

@@ -1,4 +1,4 @@
--- spec: §4
--- error: E201
+// spec: §4
+// error: E201
 def loop x => loop x
 def main = loop 1

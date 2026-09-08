@@ -1,6 +1,6 @@
--- spec: §35
--- error: E113
--- item: module
+// spec: §35
+// error: E113
+// item: module
 module M = struct
   def inc x => x + 1
 end

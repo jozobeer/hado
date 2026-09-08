@@ -1,5 +1,5 @@
--- spec: §28
--- error: E506
+// spec: §28
+// error: E506
 def f x =>
   let _ = x ->
   x

@@ -1,6 +1,6 @@
--- spec: §2
--- expect: 3
--- item: 冗長の対象外
+// spec: §2
+// expect: 3
+// item: 冗長の対象外
 def inc x => x + 1
 def inc2 x => inc x
 def main = inc2 2

@@ -1,6 +1,6 @@
--- spec: §16
--- error: E512
--- item: 変数パターン
+// spec: §16
+// error: E512
+// item: 変数パターン
 def f
   | y => y
 def main = f 1

@@ -77,7 +77,7 @@ fn whitespace_does_not_change_calls() {
         for callee in [format!("f{index}"), format!("Case{index}")] {
             let baseline =
                 parse_source(&format!("def main = {callee}({index})"), "generated").unwrap();
-            for gap in [" ", "\n", " -- gap\n "] {
+            for gap in [" ", "\n", " // gap\n "] {
                 let perturbed =
                     parse_source(&format!("def main = {callee}{gap}({index})"), "generated")
                         .unwrap();

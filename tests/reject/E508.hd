@@ -1,5 +1,5 @@
--- spec: §24
--- error: E508
+// spec: §24
+// error: E508
 def find_user (id: Int): Result<Int, String> => Ok(id)
 def f id =>
   if find_user id

@@ -1,4 +1,4 @@
--- spec: §43
--- expect: 3
--- item: リテラル
+// spec: §43
+// expect: 3
+// item: リテラル
 def main = 1 + 2

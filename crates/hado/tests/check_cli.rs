@@ -96,7 +96,7 @@ fn reject_corpus_reports_declared_codes_through_cli() {
         let source = std::fs::read_to_string(&path).unwrap();
         let expected = source
             .lines()
-            .find_map(|line| line.strip_prefix("-- error: "))
+            .find_map(|line| line.strip_prefix("// error: "))
             .unwrap()
             .trim();
         let output = Command::new(env!("CARGO_BIN_EXE_hado"))
@@ -169,7 +169,7 @@ fn every_reject_preserves_code_and_column_after_header_line_insertion() {
         let original = entry.unwrap().path();
         if original.extension().and_then(|s| s.to_str()) != Some("hd") { continue; }
         let source = std::fs::read_to_string(&original).unwrap();
-        let (header, code) = source.lines().enumerate().find_map(|(i, line)| line.strip_prefix("-- error:").map(|code| (i + 1, code.trim()))).unwrap();
+        let (header, code) = source.lines().enumerate().find_map(|(i, line)| line.strip_prefix("// error:").map(|code| (i + 1, code.trim()))).unwrap();
         let path = dir.join(original.file_name().unwrap());
         std::fs::write(&path, &source).unwrap();
         let baseline = positioned_rejection(&path, code);
