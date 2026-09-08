@@ -331,3 +331,31 @@ fn generic_abstract_types_remain_polymorphic_in_each_application() {
     case.write("main.hd", "def main = A.unwrap (A.wrap 7) + String.length (A.unwrap (A.wrap \"abc\")) + B.unwrap (B.wrap 11)");
     case.run("main.hd", 21);
 }
+
+#[test]
+fn diagnostic_types_use_source_parameter_names() {
+    for (body, code) in [("Arg.make x + 1", "E305"), ("Arg.make x x", "E301")] {
+        let case = Case::new();
+        let contracts = "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int";
+        let argument = "implement Input as Concrete\ntype T = Int\ndef make x => x";
+        let functor = format!("implement Output as Make(Arg: Input)\ndef run x => {body}");
+        let application = "implement Output as Applied = Make(Concrete)";
+        let main = "def main = Applied.run 7";
+        for (file, source) in [("contracts.hdi", contracts), ("argument.hd", argument), ("functor.hd", &functor), ("apply.hd", application), ("main.hd", main)] {
+            case.write(file, source);
+        }
+        for command in ["check", "build", "dump-mono"] {
+            case.reject(command, "main.hd", "functor.hd", code, functor.find("Arg.make").unwrap());
+            let message = String::from_utf8(case.command(command, "main.hd").stderr).unwrap();
+            assert!(message.contains("Arg.T"), "{message}");
+            assert!(!message.contains('$'), "{message}");
+        }
+        let source = [main, contracts, argument, &functor, application].join("\n");
+        let message = match hado::check_source(&source, "single.hd") {
+            Err(error) => error.to_string(),
+            Ok(_) => panic!("invalid opaque operation was accepted"),
+        };
+        assert!(message.contains("Arg.T"), "{message}");
+        assert!(!message.contains('$'), "{message}");
+    }
+}
