@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use hado::parser::{self, DefKind, Item, Node, Param, TypeExpr};
+use hado::parser::{self, DefKind, ImplementationForm, Item, Node, Param, TypeExpr};
 
 #[derive(Default)]
 struct Generator {
@@ -57,9 +57,11 @@ impl Generator {
     }
 
     fn section(&mut self) -> String {
-        match self.choose("section", 2) {
+        match self.choose("section", 4) {
             0 => self.module_section(false).0,
-            _ => self.implement_section(),
+            1 => self.implement_section(),
+            2 => self.functor_section().0,
+            _ => self.apply_section(),
         }
     }
 
@@ -190,6 +192,32 @@ impl Generator {
         let count = self.choose("implement_item*", 3);
         let items = self.list(count, |g| g.implement_item(&abstract_name), " ");
         format!("{signature}\nimplement {sig_name} as {} {items}", self.name(true))
+    }
+
+    fn functor_section(&mut self) -> (String, String, String) {
+        self.mark("functor_section", 1, 0);
+        let (signature, sig_name, abstract_name) = self.module_section(true);
+        self.mark("contract_ref", 1, 0);
+        let name = self.name(true);
+        let count = self.choose("functor_param+", 3) + 1;
+        let params = self.list(count, |g| {
+            g.mark("functor_param", 1, 0);
+            g.mark("contract_ref", 1, 0);
+            format!("{} : {sig_name}", g.name(true))
+        }, " , ");
+        self.declarations += 2;
+        (format!("{signature}\nimplement {sig_name} as {name} ( {params} ) type {abstract_name} = Int"), sig_name, name)
+    }
+
+    fn apply_section(&mut self) -> String {
+        self.mark("apply_section", 1, 0);
+        let (definition, signature, functor) = self.functor_section();
+        self.mark("contract_ref", 1, 0);
+        self.mark("impl_ref", 1, 0);
+        let count = self.choose("impl_ref+", 3) + 1;
+        let arguments = self.list(count, |g| { g.mark("impl_ref", 1, 0); g.name(true) }, " , ");
+        self.declarations += 1;
+        format!("{definition}\nimplement {signature} as {} = {functor} ( {arguments} )", self.name(true))
     }
 
     fn implement_item(&mut self, abstract_name: &str) -> String {
@@ -520,7 +548,22 @@ enum Shape {
     SignatureDefinition(String, Vec<String>, Vec<Param>, Option<TypeExpr>),
     Type(String, Vec<String>, Option<TypeExpr>),
     Signature(String, Vec<Shape>),
-    Module(String, String, Vec<Shape>),
+    Module(String, String, ImplementationShape, Vec<Shape>),
+}
+
+#[derive(Debug, PartialEq)]
+enum ImplementationShape {
+    Ordinary,
+    Functor(Vec<(String, String)>),
+    Application(String, Vec<String>),
+}
+
+fn implementation_shape(form: &ImplementationForm) -> ImplementationShape {
+    match form {
+        ImplementationForm::Ordinary => ImplementationShape::Ordinary,
+        ImplementationForm::Functor(params) => ImplementationShape::Functor(params.iter().map(|param| (param.name.clone(), param.contract.clone())).collect()),
+        ImplementationForm::Application { functor, arguments } => ImplementationShape::Application(functor.name.clone(), arguments.iter().map(|argument| argument.name.clone()).collect()),
+    }
 }
 
 fn shapes(items: &[Item]) -> Vec<Shape> {
@@ -532,7 +575,7 @@ fn shapes(items: &[Item]) -> Vec<Shape> {
         Item::SigDef(def) => Shape::SignatureDefinition(def.name.clone(), def.type_params.iter().map(|name| name.name.clone()).collect(), def.params.clone(), def.ret.clone()),
         Item::TypeDef(def) => Shape::Type(def.name.clone(), def.params.iter().map(|name| name.name.clone()).collect(), def.ty.clone()),
         Item::ModuleSig(sig) => Shape::Signature(sig.name.clone(), shapes(&sig.items)),
-        Item::ModuleImpl(module) => Shape::Module(module.name.clone(), module.sig.clone(), shapes(&module.items)),
+        Item::ModuleImpl(module) => Shape::Module(module.name.clone(), module.sig.clone(), implementation_shape(&module.form), shapes(&module.items)),
     }).collect()
 }
 

@@ -370,3 +370,71 @@ fn malformed_alias_body_precedes_alias_name_resolution() {
     assert_eq!(error.code.as_deref(), Some("E100"));
     assert_eq!((error.line, error.col), (1, prefix.len() + "(Int, ".len() + 1), "{error}");
 }
+
+#[test]
+fn functor_and_application_lists_require_uppercase_nonempty_items() {
+    for (prefix, invalid) in [
+        ("implement S as Make(", ")"),
+        ("implement S as Make(", "lower: S)"),
+        ("implement S as Make(P: ", "lower)"),
+        ("implement S as Make(P: S, ", ")"),
+        ("implement S as A = ", "lower(I)"),
+        ("implement S as A = Make(", ")"),
+        ("implement S as A = Make(", "lower)"),
+        ("implement S as A = Make(I, ", ")"),
+    ] {
+        for padding in 0..5 {
+            let source = format!("{}{}{}{}", "\n".repeat(padding % 3), prefix, " ".repeat(padding), invalid);
+            let error = parse_source(&source, "functor-list.hd").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
+            assert_eq!(error.path, "functor-list.hd");
+            let unit = padding == 0 && prefix.ends_with('(') && invalid == ")";
+            let column = prefix.len() + padding + 1 - usize::from(unit);
+            assert_eq!((error.line, error.col), (padding % 3 + 1, column), "{source}: {error}");
+        }
+    }
+}
+
+#[test]
+fn applications_end_before_the_next_section_and_cannot_have_items() {
+    for padding in 0..5 {
+        let prefix = format!("implement S as A = Make(I)\n{}", " ".repeat(padding));
+        for body in ["def extra = 1", "type T = Int"] {
+            let source = format!("{prefix}{body}");
+            let error = parse_source(&source, "application-body.hd").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
+            assert_eq!(error.path, "application-body.hd");
+            assert_eq!((error.line, error.col), (2, padding + 1));
+        }
+        for section in ["module Next", "implement S as Next", "implement S as Next(P: S)", "implement S as Next = Make(J)"] {
+            let source = format!("{prefix}{section}");
+            let ast = parse_source(&source, "application-section.hd").unwrap();
+            assert!(matches!(&ast.items[0], hado::parser::Item::ModuleImpl(module) if matches!(module.form, hado::parser::ImplementationForm::Application { .. }) && module.items.is_empty()));
+            assert_eq!(ast.items.len(), 2);
+        }
+    }
+}
+
+#[test]
+fn functor_forms_preserve_generated_names_and_argument_order() {
+    use hado::parser::{ImplementationForm, Item, canonical_program};
+    for count in 1..4 {
+        let params: Vec<_> = (0..count).map(|i| format!("P{i}: S{i}")).collect();
+        let arguments: Vec<_> = (0..count).rev().map(|i| format!("I{i}")).collect();
+        let source = format!("implement Result as Make({}) type T = Int\nimplement Result as Applied = Make({})", params.join(", "), arguments.join(", "));
+        let ast = parse_source(&source, "functor-forms.hd").unwrap();
+        for source in [&source, &canonical_program(&ast)] {
+            let ast = parse_source(source, "functor-forms.hd").unwrap();
+            let Item::ModuleImpl(definition) = &ast.items[0] else { panic!("missing functor"); };
+            let ImplementationForm::Functor(actual) = &definition.form else { panic!("functor form lost"); };
+            assert_eq!(definition.name, "Make");
+            assert_eq!(actual.iter().map(|param| (param.name.clone(), param.contract.clone())).collect::<Vec<_>>(), (0..count).map(|i| (format!("P{i}"), format!("S{i}"))).collect::<Vec<_>>());
+            let Item::ModuleImpl(application) = &ast.items[1] else { panic!("missing application"); };
+            let ImplementationForm::Application { functor, arguments: actual } = &application.form else { panic!("application form lost"); };
+            assert_eq!(application.name, "Applied");
+            assert_eq!(functor.name, "Make");
+            assert_eq!(actual.iter().map(|argument| argument.name.clone()).collect::<Vec<_>>(), arguments);
+            assert!(application.items.is_empty());
+        }
+    }
+}
