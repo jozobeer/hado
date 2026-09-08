@@ -46,7 +46,7 @@ fn read_rel(root: &Path, rel: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Corpus enumeration (PLAN.md "判定").
+// Corpus enumeration (docs/plan.0.1.md M1, 判定).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -106,7 +106,7 @@ fn corpus_counts() {
     println!("parse_e1xx_ok_n: {}", e1xx_ok.len());
     println!("parse_non_e1xx_ok_n: {}", non_e1xx_ok.len());
 
-    // Parse/compile divergence (PLAN.md コーパス外プローブ 4): a non-E1xx
+    // Parse/compile divergence (R3 コーパス外プローブ 4, docs/ledger.0.1.md): a non-E1xx
     // file that parses must not fail compilation at the syntax stage (a
     // parse diagnostic); an E1xx file must fail compilation at parse.
     let work = std::env::temp_dir().join(format!("shin-parse-{}", std::process::id()));
@@ -151,7 +151,7 @@ fn corpus_counts() {
 }
 
 // ---------------------------------------------------------------------------
-// Production-path probe (PLAN.md コーパス外プローブ 2).
+// Production-path probe (R3 コーパス外プローブ 2, docs/ledger.0.1.md).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -181,7 +181,7 @@ fn gen_probe() {
 }
 
 // ---------------------------------------------------------------------------
-// Decoy probes (PLAN.md コーパス外プローブ 3).
+// Decoy probes (R3 コーパス外プローブ 3, docs/ledger.0.1.md).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -214,7 +214,7 @@ fn decoy_probes() {
 }
 
 // ---------------------------------------------------------------------------
-// Expression-tree round trip (PLAN.md コーパス外プローブ 1).
+// Expression-tree round trip (R3 コーパス外プローブ 1, docs/ledger.0.1.md).
 // ---------------------------------------------------------------------------
 
 /// Fixed-seed linear congruential generator (no external crates).

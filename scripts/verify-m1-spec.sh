@@ -1,5 +1,5 @@
 #!/bin/bash
-# M1 spec acceptance checks 1..6 (see PLAN.md, R2). Run from the repository root.
+# M1 spec acceptance checks 1..6 (see docs/plan.0.1.md, M1). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
