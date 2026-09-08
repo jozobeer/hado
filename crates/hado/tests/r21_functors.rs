@@ -279,3 +279,14 @@ fn earlier_type_errors_precede_application_contract_errors() {
         case.reject(command, "main.hd", "main.hd", "E305", source.find("true").unwrap());
     }
 }
+
+#[test]
+fn a_parameter_shadows_a_global_implementation_without_reusing_its_representation() {
+    let case = Case::new();
+    case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nmodule Output\ndef run(x: Int): Int");
+    case.write("arguments.hd", "implement Input as Arg\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)\ndef read f => f 1\nimplement Input as Concrete\ntype T = Int\ndef make x => x\ndef read x => x");
+    case.write("functor.hd", "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))");
+    case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
+    case.write("main.hd", "def main = Applied.run 7 + Arg.read (Arg.make 2)");
+    case.run("main.hd", 2);
+}
