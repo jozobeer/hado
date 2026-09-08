@@ -122,7 +122,7 @@ def add(x: Int, y: Int): Int =>
 
 `def name = expression` は値定義専用であり、関数定義に `=` を使わない。
 
-関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）と、引数を持たず `|` が続く定義（`def f | true => 1 | 0`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。本体が条件列だけの関数は、第53節の形で書く。
+関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。本体が条件列だけの関数は、第53節の形で書く。
 
 ---
 
@@ -1397,7 +1397,7 @@ item            := definition | type_definition | module_type | module_impl
 ```text
 definition      := "def" name "=" expression
                  | "def" ["rec"] name parameters return_type? "=>" expression
-                 | "def" ["rec"] name parameters return_type? condition_arm+ pattern_fallback?   第53節
+                 | "def" ["rec"] name parameters return_type? condition_arm+ pattern_fallback    第53節
                  | "def" ["rec"] name pattern_arm+ pattern_fallback?       第52節。arity は 1
 parameters      := name+
                  | "(" typed_param ("," typed_param)* ")"
@@ -1486,7 +1486,7 @@ binding         := "let" pattern "=" expression "->" expression
 rail_binding    := "let?" pattern "=" expression "->" expression
 rail_discard    := "do?" expression "->" expression
 lambda          := "fn" parameters "=>" expression
-                 | "fn" parameters condition_arm+ pattern_fallback?       第53節
+                 | "fn" parameters condition_arm+ pattern_fallback        第53節
                  | "fn" pattern_arm+ pattern_fallback?                    第52節
 ```
 
@@ -1694,7 +1694,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E106 | constructor-call-form | §8 | 構文 | constructor 名 |
 | E107 | operator-overloading | §38 | 構文 | `def` の直後の演算子 |
 | E108 | adt-leading-pipe | §11 | 構文 | 最初の constructor 名 |
-| E109 | zero-parameter-arrow | §3 | 構文 | `=>`。`|` が続く形では最初の `|` |
+| E109 | zero-parameter-arrow | §3 | 構文 | `=>` |
 | E110 | string-escape-form | §43 | 字句 | `\` |
 | E111 | char-literal-form | §43 | 字句 | `'` |
 | E112 | int-literal-range | §43 | 字句 | リテラル |
@@ -1714,23 +1714,23 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E305 | type-mismatch | §9 | 型 | 型が食い違った式の先頭。適用の引数については下記 |
 | E306 | occurs-check | §9 | 型 | 同上 |
 | E307 | poly-recursion | §4 | 型 | 再帰呼び出しの先頭。間接呼び出しの位置を追跡できない場合は再帰関数の `def` の先頭（§4） |
-| E401 | missing-cond-fallback | §15 | 網羅性 | `if` |
+| E401 | missing-cond-fallback | §15 | 網羅性 | `if`。第53節の形では `def` か `fn` |
 | E402 | non-exhaustive | §18 | 網羅性 | `if`。`let` `let?` ではそのパターン |
 | E403 | unreachable-branch | §31 | 網羅性 | 到達不能な腕の `|` |
 | E404 | fallback-not-last | §31 | 網羅性 | fallback より後の腕の `|` |
 | E405 | duplicate-pattern | §32 | 網羅性 | 重複する 2 番目の腕の `|` |
 | E406 | duplicate-condition | §32 | 網羅性 | 同上 |
 | E501 | identity-binding | §29 | 冗長 | `let` |
-| E502 | identical-branches | §30 | 冗長 | `if` |
+| E502 | identical-branches | §30 | 冗長 | `if`。第53節の形では `def` か `fn` |
 | E503 | catch-all-underscore | §19 | 冗長 | `_` |
 | E504 | let-question-underscore | §23 | 冗長 | `_` |
 | E505 | unused-binding | §27 | 冗長 | 束縛名 |
 | E506 | implicit-discard | §28 | 冗長 | `_` |
-| E507 | rewrap | §33 | 冗長 | `if`。第52節の腕形式では `def` か `fn` |
+| E507 | rewrap | §33 | 冗長 | `if`。第52節と第53節の形では `def` か `fn` |
 | E508 | repropagate | §24 | 冗長 | 再伝播する腕の `|` |
 | E509 | ok-unit-parens | §21 | 冗長 | `Ok` |
 | E510 | list-literal-form | §46 | 冗長 | 式の `Cons` か `Nil` |
-| E511 | cond-to-literal-pattern | §16 | 冗長 | `if` |
+| E511 | cond-to-literal-pattern | §16 | 冗長 | `if`。第53節の形では `def` か `fn` |
 | E512 | top-var-pattern | §16 | 冗長 | 変数パターン |
 | E513 | unused-toplevel | §27 | 冗長 | 未使用の宣言の先頭 |
 | E514 | unused-struct-def | §35 | 冗長 | `def` |
@@ -1811,7 +1811,9 @@ def classify score
 | Fail
 ```
 
-引数の数と型注釈は制限しない。`def sign_of (a: Int) (b: Int): Int | a < b => -1 | a > b => 1 | 0` も同じ形である。腕の規則は第15節と同じで、fallback の必須（E401）と重複条件（E406）をそのまま当てる。`fn` も同じ形を取る（第7節）。
+引数の数と型注釈は制限しない。`def sign_of (a: Int) (b: Int): Int | a < b => -1 | a > b => 1 | 0` も同じ形である。腕の規則は第15節と同じで、fallback の必須（E401）と重複条件（E406）をそのまま当てる。`if` をアンカーにする診断は `def` か `fn` を指す（§50）。`fn` も同じ形を取る（第7節）。
+
+引数を持たない `def main | true => 1 | 0` は第52節の pattern 腕として読まれ、`main` が引数を持つので E206 になる。引数ゼロの条件列の形は存在しない。
 
 引数名の直後の `|` は常に条件列であり、pattern 分岐にはならない。`def unwrap x | Some(y) => y | 0` の `Some(y)` は式として読まれ、`y` が E204 になる。引数を pattern で分岐する関数は第52節の形で書く。
 
