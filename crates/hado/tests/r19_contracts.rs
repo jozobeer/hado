@@ -284,3 +284,14 @@ fn generated_field_oracles_match_concrete_runtime_controls() {
         Case::new(&format!("type Fields = {{ {} }}\ndef fill seed => {{ {filled} }}\ndef read(value: Fields): Int => {reads}\ndef main = read (fill {seed})", (0..count).map(|i| format!("slot{i}: {} Option", ["Int", "Bool", "String"][i % 3])).collect::<Vec<_>>().join("; "))).run(&expected.to_string());
     }
 }
+
+#[test]
+fn parameterized_contract_references_keep_qualified_name_anchors() {
+    for annotation in ["Int X.T", "Fn(Int X.T => Int)", "(Int X.T, Bool) Result"] {
+        let source = format!("def main = C.answer\nmodule X\ntype A T\nmodule Consumer\ndef answer: Int\ndef use(value: {annotation}): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1");
+        perturbed(&source, "E603", "X.T");
+        rejected(&source.replace("X.T", "X.Missing"), "E204", "Missing");
+    }
+    let source = "def main = C.use (Id.make 7)\nmodule X\ntype A T\ndef make(n: Int): Int T\ndef get(value: Int T): Int\nmodule Consumer\ndef use(value: Int X.T): Int\nimplement X as Id\ntype A T = A List\ndef make n => [n]\ndef get value => List.length value\nimplement Consumer as C\ndef use value => Id.get value";
+    Case::new(source).run("1");
+}
