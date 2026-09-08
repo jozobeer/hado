@@ -1,0 +1,4 @@
+implement UserId as IntId
+type T = Int
+def make value => value
+def value id => id

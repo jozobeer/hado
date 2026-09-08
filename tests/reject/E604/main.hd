@@ -1,0 +1,14 @@
+// spec: §56
+// error: E604
+// item: Functor
+def main = First.run 1 + Second.run 2
+module Value
+def value: Int
+module Store
+def run(input: Int): Int
+implement Value as Value
+def value = 10
+implement Store as MakeStore(Id: Value)
+def run input => input + Id.value
+implement Store as First = MakeStore(Value)
+implement Store as Second = MakeStore(Value)

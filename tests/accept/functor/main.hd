@@ -1,0 +1,9 @@
+// spec: §39
+// expect: plain:7 / offset:107
+// item: Functor
+// needs: prelude
+def main = String.concat (PlainStore.describe (PlainStore.create "plain:" 7)) (String.concat " / " (OffsetStore.describe (OffsetStore.create "offset:" 7)))
+implement Store as MakeStore(Id: UserId)
+type T = { id: Id.T; name: String }
+def create name number => { id = Id.make number; name = name }
+def describe user => String.concat user.name (Int.to_string (Id.value user.id))

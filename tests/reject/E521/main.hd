@@ -1,0 +1,13 @@
+// spec: §56
+// error: E521
+// item: Functor
+def main = Applied.run 1
+module Value
+def value: Int
+module Store
+def run(input: Int): Int
+implement Value as Value
+def value = 1
+implement Store as Ignore(Id: Value)
+def run input => input + 1
+implement Store as Applied = Ignore(Value)
