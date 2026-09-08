@@ -1,5 +1,5 @@
 #!/bin/bash
-# M1 corpus acceptance checks 1..7 (see docs/0.1.1/plan.md, M1). Run from the repository root.
+# M1 corpus acceptance checks 1..7 (see docs/plan.md, M1). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,9 +9,9 @@ total=7
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
-SPEC="docs/0.1.1/spec.md"
-COV="docs/0.1.1/spec-coverage.md"
-PLAN="docs/0.1.1/plan.md"
+SPEC="docs/spec.md"
+COV="docs/spec-coverage.md"
+PLAN="docs/plan.md"
 CORPUS_RS="crates/shin/tests/corpus.rs"
 
 TMPD="$(mktemp -d)"
@@ -170,7 +170,7 @@ while IFS= read -r name || [ -n "$name" ]; do
         grep -qFx -- "-- item: $name" "$f" && nr=$((nr + 1))
     done
     [ "$na" -ge 1 ] || c3_reasons="$c3_reasons accept-missing:$name"
-    # Reject-exempt (no rejectable form by definition, docs/0.1.1/plan.md M1):
+    # Reject-exempt (no rejectable form by definition, docs/plan.md M1):
     # - 冗長の対象外: permission ("eta expansion is not redundant"), §2
     # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §48
     if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ]; then

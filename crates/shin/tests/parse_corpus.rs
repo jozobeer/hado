@@ -46,7 +46,7 @@ fn read_rel(root: &Path, rel: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Corpus enumeration (docs/0.1.1/plan.md M1, 判定).
+// Corpus enumeration (docs/plan.md M1, 判定).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -106,7 +106,7 @@ fn corpus_counts() {
     println!("parse_e1xx_ok_n: {}", e1xx_ok.len());
     println!("parse_non_e1xx_ok_n: {}", non_e1xx_ok.len());
 
-    // Parse/compile divergence (R3 コーパス外プローブ 4, docs/0.1.1/ledger.md): a non-E1xx
+    // Parse/compile divergence (R3 コーパス外プローブ 4, docs/ledger.md): a non-E1xx
     // file that parses must not fail compilation at the syntax stage (a
     // parse diagnostic); an E1xx file must fail compilation at parse.
     let work = std::env::temp_dir().join(format!("shin-parse-{}", std::process::id()));
@@ -131,7 +131,7 @@ fn corpus_counts() {
     }
     std::fs::remove_dir_all(work).unwrap();
 
-    let spec = read_rel(&root, "docs/0.1.1/spec.md");
+    let spec = read_rel(&root, "docs/spec.md");
     let codes: std::collections::BTreeSet<_> = spec.lines().filter_map(|line| {
         let code = line.strip_prefix("| E")?.split('|').next()?.trim();
         (code.len() == 3 && code.bytes().all(|b| b.is_ascii_digit())).then(|| format!("E{code}"))
@@ -151,7 +151,7 @@ fn corpus_counts() {
 }
 
 // ---------------------------------------------------------------------------
-// Production-path probe (R3 コーパス外プローブ 2, docs/0.1.1/ledger.md).
+// Production-path probe (R3 コーパス外プローブ 2, docs/ledger.md).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -181,7 +181,7 @@ fn gen_probe() {
 }
 
 // ---------------------------------------------------------------------------
-// Decoy probes (R3 コーパス外プローブ 3, docs/0.1.1/ledger.md).
+// Decoy probes (R3 コーパス外プローブ 3, docs/ledger.md).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -214,7 +214,7 @@ fn decoy_probes() {
 }
 
 // ---------------------------------------------------------------------------
-// Expression-tree round trip (R3 コーパス外プローブ 1, docs/0.1.1/ledger.md).
+// Expression-tree round trip (R3 コーパス外プローブ 1, docs/ledger.md).
 // ---------------------------------------------------------------------------
 
 /// Fixed-seed linear congruential generator (no external crates).

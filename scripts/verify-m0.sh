@@ -1,5 +1,5 @@
 #!/bin/bash
-# M0 acceptance checks 1..7 (see docs/0.1.1/plan.md, M0). Run from the repository root.
+# M0 acceptance checks 1..7 (see docs/plan.md, M0). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
