@@ -32,7 +32,7 @@ def verify(name, copied, stdout, stderr=b"", status=0):
     return False
 
 with tempfile.TemporaryDirectory(prefix="hado-m6-") as temporary:
-    for source in sorted(Path("tests/accept").glob("*.hd")):
+    for source in sorted(Path("tests/accept").glob("*/main.hd")):
         text = source.read_text()
         if not include_prelude and re.search(r"^// needs: prelude\s*$", text, re.M):
             continue

@@ -12,13 +12,13 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// `*.hd` files directly under `dir`, sorted. Anything else is ignored.
+/// `*/main.hd` files under `dir`, sorted. Anything else is ignored.
 fn list_hado(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let entries = std::fs::read_dir(dir).unwrap();
     for entry in entries {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) == Some("hd") {
+        let path = entry.unwrap().path().join("main.hd");
+        if path.is_file() {
             out.push(path);
         }
     }

@@ -698,3 +698,21 @@ R14〜R17 で green に戻す。
 **審査:** `opencode/deepseek-v4-flash` のコーパス審査は、非網羅パターンのテストに型エラーがあるとの指摘1件。成功値を取り出してからパターン照合する §22 の規則と、旧表記の同じ式を HEAD の独立コピーで検査した E402 の実測を示し、レビュアーが撤回して PASS（セッション `ses_f7eb441c8ffe3zRn761Yq9EGEx`、`review-r14-followup.jsonl`）。実装審査も PASS（`/tmp/hado-v012/review-r14-implementation.jsonl`）。実測と判定を分ける `evidence-discipline` に従い、誤った指摘に合わせて正しいテストを変更しなかった。
 
 仕様への疑義は無い。最終削りで追加削除すべき成果物は無かった。工程コミットは `5c57d11`（コーパス・判定器）と `eb9b2eb`（実装）。この記録の直前の `git status --short` は空。次は R15 の機械的なディレクトリ移行。
+
+### R15 — コーパスのディレクトリ化（2026-09-08）
+
+`tests/accept/X.hd` と `tests/reject/EXXX.hd` を `git mv` でそれぞれ `X/main.hd`、`EXXX/main.hd` に移した。列挙、門番のプローブ、ドキュメントのパスを同じ単位へ移し、コーパスの内容は変更していない。
+
+**15-a の実測:** R14 と同じ環境変数で `cargo test --offline --no-fail-fast` と全 `bash scripts/verify-*.sh` を実行。全テスト対象の passed / failed 件数が R14 と一致（合計421 passed / 1 failed）、全門番の exit と `PASSED: n/N` も R14 の表と完全一致した。比較ログは `/tmp/hado-v012/r14/summary.txt` と `/tmp/hado-v012/r15/summary.txt`、各テストのログはそれぞれの `cargo-test.log`。節構文に由来する R14 の赤だけが残る。
+
+初回の m3 は10/12で、追加の赤は check 8（暗記検出）だった。ケース固有だった `p.name` が全件で `main.hd` になり、正しい列挙処理の文字列を暗記と誤認していた。検査対象を `ケース名/main.hd` へ移し、完全パスと20文字以上のコーパス行の検出は維持した。全ケースの相対パス・完全パスを注入すると拒否し、正しいソースは受理することを直接確認。修正後の `bash scripts/verify-m3.sh` は11/12、check 8 は OK、check 9 だけが既知の赤。初回ログも `/tmp/hado-v012/r15-initial-m3.log` に保存した。
+
+**15-b:** 移行前の `/tmp/hado-v012/r14-lock.sha256` と現行lockのハッシュ列は順序も含めて一致。`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。
+
+**15-c:** 受理・拒否ディレクトリ直下に `.hd` は無く、各ケースに `main.hd` がちょうど1本。ケースの追加削除は無い。
+
+**審査:** 指定の `opencode/deepseek-v4-flash` は独立コピーの移行差分を PASS（セッション `ses_f7ea48a9bffeyjdwwLCYI6gvr1`、`review-r15-preview.jsonl`）。実測で見つけた m3 の移行漏れを追加審査し、修正も PASS（`review-r15-predicate.jsonl`）。審査済みコピーと本体の変更ファイルはバイト単位で一致する。差分の審査だけでは門番の実測を代替できないことが今回の移行で確認できた。
+
+仕様への疑義は無い。最終削りで追加の削除対象は無かった。
+
+最終の実測審査も **PASS — 15-a, 15-b, 15-c all satisfied**（`/tmp/hado-v012/review-r15-final.jsonl`、同セッション）。次は R16 の節構文。

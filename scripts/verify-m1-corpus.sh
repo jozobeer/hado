@@ -53,14 +53,14 @@ awk -F '|' '
 c1_reasons=""
 n_reject=0
 if [ -d tests/reject ]; then
-    n_reject=$(ls tests/reject/*.hd 2>/dev/null | wc -l | tr -d ' ')
+    n_reject=$(ls tests/reject/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
 fi
 n_codes=$(cut -f1 "$TMPD/codes.tsv" | sort -u | wc -l | tr -d ' ')
 if [ "$n_reject" -ne "$n_codes" ]; then
     c1_reasons="$c1_reasons reject-count=$n_reject(want-$n_codes)"
 fi
 : >"$TMPD/corpus_codes.txt"
-for f in tests/reject/*.hd; do
+for f in tests/reject/*/main.hd; do
     [ -e "$f" ] || continue
     n_err=$(grep -cE '^// error: E[1-7][0-9][0-9]$' "$f" || true)
     if [ "$n_err" -ne 1 ]; then
@@ -104,7 +104,7 @@ awk '/^# 39\./{f=1} /^# 40\./{f=0} f && /^```/{inb=!inb; first=inb; next} f && i
 while IFS= read -r s; do
     [ -n "$s" ] || continue
     found=0
-    for f in tests/accept/*.hd; do
+    for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
         if grep -qxF -- "$s" "$f"; then
             found=1
@@ -113,7 +113,7 @@ while IFS= read -r s; do
     done
     [ "$found" -eq 1 ] || c2_reasons="$c2_reasons missing-line:$s"
 done <"$TMPD/sec39.txt"
-for f in tests/accept/*.hd; do
+for f in tests/accept/*/main.hd; do
     [ -e "$f" ] || continue
     hit=0
     while IFS= read -r s; do
@@ -161,11 +161,11 @@ while IFS= read -r name || [ -n "$name" ]; do
     [ -n "$name" ] || continue
     na=0
     nr=0
-    for f in tests/accept/*.hd; do
+    for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
         grep -qFx -- "// item: $name" "$f" && na=$((na + 1))
     done
-    for f in tests/reject/*.hd; do
+    for f in tests/reject/*/main.hd; do
         [ -e "$f" ] || continue
         grep -qFx -- "// item: $name" "$f" && nr=$((nr + 1))
     done
@@ -178,7 +178,7 @@ while IFS= read -r name || [ -n "$name" ]; do
     fi
 done <"$TMPD/items22.txt"
 : >"$TMPD/all_items.txt"
-for f in tests/accept/*.hd tests/reject/*.hd; do
+for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
     [ -e "$f" ] || continue
     grep -E '^// item: ' "$f" 2>/dev/null | sed 's|^// item: ||' >>"$TMPD/all_items.txt" || true
 done
@@ -198,7 +198,7 @@ fi
 c4_reasons=""
 and_ok=0
 or_ok=0
-for f in tests/accept/*.hd; do
+for f in tests/accept/*/main.hd; do
     [ -e "$f" ] || continue
     if grep -qE '^// short-circuit: &&$' "$f" && grep -qF 'def rec' "$f" && grep -qF 'false &&' "$f"; then
         and_ok=1
@@ -223,14 +223,14 @@ else
     n_accept=0
     n_reject_disk=0
     if [ -d tests/accept ]; then
-        n_accept=$(ls tests/accept/*.hd 2>/dev/null | wc -l | tr -d ' ')
+        n_accept=$(ls tests/accept/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
     fi
     if [ -d tests/reject ]; then
-        n_reject_disk=$(ls tests/reject/*.hd 2>/dev/null | wc -l | tr -d ' ')
+        n_reject_disk=$(ls tests/reject/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
     fi
     want_n=$((n_accept + n_reject_disk))
-    (cd tests/accept 2>/dev/null && ls *.hd 2>/dev/null | sed 's|^|tests/accept/|' | sort >"$TMPD/disk_accept.txt") || : >"$TMPD/disk_accept.txt"
-    (cd tests/reject 2>/dev/null && ls *.hd 2>/dev/null | sed 's|^|tests/reject/|' | sort >"$TMPD/disk_reject.txt") || : >"$TMPD/disk_reject.txt"
+    (cd tests/accept 2>/dev/null && ls */main.hd 2>/dev/null | sed 's|^|tests/accept/|' | sort >"$TMPD/disk_accept.txt") || : >"$TMPD/disk_accept.txt"
+    (cd tests/reject 2>/dev/null && ls */main.hd 2>/dev/null | sed 's|^|tests/reject/|' | sort >"$TMPD/disk_reject.txt") || : >"$TMPD/disk_reject.txt"
     cat "$TMPD/disk_accept.txt" "$TMPD/disk_reject.txt" | sort >"$TMPD/disk_all.txt"
 
     cargo test --test corpus -- --nocapture >"$TMPD/corpus.log" 2>&1
@@ -252,18 +252,20 @@ else
     for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_source_to_object' 'link_executable' '// expect:' '// error:'; do
         grep -qF -- "$lit" "$CORPUS_RS" || c5_reasons="$c5_reasons corpus.rs-missing:$lit"
     done
-    for f in tests/accept/*.hd tests/reject/*.hd; do
+    for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
         [ -e "$f" ] || continue
-        base=$(basename "$f")
+        base=$(basename "$(dirname "$f")")
         if grep -qF -- "\"$base\"" "$CORPUS_RS"; then
             c5_reasons="$c5_reasons corpus.rs-quotes-basename:$base"
         fi
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
-    printf -- '// spec: §39\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__.hd
+    mkdir -p tests/accept/__probe__
+    printf -- '// spec: §39\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
     cargo test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
-    rm -f tests/accept/__probe__.hd
+    rm -f tests/accept/__probe__/main.hd
+    rmdir tests/accept/__probe__
     want_probe=$((want_n + 1))
     if [ "$probe_status" -ne 0 ]; then
         c5_reasons="$c5_reasons probe-exit=$probe_status"
@@ -272,7 +274,7 @@ else
         got=$(grep -E '^corpus_enumerated: ' "$TMPD/corpus_probe.log" | head -n 1)
         c5_reasons="$c5_reasons probe-enumerated!=disk-$want_probe(got:$got)"
     fi
-    if ! grep -qFx 'corpus_file: tests/accept/__probe__.hd' "$TMPD/corpus_probe.log"; then
+    if ! grep -qFx 'corpus_file: tests/accept/__probe__/main.hd' "$TMPD/corpus_probe.log"; then
         c5_reasons="$c5_reasons probe-path-missing"
     fi
     cargo test --test corpus -- --nocapture >"$TMPD/corpus_back.log" 2>&1
@@ -289,11 +291,11 @@ fi
 
 # --- check 6: header conventions and // needs: prelude ---
 c6_reasons=""
-total_hado=$(ls tests/accept/*.hd tests/reject/*.hd 2>/dev/null | wc -l | tr -d ' ')
+total_hado=$(ls tests/accept/*/main.hd tests/reject/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
 if [ "${total_hado:-0}" -eq 0 ]; then
     c6_reasons="$c6_reasons no-hado-files"
 fi
-for f in tests/accept/*.hd tests/reject/*.hd; do
+for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
     [ -e "$f" ] || continue
     first=$(grep -vE '^[[:space:]]*$' "$f" | head -n 1)
     if ! printf '%s' "$first" | grep -qE '^// spec: §[0-9]+$'; then

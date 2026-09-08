@@ -89,8 +89,8 @@ fn reject_corpus_reports_declared_codes_through_cli() {
     let mut checked = 0;
     let mut failures = Vec::new();
     for entry in std::fs::read_dir(directory).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|extension| extension.to_str()) != Some("hd") {
+        let path = entry.unwrap().path().join("main.hd");
+        if !path.is_file() {
             continue;
         }
         let source = std::fs::read_to_string(&path).unwrap();
@@ -166,8 +166,8 @@ fn every_reject_preserves_code_and_column_after_header_line_insertion() {
     let mut failures = Vec::new();
     let mut checked = 0;
     for entry in std::fs::read_dir(corpus).unwrap() {
-        let original = entry.unwrap().path();
-        if original.extension().and_then(|s| s.to_str()) != Some("hd") { continue; }
+        let original = entry.unwrap().path().join("main.hd");
+        if !original.is_file() { continue; }
         let source = std::fs::read_to_string(&original).unwrap();
         let (header, code) = source.lines().enumerate().find_map(|(i, line)| line.strip_prefix("// error:").map(|code| (i + 1, code.trim()))).unwrap();
         let path = dir.join(original.file_name().unwrap());

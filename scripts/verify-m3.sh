@@ -24,7 +24,7 @@ def check(path, print_type=False):
 def success(r): return r.returncode == 0 and not r.stdout and not r.stderr
 usage = [run(hado), run(hado, 'check')]
 report(1, 'cli', build.returncode == 0 and os.access(hado, os.X_OK) and all(r.returncode == 2 and not r.stdout and r.stderr.startswith('usage: hado ') and '<file>' in r.stderr for r in usage))
-accept = sorted(P('tests/accept').glob('*.hd'))
+accept = sorted(P('tests/accept').glob('*/main.hd'))
 accepted = 0
 for p in accept:
     r = check(p)
@@ -34,7 +34,7 @@ for p in accept:
     else: print(r.stderr.strip())
 report(2, f'accept-{len(accept)}', bool(accept) and len(accept) == accepted)
 codes = ['E201','E203','E204','E301','E302','E303','E304','E601','E602']
-reject = [P(f'tests/reject/{code}.hd') for code in codes]
+reject = [P(f'tests/reject/{code}/main.hd') for code in codes]
 lines = {}
 for code,p in zip(codes,reject):
     r = check(p)
@@ -92,13 +92,13 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
 source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
-corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*.hd')]
+corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*/main.hd')]
 lib = P('crates/hado/src/lib.rs').read_text()
 types = P('crates/hado/src/types.rs').read_text()
 names = P('crates/hado/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
-glue &= not any('"'+p.name+'"' in source or str(p) in source for p in corpus)
+glue &= not any('"'+(p.parent.name+'/main.hd')+'"' in source or str(p) in source for p in corpus)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
 tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1')

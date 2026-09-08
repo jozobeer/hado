@@ -41,13 +41,13 @@ def valid_ir(result):
             return False
     return True
 
-for path in sorted(Path("tests/accept").glob("*.hd")):
+for path in sorted(Path("tests/accept").glob("*/main.hd")):
     if re.search(r"^// needs: prelude\s*$", path.read_text(), re.M):
         continue
     result = dump(path)
     report(path, valid_ir(result), result.stderr.strip() or result.stdout)
 
-for path in sorted(Path("tests/reject").glob("*.hd")):
+for path in sorted(Path("tests/reject").glob("*/main.hd")):
     expected = re.search(r"^// error: (E\d+)\s*$", path.read_text(), re.M)
     result = dump(path)
     diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)

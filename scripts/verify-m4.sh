@@ -12,8 +12,8 @@ import sys
 failed = False
 all_passed = all_total = 0
 for kind, files in [
-    ("reject", sorted(Path("tests/reject").glob("E[45]*.hd"))),
-    ("accept", sorted(Path("tests/accept").glob("*.hd"))),
+    ("reject", sorted(Path("tests/reject").glob("E[45]*/main.hd"))),
+    ("accept", sorted(Path("tests/accept").glob("*/main.hd"))),
 ]:
     total = passed = 0
     for path in files:
