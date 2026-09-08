@@ -1,4 +1,4 @@
-# 言語仕様案 v0.1
+# 言語仕様案 v0.1.1
 
 ## 1. 設計思想
 
@@ -122,7 +122,7 @@ def add(x: Int, y: Int): Int =>
 
 `def name = expression` は値定義専用であり、関数定義に `=` を使わない。
 
-関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。
+関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）と、引数を持たず `|` が続く定義（`def f | true => 1 | 0`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。本体が条件列だけの関数は、第53節の形で書く。
 
 ---
 
@@ -233,12 +233,18 @@ def add x y => x + y
 
 `=>` は関数定義と匿名関数においてのみ、入力と結果の対応を表す。
 
-匿名関数も、引数のパターン分岐の形（第52節）を取れる。
+匿名関数も、引数のパターン分岐の形（第52節）と条件列の形（第53節）を取れる。
 
 ```ocaml
 fn
 | Guest => "guest"
 | Member(user) => user.name
+```
+
+```ocaml
+fn x
+| x > 1 => x
+| 0
 ```
 
 ---
@@ -483,6 +489,8 @@ if
 条件列にfallbackがない場合はコンパイルエラーとする（E401）。
 
 `if / else if / else` の構文は持たない。
+
+関数の本体が条件列だけのときは、`=> if` を省いた第53節の形で書く。
 
 ---
 
@@ -868,6 +876,7 @@ users
 |    branch alternative / fallback marker
 |>   data flow
 ?    failure-aware operation
+...  rest of a List
 ```
 
 例えば、
@@ -1187,7 +1196,7 @@ Fn<(Int, Int), Int>
 
 `Fn` は n 引数である。定義と呼び出しの引数数は一致必須であり、部分適用は持たない。規則は第8節に従う。
 
-全ての shin 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。
+全ての hado 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。
 
 signatureでは通常、
 
@@ -1281,12 +1290,11 @@ def size x =>
 複数条件：
 
 ```ocaml
-def classify score =>
-  if
-  | score >= 90 => Excellent
-  | score >= 70 => Good
-  | score >= 50 => Pass
-  | Fail
+def classify score
+| score >= 90 => Excellent
+| score >= 70 => Good
+| score >= 50 => Pass
+| Fail
 ```
 
 pattern fallback：
@@ -1372,7 +1380,7 @@ unit            := "()"
 name            := lower (letter | digit | "_")*       値・field・引数の名前
 upper_name      := upper (letter | digit | "_")*       型・constructor・module・module type・型変数の名前
 dunder_name     := "__" name                           stdlib 限定の組み込み名（第47節）
-comment         := "--" 行末までの文字
+comment         := "//" 行末までの文字                   `--` と `#` は E104
 ```
 
 `_` 単独は wildcard であり名前ではない。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
@@ -1389,6 +1397,7 @@ item            := definition | type_definition | module_type | module_impl
 ```text
 definition      := "def" name "=" expression
                  | "def" ["rec"] name parameters return_type? "=>" expression
+                 | "def" ["rec"] name parameters return_type? condition_arm+ pattern_fallback?   第53節
                  | "def" ["rec"] name pattern_arm+ pattern_fallback?       第52節。arity は 1
 parameters      := name+
                  | "(" typed_param ("," typed_param)* ")"
@@ -1396,7 +1405,7 @@ typed_param     := name ":" type_expr
 return_type     := ":" type_expr
 ```
 
-`def rec` は関数定義にのみ使用できる（E102）。`parameters` は 1 個以上である（E109）。
+`def rec` は関数定義にのみ使用できる（E102）。`parameters` は 1 個以上である（E109）。`parameters` の直後が `=>` なら本体、`|` なら条件列である。
 
 型定義:
 
@@ -1463,8 +1472,10 @@ constructor_expr := "Ok" "(" ")"                                          Unit p
                  | upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
 list_expr       := "[" "]"
-                 | "[" expression ("," expression)* "]"
+                 | "[" expression ("," expression)* ["," "..." expression] "]"
 ```
+
+`...` の後は `]` まで 1 つの式である。要素を伴わない `[...xs]` は文法に無い（E100）。
 
 `prefix_form` は括弧で囲めば `primary` になる（`(fn x => x + 1)`）。
 
@@ -1475,6 +1486,7 @@ binding         := "let" pattern "=" expression "->" expression
 rail_binding    := "let?" pattern "=" expression "->" expression
 rail_discard    := "do?" expression "->" expression
 lambda          := "fn" parameters "=>" expression
+                 | "fn" parameters condition_arm+ pattern_fallback?       第53節
                  | "fn" pattern_arm+ pattern_fallback?                    第52節
 ```
 
@@ -1483,7 +1495,8 @@ lambda          := "fn" parameters "=>" expression
 ```text
 branch          := boolean_branch | condition_branch | pattern_branch
 boolean_branch  := "if" expression "=>" arm_body "|" arm_body
-condition_branch := "if" ("|" expression "=>" arm_body)+ "|" arm_body
+condition_branch := "if" condition_arm+ pattern_fallback
+condition_arm   := "|" expression "=>" arm_body
 pattern_branch  := "if" expression pattern_arm+ pattern_fallback?
 pattern_arm     := "|" pattern "=>" arm_body
 pattern_fallback := "|" arm_body
@@ -1499,12 +1512,17 @@ pattern         := "_"
                  | name
                  | upper_name ["(" pattern ("," pattern)* ")"]
                  | record_pattern
+                 | list_pattern
                  | literal_pattern
+list_pattern    := "[" "]"
+                 | "[" pattern ("," pattern)* ["," "..." (name | "_")] "]"
 record_pattern  := "{" field_pattern (";" field_pattern)* "}"
 field_pattern   := name
                  | name "=" pattern
 literal_pattern := ["-"] int | ["-"] float | char | string | bool
 ```
+
+`...` の後は名前か `_` に限り、他は E100 とする。要素を伴わない `[...xs]` は文法に無い（E100）。
 
 `pattern_fallback` は必ず最後に置く（E404）。pattern branch に fallback が無い場合は網羅性を検証する（E402）。
 
@@ -1560,7 +1578,7 @@ Bool は `true` と `false` とする。
 
 Unit は `()` とする。
 
-コメントは `--` による行コメントのみとする。他の記法によるコメントは E104 とする。
+コメントは `//` による行コメントのみとする。`--`（v0.1 の記法）と `#` を含む他の記法によるコメントは E104 とする。
 
 第41節の文法に合わない入力で、特定のコードを持つ規則に当たらないものは E100 とする。
 
@@ -1592,11 +1610,20 @@ Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相
 
 # 46. List リテラル
 
-`[a, b, c]` は `Cons` 連鎖の糖衣である。空は `Nil` とする。
+List は式でもパターンでも `[]` と `[a, b, ...rest]` の形で書く。`[a, b, ...rest]` は `Cons(a, Cons(b, rest))` の糖衣で、`[]` は `Nil`、`[a, b]` は `Cons(a, Cons(b, Nil))` である。`...` は末尾にだけ置ける。
 
-末尾がリテラルである `Cons(a, Nil)` と `Cons(a, [b])` は拒否する（E510）。
+式では `...` の後に任意の式を置ける。
 
-パターンに List リテラルの糖衣は無い。パターンは `Cons` と `Nil` で書く。
+```ocaml
+def rec map values f =>
+  if values
+  | [] => []
+  | [head, ...tail] => [f head, ...map tail f]
+```
+
+パターンでは `...` の後は名前か `_` である。`[x, ...xs]` は先頭と残りを束縛し、`[x, ..._]` は先頭だけを束縛する。
+
+`Nil` と `Cons` を利用者のコードに書くことは冗長である。式に書けば E510、パターンに書けば E516 とする。`List` 型の定義は prelude が持ち、constructor は糖衣の展開先としてだけ存在する。
 
 ---
 
@@ -1606,7 +1633,7 @@ Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相
 
 型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
-prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なしで参照できる。
+prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照できる。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。
 
 `__` で始まる名前は呼び出し位置でしか参照できず、値化はファイルの場所によらず E203 とする。呼び出し位置では `stdlib/` のファイルでのみ解決し、ユーザーコードでは E202 とする。
 
@@ -1616,7 +1643,7 @@ prelude の constructor `Some` `None` `Ok` `Error` `Nil` `Cons` は修飾なし�
 
 末尾位置の関数呼び出しはスタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
 
-全ての shin 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。関数値経由の末尾呼び出しは `return_call_indirect` で表せる。
+全ての hado 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。関数値経由の末尾呼び出しは `return_call_indirect` で表せる。
 
 ---
 
@@ -1632,7 +1659,7 @@ prelude は組み込みを次の形で包む。
 def length s => __string_length s
 ```
 
-M5 の extern 表の各項目は、shin 側の名前（`__string_length` 等）と型を持つ。
+M5 の extern 表の各項目は、hado 側の名前（`__string_length` 等）と型を持つ。
 
 関数集合は次とする。
 
@@ -1664,12 +1691,12 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E101 | nested-branch | §20 | 構文 | 内側の `if` |
 | E102 | rec-on-value | §4 | 構文 | `rec` |
 | E103 | float-literal-form | §43 | 字句 | リテラル |
-| E104 | comment-form | §43 | 字句 | コメントの先頭 |
+| E104 | comment-form | §43 | 字句 | コメントの先頭（`--` `#` の 1 文字目） |
 | E105 | no-tuple | §37 | 構文 | `(` |
 | E106 | constructor-call-form | §8 | 構文 | constructor 名 |
 | E107 | operator-overloading | §38 | 構文 | `def` の直後の演算子 |
 | E108 | adt-leading-pipe | §11 | 構文 | 最初の constructor 名 |
-| E109 | zero-parameter-arrow | §3 | 構文 | `=>` |
+| E109 | zero-parameter-arrow | §3 | 構文 | `=>`。`|` が続く形では最初の `|` |
 | E110 | string-escape-form | §43 | 字句 | `\` |
 | E111 | char-literal-form | §43 | 字句 | `'` |
 | E112 | int-literal-range | §43 | 字句 | リテラル |
@@ -1704,12 +1731,14 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E507 | rewrap | §33 | 冗長 | `if`。第52節の腕形式では `def` か `fn` |
 | E508 | repropagate | §24 | 冗長 | 再伝播する腕の `|` |
 | E509 | ok-unit-parens | §21 | 冗長 | `Ok` |
-| E510 | cons-literal-tail | §46 | 冗長 | `Cons` |
+| E510 | list-literal-form | §46 | 冗長 | 式の `Cons` か `Nil` |
 | E511 | cond-to-literal-pattern | §16 | 冗長 | `if` |
 | E512 | top-var-pattern | §16 | 冗長 | 変数パターン |
 | E513 | unused-toplevel | §27 | 冗長 | 未使用の宣言の先頭 |
 | E514 | unused-struct-def | §35 | 冗長 | `def` |
 | E515 | if-on-sole-parameter | §52 | 冗長 | `def` か `fn` |
+| E516 | list-pattern-form | §46 | 冗長 | パターンの `Cons` か `Nil` |
+| E517 | if-chain-on-parameters | §53 | 冗長 | `def` か `fn` |
 | E601 | opaque-type | §35 | 型 | field access の `.` |
 | E602 | signature-mismatch | §35 | 型 | `module` |
 | E701 | main-polymorphic | §5 | 単相化 | `def main` |
@@ -1757,8 +1786,8 @@ def display
 
 ```ocaml
 def rec length
-| Nil => 0
-| Cons(_, tail) => 1 + length tail
+| [] => 0
+| [_, ...tail] => 1 + length tail
 ```
 
 arity は 1 である。腕の規則は第16節から第19節と同じで、網羅性（E402）、到達不能（E403）、重複（E405）、fallback の位置（E404）、`_` の禁止（E503）、最上位の変数パターンの禁止（E512）をそのまま当てる。`fn` も同じ形を取る（第7節）。
@@ -1769,3 +1798,23 @@ arity は 1 である。腕の規則は第16節から第19節と同じで、網�
 * 引数と戻りに型注釈が無い
 * 引数の自由な参照が scrutinee の 1 回だけである（腕の中で同じ名前を再束縛したものは数えない）
 * 本体が、その引数を scrutinee にした pattern 分岐ちょうどである
+
+---
+
+# 53. 引数の条件列
+
+本体が条件列（第15節）だけの関数は、`=> if` を省いて引数列の直後に腕を並べる。
+
+```ocaml
+def classify score
+| score >= 90 => Excellent
+| score >= 70 => Good
+| score >= 50 => Pass
+| Fail
+```
+
+引数の数と型注釈は制限しない。`def sign_of (a: Int) (b: Int): Int | a < b => -1 | a > b => 1 | 0` も同じ形である。腕の規則は第15節と同じで、fallback の必須（E401）と重複条件（E406）をそのまま当てる。`fn` も同じ形を取る（第7節）。
+
+引数名の直後の `|` は常に条件列であり、pattern 分岐にはならない。`def unwrap x | Some(y) => y | 0` の `Some(y)` は式として読まれ、`y` が E204 になる。引数を pattern で分岐する関数は第52節の形で書く。
+
+本体が条件列ちょうどである関数を `=> if` を付けて書くことは冗長であり E517 とする。引数の数と型注釈の有無によらず当てる。`let` などの継続を挟んだ後に条件列が来る関数は対象外である。
