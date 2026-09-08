@@ -159,9 +159,20 @@ impl Generator {
         source
     }
 
+    fn path(&mut self) -> String {
+        if self.choose("path?", 2) == 0 { return String::new(); }
+        self.mark("path", 1, 0);
+        let count = self.choose("path_segments+", 3) + 1;
+        format!("{} :: ", self.list(count, |g| g.name(false), " :: "))
+    }
+
+    fn upper_reference(&mut self) -> String {
+        format!("{}{}", self.path(), self.name(true))
+    }
+
     fn type_ref(&mut self) -> String {
-        if self.choose("type_ref", 2) == 0 { self.name(true) }
-        else { format!("{} . {}", self.name(true), self.name(true)) }
+        if self.choose("type_ref", 2) == 0 { self.upper_reference() }
+        else { format!("{} . {}", self.upper_reference(), self.name(true)) }
     }
 
     fn fn_params(&mut self, depth: usize) -> String {
@@ -196,6 +207,7 @@ impl Generator {
         self.mark("implement_section", 1, 0);
         let (signature, sig_name, abstract_name) = self.module_section(true);
         self.mark("contract_ref", 1, 0);
+        let sig_name = format!("{}{}", self.path(), sig_name);
         self.declarations += 1;
         let count = self.choose("implement_item*", 3);
         let items = self.list(count, |g| g.implement_item(&abstract_name), " ");
@@ -211,10 +223,10 @@ impl Generator {
         let params = self.list(count, |g| {
             g.mark("functor_param", 1, 0);
             g.mark("contract_ref", 1, 0);
-            format!("{} : {sig_name}", g.name(true))
+            format!("{} : {}{sig_name}", g.name(true), g.path())
         }, " , ");
         self.declarations += 2;
-        (format!("{signature}\nimplement {sig_name} as {name} ( {params} ) type {abstract_name} = Int"), sig_name, name)
+        (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) type {abstract_name} = Int", self.path()), sig_name, name)
     }
 
     fn apply_section(&mut self) -> String {
@@ -223,9 +235,9 @@ impl Generator {
         self.mark("contract_ref", 1, 0);
         self.mark("impl_ref", 1, 0);
         let count = self.choose("impl_ref+", 3) + 1;
-        let arguments = self.list(count, |g| { g.mark("impl_ref", 1, 0); g.name(true) }, " , ");
+        let arguments = self.list(count, |g| { g.mark("impl_ref", 1, 0); g.upper_reference() }, " , ");
         self.declarations += 1;
-        format!("{definition}\nimplement {signature} as {} = {functor} ( {arguments} )", self.name(true))
+        format!("{definition}\nimplement {}{signature} as {} = {}{functor} ( {arguments} )", self.path(), self.name(true), self.path())
     }
 
     fn implement_item(&mut self, abstract_name: &str) -> String {
@@ -297,7 +309,7 @@ impl Generator {
 
     fn pipe_target(&mut self, depth: usize, in_arm: bool) -> String {
         let head = if self.choose("pipe_callee", 2) == 0 { self.name(false) }
-            else { format!("{} . {}", self.name(true), self.name(false)) };
+            else { format!("{} . {}", self.upper_reference(), self.name(false)) };
         let count = self.choose("pipe_arguments", 3);
         format!("{head} {}", self.list(count, |g| g.primary(depth, in_arm), " "))
     }
@@ -347,7 +359,7 @@ impl Generator {
                 self.mark("primary", 14, 7);
                 format!("__{}", self.name(false))
             }
-            2 => format!("{} . {}", self.name(true), self.name(false)),
+            2 => format!("{} . {}", self.upper_reference(), self.name(false)),
             3 => format!("{} . {}", self.name(false), self.name(false)),
             _ => format!("( {} )", self.lambda(depth, in_arm)),
         }
@@ -368,8 +380,8 @@ impl Generator {
         match choice {
             0..=5 => self.literal(choice),
             6 => self.name(false),
-            8 => format!("{} . {}", self.name(true), self.name(false)),
-            9 if depth == 0 => { self.mark("constructor_expr", 4, 0); self.name(true) }
+            8 => format!("{} . {}", self.upper_reference(), self.name(false)),
+            9 if depth == 0 => { self.mark("constructor_expr", 4, 0); self.upper_reference() }
             9 => self.constructor_expr(depth - 1, in_arm),
             10 => self.record_expr(depth - 1, in_arm),
             11 => self.list_expr(depth - 1, in_arm),
@@ -406,13 +418,13 @@ impl Generator {
 
     fn constructor_expr(&mut self, depth: usize, in_arm: bool) -> String {
         match self.choose("constructor_expr", 4) {
-            0 => return self.name(true),
+            0 => return self.upper_reference(),
             1 => return "Ok ()".into(),
-            2 => return format!("{} {}", self.name(true), self.record_expr(depth, in_arm)),
+            2 => return format!("{} {}", self.upper_reference(), self.record_expr(depth, in_arm)),
             _ => {}
         }
         let count = self.random(3) + 1;
-        format!("{} ( {} )", self.name(true), self.list(count, |g| g.expression(depth, in_arm), " , "))
+        format!("{} ( {} )", self.upper_reference(), self.list(count, |g| g.expression(depth, in_arm), " , "))
     }
 
     fn record_expr(&mut self, depth: usize, in_arm: bool) -> String {
@@ -482,7 +494,7 @@ impl Generator {
             0 => "_".into(),
             1 => self.name(false),
             2 => {
-                let name = self.name(true);
+                let name = self.upper_reference();
                 match self.choose("constructor_pattern_form", 3) {
                     0 => name,
                     1 => {

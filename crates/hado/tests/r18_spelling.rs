@@ -39,7 +39,7 @@ fn reject(source: &str, code: &str, anchor_offset: usize) {
     let output = case.command(&["check"]);
     assert_eq!(output.status.code(), Some(1), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
     assert!(output.stdout.is_empty());
-    let prefix = format!("{}:{line}:{column}: error[{code}]:", case.0.join("main.hd").display());
+    let prefix = format!("{}:{line}:{column}: error[{code}]:", "main.hd");
     assert!(String::from_utf8_lossy(&output.stderr).starts_with(&prefix), "expected {prefix}\n{}\n{source}", String::from_utf8_lossy(&output.stderr));
 }
 

@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+sys.path.insert(0, "scripts")
+from corpus_paths import diagnostic as parse_diagnostic
 import tempfile
 
 compiler = str(Path(sys.argv[1]).resolve())
@@ -50,8 +52,8 @@ for path in sorted(Path("tests/accept").glob("*/main.hd")):
 for path in sorted(Path("tests/reject").glob("*/main.hd")):
     expected = re.search(r"^// error: (E\d+)\s*$", path.read_text(), re.M)
     result = dump(path)
-    diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)
-    report(path, result.returncode == 1 and not result.stdout and expected and diagnostic and expected[1] == diagnostic[1], result.stderr.strip())
+    diagnostic = parse_diagnostic(result.stderr, path, expected[1]) if expected else None
+    report(path, result.returncode == 1 and not result.stdout and expected and diagnostic, result.stderr.strip())
 
 with tempfile.TemporaryDirectory(prefix="hado-m5-") as temporary:
     probes = [

@@ -46,7 +46,7 @@ fn cli_usage_and_basic_types() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.starts_with(&format!("{}:2:12: error[E305]:", path.display())),
+        stderr.starts_with(&format!("{}:2:12: error[E305]:", path.file_name().unwrap().to_string_lossy())),
         "{stderr}"
     );
     assert_eq!(stderr.lines().count(), 1);
@@ -82,7 +82,7 @@ fn cli_rejects_noncanonical_identity_binding() {
         String::from_utf8(output.stderr).unwrap(),
         format!(
             "{}:1:12: error[E501]: binding x is returned unchanged at 1:25\n",
-            path.display()
+            path.file_name().unwrap().to_string_lossy()
         )
     );
 }
@@ -109,9 +109,15 @@ fn reject_corpus_reports_declared_codes_through_cli() {
             .output()
             .unwrap();
         let diagnostic = String::from_utf8(output.stderr).unwrap();
-        let baseline = hado::check_source(&source, &path.to_string_lossy()).err().unwrap();
-        assert_eq!(diagnostic, format!("{baseline}\n"), "single-file diagnostic changed: {}", path.display());
-        let positioned = diagnostic.strip_prefix(&format!("{}:", path.display()));
+        let baseline = match hado::project::Project::load(&path) {
+            Ok(project) => project.check().err().expect("reject corpus passed library checker").to_string(),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(diagnostic, format!("{baseline}\n"), "project diagnostic changed: {}", path.display());
+        let positioned = diagnostic.split_once(':').filter(|(file, _)| {
+            !file.is_empty() && std::path::Path::new(file).is_relative()
+                && !std::path::Path::new(file).components().any(|part| matches!(part, std::path::Component::ParentDir))
+        }).map(|(_, positioned)| positioned);
         let valid_position_and_code = positioned.is_some_and(|positioned| {
             let mut parts = positioned.splitn(3, ':');
             let line = parts.next().and_then(|value| value.parse::<usize>().ok());
@@ -150,45 +156,125 @@ fn dump_mono_exposes_typed_arithmetic() {
     assert!(text.contains("name: \"print_Int\""));
 }
 
-fn positioned_rejection(path: &std::path::Path, code: &str) -> Result<(usize, usize), String> {
+#[derive(Debug, PartialEq, Eq)]
+struct Rejection {
+    file: String,
+    line: usize,
+    column: usize,
+    code: String,
+}
+
+fn positioned_rejection(path: &std::path::Path, code: &str) -> Result<Rejection, String> {
     let output = Command::new(env!("CARGO_BIN_EXE_hado")).arg("check").arg(path).output().unwrap();
     let text = String::from_utf8(output.stderr).unwrap();
     if output.status.code() != Some(1) || !output.stdout.is_empty() || text.lines().count() != 1 {
         return Err(format!("invalid rejection: {:?} {text}", output.status.code()));
     }
-    let rest = text.strip_prefix(&format!("{}:", path.display())).ok_or_else(|| text.clone())?;
+    let (file, rest) = text.split_once(':').ok_or_else(|| text.clone())?;
+    let relative = std::path::Path::new(file);
+    if file.is_empty() || relative.is_absolute()
+        || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_)))
+        || !path.parent().unwrap().join(relative).is_file() { return Err(text); }
     let mut parts = rest.splitn(3, ':');
     let line = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| text.clone())?;
-    let col = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| text.clone())?;
-    if line == 0 || col == 0 || !parts.next().is_some_and(|s| s.starts_with(&format!(" error[{code}]: "))) {
+    let column = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| text.clone())?;
+    if line == 0 || column == 0 || !parts.next().is_some_and(|s| s.starts_with(&format!(" error[{code}]: "))) {
         return Err(text);
     }
-    Ok((line, col))
+    Ok(Rejection { file: file.into(), line, column, code: code.into() })
+}
+
+fn copy_case_sources(source: &std::path::Path, destination: &std::path::Path) {
+    std::fs::create_dir_all(destination).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let path = entry.unwrap().path();
+        let target = destination.join(path.file_name().unwrap());
+        if path.is_dir() {
+            copy_case_sources(&path, &target);
+        } else if matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            std::fs::copy(path, target).unwrap();
+        }
+    }
 }
 
 #[test]
 fn every_reject_preserves_code_and_column_after_header_line_insertion() {
     let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reject");
     let dir = std::env::temp_dir().join(format!("hado-reject-shift-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir(&dir).unwrap();
     let mut failures = Vec::new();
     let mut checked = 0;
     for entry in std::fs::read_dir(corpus).unwrap() {
-        let original = entry.unwrap().path().join("main.hd");
+        let case = entry.unwrap().path();
+        let original = case.join("main.hd");
         if !original.is_file() { continue; }
         let source = std::fs::read_to_string(&original).unwrap();
         let (header, code) = source.lines().enumerate().find_map(|(i, line)| line.strip_prefix("// error:").map(|code| (i + 1, code.trim()))).unwrap();
-        let path = dir.join(original.file_name().unwrap());
-        std::fs::write(&path, &source).unwrap();
-        let baseline = positioned_rejection(&path, code);
+        let copied = dir.join(case.file_name().unwrap());
+        copy_case_sources(&case, &copied);
+        let path = copied.join("main.hd");
+        let baseline = positioned_rejection(&original, code);
+        let copied_baseline = positioned_rejection(&path, code);
+        if copied_baseline != baseline || baseline.is_err() {
+            failures.push(format!("{code}: copy changed diagnostic: original {baseline:?}, copy {copied_baseline:?}"));
+        }
         let shifted = source.lines().enumerate().map(|(i, line)| format!("{line}\n{}", if i + 1 == header { "\n" } else { "" })).collect::<String>();
         std::fs::write(&path, shifted).unwrap();
         let actual = positioned_rejection(&path, code);
-        let expected = baseline.map(|(line, col)| (line + usize::from(line > header), col));
+        let expected = baseline.map(|mut rejection| {
+            if rejection.file == "main.hd" && rejection.line > header { rejection.line += 1; }
+            rejection
+        });
         if actual != expected || expected.is_err() { failures.push(format!("{code}: expected {expected:?}, got {actual:?}")); }
         checked += 1;
     }
     std::fs::remove_dir_all(dir).unwrap();
+    assert!(checked > 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn missing_main_has_fixed_position(source: &str, rejection: &Rejection) -> bool {
+    if rejection.code != "E206" { return false; }
+    let ast = hado::parser::parse_source(source, "main.hd").expect("E206 requires syntactically valid entry");
+    let missing = !ast.items.iter().any(|item| matches!(item, hado::parser::Item::Def(def) if def.name == "main"));
+    if missing {
+        assert_eq!((&*rejection.file, rejection.line, rejection.column), ("main.hd", 1, 1));
+    }
+    missing
+}
+
+#[test]
+fn every_reject_preserves_its_actual_diagnostic_file_after_leading_newline() {
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reject");
+    let directory = std::env::temp_dir().join(format!("hado-reject-file-shift-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for item in std::fs::read_dir(corpus).unwrap() {
+        let case = item.unwrap().path();
+        let original = case.join("main.hd");
+        if !original.is_file() { continue; }
+        let source = std::fs::read_to_string(&original).unwrap();
+        let code = source.lines().find_map(|line| line.strip_prefix("// error:")).unwrap().trim();
+        let copied = directory.join(case.file_name().unwrap());
+        copy_case_sources(&case, &copied);
+        let entry = copied.join("main.hd");
+        let baseline = positioned_rejection(&original, code);
+        let initial = positioned_rejection(&entry, code);
+        checked += 1;
+        if initial != baseline || baseline.is_err() {
+            failures.push(format!("{code}: copy changed diagnostic: {baseline:?}, {initial:?}"));
+            continue;
+        }
+        let mut expected = baseline.unwrap();
+        let diagnostic_file = copied.join(&expected.file);
+        let before = std::fs::read_to_string(&diagnostic_file).unwrap();
+        std::fs::write(&diagnostic_file, format!("\n{before}")).unwrap();
+        if !missing_main_has_fixed_position(&source, &expected) { expected.line += 1; }
+        let actual = positioned_rejection(&entry, code);
+        if actual.as_ref() != Ok(&expected) { failures.push(format!("{code}: expected {expected:?}, got {actual:?}")); }
+    }
+    std::fs::remove_dir_all(directory).unwrap();
     assert!(checked > 0);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

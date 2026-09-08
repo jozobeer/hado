@@ -23,7 +23,7 @@ impl Case {
         let output = self.command(command, entry);
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
-        let prefix = format!("{}:{line}:{col}: error[{code}]:", self.0.join(file).display());
+        let prefix = format!("{}:{line}:{col}: error[{code}]:", std::path::Path::new(file).strip_prefix(std::path::Path::new(entry).parent().unwrap()).unwrap().display());
         assert!(String::from_utf8_lossy(&output.stderr).starts_with(&prefix), "expected {prefix}\n{}", String::from_utf8_lossy(&output.stderr));
     }
 }
@@ -175,8 +175,7 @@ fn single_file_entry_diagnostics_keep_existing_positions() {
         let case = Case::new();
         let source = format!("{}{}def helper x => x + 1", "\n".repeat(padding), " ".repeat(padding));
         case.write("main.hd", &source);
-        let path = case.0.join("main.hd");
-        let expected = hado::check_source(&source, &path.to_string_lossy()).err().unwrap();
+        let expected = hado::check_source(&source, "main.hd").err().unwrap();
         assert_eq!(expected.code.as_deref(), Some("E206"));
         let actual = case.command("check", "main.hd");
         assert_eq!(actual.stderr, format!("{expected}\n").as_bytes());

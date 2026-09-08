@@ -251,3 +251,46 @@ fn valid_directory_names_allow_digits_and_trailing_underscores() {
     case.write("a1_/all.hd", "module S\ndef run(x: Int): Int\nimplement S as M\ndef run x => x + 3");
     case.run("main.hd", 10);
 }
+
+fn namespace_anchor_case() -> Case {
+    let case = Case::new();
+    case.write("known/all.hd", "type T = | T(Int)\nmodule T\ndef read(x: T): Int\nimplement T as T\ndef read | T(n) => n + 1");
+    case
+}
+fn reference_template(kind: &str) -> &'static str {
+    match kind {
+        "type" => "def use (x: TARGET) => known::T.read x\ndef main = use (known::T(7))",
+        "contract" => "def main = A.read (known::T(7))\nimplement TARGET as C\ndef read x => known::T.read x\nimplement known::T as F(P: known::T)\ndef read x => P.read x\nimplement known::T as A = F(C)",
+        "implementation" => "def main = TARGET.read (known::T(7))",
+        "constructor-expression" => "def main = known::T.read (TARGET(7))",
+        "constructor-pattern" => "def use | TARGET(n) => known::T.read (known::T(n))\ndef main = use (known::T(7))",
+        _ => unreachable!(),
+    }
+}
+#[test]
+fn missing_namespace_segments_and_terminal_names_have_exact_independent_anchors() {
+    for kind in ["type", "contract", "implementation", "constructor-expression", "constructor-pattern"] {
+        for (reference, missing) in [("missing::T", "missing"), ("known::missing::T", "missing"), ("known::Missing", "Missing")] {
+            for padding in 0..5 {
+                let case = namespace_anchor_case();
+                let template = reference_template(kind);
+                let source = template.replace("TARGET", reference);
+                let offset = template.find("TARGET").unwrap() + reference.find(missing).unwrap();
+                let leading = "\n".repeat(padding % 3);
+                let shifted = format!("{leading}{}{}{}", &source[..offset], " ".repeat(padding), &source[offset..]);
+                case.write("main.hd", &shifted);
+                for command in ["check", "build", "dump-mono"] {
+                    case.reject(command, "main.hd", "main.hd", "E204", leading.len() + offset + padding);
+                }
+            }
+        }
+    }
+}
+#[test]
+fn repairing_each_namespace_reference_resolves_the_same_declared_symbol() {
+    for kind in ["type", "contract", "implementation", "constructor-expression", "constructor-pattern"] {
+        let case = namespace_anchor_case();
+        case.write("main.hd", &reference_template(kind).replace("TARGET", "known::T"));
+        case.run("main.hd", 8);
+    }
+}

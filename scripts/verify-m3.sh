@@ -3,6 +3,9 @@ set -eu
 cd "$(dirname "$0")/.."
 python3 - <<'PY'
 import os, pathlib, re, subprocess, tempfile, json
+import sys
+sys.path.insert(0, "scripts")
+from corpus_paths import source_files, diagnostic
 P = pathlib.Path
 results = {}
 def run(*args):
@@ -35,15 +38,15 @@ for p in accept:
 report(2, f'accept-{len(accept)}', bool(accept) and len(accept) == accepted)
 codes = ['E201','E203','E204','E301','E302','E303','E304','E601','E602']
 reject = [P(f'tests/reject/{code}/main.hd') for code in codes]
-lines = {}
+anchors = {}
 for code,p in zip(codes,reject):
     r = check(p)
-    match = re.fullmatch(re.escape(str(p))+r':([1-9][0-9]*):[1-9][0-9]*: error\['+code+r'\]: [^\n]+\n', r.stderr)
+    match = diagnostic(r.stderr, p, code)
     if r.returncode == 1 and not r.stdout and match:
-        lines[code] = int(match[1])
+        anchors[code] = match
         print(f'm3_reject_ok: {p} {code}')
-print(f'm3_reject_ok_n: {len(lines)}')
-report(3, 'reject-9', len(lines) == 9)
+print(f'm3_reject_ok_n: {len(anchors)}')
+report(3, f'reject-{len(codes)}', len(anchors) == len(codes))
 p = reject[0]
 original = p.read_bytes()
 try:
@@ -54,14 +57,16 @@ try:
 finally: p.write_bytes(original)
 shifted = 0
 for code,p in zip(codes,reject):
-    original = p.read_bytes()
+    if code not in anchors:
+        continue
+    target, line, col = anchors[code]
+    original = target.read_bytes()
     try:
-        p.write_text(re.sub(r'(^// error:[^\n]*\n)', r'\1\n', original.decode(), count=1, flags=re.M))
+        target.write_bytes(b'\n' + original)
         r = check(p)
-        match = re.match(re.escape(str(p))+r':(\d+):',r.stderr)
-        shifted += bool(match and code in lines and int(match[1]) == lines[code]+1)
-    finally: p.write_bytes(original)
-report(5, 'perturb', shifted == 9)
+        shifted += r.returncode == 1 and not r.stdout and diagnostic(r.stderr, p, code) == (target, line + 1, col)
+    finally: target.write_bytes(original)
+report(5, 'perturb', shifted == len(codes))
 state = 0x543E5EED
 def choice(n):
     global state
@@ -103,13 +108,18 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
 source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
-corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*/*') if p.suffix in ('.hd', '.hdi')]
+corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in source_files(folder)]
 lib = P('crates/hado/src/lib.rs').read_text()
 types = P('crates/hado/src/types.rs').read_text()
 names = P('crates/hado/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
 glue &= not any('"'+(p.parent.name+'/'+p.name)+'"' in source or str(p) in source for p in corpus)
+for folder in ['tests/accept', 'tests/reject']:
+    for case in P(folder).iterdir():
+        if case.is_dir():
+            glue &= not any('"'+p.relative_to(case).as_posix()+'"' in source
+                            for p in source_files(case) if p.parent != case)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
 tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1')

@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+sys.path.insert(0, "scripts")
+from corpus_paths import diagnostic as parse_diagnostic
 
 failed = False
 all_passed = all_total = 0
@@ -22,8 +24,8 @@ for kind, files in [
         result = subprocess.run([sys.argv[1], "check", str(path)], capture_output=True, text=True)
         if kind == "reject":
             expected = re.search(r"^// error: (E\d+)\s*$", source, re.M)
-            diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)
-            ok = result.returncode == 1 and not result.stdout and expected and diagnostic and expected[1] == diagnostic[1]
+            diagnostic = parse_diagnostic(result.stderr, path, expected[1]) if expected else None
+            ok = result.returncode == 1 and not result.stdout and expected and diagnostic
         else:
             ok = result.returncode == 0 and not result.stdout and not result.stderr
         if ok:

@@ -420,3 +420,31 @@ fn expression_tree_round_trip() {
     );
     assert_eq!(ok, n, "expected all {n} trees to round-trip");
 }
+fn auxiliary_sources(directory: &Path, entry: &Path, result: &mut Vec<PathBuf>) {
+    for item in std::fs::read_dir(directory).unwrap() {
+        let path = item.unwrap().path();
+        if path.is_dir() {
+            auxiliary_sources(&path, entry, result);
+        } else if path != entry && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            result.push(path);
+        }
+    }
+}
+
+#[test]
+fn corpus_auxiliary_source_files_parse_recursively() {
+    let root = repo_root();
+    let mut sources = Vec::new();
+    for category in ["tests/accept", "tests/reject"] {
+        for entry in list_hado(&root.join(category)) {
+            auxiliary_sources(entry.parent().unwrap(), &entry, &mut sources);
+        }
+    }
+    sources.sort();
+    assert!(!sources.is_empty(), "corpus has no auxiliary source files");
+    for path in sources {
+        let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+        let source = std::fs::read_to_string(&path).unwrap();
+        parse_source(&source, &relative).unwrap_or_else(|error| panic!("auxiliary source failed to parse: {relative}: {error}"));
+    }
+}

@@ -29,7 +29,7 @@ impl Case {
         assert_eq!(output.status.code(), Some(1), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
         assert!(output.stdout.is_empty());
         let diagnostic = String::from_utf8(output.stderr).unwrap();
-        let location = format!("{}:{}:{}: error[{code}]: ", self.0.join("main.hd").display(), prefix.matches('\n').count() + 1, prefix.rsplit('\n').next().unwrap().chars().count() + 1);
+        let location = format!("{}:{}:{}: error[{code}]: ", "main.hd", prefix.matches('\n').count() + 1, prefix.rsplit('\n').next().unwrap().chars().count() + 1);
         assert!(diagnostic.starts_with(&location), "expected {location}\n{diagnostic}\n{source}");
         assert_eq!(diagnostic.lines().count(), 1);
     }

@@ -34,7 +34,7 @@ impl Case {
         assert_eq!(output.status.code(), Some(1), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
         assert!(output.stdout.is_empty());
         let diagnostic = String::from_utf8(output.stderr).unwrap();
-        let prefix = format!("{}:{}:{}: error[{code}]: ", self.0.join(file).display(), before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1);
+        let prefix = format!("{}:{}:{}: error[{code}]: ", PathBuf::from(file).strip_prefix(PathBuf::from(entry).parent().unwrap()).unwrap().display(), before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1);
         assert!(diagnostic.starts_with(&prefix), "expected {prefix}\n{diagnostic}\n{source}");
         assert_eq!(diagnostic.lines().count(), 1);
     }
