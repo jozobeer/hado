@@ -746,7 +746,7 @@ fn result_propagation_preserves_error_when_success_type_changes() {
 
 #[test]
 fn recursive_list_fold_connects_construction_projection_and_calls() {
-    let source = "def rec sum | Nil => 0 | Cons(head, tail) => head + sum tail\ndef main = sum [2, 3, 5]";
+    let source = "def rec sum | [] => 0 | [head, ...tail] => head + sum tail\ndef main = sum [2, 3, 5]";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();

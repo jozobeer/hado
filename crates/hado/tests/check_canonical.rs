@@ -60,11 +60,12 @@ fn explicit_unit_ok_payload_is_noncanonical() {
 }
 
 #[test]
-fn literal_cons_tails_require_list_syntax() {
+fn written_list_constructors_require_list_syntax() {
     for source in [
         "def main = Cons(1, Nil)",
         "def main = Cons(1, [2])",
         "def main = Cons(1, [])",
+        "def prepend xs => Cons(1, xs)",
     ] {
         let ast = parse_source(source, "t").unwrap();
         assert_eq!(
@@ -72,7 +73,7 @@ fn literal_cons_tails_require_list_syntax() {
             Some("E510")
         );
     }
-    for source in ["def main = [1, 2]", "def prepend xs => Cons(1, xs)"] {
+    for source in ["def main = [1, 2]", "def prepend xs => [1, ...xs]"] {
         check::check_ast(&parse_source(source, "t").unwrap(), "t").unwrap();
     }
 }
@@ -597,12 +598,12 @@ fn nested_adt_coverage_tracks_inner_alternatives() {
 #[test]
 fn recursive_list_coverage_terminates_and_finds_missing_lengths() {
     for (arms, expected) in [
-        ("Nil => 0 | Cons(_, Nil) => 1", Some("E402")),
+        ("[] => 0 | [_] => 1", Some("E402")),
         (
-            "Nil => 0 | Cons(_, Nil) => 1 | Cons(_, Cons(_, _)) => 2",
+            "[] => 0 | [_] => 1 | [_, _, ..._] => 2",
             None,
         ),
-        ("Nil => 0 | Cons(_, _) => 1 | 2", Some("E403")),
+        ("[] => 0 | [_, ..._] => 1 | 2", Some("E403")),
     ] {
         let source =
             format!("def length_class | {arms}\ndef main = length_class [1, 2, 3]");

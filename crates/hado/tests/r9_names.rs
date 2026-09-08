@@ -38,7 +38,7 @@ fn diagnostic_numbers_follow_the_current_specification() {
         ("def main = __string_length", "E203"),
         ("def main = missing", "E204"),
         ("def rec poly x => poly [x]\ndef main = poly 1", "E307"),
-        ("def main = Nil", "E701"),
+        ("def main = []", "E701"),
         ("def main = fn x => x + 1", "E702"),
         ("def f x => x + 1\ndef main = f == f", "E703"),
         ("def f x => x + 1\ndef main = compare f f", "E704"),
