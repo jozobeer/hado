@@ -295,3 +295,13 @@ fn parameterized_contract_references_keep_qualified_name_anchors() {
     let source = "def main = C.use (Id.make 7)\nmodule X\ntype A T\ndef make(n: Int): Int T\ndef get(value: Int T): Int\nmodule Consumer\ndef use(value: Int X.T): Int\nimplement X as Id\ntype A T = A List\ndef make n => [n]\ndef get value => List.length value\nimplement Consumer as C\ndef use value => Id.get value";
     Case::new(source).run("1");
 }
+
+#[test]
+fn qualified_realization_cycles_report_e602_without_overflowing() {
+    for (variables, applied, representation) in [("", "", "M.T"), ("A ", "Int ", "A M.T")] {
+        let source = format!("def main = M.get (M.make 1)\nmodule S\ntype {variables}T\ndef make(n: Int): {applied}T\ndef get(v: {applied}T): Int\nimplement S as M\ntype {variables}T = {representation}\ndef make n => n\ndef get v => v");
+        rejected(&source, "E602", "implement");
+    }
+    let source = "def main = A.read None\nmodule S\ntype T\ndef read(value: T Option): Int\nimplement S as A\ntype T = B.T\ndef read _ => 1\nimplement S as B\ntype T = A.T\ndef read _ => 2";
+    rejected(source, "E602", "implement");
+}
