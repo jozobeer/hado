@@ -1,0 +1,7 @@
+// spec: §7
+// expect: [5, 7, 9, 8]
+// item: fn の括弧
+type Choice = | A | B
+def apply f x => f x
+def choose b x => if b => apply fn(n => n + x) 3 | x
+def main = [apply fn(x => x + 1) 4, apply fn(| A => 7 | B => 8) A, apply fn(x | x > 0 => x + 1 | 0) 8, choose true 5]

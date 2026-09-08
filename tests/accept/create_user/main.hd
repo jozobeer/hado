@@ -1,7 +1,7 @@
 // spec: §39
 // expect: ok
 // item: 関数適用
-def parse (input: List<Int>): Result<List<Int>, String> => Ok(input)
+def parse (input: Int List): (Int List, String) Result => Ok(input)
 def validate | [] => Ok() | [_, ..._] => Error("invalid")
 def authorize | [] => Ok() | [_, ..._] => Error("denied")
 def save | [] => Ok("ok") | [_, ..._] => Error("save failed")

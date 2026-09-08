@@ -1,0 +1,4 @@
+// spec: §14
+// error: E520
+def f (b: Bool) => if b | true => 1 | false => 0
+def main = f true

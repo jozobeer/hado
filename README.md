@@ -28,7 +28,7 @@ hado build <file.hd>              # 入力の隣に実行ファイルを置く
 
 ```
 $ hado check --print-type hello.hd
-Result<String,String>
+(String, String) Result
 $ hado build hello.hd && ./hello
 ok
 ```

@@ -3,8 +3,8 @@
 // item: let p? =
 type Box = | Box(Int)
 type Entry = { value: Box }
-def pass (n: Int): Result<Unit, String> => if n > 0 => Ok() | Error("negative")
-def read (entry: Result<Entry, String>): Result<Int, String> =>
+def pass (n: Int): (Unit, String) Result => if n > 0 => Ok() | Error("negative")
+def read (entry: (Entry, String) Result): (Int, String) Result =>
   let { value = Box(n) }? = entry ->
   do pass n ->
   do pass (n + 1) ->

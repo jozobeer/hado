@@ -1,3 +1,5 @@
 // spec: §41
 // error: E100
-def main = 1 < 2 < 3
+// item: 型の綴り
+def id(x: Option<Int>): Option<Int> => x
+def main = id (Some(1))

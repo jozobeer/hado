@@ -1,0 +1,18 @@
+// spec: §10
+// expect: 7
+// item: 型の綴り
+// needs: prelude
+type A Packet = { payload: A }
+def score (box: (Int List, String) Result Packet): Int =>
+  if box.payload | Ok(items) => List.length items | Error(_) => 0
+def main = score { payload = Ok([1, 2]) } + Box.size (Box.make [3]) + Box.run fn(f, x => f x) 4
+module Box
+type T
+def make(xs: Int List): T
+def size(xs: T): Int
+def A run(f: Fn(Fn(A => A), A => A), x: A): A
+implement Box as Box
+type T = Int List
+def make xs => xs
+def size xs => List.length xs
+def run f x => f fn(value => value) x

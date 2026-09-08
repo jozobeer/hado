@@ -5,6 +5,6 @@
 type User = { name: String; active: Bool }
 def active_names users =>
   users
-  |> List.filter (fn user => user.active)
-  |> List.map (fn user => user.name)
+  |> List.filter fn(user => user.active)
+  |> List.map fn(user => user.name)
 def main = List.length (active_names [{ name = "a"; active = true }])

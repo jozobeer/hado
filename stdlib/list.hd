@@ -1,19 +1,19 @@
-type List<T> = | Nil | Cons(T, List<T>)
+type T List = | Nil | Cons(T, T List)
 module List
-def map<A, B>(values: List<A>, f: Fn<A, B>): List<B>
-def filter<A>(values: List<A>, predicate: Fn<A, Bool>): List<A>
-def fold<A, B>(values: List<A>, initial: B, f: Fn<(B, A), B>): B
-def length<A>(values: List<A>): Int
-def reverse<A>(values: List<A>): List<A>
-def append<A>(left: List<A>, right: List<A>): List<A>
-def sort<A>(values: List<A>, comparator: Fn<(A, A), Int>): List<A>
+def (A, B) map(values: A List, f: Fn(A => B)): B List
+def A filter(values: A List, predicate: Fn(A => Bool)): A List
+def (A, B) fold(values: A List, initial: B, f: Fn(B, A => B)): B
+def A length(values: A List): Int
+def A reverse(values: A List): A List
+def A append(left: A List, right: A List): A List
+def A sort(values: A List, comparator: Fn(A, A => Int)): A List
 implement List as List
 def rec map values f => if values | [] => [] | [head, ...tail] => [f head, ...map tail f]
 def retain head tail keep => if keep => [head, ...tail] | tail
 def rec filter values predicate => if values | [] => [] | [head, ...tail] => retain head (filter tail predicate) (predicate head)
 def rec fold values initial f => if values | [] => initial | [head, ...tail] => fold tail (f initial head) f
 def rec length | [] => 0 | [_, ...tail] => 1 + length tail
-def reverse values => fold values [] (fn reversed value => [value, ...reversed])
+def reverse values => fold values [] fn(reversed, value => [value, ...reversed])
 def rec append left right => if left | [] => right | [head, ...tail] => [head, ...append tail right]
 def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
 def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]

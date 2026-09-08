@@ -1,9 +1,7 @@
 // spec: §20
 // error: E101
-def f x =>
-  if x
-  | 1 => if x
-    | 2 => 5
-    | 0
-  | 0
-def main = f 1
+// item: fn の括弧
+type Choice = | A | B
+def apply f x => f x
+def f (x: Choice) => if x | A => apply fn(| A => 1 | B => 2) A | B => 0
+def main = f A

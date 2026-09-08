@@ -6,9 +6,9 @@ def main = if UserStore.find 1 | Some(_) => 1 | 0
 module UserStore
 type T
 
-def find(id: Int): Option<T>
-def save(user: T): Result<Unit, Error>
-def delete(user: T): Result<Unit, Error>
+def find(id: Int): T Option
+def save(user: T): (Unit, Error) Result
+def delete(user: T): (Unit, Error) Result
 implement UserStore as UserStore
 type T = Error
 def find id => if id > 0 => Some(NotFound) | None
