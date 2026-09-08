@@ -304,3 +304,30 @@ fn an_unknown_type_on_a_known_parameter_points_to_the_member() {
         case.reject(command, "main.hd", "functor.hd", "E204", source.find("Missing").unwrap());
     }
 }
+
+#[test]
+fn heterogeneous_applications_preserve_local_data_and_value_members() {
+    for (data, make, cached, read) in [
+        ("type Payload = { inner: Arg.T }", "{ inner = Arg.make x }", "{ inner = Arg.make 2 }", "def read value => Arg.read value.inner"),
+        ("type Payload = | Wrapped(Arg.T)", "Wrapped(Arg.make x)", "Wrapped(Arg.make 2)", "def read | Wrapped(inner) => Arg.read inner"),
+    ] {
+        let case = Case::new();
+        case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nmodule Output\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef cached: T");
+        case.write("arguments.hd", "implement Input as Number\ntype T = Int\ndef make x => x\ndef read x => x\nimplement Input as Text\ntype T = String\ndef make x => Int.to_string x\ndef read x => String.length x");
+        case.write("functor.hd", &format!("implement Output as Make(Arg: Input)\n{data}\ntype T = Payload\ndef make x => {make}\n{read}\ndef cached = {cached}"));
+        case.write("apply.hd", "implement Output as A = Make(Number)\nimplement Output as B = Make(Text)");
+        case.write("main.hd", "def main = A.read (A.make 7) + B.read (B.make 123) + A.read A.cached + B.read B.cached");
+        case.run("main.hd", 13);
+    }
+}
+
+#[test]
+fn generic_abstract_types_remain_polymorphic_in_each_application() {
+    let case = Case::new();
+    case.write("contracts.hdi", "module Input\ntype A T\ndef A wrap(value: A): A T\ndef A unwrap(value: A T): A\nmodule Output\ntype A T\ndef A wrap(value: A): A T\ndef A unwrap(value: A T): A");
+    case.write("arguments.hd", "implement Input as First\ntype A Payload = | Packed(A)\ntype A T = A Payload\ndef wrap value => Packed(value)\ndef unwrap | Packed(value) => value\nimplement Input as Second\ntype A Payload = | Wrapped(A)\ntype A T = A Payload\ndef wrap value => Wrapped(value)\ndef unwrap | Wrapped(value) => value");
+    case.write("functor.hd", "implement Output as Make(Arg: Input)\ntype A Container = | Container(A Arg.T)\ntype A T = A Container\ndef wrap value => Container(Arg.wrap value)\ndef unwrap | Container(value) => Arg.unwrap value");
+    case.write("apply.hd", "implement Output as A = Make(First)\nimplement Output as B = Make(Second)");
+    case.write("main.hd", "def main = A.unwrap (A.wrap 7) + String.length (A.unwrap (A.wrap \"abc\")) + B.unwrap (B.wrap 11)");
+    case.run("main.hd", 21);
+}
