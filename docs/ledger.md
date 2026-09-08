@@ -661,3 +661,40 @@ advisor の指摘で、前提に埋めていた 3 点（`implement` 節の本体
 R14〜R17 で green に戻す。
 
 **次の一手:** `docs/plan.md` 12 節をエージェントに渡す。R14 から R17 まで一続きで進む。
+
+### R14 — `let p? =` と `do`（2026-09-08）
+
+`?` を独立トークンとし、成功値への束縛はパターン末尾、破棄は `do` で表す。既存の `LetQ` / `DoQ` AST を保つ方針で、lexer・parser・正規形・診断案内を変更した。生成テストは実装前に 0 passed / 5 failed、実装後に 5 passed / 0 failed（`/tmp/hado-v012/r14-red.log`、`r14-green.log`）。
+
+**14-a の実測:** `PATH=/home/zyun/.cargo/bin:$PATH RUSTUP_TOOLCHAIN=1.98.0 CARGO_TARGET_DIR=/tmp/hado-v012/target` を設定して実行。既定の PATH に cargo が無く、rustup の既定 1.84 では固定依存の edition 2024 を読めなかったため、インストール済み 1.98 と書き込み可能な target を使った。依存を `cargo +1.98.0 fetch --locked` で補充した後は offline で検証した。
+
+`cargo test --offline --no-fail-fast` は **421 passed / 1 failed、exit 101**。失敗は `r9_grammar::grammar_generated_programs_preserve_every_declaration` の節構文6規則の未被覆だけで、14-a の許容する R16 依存である。全門番を個別に実行した末尾は次のとおり（ログ: `/tmp/hado-v012/r14/`）。
+
+| コマンド（`bash scripts/verify-*.sh`） | 末尾 | exit |
+|---|---|---|
+| `verify-m0.sh` | `PASSED: 4/7` | 1 |
+| `verify-m1-corpus.sh` | `PASSED: 4/7` | 1 |
+| `verify-m1-spec.sh` | `PASSED: 6/6` | 0 |
+| `verify-m2.sh` | `PASSED: 7/8` | 1 |
+| `verify-m3.sh` | `PASSED: 11/12` | 1 |
+| `verify-m4.sh` | `PASSED: 55/55` | 0 |
+| `verify-m5.sh` | `PASSED: 89/89` | 0 |
+| `verify-m6.sh` | `PASSED: 27/27` | 0 |
+| `verify-m7.sh` | `PASSED: 2/3` | 1 |
+| `verify-r11.sh` | `PASSED: 1/1` | 0 |
+| `verify-r12.sh` | `PASSED: 1/1` | 0 |
+| `verify-r13.sh` | `PASSED: 1/1` | 0 |
+| `verify-r14.sh` | `PASSED: 1/1` | 0 |
+| `verify-r9.sh` | `PASSED: 4/5` | 1 |
+
+赤は m0 の 2〜4、m1-corpus の 2・3・7、m2 の 5、m3 の 9、m7 の 3、r9 の R9-1。全て節構文の未被覆と、それを参照する終了コードに由来する。R14 に固有の赤は無い。
+
+**14-b:** 名前・record・constructor・入れ子の生成パターンの正規形往復と空白摂動、旧形の E100 と `?` アンカー、純粋値の E303、Option/Result を捨てる E504、非網羅パターンの E402 を検証。Option/Result それぞれの成功・各段階の失敗経路を CLI build → 実行し、判定器が計算した値と照合した。
+
+**14-c:** コーパス審査後の `5c57d11` で lock を固定。実装 `eb9b2eb` では変更せず、`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。拒否コード表とディスクはともに57、E1xxは13（表から導出）。
+
+**14-d:** `every_reject_preserves_code_and_column_after_header_line_insertion` が E303・E504 を含む全拒否について通過。生成テストも両コードの行・列を摂動して照合した。
+
+**審査:** `opencode/deepseek-v4-flash` のコーパス審査は、非網羅パターンのテストに型エラーがあるとの指摘1件。成功値を取り出してからパターン照合する §22 の規則と、旧表記の同じ式を HEAD の独立コピーで検査した E402 の実測を示し、レビュアーが撤回して PASS（セッション `ses_f7eb441c8ffe3zRn761Yq9EGEx`、`review-r14-followup.jsonl`）。実装審査も PASS（`/tmp/hado-v012/review-r14-implementation.jsonl`）。実測と判定を分ける `evidence-discipline` に従い、誤った指摘に合わせて正しいテストを変更しなかった。
+
+仕様への疑義は無い。最終削りで追加削除すべき成果物は無かった。工程コミットは `5c57d11`（コーパス・判定器）と `eb9b2eb`（実装）。この記録の直前の `git status --short` は空。次は R15 の機械的なディレクトリ移行。
