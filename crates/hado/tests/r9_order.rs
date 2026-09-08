@@ -52,7 +52,7 @@ fn types_precede_redundancy() {
 
 #[test]
 fn redundancy_precedes_monomorphization() {
-    assert_eq!(code("def main = let unused = 1 -> Nil"), "E505");
+    assert_eq!(code("def main = let unused = 1 -> []"), "E505");
 }
 
 #[test]

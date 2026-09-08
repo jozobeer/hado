@@ -107,9 +107,9 @@ fn nullary_constructor_patterns_constrain_the_scrutinee_type() {
 
 #[test]
 fn main_requires_a_monomorphic_type() {
-    for source in ["def main = Nil", "def main = Some(Nil)"] {
+    for source in ["def main = []", "def main = Some([])"] {
         assert_eq!(check_source(source, "t").err().unwrap().code.as_deref(), Some("E701"));
     }
-    let source = "def empty (n: Int): List<Int> => if n == 0 => Nil | [n]\ndef main = empty 0";
+    let source = "def empty (n: Int): List<Int> => if n == 0 => [] | [n]\ndef main = empty 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Adt("List".into(), vec![Ty::Int]));
 }

@@ -358,7 +358,11 @@ impl Generator {
 
     fn list_expr(&mut self, depth: usize, in_arm: bool) -> String {
         let count = self.choose("list_expr", 3);
-        format!("[ {} ]", self.list(count, |g| g.expression(depth, in_arm), " , "))
+        let mut items = self.list(count, |g| g.expression(depth, in_arm), " , ");
+        if count > 0 && self.choose("list_tail?", 2) == 1 {
+            items.push_str(&format!(", ...{}", self.expression(depth, in_arm)));
+        }
+        format!("[ {items} ]")
     }
 
     fn branch(&mut self, depth: usize) -> String {
@@ -397,8 +401,8 @@ impl Generator {
     }
 
     fn pattern(&mut self, depth: usize) -> String {
-        let choice = if depth == 0 { self.random(2) } else { self.random(5) };
-        self.mark("pattern", 5, choice);
+        let choice = if depth == 0 { self.random(2) } else { self.random(6) };
+        self.mark("pattern", 6, choice);
         match choice {
             0 => "_".into(),
             1 => self.name(false),
@@ -408,8 +412,19 @@ impl Generator {
                 if count == 0 { name } else { format!("{name} ( {} )", self.list(count, |g| g.pattern(depth - 1), " , ")) }
             }
             3 => self.record_pattern(depth - 1),
+            5 => self.list_pattern(depth - 1),
             _ => self.literal_pattern(),
         }
+    }
+
+    fn list_pattern(&mut self, depth: usize) -> String {
+        let count = self.choose("list_pattern", 3);
+        let mut items = self.list(count, |g| g.pattern(depth), " , ");
+        if count > 0 && self.choose("pattern_tail?", 2) == 1 {
+            let rest = if self.random(2) == 0 { "_".into() } else { self.name(false) };
+            items.push_str(&format!(", ...{rest}"));
+        }
+        format!("[ {items} ]")
     }
 
     fn record_pattern(&mut self, depth: usize) -> String {
