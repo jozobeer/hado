@@ -1,6 +1,6 @@
 //! Tokenizer for the hado grammar.
 //!
-//! Follows §43 (literals and `--` line comments) and §44 (operators).
+//! Follows §43 (literals and `//` line comments) and §44 (operators).
 //! Every token carries a 1-based `Span`. Whitespace (including newlines) and
 //! line comments are skipped: the parser does not look at newlines (§41).
 
@@ -173,7 +173,7 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
             Some(c) if c == ' ' || c == '\t' || c == '\r' || c == '\n' => {
                 lx.bump();
             }
-            Some('-') if lx.rest().starts_with("--") => {
+            Some('/') if lx.rest().starts_with("//") => {
                 while let Some(c) = lx.peek() {
                     if c == '\n' {
                         break;
@@ -308,7 +308,7 @@ impl Lexer<'_> {
             }
             '#' => Err(self.err(
                 Some("E104"),
-                "# is not a comment marker; only `--` line comments exist",
+                "# is not a comment marker; use //",
             )),
             '=' => {
                 self.bump();
@@ -370,6 +370,10 @@ impl Lexer<'_> {
                     Ok(TokKind::Pipe)
                 }
             }
+            '-' if self.rest().starts_with("--") => Err(self.err(
+                Some("E104"),
+                "-- is not a comment marker; use //",
+            )),
             '-' => {
                 self.bump();
                 if self.peek() == Some('>') {
@@ -550,7 +554,7 @@ mod tests {
     #[test]
     fn lex_comments_and_newlines() {
         assert_eq!(
-            kinds("1 -- hi\n  + 2"),
+            kinds("1 // hi\n  + 2"),
             vec![TokKind::Int(1), TokKind::Plus, TokKind::Int(2), TokKind::Eof]
         );
     }
