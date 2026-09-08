@@ -567,7 +567,7 @@ R9 の受け入れ条件:
 | R12 List 構文 | `tests/accept` `tests/reject` `stdlib/`、`crates/hado/**`、`scripts/`、lock | 12-a〜12-e |
 | R13 引数の条件列 | `tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、lock | 13-a〜13-d |
 
-**着手時点で赤の門番:** `verify-m1-corpus.sh` チェック 1（§50 が 58 行、拒否コーパスが 56 本）、チェック 2（§39 の `classify` が短縮形、コーパスが従来形）、チェック 3（9.2 の項目に受理と拒否が無い）と、それらに依存する `verify-m2.sh` `verify-m3.sh` のチェック。赤の一覧は 9 節を書いたセッションが実測して `ledger.md` に書いた。R13 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。
+**着手時点で赤の門番（実測）:** `cargo test` の 2 本（`parse_corpus::corpus_counts` は §50 が 58 行で拒否が 56 本、`r9_grammar` は §41 の新形式を現行パーサが読めない）。`verify-m1-corpus.sh` の 1（E516 E517 が無い）、2（§39 の `classify` が短縮形）、3（9.2 の項目に受理と拒否が無い）、7。`cargo test` の終了コードを見る `verify-m0.sh` の 2〜4、`verify-m2.sh` の 1・3・5、`verify-m3.sh` の 9、`verify-r9.sh` の R9-1。内訳は `docs/0.1.1/ledger.md` の「0.1.1 の計画」。R13 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。
 
 ### R10 改名（shin → hado、`.shin` → `.hd`）
 
