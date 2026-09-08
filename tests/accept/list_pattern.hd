@@ -1,0 +1,7 @@
+// spec: §46
+// expect: [3, 7, 3]
+// item: List 構文
+def rec count | [] => 0 | [_, ...tail] => 1 + count tail
+def sum_pair | [a, b] => a + b | [] => 0 | [head, ...tail] => head + count tail
+def nested | [[value], ..._] => value | [] => 0 | [_, ..._] => -1
+def main = [sum_pair [1, 2], nested [[7], [8]], ...[count [4, 5, 6]]]
