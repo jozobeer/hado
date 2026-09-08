@@ -1,5 +1,5 @@
 #!/bin/bash
-# M2 acceptance checks 1..8 (see docs/0.1.1/plan.md, M2). Run from the repository root.
+# M2 acceptance checks 1..8 (see docs/plan.md, M2). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -56,9 +56,9 @@ else
 fi
 
 # --- check 2: specification E1xx codes and swap probe ---
-e1xx_codes=$(sed -n 's/^| \(E1[0-9][0-9]\) |.*/\1/p' docs/0.1.1/spec.md | sort -u)
+e1xx_codes=$(sed -n 's/^| \(E1[0-9][0-9]\) |.*/\1/p' docs/spec.md | sort -u)
 n_e1xx=$(printf '%s\n' "$e1xx_codes" | wc -l)
-n_non_e1xx=$(sed -n 's/^| \(E[2-9][0-9][0-9]\) |.*/\1/p' docs/0.1.1/spec.md | sort -u | wc -l)
+n_non_e1xx=$(sed -n 's/^| \(E[2-9][0-9][0-9]\) |.*/\1/p' docs/spec.md | sort -u | wc -l)
 c2_reasons=""
 for code in $e1xx_codes; do
     f="tests/reject/$code.shin"

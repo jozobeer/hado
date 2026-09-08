@@ -2,7 +2,7 @@
 
 ML 系の型システムと ADT を核に、より小さく、より平坦に、より一意に書ける言語。Rust で書いたコンパイラが検査と実行ファイル生成を行う。
 
-仕様 `docs/<版>/spec.md` §1 の 2 原則:
+仕様 `docs/spec.md` §1 の 2 原則:
 
 > **Control flow should be flat.**
 
@@ -58,17 +58,17 @@ stdlib/           prelude。shin 自身で書き、全プログラムに暗黙�
 tests/accept/     受理コーパス。expect: タグに実行結果を持つ
 tests/reject/     拒否コーパス。エラーコードごとに 1 ファイル
 scripts/          門番スクリプト
-docs/<版>/        仕様・計画・台帳。版ごとのディレクトリ
+docs/             仕様・計画・台帳。常に現行版
 AGENTS.md         エージェント向けの規則
 ```
 
 ## 文書
 
-`<版>` は言語の版。`docs/` 直下の版ディレクトリのうち最も新しいものが現行。
+`docs/` の文書は常に現行版。過去の版は git tag（`v0.1` など）で読む。
 
-- `docs/<版>/spec.md` — 言語仕様。§50 にエラーコード表と検査の段階順
-- `docs/<版>/plan.md` — 開発計画。決定記録、ラウンドの手順書、判断の解説
-- `docs/<版>/corpus.md` — コーパスの規約と門番の設計
-- `docs/<版>/ledger.md` — ラウンドごとの実行記録
-- `docs/<版>/spec-trace.md` `docs/<版>/spec-coverage.md` — 仕様の規範文と計画の項目の対応表
+- `docs/spec.md` — 言語仕様。§50 にエラーコード表と検査の段階順
+- `docs/plan.md` — 開発計画。決定記録、ラウンドの手順書、判断の解説
+- `docs/corpus.md` — コーパスの規約と門番の設計
+- `docs/ledger.md` — ラウンドごとの実行記録
+- `docs/spec-trace.md` `docs/spec-coverage.md` — 仕様の規範文と計画の項目の対応表
 - `docs/cranelift-<版>.md` — Cranelift の API の実際の形

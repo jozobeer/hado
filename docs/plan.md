@@ -1,6 +1,6 @@
 # 開発計画 v0.1 → v0.1.1
 
-対象は `docs/0.1.1/spec.md`（以下「仕様」）。仕様の節番号は、M1 で改訂する前の現行版を指す。
+対象は `docs/spec.md`（以下「仕様」）。仕様の節番号は、M1 で改訂する前の現行版を指す。
 
 ## 1. 意図
 
@@ -91,7 +91,7 @@ runtime/              C ランタイム（C の main、GC 確保・String primit
 stdlib/               prelude（.shin）
 tests/accept/         受理コーパス
 tests/reject/         拒否コーパス
-docs/<版>/            spec.md、plan.md
+docs/            spec.md、plan.md
 ```
 
 ### M0 環境と歩く骨格
@@ -115,7 +115,7 @@ docs/<版>/            spec.md、plan.md
 
 ### M1 仕様の穴埋めとコーパス
 
-1. 2.2 と 2.3 の内容を `docs/0.1.1/spec.md` に書き込む。既存の節番号は変えず、新設の節は §42 の後に追加する。コーパスの `-- spec:` はこの番号を指す。
+1. 2.2 と 2.3 の内容を `docs/spec.md` に書き込む。既存の節番号は変えず、新設の節は §42 の後に追加する。コーパスの `-- spec:` はこの番号を指す。
 
    | 対象 | 内容 |
    |---|---|
@@ -295,7 +295,7 @@ v0.2 へ保留:
 
 ## 7. R6 で確定した事項（2026-09-07）
 
-M3〜M7 の成果物を実測して見つかった未決事項を、grilling 形式で確定した。仕様 `docs/0.1.1/spec.md` はこの表を反映済み。経緯は `docs/0.1.1/ledger.md` の R6。2.2 と 2.3 の表と食い違う箇所は本節が優先する。
+M3〜M7 の成果物を実測して見つかった未決事項を、grilling 形式で確定した。仕様 `docs/spec.md` はこの表を反映済み。経緯は `docs/ledger.md` の R6。2.2 と 2.3 の表と食い違う箇所は本節が優先する。
 
 判断基準として繰り返し使ったもの: 拒否か許容かで迷ったら拒否（error → 許容は既存コードを壊さない緩和なので後から安全にできる）。新機能は最小形で入れ、将来形の特殊ケースになっていることを確かめる。
 
@@ -350,11 +350,11 @@ grilling を経ずに commander が決めた点（可逆。異議があれば戻
 
 ## 8. R8〜R9 の手順書（旧 `PLAN.md`、2026-09-07）
 
-リポジトリ直下の `PLAN.md` として実行エージェントに渡した手順書。0.1 の完了時に本節へ移した（`PLAN.md` は廃止し、以降は `plan.<版>.md` に統合する）。
+リポジトリ直下の `PLAN.md` として実行エージェントに渡した手順書。0.1 の完了時に本節へ移した（`PLAN.md` は廃止し、以降は `docs/plan.md` に統合する）。
 
-この計画を実行するエージェント向けの手順書。R6（2026-09-07）の決定（`docs/0.1.1/plan.md` 7 節）を実行する。手順 0 から R9 まで、下の表の順に止まらずに進める。
+この計画を実行するエージェント向けの手順書。R6（2026-09-07）の決定（`docs/plan.md` 7 節）を実行する。手順 0 から R9 まで、下の表の順に止まらずに進める。
 
-**読む順:** 本ファイル → `docs/0.1.1/corpus.md` → `docs/0.1.1/spec.md`（§50 §41 §51 §52 を先に）→ `docs/0.1.1/plan.md` 7 節。2.2 と 2.3 の表と食い違えば 7 節が、7 節と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
+**読む順:** 本ファイル → `docs/corpus.md` → `docs/spec.md`（§50 §41 §51 §52 を先に）→ `docs/plan.md` 7 節。2.2 と 2.3 の表と食い違えば 7 節が、7 節と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
 **判定者:** 各工程の成果物は、作成した本人以外が判定基準に沿って審査する。別モデルのエージェントを呼べる環境ならそれに、呼べなければ人に出す。手順 0 の仕様は実行者が書いていないので、実行者が判定者になる。
 **触ってよい場所:** 下の表の「成果物」列のみ。`docs/` と `PLAN.md` は全工程で禁止。R8 は `crates/` `scripts/` も、R9 は `tests/accept` `tests/reject` `stdlib/` も禁止。
 **判定に現行コンパイラを使わない:** R8 では新形式を parse できず、検査順が §50 と違う。R8 の根拠は仕様の読みだけである。
@@ -374,7 +374,7 @@ grilling を経ずに commander が決めた点（可逆。異議があれば戻
 
 ### 手順 0. 仕様の審査
 
-`docs/0.1.1/spec.md` は R7（2026-09-07）で改訂され、まだ審査を受けていない。観点: §41 の EBNF から §39 の例と受理コーパスの全構文が導出できるか、§50 の 56 行に段階とアンカーが全て書かれているか、`docs/0.1.1/spec-trace.md` の各行が実在する節を指すか、7 節の決定が本文に漏れなく反映されているか。
+`docs/spec.md` は R7（2026-09-07）で改訂され、まだ審査を受けていない。観点: §41 の EBNF から §39 の例と受理コーパスの全構文が導出できるか、§50 の 56 行に段階とアンカーが全て書かれているか、`docs/spec-trace.md` の各行が実在する節を指すか、7 節の決定が本文に漏れなく反映されているか。
 
 指摘は直さず報告に書く。R8 の特定のファイルが書けなくなる指摘だけ、そのファイルを止めて他を進める。`verify-m1-spec.sh` が `PASSED: 6/6` であることを実測する。
 
@@ -409,7 +409,7 @@ E303 は番号そのまま、短い名前を rail-type に。
 | `create_user.shin` | `Cons(head, tail)` → `Cons(_, _)` ×3 | §27 |
 | `delete_user.shin` `unit.shin` | `-- expect:` を空に | §51 |
 | `display.shin` `name.shin` `record.shin` `literal_pattern.shin` | 第52節の形に | §52 |
-| `short_and.shin` | `-- item: 末尾呼び出し` を `tail_self.shin` へ移す | `docs/0.1.1/corpus.md` |
+| `short_and.shin` | `-- item: 末尾呼び出し` を `tail_self.shin` へ移す | `docs/corpus.md` |
 
 #### 受理の新設（`verify-m6.sh` の生成プローブを移す）
 
@@ -467,14 +467,14 @@ R8 の審査合格後に実行者が `tests/corpus.sha256` を新設する（`sh
 #### R8 の判定
 
 - 8-a. `verify-m1-corpus.sh` のチェック 1〜4 と 6 が OK（件数は §50 の行数から導く。チェック 5 と 7 は `cargo test` を含むので R9 まで赤）。
-- 8-b. 全件の `-- spec: §N` が実在する見出しを指し、`-- item:` が `docs/0.1.1/spec-coverage.md` と文字列一致。
+- 8-b. 全件の `-- spec: §N` が実在する見出しを指し、`-- item:` が `docs/spec-coverage.md` と文字列一致。
 - 8-c. 別の判定者が全 83 本を読み、「1 ファイル 1 欠陥」（§50 の段階順とアンカー位置順で判定）と「タグを寄せていない」を確認する。
 - 8-d. R8 終了時に赤になる門番を報告に列挙する（見込み: `verify-m1-corpus` の 5 と 7、`verify-m2` と `parse_corpus.rs` の件数、`verify-m3` の accept-20、`verify-m4`〜`m7` の新形式と新コード）。
 
 
 ### R9 実装
 
-順序に依存あり。各項目の判定器は「入力を実行時に生成し、期待値を判定器側で計算する」（`docs/0.1.1/corpus.md`）。`docs/0.1.1/spec-trace.md` の「固定するもの」列が、各項目の判定器の名前を参照する。
+順序に依存あり。各項目の判定器は「入力を実行時に生成し、期待値を判定器側で計算する」（`docs/corpus.md`）。`docs/spec-trace.md` の「固定するもの」列が、各項目の判定器の名前を参照する。
 
 1. **字句と構文**（`lexer.rs` `parser.rs`）: E100（規則に対応しない失敗）、E108、E109、E110〜E112、Char のエスケープ 4 つ、負のリテラルパターン、`def` と `fn` の腕形式、sig の型は本体なし、型の別名と無名 record を E100。E106 を constructor を先頭に置く並置とパイプの右辺の constructor に変え、識別子と `(` の隣接判定（`parser.rs:1112`）を消す。診断コードの付け直し。判定器: §41 の EBNF から乱数でプログラムを生成し、parse → 正規形印字 → 再 parse の往復（`parse_corpus.rs` の式木往復を全文法に広げる）。E106 は乱数の constructor 名と引数で `C x` と `x |> C` を生成し、全件 E106。空白の摂動: 生成した `f (x)` から識別子と `(` の間の空白を抜いても同じ木になる（既存の式木往復は隣接形を出さないので、これが Q36 を見る唯一の検査）。
 2. **検査順**（`lib.rs` `check_source`）: §50 の段階順。同一段階内はアンカー位置順。判定器: 型エラーと冗長欠陥を同居させた `def` を 20 本生成し、全件 E305 か E204。位置順は、同一段階の欠陥 2 つを位置を入れ替えて生成し、先の方が報告されること。`%` を Int 専用に型付けし、Float への適用が E305 になること。
@@ -490,12 +490,12 @@ R9 の受け入れ条件:
 - 9-b. 受理 27 本が期待 stdout / stderr / 終了コードを返す（`verify-m7.sh`）。
 - 9-c. 拒否 56 本が指定コードと指定アンカーで落ちる。位置の摂動プローブ（`-- error:` 行の直後に空行）を全コードに当てる。
 - 9-d. `tests/corpus.sha256` が一致する（R9 でコーパスと `stdlib/` を触っていない）。
-- 9-e. `docs/0.1.1/spec-trace.md` の「固定するもの」に書かれた判定器が全て実在する。
+- 9-e. `docs/spec-trace.md` の「固定するもの」に書かれた判定器が全て実在する。
 
 
 ### スコープ外
 
-`docs/0.1.1/plan.md` 6 節「v0.2 へ保留」の項目。warning の導入（緩和は「規則から外す」で行う）。
+`docs/plan.md` 6 節「v0.2 へ保留」の項目。warning の導入（緩和は「規則から外す」で行う）。
 
 ### 分からなかったこと
 
@@ -505,7 +505,7 @@ R9 の受け入れ条件:
 
 ## 9. v0.1.1 の範囲と決定（2026-09-08）
 
-`docs/wants.md` の 6 項目のうち 4 項目（言語名の変更、`//` コメント、List の `[x, ...xs]`、引数の条件列の短縮形）を 0.1.1 とする。grilling（14 問）で確定し、経緯は `docs/0.1.1/ledger.md` の「0.1.1 の計画」にある。仕様 `docs/0.1.1/spec.md` は本節を反映済み。2.1〜2.3 と 7 節と食い違う箇所は本節が優先する。
+`docs/wants.md` の 6 項目のうち 4 項目（言語名の変更、`//` コメント、List の `[x, ...xs]`、引数の条件列の短縮形）を 0.1.1 とする。grilling（14 問）で確定し、経緯は `docs/ledger.md` の「0.1.1 の計画」にある。仕様 `docs/spec.md` は本節を反映済み。2.1〜2.3 と 7 節と食い違う箇所は本節が優先する。
 
 判断基準は 7 節と同じ。拒否か許容かで迷ったら拒否し、新機能は最小形で入れる。受理を広げる変更は後から安全に足せるので、後回しにした拡張は 9.3 に置く。
 
@@ -517,8 +517,8 @@ R9 の受け入れ条件:
 | Q2 | 範囲 | 言語名、コメント、List 構文、引数の条件列。ファイル名 module と `let value? =` は次の版 | — |
 | Q3 | 改名の位置 | 最初のラウンド（R10）。以降の仕様・コーパス・コミットを新しい語彙で書くため | — |
 | Q4 | 改名の範囲 | 過去の記録（`ledger.md` と本文書の 1〜8 節、git 履歴）以外の全て。CLI `hado`、拡張子 `.hd`、crate `crates/hado`、ランタイム記号 `hado_entry` `hado_alloc` | — |
-| Q5 | 文書の版 | tag の後、6 文書を `git mv` で `docs/0.1.1/` に移して直接編集する。0.1 の姿は tag が持つ | — |
-| Q6 | 手順書の置き場 | `PLAN.md` を廃止し `docs/<版>/plan.md` に統合する。`AGENTS.md` と `README.md` は進行中の開発に依存しない | — |
+| Q5 | 文書の版 | tag の後、6 文書を版接尾辞なしの `docs/spec.md` などに `git mv` して直接編集する。0.1 の姿は tag が持つ。（当初は `docs/0.1.1/` に置いたが、版は tag が持つのでディレクトリも外した） | — |
+| Q6 | 手順書の置き場 | `PLAN.md` を廃止し `docs/plan.md` に統合する。`AGENTS.md` と `README.md` は進行中の開発に依存しない | — |
 | Q7 | 再編の時期 | tag の前。tag が「0.1 完了で文書も整合した状態」を指すため | — |
 | Q8 | コメント | `//` に置き換える。`--` と `#` は E104 | §41, §43 |
 | Q9 | List の書き方 | 式もパターンも `[]` `[x, ...xs]` が唯一の形。式の `Nil` `Cons` は E510（`list-literal-form` に改名して範囲を広げる）、パターンは E516。prelude も書き直す | §46, §47, §50 |
@@ -552,22 +552,22 @@ R9 の受け入れ条件:
 
 この節を実行するエージェント向けの手順書。9 節の決定を実行する。R10 から R13 まで表の順に進める。
 
-**読む順:** 本節 → `docs/0.1.1/corpus.md` → `docs/0.1.1/spec.md`（§41 §43 §46 §50 §53 を先に）→ 9 節。表と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
+**読む順:** 本節 → `docs/corpus.md` → `docs/spec.md`（§41 §43 §46 §50 §53 を先に）→ 9 節。表と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
 **判定者:** 各工程の成果物は、作成した本人以外が判定基準に沿って審査する。別モデルのエージェントを呼べる環境ならそれに、呼べなければ人に出す。
 **仕様は確定済み:** 9 節の決定は仕様に反映済みで、各ラウンドは コーパス → lock → 実装 の順に進む。判定に現行コンパイラを使えるのは R10 だけである。R11 以降は新形式を parse できないので、コーパスの根拠は仕様の読みだけである。
 **仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
-**過渡状態:** 本節を書いた時点で `docs/0.1.1/` の仕様・コーパス規約・追跡表は hado の語彙、コードとコーパスは shin の語彙である。R10 が解消する。
+**過渡状態:** 本節を書いた時点で `docs/` の仕様・コーパス規約・追跡表は hado の語彙、コードとコーパスは shin の語彙である。R10 が解消する。
 **コミット:** 工程ごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
 **報告:** 完了時と、依存する作業で止まったときに返す。(1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
 
 | 工程 | 成果物 | 判定 |
 |---|---|---|
-| R10 改名 | リポジトリ全体（`docs/0.1.1/ledger.md` と本文書の 1〜8 節を除く）、`tests/corpus.sha256` | 10-a〜10-d。審査は別の判定者 |
-| R11 コメント | `tests/accept` `tests/reject` `stdlib/` のヘッダ、`docs/0.1.1/corpus.md`、`crates/hado/**`、`scripts/`、lock | 11-a〜11-c |
+| R10 改名 | リポジトリ全体（`docs/ledger.md` と本文書の 1〜8 節を除く）、`tests/corpus.sha256` | 10-a〜10-d。審査は別の判定者 |
+| R11 コメント | `tests/accept` `tests/reject` `stdlib/` のヘッダ、`docs/corpus.md`、`crates/hado/**`、`scripts/`、lock | 11-a〜11-c |
 | R12 List 構文 | `tests/accept` `tests/reject` `stdlib/`、`crates/hado/**`、`scripts/`、lock | 12-a〜12-e |
 | R13 引数の条件列 | `tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、lock | 13-a〜13-d |
 
-**着手時点で赤の門番（実測）:** `cargo test` の 2 本（`parse_corpus::corpus_counts` は §50 が 58 行で拒否が 56 本、`r9_grammar` は §41 の新形式を現行パーサが読めない）。`verify-m1-corpus.sh` の 1（E516 E517 が無い）、2（§39 の `classify` が短縮形）、3（9.2 の項目に受理と拒否が無い）、7。`cargo test` の終了コードを見る `verify-m0.sh` の 2〜4、`verify-m2.sh` の 1・3・5、`verify-m3.sh` の 9、`verify-r9.sh` の R9-1。内訳は `docs/0.1.1/ledger.md` の「0.1.1 の計画」。R13 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。
+**着手時点で赤の門番（実測）:** `cargo test` の 2 本（`parse_corpus::corpus_counts` は §50 が 58 行で拒否が 56 本、`r9_grammar` は §41 の新形式を現行パーサが読めない）。`verify-m1-corpus.sh` の 1（E516 E517 が無い）、2（§39 の `classify` が短縮形）、3（9.2 の項目に受理と拒否が無い）、7。`cargo test` の終了コードを見る `verify-m0.sh` の 2〜4、`verify-m2.sh` の 1・3・5、`verify-m3.sh` の 9、`verify-r9.sh` の R9-1。内訳は `docs/ledger.md` の「0.1.1 の計画」。R13 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。
 
 ### R10 改名（shin → hado、`.shin` → `.hd`）
 
@@ -576,12 +576,12 @@ R9 の受け入れ条件:
 - `crates/shin` → `crates/hado`（`git mv`）。package 名、bin 名、workspace の members、`Cargo.lock`
 - `tests/accept` `tests/reject` `stdlib/` の全ファイルを `.hd` に `git mv`。`main.rs` の拡張子検査と usage、`build.rs` の一時ディレクトリ名、`lib.rs` の `include_str!` のパス
 - ランタイム記号 `shin_entry` `shin_alloc` → `hado_entry` `hado_alloc`。`runtime/` `runtime_print.c` `runtime_abi.rs` `emit.rs` と、記号を検査する `verify-m0.sh`
-- 門番スクリプトとテストの文字列、`README.md`、`AGENTS.md`、`docs/cranelift-0.135.md`、`docs/0.1.1/` の `corpus.md` `spec-trace.md` `spec-coverage.md`（仕様と本節は hado で書いてある）
+- 門番スクリプトとテストの文字列、`README.md`、`AGENTS.md`、`docs/cranelift-0.135.md`、`docs/` の `corpus.md` `spec-trace.md` `spec-coverage.md`（仕様と本節は hado で書いてある）
 - **lock の再生成。** `tests/corpus.sha256` はファイル名を含むので改名で必ず不一致になる。`sha256sum tests/accept/*.hd tests/reject/*.hd stdlib/*.hd` で作り直す。`AGENTS.md` の「実装の工程で更新しない」の例外を本項が与える
 
 R10 の判定:
 
-- 10-a. `grep -rIl shin --exclude-dir=.git --exclude-dir=target . | grep -v '^./docs/0.1.1/ledger.md$' | grep -v '^./docs/0.1.1/plan.md$'` が空。`plan.md` は 1〜8 節が 0.1 の記録で、10 節は改名の記述として旧名を含むので除く
+- 10-a. `grep -rIl shin --exclude-dir=.git --exclude-dir=target . | grep -v '^./docs/ledger.md$' | grep -v '^./docs/plan.md$'` が空。`plan.md` は 1〜8 節が 0.1 の記録で、10 節は改名の記述として旧名を含むので除く
 - 10-b. 全門番（m0〜m7、r9）が改名前と同じ `PASSED: n/N`、`cargo test` が同数で通過
 - 10-c. lock のハッシュ列が改名前と同一（`cut -d' ' -f1` の diff が空）。内容を変えていない証拠
 - 10-d. `hado build x.shin` が拡張子で拒否され、`hado build x.hd` が実行ファイルを作る
@@ -592,7 +592,7 @@ R10 の判定:
 
 コーパス:
 
-- 全件のヘッダ `-- spec:` `-- error:` `-- expect:` `-- expect-error:` `-- item:` `-- needs:` `-- short-circuit:` を `// ` に。`docs/0.1.1/corpus.md` のヘッダタグ表も
+- 全件のヘッダ `-- spec:` `-- error:` `-- expect:` `-- expect-error:` `-- item:` `-- needs:` `-- short-circuit:` を `// ` に。`docs/corpus.md` のヘッダタグ表も
 - `E104.hd` の本命を `#` から `--`（0.1 の記法）に。`#` は判定器のプローブに移す
 - `comment.hd` を `//` に
 
