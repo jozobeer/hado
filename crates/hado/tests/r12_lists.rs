@@ -9,7 +9,28 @@ fn list_expression(state: &mut u64, depth: usize) -> String {
     if depth == 0 { return random(state, 1000).to_string(); }
     let count = random(state, 5) as usize;
     let values = (0..count).map(|_| list_expression(state, depth - 1)).collect::<Vec<_>>();
+    if count > 1 && random(state, 2) == 1 {
+        return format!("[{}, ...[{}]]", values[..count - 1].join(", "), values[count - 1]);
+    }
     format!("[{}]", values.join(", "))
+}
+
+fn bodies(ast: &parser::Ast) -> Vec<&parser::Node> {
+    ast.items.iter().filter_map(|item| match item {
+        parser::Item::Def(def) => Some(match &def.kind {
+            parser::DefKind::Value(body) | parser::DefKind::Function { body, .. } => body,
+        }),
+        _ => None,
+    }).collect()
+}
+
+fn assert_round_trip(source: &str) {
+    let original = parser::parse_source(source, "round.hd").unwrap();
+    let printed = parser::canonical_program(&original);
+    let restored = parser::parse_source(&printed, "round.hd").unwrap();
+    assert!(!printed.contains("Cons") && !printed.contains("Nil"), "{printed}");
+    assert_eq!(bodies(&original), bodies(&restored), "{source}\n{printed}");
+    assert_eq!(parser::canonical_program(&restored), printed);
 }
 
 fn rejected(source: &str, code: &str, anchor: &str) {
@@ -29,9 +50,7 @@ fn generated_lists_round_trip_with_canonical_patterns() {
         let width = random(&mut state, 6) as usize + 1;
         let pattern = format!("[{}, ...tail]", vec!["[_, ..._]"; width].join(", "));
         let source = format!("def probe | {pattern} => 1 | 0\ndef main = {}", list_expression(&mut state, depth));
-        let printed = parser::canonical_program(&parser::parse_source(&source, "round.hd").unwrap());
-        assert!(!printed.contains("Cons") && !printed.contains("Nil"), "{printed}");
-        assert_eq!(parser::canonical_program(&parser::parse_source(&printed, "round.hd").unwrap()), printed);
+        assert_round_trip(&source);
     }
 }
 
