@@ -14,20 +14,20 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
+    let input = std::path::Path::new(path);
+    if input.extension().and_then(|extension| extension.to_str()) != Some("hd") {
+        eprintln!("input must have the .hd extension");
+        return ExitCode::from(1);
+    }
+    let project = match hado::project::Project::load(input) {
+        Ok(project) => project,
         Err(error) => {
-            eprintln!("{path}:1:1: error: {error}");
+            eprintln!("{error}");
             return ExitCode::from(1);
         }
     };
     if build {
-        let input = std::path::Path::new(path);
-        if input.extension().and_then(|s| s.to_str()) != Some("hd") {
-            eprintln!("build input must have the .hd extension");
-            return ExitCode::from(1);
-        }
-        return match hado::build::executable(&source, path, &input.with_extension("")) {
+        return match project.build(&input.with_extension("")) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
         };
     }
     if dump {
-        return match hado::dump_mono(&source, path) {
+        return match project.dump_mono() {
             Ok(output) => {
                 print!("{output}");
                 ExitCode::SUCCESS
@@ -47,7 +47,7 @@ fn main() -> ExitCode {
             }
         };
     }
-    match hado::check_source(&source, path) {
+    match project.check() {
         Ok(checked) => {
             if print {
                 println!("{}", checked.main);

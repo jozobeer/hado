@@ -250,6 +250,17 @@ pub struct Ast {
 }
 
 impl Ast {
+    pub(crate) fn append(&mut self, other: Self) {
+        self.items.extend(other.items);
+        self.branches_after_fallback.extend(other.branches_after_fallback);
+        self.branch_anchors.extend(other.branch_anchors);
+        self.equality_anchors.extend(other.equality_anchors);
+        self.qualified_type_anchors.extend(other.qualified_type_anchors);
+        self.written_list_patterns.extend(other.written_list_patterns);
+        self.long_condition_functions.extend(other.long_condition_functions);
+    }
+
+
     /// Body of the `def main = <expr>` value definition, if present.
     pub fn main(&self) -> Option<&Node> {
         self.items.iter().find_map(|item| match item {
