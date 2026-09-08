@@ -112,7 +112,9 @@ fn do_requires_a_rail_and_records_require_a_candidate() {
 
 #[test]
 fn unused_bindings_include_parameters_and_nested_patterns() {
-    assert_eq!(check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.hd").err().unwrap().code.as_deref(), Some("E100"));
+    let error = check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.hd").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E519"));
+    assert_eq!((error.line, error.col), (1, 7));
     for (source, name) in [
         ("def f used unused => used + 1\ndef main = f 1 2", "unused"),
         ("def main = fn(used, unused => used + 1) 1 2", "unused"),

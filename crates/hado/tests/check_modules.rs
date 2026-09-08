@@ -30,7 +30,7 @@ fn signature_matching_rejects_missing_and_mismatched_values() {
 #[test]
 fn abstract_types_hide_record_representation() {
     let prefix = "module S type T def make(x: Int): T\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }";
-    assert!(check_source(&format!("def main = M.make 1\n{prefix}"), "t").is_ok());
+    assert_eq!(check_source(&format!("def main = M.make 1\n{prefix}"), "t").err().unwrap().code.as_deref(), Some("E705"));
     let source = format!("def main = let item = M.make 1 -> item.value\n{prefix}");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
@@ -116,7 +116,7 @@ fn checked_modules_retain_internal_constructor_tags_and_schemes() {
 
 #[test]
 fn internal_record_schemas_use_qualified_result_types() {
-    let source = "def main = A.make 1\nmodule S type T def make(x: Int): T\nimplement S as A type Representation = { value: Int } type T = Representation def make x => { value = x }";
+    let source = "def main = A.get (A.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as A type Representation = { value: Int } type T = Representation def make x => { value = x } def get item => item.value";
     let checked = check_source(source, "t").unwrap();
     let mut inference = hado::types::Inference::default();
     let ty = inference.instantiate(&checked.module_records["A.Representation"].1);

@@ -141,5 +141,5 @@ fn implementation_local_data_requires_a_reachable_use() {
             check_source(&source, "local-data.hd").unwrap();
         }
     }
-    check_source("def main = M.make 1\nmodule S type T def make(x: Int): T\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x }", "local-data.hd").unwrap();
+    check_source("def main = M.get (M.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x } def get item => item.value", "local-data.hd").unwrap();
 }

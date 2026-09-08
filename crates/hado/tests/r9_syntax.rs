@@ -138,7 +138,6 @@ fn incomplete_grammar_forms_are_rejected() {
     for source in [
         "def main = fn(=> 1)",
         "def f(x) => x",
-        "def f _ => 1",
         "module S def f x",
         "module S def f(x: Int)",
         "def main = {}",
@@ -153,6 +152,7 @@ fn incomplete_grammar_forms_are_rejected() {
             "{source}"
         );
     }
+    assert!(parse_source("def f _ => 1", "generated").is_ok());
 }
 
 #[test]

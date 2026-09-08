@@ -182,10 +182,12 @@ fn equality_inspects_recursive_payloads_without_looping() {
 }
 
 #[test]
-fn phantom_function_parameter_does_not_make_a_value_contain_a_function() {
+fn phantom_type_parameters_are_rejected_for_function_instantiations() {
     let source =
         "type T Token = | Token\ndef eq (x: Fn(Int => Int) Token) => x == x\ndef main = eq Token";
-    assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
+    let error = check_source(source, "t").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E518"));
+    assert_eq!((error.line, error.col), (1, 6));
 }
 
 #[test]
