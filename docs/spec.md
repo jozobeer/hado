@@ -1,4 +1,4 @@
-# 言語仕様案 v0.1.1
+# 言語仕様案 v0.1.2
 
 ## 1. 設計思想
 
@@ -75,7 +75,7 @@ x
 
 # 3. 名前付き定義
 
-トップレベルやmodule内の名前付き定義には `def` を使う。
+外（第54節）や `implement` 節の名前付き定義には `def` を使う。
 
 値の定義：
 
@@ -163,7 +163,7 @@ let = local binding
 
 `let` の本体は `->` の右側に続く継続である。`let` は値を束縛するために使い、成功・失敗の伝播は行わない。
 
-プログラムの入口はトップレベルの `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。
+プログラムの入口は、入口ファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。
 
 `main` の型は単相で、Fn を含んではならない。`def main = Nil` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702 とする。
 
@@ -191,15 +191,15 @@ binding -> continuation
 
 となる。
 
-`let?` と `do?` も同じ継続構文を使う。
+失敗を伝播する `let p? =` と `do` も同じ継続構文を使う。
 
 ```ocaml
-let? user = find_user id ->
+let user? = find_user id ->
 use user
 ```
 
 ```ocaml
-do? validate input ->
+do validate input ->
 next
 ```
 
@@ -588,7 +588,7 @@ if value
 
 非網羅branchはwarningではなくerror。
 
-`let` と `let?` のパターンにも同じ規則を当てる（第22節）。
+`let` のパターンにも同じ規則を当てる。`?` の有無を問わない（第22節）。
 
 ---
 
@@ -694,18 +694,18 @@ unchecked exceptionもv0.1では持たない。
 
 ---
 
-# 22. `let?`
+# 22. `let p? =`
 
-成功値を使いたいROPには `let?` を使う。
+成功値を使いたいROPには、パターンの末尾に `?` を付けた `let` を使う。
 
 ```ocaml
 def load_account id =>
-  let? user = find_user id ->
-  let? account = find_account user.account_id ->
+  let user? = find_user id ->
+  let account? = find_account user.account_id ->
   Ok(account)
 ```
 
-`let?` は、右辺のOptionまたはResultを評価し、成功値をpatternに束縛する。
+`let p? = e` は、右辺 `e` のOptionまたはResultを評価し、成功値をpattern `p` に束縛する。`?` はpattern全体の末尾に 1 つ置く（`let { name }? = ...`、`let Id(n)? = ...`）。空白は意味を持たないので `let x ? = e` も同じ形である。
 
 Resultの場合：
 
@@ -727,28 +727,28 @@ None
   => Noneをそのまま伝播
 ```
 
-`let?` の右辺は、対応するOptionまたはResult型でなければならない。そうでなければコンパイルエラーとする（E303）。
+`?` を付けた `let` の右辺は、対応するOptionまたはResult型でなければならない。そうでなければコンパイルエラーとする（E303）。
 
-`let` と `let?` のパターンは、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`let Id(n) = x`）とその入れ子は一致する。
+`let` のパターンは、`?` の有無によらず、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`let Id(n) = x`）とその入れ子は一致する。
 
 ---
 
-# 23. `do?`
+# 23. `do`
 
-成功値は不要だが、失敗だけ伝播したい場合は `do?` を使う。
+成功値は不要だが、失敗だけ伝播したい場合は `do` を使う。
 
 ```ocaml
 def publish article =>
-  do? validate article ->
-  do? authorize article ->
-  do? persist article ->
+  do validate article ->
+  do authorize article ->
+  do persist article ->
   Ok()
 ```
 
 これは、
 
 ```ocaml
-let? _ = validate article ->
+let _? = validate article ->
 ...
 ```
 
@@ -757,7 +757,7 @@ let? _ = validate article ->
 そのため、
 
 ```ocaml
-let? _ = ...
+let _? = ...
 ```
 
 は禁止（E504）。
@@ -765,7 +765,7 @@ let? _ = ...
 意味は、
 
 ```text
-do? expression -> continuation
+do expression -> continuation
 ```
 
 Resultなら、
@@ -788,9 +788,7 @@ None
   => Noneを伝播
 ```
 
-`do?` は成功値を破棄することを明示するための構文であり、通常の純粋値に対しては使用できない。式が Option または Result でなければ E303 とする。
-
-`?` の無い `do` は無い。純粋値の破棄は意味を持たない（第28節）ためである。
+`do` は成功値を破棄することを明示するための構文であり、通常の純粋値に対しては使用できない。式が Option または Result でなければ E303 とする。純粋値の破棄は意味を持たない（第28節）ので、`do` に失敗を伝播しない形は無く、`?` の印も持たない。`let _? = e` の `e` が Option でも Result でもないときは、段階順（第50節）により E504 より先に E303 が当たる。
 
 ---
 
@@ -811,22 +809,22 @@ if find_user id
 canonical formは、
 
 ```ocaml
-let? user = find_user id ->
+let user? = find_user id ->
 ...
 ```
 
 成功値が不要なら、
 
 ```ocaml
-do? validate user ->
+do validate user ->
 ...
 ```
 
 責務は明確に分ける。
 
 ```text
-let? = bind + propagate
-do?  = discard success value + propagate
+let p? = bind + propagate
+do     = discard success value + propagate
 if   = meaningful domain branching
 ```
 
@@ -875,7 +873,7 @@ users
 ->   local continuation separator
 |    branch alternative / fallback marker
 |>   data flow
-?    failure-aware operation
+?    failure-aware binding (pattern suffix)
 ...  rest of a List
 ```
 
@@ -908,8 +906,8 @@ if user
 > userがGuestなら `"guest"`、Memberなら名前
 
 ```ocaml
-let? user = find_user id ->
-let? account = find_account user.account_id ->
+let user? = find_user id ->
+let account? = find_account user.account_id ->
 Ok(account)
 ```
 
@@ -934,9 +932,9 @@ next
 
 `x` が継続内で使われていないならコンパイルエラー（E505）。
 
-E505 は `let` `let?` の束縛、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第19節）。引数に `_` は書けないので、引数を使わない関数は書けない。
+E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第19節）。引数に `_` は書けないので、引数を使わない関数は書けない。
 
-未使用の判定は top-level の `def` `type` `module type` `module` にも適用する（E513）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
+未使用の判定は、外の `def` と `type`、契約、実装、`implement` 節の中の ADT と record にも適用する（E513）。契約の抽象型の実体化 `type T = User` は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
 
 ---
 
@@ -954,7 +952,7 @@ next
 成功値の破棄が意味を持つROPの場合は、
 
 ```ocaml
-do? validate input ->
+do validate input ->
 next
 ```
 
@@ -1055,49 +1053,44 @@ result
 
 ---
 
-# 34. Module Signature
+# 34. module（契約）
 
-OCamlのmodule systemの思想を取り入れる。
+OCamlのmodule systemの思想を取り入れる。`module` は契約であり、実装（第35節）とは別に宣言する。
 
-v0.1ではまず `sig` によるcontractを持つ。
+契約は `module` と名前の見出しで始まり、次の見出し（`module` か `implement`）かファイル末尾まで続く。`end` は無く、見出しは入れ子にならない。
 
 ```ocaml
-module type USER_STORE = sig
-  type T
-
-  def find(id: Int): Option<T>
-  def save(user: T): Result<Unit, Error>
-end
+module UserStore
+type T
+def find(id: Int): Option<T>
+def save(user: T): Result<Unit, Error>
 ```
 
-ここでの `Error` は prelude の constructor `Error` とは別物であり、signature を書く側が定義する型である。signature の中の型名も、struct が実装されるかどうかによらず解決される。
+ここでの `Error` は prelude の constructor `Error` とは別物であり、契約を書く側が定義する型である。契約の中の型名は、実装があるかどうかによらず解決される。
 
-signature の型宣言は本体を持たない `type T` に限る。本体を持つ型宣言は E100 とする。外に見せたい型は module の外で定義し、signature にはその名前を書く。
+契約の型宣言は本体を持たない `type T` に限る。本体を持つ型宣言は E100 とする。外に見せたい型は最初の見出しより前の「外」（第54節）で定義し、契約にはその名前を書く。
 
 abstract type：
 
 ```ocaml
-module type USER_ID = sig
-  type T
-
-  def make(value: Int): Option<T>
-  def value(id: T): Int
-end
+module UserId
+type T
+def make(value: Int): Option<T>
+def value(id: T): Int
 ```
 
-signatureの関数は、名前の直後に型変数を宣言できる。
+契約の関数は、名前の直後に型変数を宣言できる。
 
 ```ocaml
-module type OPTION = sig
-  def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
-end
+module Option
+def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
 ```
 
-宣言した型変数はその関数のsignature内だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204 とする。
+宣言した型変数はその関数の型の中だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204 とする。
 
-`val` は使わない。
+契約の中では実装の名前空間を解決しない。契約の型に `MemoryStore.T` のような実装修飾の型を書くと E204 とする。
 
-signature側もimplementation側も、
+`val` は使わない。契約側も実装側も、
 
 ```text
 def = named definition
@@ -1105,27 +1098,30 @@ def = named definition
 
 で統一する。
 
+契約への参照は `implement X as Y` の見出しだけである。実装が 1 つも無い契約は参照されていないので E513 とする。
+
 ---
 
-# 35. Module implementation
+# 35. implement（実装）
 
-v0.1 の module 実装は次の形とする。signature 注釈は必須である（E113）。
+実装は `implement X as Y` の見出しで始まる。`X` は満たす契約、`Y` は実装の名前で、どちらも省けない。契約と実装は別の名前空間（第47節）なので、1 対 1 の module は `implement UserStore as UserStore` と書く。
 
 ```ocaml
-module UserStore : USER_STORE = struct
-  type T = User
-
-  def find id =>
-    ...
-
-  def save user =>
-    ...
-end
+implement UserStore as UserStore
+type T = User
+def find id =>
+  ...
+def save user =>
+  ...
 ```
 
-struct は sig の全ての member と型を持ち、それぞれの型が一致し、sig の型変数に対して十分に多相でなければならない。満たさなければ E602 とする。struct は sig に載らない定義を持てる。sig の `type T` は外から不透明である。
+実装は契約の全ての member と型を持ち、それぞれの型が一致し、契約の型変数に対して十分に多相でなければならない。満たさなければ E602 とし、`implement` を指す。実装は契約に載らない定義を持てる。`def` に加えて本体付きの型（ADT と record）も書け、それはその実装の中だけで見える。外から `MemoryStore.Entry` のように参照すると E204 とする。
 
-抽象型の実体化で別名を展開した結果、同じ別名へ戻って実体が確定しない場合（`type T = T`、`type T = U` と `type U = T` など）は E602 とし、その module 定義の先頭を指す。名前を持つ ADT や record の再帰型は、この別名の循環とは区別する。
+型の参照 `Y.T` は、実装 `Y` の契約が宣言する抽象型 `T` を指し、外からは不透明である。`type T = User` の実体化は新しい名前を作らず、`Y.T` の中身を外に見せない。契約が宣言していない抽象型を実体化する `type U = Int` は E204 とし、`U` を指す。契約で修飾した `X.T` は無く、E204 とする。
+
+実装の中の ADT と record は実装ごとの局所名前空間にあり、2 つの実装が同名の型を持ってよい。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す。
+
+抽象型の実体化で別名を展開した結果、同じ別名へ戻って実体が確定しない場合（`type T = T`、`type T = U` と `type U = T` など）は E602 とし、その `implement` を指す。名前を持つ ADT や record の再帰型は、この別名の循環とは区別する。
 
 ```ocaml
 def name (t: UserStore.T) => t.name
@@ -1133,9 +1129,23 @@ def name (t: UserStore.T) => t.name
 
 は E601 とする。
 
-struct 内で sig からも内部からも参照されない `def` はエラーとする（E514）。
+実装の中で契約からも内部からも参照されない `def` はエラーとする（E514）。
 
-Functorやfirst-class moduleはv0.1には入れない。
+同じ契約を複数の実装が満たせる。
+
+```ocaml
+implement Store as MemoryStore
+...
+
+implement Store as FileStore
+...
+```
+
+参照は実装の名前で行う（`MemoryStore.find`）。`implement X as Y` の `X` に当たる契約が無ければ E204、実装 `Y` がどこからも参照されなければ E513 とする。
+
+0.1.1 までの `module type X = sig ... end` と `module X : SIG = struct ... end` は文法に無く、E100 となる。`sig` `struct` `end` はキーワードではない。
+
+Functorやfirst-class moduleは入れない。
 
 ---
 
@@ -1246,10 +1256,10 @@ Resultを使った処理：
 
 ```ocaml
 def create_user input =>
-  let? parsed = parse input ->
-  do? validate parsed ->
-  do? authorize parsed ->
-  let? saved = save parsed ->
+  let parsed? = parse input ->
+  do validate parsed ->
+  do authorize parsed ->
+  let saved? = save parsed ->
   Ok(saved)
 ```
 
@@ -1257,9 +1267,9 @@ def create_user input =>
 
 ```ocaml
 def delete_user id =>
-  let? user = find_user id ->
-  do? authorize_delete user ->
-  do? delete user ->
+  let user? = find_user id ->
+  do authorize_delete user ->
+  do delete user ->
   Ok()
 ```
 
@@ -1314,16 +1324,20 @@ def active_names users =>
   |> List.map (fn user => user.name)
 ```
 
-module signature：
+契約と実装：
 
 ```ocaml
-module type USER_STORE = sig
-  type T
+module UserStore
+type T
+def find(id: Int): Option<T>
+def save(user: T): Result<Unit, Error>
+def delete(user: T): Result<Unit, Error>
 
-  def find(id: Int): Option<T>
-  def save(user: T): Result<Unit, Error>
-  def delete(user: T): Result<Unit, Error>
-end
+implement UserStore as UserStore
+type T = User
+def find id => ...
+def save user => ...
+def delete user => ...
 ```
 
 ---
@@ -1337,8 +1351,8 @@ def
 def rec
 
 let
-let?
-do?
+let p? =
+do
 ->
 
 fn
@@ -1355,9 +1369,9 @@ _
 
 |>
 
-sig
-struct
 module
+implement
+as
 ```
 
 ---
@@ -1378,7 +1392,7 @@ string_escape   := "\n" | "\t" | "\\" | '\"'           これ以外は E110
 bool            := "true" | "false"
 unit            := "()"
 name            := lower (letter | digit | "_")*       値・field・引数の名前
-upper_name      := upper (letter | digit | "_")*       型・constructor・module・module type・型変数の名前
+upper_name      := upper (letter | digit | "_")*       型・constructor・契約・実装・型変数の名前
 dunder_name     := "__" name                           stdlib 限定の組み込み名（第47節）
 comment         := "//" 行末までの文字                   `--` と `#` は E104
 ```
@@ -1388,9 +1402,13 @@ comment         := "//" 行末までの文字                   `--` と `#` は
 プログラム:
 
 ```text
-program         := item*
-item            := definition | type_definition | module_type | module_impl
+program         := outer_item* section*
+outer_item      := type_definition
+                 | definition                                             入口ファイルに限る（第54節）
+section         := module_section | implement_section
 ```
+
+最初の見出し（`module` か `implement`）より前が「外」、以後が節の列である。見出しは式や項目の中に現れないので、節の終わりは次の見出しかファイル末尾で決まる。`program` は 1 ファイルの文法で、複数ファイルの結合は第54節が定める。
 
 名前付き定義:
 
@@ -1424,7 +1442,7 @@ field_type      := name ":" type_expr
 
 ```text
 type_expr       := upper_name ["<" type_expr ("," type_expr)* ">"]        型か型変数
-                 | upper_name "." upper_name                              module の抽象型（UserStore.T）
+                 | upper_name "." upper_name                              実装の抽象型（UserStore.T）
                  | "Fn" "<" fn_params "," type_expr ">"
 fn_params       := type_expr
                  | "(" type_expr ("," type_expr)* ")"
@@ -1433,18 +1451,16 @@ fn_params       := type_expr
 module:
 
 ```text
-module_type     := "module" "type" upper_name "=" "sig" sig_item* "end"
-sig_item        := "type" upper_name
+module_section  := "module" upper_name module_item*
+module_item     := "type" upper_name
                  | "def" name type_params? "(" typed_param ("," typed_param)* ")" ":" type_expr
-module_impl     := "module" upper_name ":" upper_name "=" "struct" struct_item* "end"
-struct_item     := definition
+implement_section := "implement" upper_name "as" upper_name implement_item*
+implement_item  := definition
                  | type_definition
-                 | "type" upper_name "=" type_expr                        sig の抽象型の実体化に限る
+                 | "type" upper_name "=" type_expr                        契約の抽象型の実体化に限る
 ```
 
-sig の `type` は本体を持たない（E100）。sig の `def` は全ての引数と戻りに型を書く。
-
-v0.1 の `module` と `module type` はトップレベルでのみ宣言できる。`struct` 内の入れ子宣言は E100 とし、内側の `module` を指す。
+契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書く。`as` はキーワードで、名前には使えない。
 
 式（優先順位の低い方から）:
 
@@ -1463,7 +1479,7 @@ postfix         := primary ("." name)*                                     field
 primary         := int | float | char | string | bool | unit
                  | name
                  | dunder_name                                            呼び出しの先頭に限る（E203）
-                 | upper_name "." name                                    module の値（List.map）
+                 | upper_name "." name                                    実装の値（List.map）
                  | constructor_expr
                  | record_expr
                  | list_expr
@@ -1483,8 +1499,8 @@ list_expr       := "[" "]"
 
 ```text
 binding         := "let" pattern "=" expression "->" expression
-rail_binding    := "let?" pattern "=" expression "->" expression
-rail_discard    := "do?" expression "->" expression
+rail_binding    := "let" pattern "?" "=" expression "->" expression
+rail_discard    := "do" expression "->" expression
 lambda          := "fn" parameters "=>" expression
                  | "fn" parameters condition_arm+ pattern_fallback        第53節
                  | "fn" pattern_arm+ pattern_fallback?                    第52節
@@ -1621,15 +1637,17 @@ def rec map values f =>
 
 パターンでは `...` の後は名前か `_` である。`[x, ...xs]` は先頭と残りを束縛し、`[x, ..._]` は先頭だけを束縛する。
 
+`...` の後ろに要素を置く形（`[...init, last]`、`[first, ...middle, last]`）は持たない。cons list は末尾に O(1) で触れず、照合の中に走査と `init` `middle` の割り当てが隠れるためである。末尾が要るときは `List.reverse` してから先頭で照合する。
+
 `Nil` と `Cons` を利用者のコードに書くことは冗長である。式に書けば E510、パターンに書けば E516 とする。`List` 型の定義は prelude が持ち、constructor は糖衣の展開先としてだけ存在する。
 
 ---
 
 # 47. 名前空間
 
-名前空間は型・module・constructor・値の 4 つとする。どの名前空間でも解決できない名前の参照は E204 とする。`Option<T>`（型）と `Option.map`（module）は共存する。
+名前空間は型・契約・実装・constructor・値の 5 つとする。どの名前空間でも解決できない名前の参照は E204 とする。`Option<T>`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前は契約、`.` の左の名前は実装として解く。
 
-型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
+型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record は、その実装だけの局所的な型の空間にあり、実装同士の同名は E205 にならない。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す（第35節）。修飾した参照 `A.B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
 prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照できる。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。
 
@@ -1647,9 +1665,9 @@ prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照で�
 
 # 49. prelude
 
-言語が名前で解決する型は `Option` `Result` `List` `DivisionError` とする。`/` の戻り型、`let?` の対象、List リテラルの展開先に用いる。
+言語が名前で解決する型は `Option` `Result` `List` `DivisionError` とする。`/` の戻り型、`let p? =` と `do` の対象、List リテラルの展開先に用いる。
 
-prelude の各 module は `module X : SIG = struct ... end` の形で書く。第35節の規則に従う。
+prelude の各 module は、外の型と `module X` と `implement X as X` を 1 ファイルに置く形で書く。第34節と第35節の規則に従う。
 
 prelude は組み込みを次の形で包む。
 
@@ -1681,7 +1699,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 
 拒否コーパスは次のコードで照合する。
 
-検査は 字句 → 構文 → 名前解決 → 型 → 網羅性 → 冗長 → 単相化 の順に走る。1 つのプログラムに複数の欠陥があるとき、報告するのはこの順で最初の段階に当たる 1 件である。同一段階に 2 つ以上あるときは、アンカー位置のソース順で先のものを報告する。アンカーは規則が名指す最小の構文要素の先頭で、表の「アンカー」列に定める。「節」列は主となる節を 1 つ書き、拒否コーパスの `-- spec:` はこれと一致させる。コードの百の位は段階に対応する（E1xx 字句と構文、E2xx 名前解決、E3xx 型、E4xx 網羅性、E5xx 冗長、E6xx module の型、E7xx 単相化）。
+検査は 字句 → 構文 → 名前解決 → 型 → 網羅性 → 冗長 → 単相化 の順に走る。1 つのプログラムに複数の欠陥があるとき、報告するのはこの順で最初の段階に当たる 1 件である。同一段階に 2 つ以上あるときは、アンカー位置のソース順で先のものを報告する。アンカーは規則が名指す最小の構文要素の先頭で、表の「アンカー」列に定める。「節」列は主となる節を 1 つ書き、拒否コーパスの `// spec:` はこれと一致させる。診断は `パス:行:列: error[コード]: 説明` の 1 行で、パスはアンカーを含むファイルである。コードの百の位は段階に対応する（E1xx 字句と構文、E2xx 名前解決、E3xx 型、E4xx 網羅性、E5xx 冗長、E6xx module の型、E7xx 単相化）。
 
 | コード | 短い名前 | 節 | 段階 | アンカー |
 |---|---|---|---|---|
@@ -1698,24 +1716,23 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E110 | string-escape-form | §43 | 字句 | `\` |
 | E111 | char-literal-form | §43 | 字句 | `'` |
 | E112 | int-literal-range | §43 | 字句 | リテラル |
-| E113 | missing-signature | §35 | 構文 | `module` |
 | E201 | implicit-recursion | §4 | 名前解決 | 自分を参照する名前 |
 | E202 | dunder-in-user | §47 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §47 | 名前解決 | `__` 名 |
 | E204 | unbound-name | §47 | 名前解決 | 名前 |
-| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前 |
+| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節 |
 | E206 | entry-form | §5 | 名前解決 | `def main`。無ければ 1:1 |
 | E207 | rec-cycle-value | §4 | 名前解決 | 閉路に含まれる値定義の `def` |
 | E208 | missing-rec | §4 | 名前解決 | `rec` の無い `def` |
 | E301 | arity-mismatch | §8 | 型 | 適用の先頭 |
 | E302 | recursive-type-arg | §10 | 型 | 宣言と異なる型引数 |
-| E303 | rail-type | §22 | 型 | `let?` `do?` の右辺の式 |
+| E303 | rail-type | §22 | 型 | `let p? =` と `do` の右辺の式 |
 | E304 | record-ambiguous | §12 | 型 | record 式か record パターンの `{`。型が未確定の field 参照では参照式の先頭 |
 | E305 | type-mismatch | §9 | 型 | 型が食い違った式の先頭。適用の引数については下記 |
 | E306 | occurs-check | §9 | 型 | 同上 |
 | E307 | poly-recursion | §4 | 型 | 再帰呼び出しの先頭。間接呼び出しの位置を追跡できない場合は再帰関数の `def` の先頭（§4） |
 | E401 | missing-cond-fallback | §15 | 網羅性 | `if`。第53節の形では `def` か `fn` |
-| E402 | non-exhaustive | §18 | 網羅性 | `if`。`let` `let?` ではそのパターン |
+| E402 | non-exhaustive | §18 | 網羅性 | `if`。`let` ではそのパターン |
 | E403 | unreachable-branch | §31 | 網羅性 | 到達不能な腕の `|` |
 | E404 | fallback-not-last | §31 | 網羅性 | fallback より後の腕の `|` |
 | E405 | duplicate-pattern | §32 | 網羅性 | 重複する 2 番目の腕の `|` |
@@ -1733,12 +1750,12 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E511 | cond-to-literal-pattern | §16 | 冗長 | `if`。第53節の形では `def` か `fn` |
 | E512 | top-var-pattern | §16 | 冗長 | 変数パターン |
 | E513 | unused-toplevel | §27 | 冗長 | 未使用の宣言の先頭 |
-| E514 | unused-struct-def | §35 | 冗長 | `def` |
+| E514 | unused-implement-def | §35 | 冗長 | `def` |
 | E515 | if-on-sole-parameter | §52 | 冗長 | `def` か `fn` |
 | E516 | list-pattern-form | §46 | 冗長 | パターンの `Cons` か `Nil` |
 | E517 | if-chain-on-parameters | §53 | 冗長 | `def` か `fn` |
 | E601 | opaque-type | §35 | 型 | field access の `.` |
-| E602 | signature-mismatch | §35 | 型 | `module` |
+| E602 | contract-mismatch | §35 | 型 | `implement` |
 | E701 | main-polymorphic | §5 | 単相化 | `def main` |
 | E702 | main-contains-fn | §5 | 単相化 | `def main` |
 | E703 | eq-on-fn | §45 | 単相化 | 演算子 |
@@ -1818,3 +1835,19 @@ def classify score
 引数名の直後の `|` は常に条件列であり、pattern 分岐にはならない。`def unwrap x | Some(y) => y | 0` の `Some(y)` は式として読まれ、`y` が E204 になる。引数を pattern で分岐する関数は第52節の形で書く。
 
 本体が条件列ちょうどである関数を `=> if` を付けて書くことは冗長であり E517 とする。引数の数と型注釈の有無によらず当てる。`let` などの継続を挟んだ後に条件列が来る関数は対象外である。
+
+---
+
+# 54. 複数ファイル
+
+プログラムは、`hado build` か `hado check` に渡した入口ファイルと、同じディレクトリにある全ての `.hd` `.hdi`、および prelude からなる。サブディレクトリと検索パスは無い。ディレクトリのファイルは参照の有無によらず全て読み、全ての検査を受ける。
+
+各ファイルは第41節の `program` の形で、プログラムはその和である。外の型と節はファイルの境界を越えて 1 つの名前空間に入る。ファイルの中身は、最初の見出しより前の「外」と、見出しで始まる節の列である。外に置けるのは本体付きの型で、プログラム全体で修飾なしに見える。入口ファイルの外にはさらに `def` を置け、`main` もここに置く。入口以外のファイルの外に `def` があれば E100 とし、その `def` を指す。入口に渡せるのは `.hd` だけで、`.hdi` を渡すと CLI が拡張子で拒否する（診断ではない）。
+
+`.hd` には `module` と `implement` の両方の節を置ける。`.hdi` には外の型と `module` の節だけを置け、`implement` があれば E100 とし、その `implement` を指す。`.hdi` は契約だけを置くファイルである。契約の中では実装の名前空間を解決しない（第34節）ので、`.hdi` から実装を参照する経路は無い。
+
+ファイル名は自由で、名前はソースの見出しだけで決まる。1 ファイルに 1 つの契約か実装を置き、ファイル名をその名前の snake_case にするのを慣習とする。
+
+全ての節はプログラム全体の top-level である。同じ名前空間の同名の宣言はファイルをまたいでも E205 とし、2 回目の宣言を指す。ファイルをまたぐ順序は、入口ファイルを先、残りをパスのバイト順とする。第50節の「アンカー位置のソース順」は、ファイルの順序、行、列の辞書式で比べる。実装の無い契約と参照されない実装は E513 とする（第34節、第35節）。
+
+`hado check` に入口以外のファイルを渡すと、そのファイルが入口として扱われ、ファイルの順序もそれを先頭に組み直す。本来の入口ファイルは外の `def` で E100 になり、アンカーはそのファイルの最初の外の `def`、診断のパスはそのファイルである。

@@ -37,13 +37,13 @@ awk -F '|' '
     }
 ' "$TMPD/sec50.txt" >"$TMPD/codes.tsv"
 
-# --- shared: corpus item names (coverage column extraction, 2.2 and 9.2 rows) ---
+# --- shared: corpus item names (coverage column extraction, 2.2, 9.2 and 11.2 rows) ---
 awk -F '|' '
     {
         t=$2; name=$3
         gsub(/^ +| +$/, "", t)
         gsub(/^ +| +$/, "", name)
-        if (t != "2.2" && t != "9.2") next
+        if (t != "2.2" && t != "9.2" && t != "11.2") next
         if (name == "" || name == "項目名") next
         print name
     }
@@ -140,12 +140,12 @@ else
     fail 2 "sec39-examples:$c2_reasons"
 fi
 
-# --- check 3: accept covers all items of plan 2.2 and 9.2; reject covers all but the 2 exempt ---
+# --- check 3: accept covers all items of plan 2.2, 9.2 and 11.2; reject covers all but the 2 exempt ---
 c3_reasons=""
 n_items=$(wc -l <"$TMPD/items22.txt" | tr -d ' ')
 n_plan=$(awk -F '|' '
-    /^### 2\.2/ || /^### 9\.2/ { p=1; next }
-    /^### 2\.3/ || /^### 9\.3/ { p=0 }
+    /^### 2\.2/ || /^### 9\.2/ || /^### 11\.2/ { p=1; next }
+    /^### 2\.3/ || /^### 9\.3/ || /^### 11\.3/ { p=0 }
     p {
         name=$2
         gsub(/^ +| +$/, "", name)

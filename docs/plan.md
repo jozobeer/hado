@@ -1,4 +1,4 @@
-# 開発計画 v0.1 → v0.1.1
+# 開発計画 v0.1 → v0.1.2
 
 対象は `docs/spec.md`（以下「仕様」）。仕様の節番号は、M1 で改訂する前の現行版を指す。
 
@@ -668,3 +668,213 @@ R13 の終了時に `git tag v0.1.1` を打つ。
 ### スコープ外
 
 9.3 の項目と 6 節の「v0.2 へ保留」。warning の導入。
+
+## 11. v0.1.2 の範囲と決定（2026-09-08）
+
+`docs/wants.md` に残った 2 項目（ファイル名 module、`let value? =`）と 9.3 の 4 項目を、grilling（30 問）で確定した。経緯は `docs/ledger.md` の「0.1.2 の計画」にある。仕様 `docs/spec.md` は本節を反映済み。2.1〜2.3、7 節、9 節と食い違う箇所は本節が優先する。
+
+判断基準は 7 節と 9 節と同じ。拒否か許容かで迷ったら拒否し、新機能は最小形で入れる。
+
+### 11.1 決定
+
+| ID | 論点 | 決定 | 仕様の節 |
+|---|---|---|---|
+| Q1 | 範囲 | 9.3 の 4 項目を全て検討する。結果は入れる 2、やらない 2（11.3） | — |
+| Q2 | module の探索 | 入口ファイルと同じディレクトリ。サブディレクトリと検索パスは無い。Q16 で「全て読む」に改めた | §54 |
+| Q3 | ファイル名と module 名 | 当初は UpperCamel → snake_case の導出。Q19 で削除し、名前は見出しだけで決める | §54 |
+| Q4〜Q8 | 契約の書き方 | `.hdi` は残す。契約ファイルは実装を知らず、満たす契約は実装側が宣言する | §34, §54 |
+| Q9 | 1 ファイル 1 module | 慣習とする。ファイル内に複数の節を置ける | §54 |
+| Q10, Q12 | キーワード | `module`（契約）と `implement`（実装）。見出しの足場 `module type X = sig ... end` と `module X : SIG = struct ... end` が消える。型注釈の `:` と実体化の `=` は残る | §34, §35, §40 |
+| Q11 | 契約の無い `.hd` | 入口ファイルだけ。入口の外に `def` と `main` を置く | §54 |
+| Q13 | 1 対 1 の宣言 | 省かない。`.hd` の節は必ず見出しで始まる | §35 |
+| Q14 | 節形式 | 見出しは `module X` と `implement X as Y`。次の見出しかファイル末尾まで本文。`end` と入れ子は無い | §34, §41 |
+| Q15 | 契約の型 | 抽象型 `type T` のみ（7 節 Q35 のまま） | §34 |
+| Q16 | 外の型 | 最初の見出しより前に本体付きの型を置き、修飾なしで全体に見える。ディレクトリの `.hd` `.hdi` は全て読む | §41, §54 |
+| Q17 | 節の可視性 | 全ての節は top-level。`as` は必須 | §35, §54 |
+| Q18 | 1 対 1 の名前 | `implement UserStore as UserStore`。契約と実装は別の名前空間 | §35, §47 |
+| Q19 | `.hdi` | 見出しを書く。`module` 節と外の型だけを置ける。ファイル名は自由 | §54 |
+| Q20 | 外の `def` | 入口ファイルだけ。他は E100 | §54 |
+| Q21 | 旧構文 | E100。専用コードは足さない | §35 |
+| Q22 | コーパスの単位 | 1 ケース 1 ディレクトリ（`tests/accept/classify/main.hd`） | — |
+| Q23 | `let?` `do?` | `let p? = e ->` と `do e ->`。`?` はパターン末尾に 1 つ。旧形は E100 | §22, §23, §26 |
+| Q24 | List の中間展開 | やらない（11.3） | §46 |
+| Q25 | 名前あり + `\|` の専用診断 | やらない（11.3） | — |
+| Q26 | ラウンド | R14 `let p? =` → R15 ディレクトリ化 → R16 節構文 → R17 複数ファイル | — |
+| Q28 | `implement` 節の本体付きの型 | 書ける。その実装の中だけで見える | §35 |
+| Q29 | `.hdi` の外の型 | 書ける。規則は `.hd` と同じ | §54 |
+| Q30 | 入口ファイルの節 | 置ける。入口の特別扱いは「外に `def` を置ける」だけ | §54 |
+
+Q27 は一覧の確認。
+
+### 11.2 仕様の項目
+
+コーパスの `item:` タグに使う項目名。2.2 と 9.2 の項目に加える。
+
+| 項目 | 仕様の節 | 内容 |
+|---|---|---|
+| 節構文 | §34, §35, §41, §54 | `module X` と `implement X as Y` の見出し。外の型。`.hdi`。ディレクトリ全体を読む |
+| let p? = | §22, §23 | `let p? = e ->` と `do e ->`。旧形 `let?` `do?` は E100 |
+
+### 11.3 やらないこと
+
+- List パターンの中間展開 `[first, ...middle, last]` と末尾展開 `[...init, last]`。cons list は末尾に O(1) で触れず、走査と割り当てが照合の中に隠れる。cons list を持つ OCaml、Haskell、Elixir、F# も先頭マッチしか持たない。List の表現を変える最適化をした後に再考する
+- `def f x | Some(y) => ...` への専用診断。E204 が `y` を指すので止まる位置は正しい。足さない
+- 6 節の「効果と I/O を入れるときの、値を捨てる `do`」は、`do` が失敗の伝播を意味するようになったので、入れるときに別の綴りを決める
+
+### 11.4 commander が置いた細則（可逆。異議があれば戻す）
+
+- ファイルをまたぐ順序は、入口ファイルを先、残りをパスのバイト順。E205 の「2 回目」と §50 の「ソース順」はこの順で比べる
+- `?` は独立したトークンで、空白は意味を持たない（7 節 Q36）ので `let x ? = e` も受理する
+- E113（missing-signature）は新構文で発生しないので表から削る。番号は欠番のままにする。§50 の行数は 57
+- E514 の短い名前を `unused-struct-def` から `unused-implement-def` に、E602 を `signature-mismatch` から `contract-mismatch` に変える。`struct` と signature が仕様の語彙に無いため
+- 診断の形式は現行の `パス:行:列: error[コード]: 説明` のまま。§50 に書いた。位置摂動プローブはファイルの次元を足す
+- 型の参照 `Y.T` は実装 `Y` の契約の抽象型で不透明。実装の中の ADT・record は外から E204。契約で修飾した `X.T` は無い（E204）
+- 契約の中では実装の名前空間を解決しない（E204）。契約の参照は `implement` の見出しだけなので、「参照されない契約」と「実装の無い契約」は同じ
+- 未使用の型は外でも `implement` 節の中でも E513。`implement` 節の `def` は E514
+- 契約に無い抽象型の実体化 `type U = Int` は E204。実装の中の ADT・record は実装ごとの局所名前空間で、外の型や抽象型と同名なら E205。修飾参照の E204 は解決できない最初の名前を指す。E513 の対象に実装の中の ADT・record を含め、実体化は含めない
+- `hado check` に入口以外のファイルを渡すと、本来の入口ファイルが外の `def` で E100 になる。§54 に書いた
+
+## 12. R14〜R17 の手順書
+
+この節を実行するエージェント向けの手順書。11 節の決定を実行する。R14 から R17 まで表の順に進める。
+
+**読む順:** 本節 → `docs/corpus.md` → `docs/spec.md`（§22 §23 §34 §35 §41 §54 を先に）→ 11 節。表と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
+**判定者:** 各工程の成果物は、作成した本人以外が判定基準に沿って審査する。別モデルのエージェントを呼べる環境ならそれに、呼べなければ人に出す。
+**門番:** `scripts/verify-*.sh` の全て。着手時点は m0、m1-spec、m1-corpus、m2〜m7、r9、r11〜r13 の 13 本で、R14、R16、R17 が verify-r14、r16、r17 を足す（R15 は判定器を持たない）。「全門番が通過」は、その時点の全本が終了コード 0 で、`cargo test --offline --no-fail-fast` が 0 failed の意味である。
+**仕様は確定済み:** 11 節の決定は仕様に反映済みで、各ラウンドは コーパス → lock → 実装 の順に進む。現行コンパイラで判定できるのは R15 だけである。R14 と R16 は新形式を parse できず、R17 はディレクトリを読めないので、コーパスの根拠は仕様の読みだけである。
+**仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
+**過渡状態:** 本節を書いた時点で `docs/` の仕様・追跡表・対応表は 0.1.2 の語彙、コードとコーパスと stdlib と `docs/corpus.md` の配置説明は 0.1.1 の語彙である。R14〜R17 が解消する。
+**コミット:** 工程ごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
+**報告:** 完了時と、依存する作業で止まったときに返す。(1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
+
+| 工程 | 成果物 | 判定 |
+|---|---|---|
+| R14 `let p? =` と `do` | `tests/accept` `tests/reject` `stdlib/result.hd`、`crates/hado/**`、`scripts/`、lock | 14-a〜14-d |
+| R15 ディレクトリ化 | `tests/accept/*/main.hd` `tests/reject/*/main.hd`、`crates/hado/tests/**`、`scripts/`、`docs/corpus.md`、`docs/spec-trace.md`、lock | 15-a〜15-c。審査は別の判定者 |
+| R16 節構文 | `tests/accept` `tests/reject` `stdlib/`、`crates/hado/**`、`scripts/`、lock | 16-a〜16-e |
+| R17 複数ファイル | `tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、`docs/corpus.md`、lock | 17-a〜17-d |
+
+**着手時点で赤の門番（実測）:** 12 節の末尾「着手時点の実測」に置く。R17 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。
+
+### R14 `let p? =` と `do`
+
+仕様は §6 §18 §22 §23 §24 §26 §27 §28 §39 §40 §41 §49 §50 に反映済み。
+
+コーパス:
+
+| ファイル | 変更 | 根拠 |
+|---|---|---|
+| `create_user.hd` `delete_user.hd` | `let? x =` → `let x? =`、`do? e` → `do e` | §22, §23 |
+| `E303.hd` `E504.hd` | 同上。期待するコードは維持 | §22, §23 |
+| `stdlib/result.hd` | 同上 | §49 |
+| 受理の新設 `rail_forms.hd` | record パターンと constructor パターンに `?` を付けた `let`、`do` の連鎖、`main` で実行。`// spec: §22`、`// expect:`（実行値）、`// item: let p? =` | §22, §23 |
+| 拒否の `item:` | `E303.hd` に `// item: let p? =` を付ける | §22 |
+| `E113.hd` | 削除。§50 の行数は 57 で、E1xx は 13 本。E113 は新構文で発生しないので、コーパスの削除を先に行う（実装の削除は R16） | §50 |
+
+実装の注意（決定ではない）:
+
+- lexer: `?` を独立したトークンにする。`let?` は `let` `?` に分かれ、`?` の位置でパターンが無いので E100 になる。`do?` も `?` で E100
+- parser: `let pattern "?" "="`。AST は `?` の有無を持つ。正規形の印字は `let p? =`
+- 文法生成器（`r9_grammar`）の EBNF を §41 に合わせる。§41 の `"?"` と `module_item` の記法を生成器が読めなければ、生成器側を直す（parser の拒否と取り違えない）
+- E508 のメッセージ文（`use let? or do?`）と、それを引用する `README.md` の例を新形に
+
+R14 の判定:
+
+- 14-a. 全門番と `cargo test` が通過。ただし節構文に依存する次の赤は R16 まで残る: `cargo test` の `r9_grammar`（§41 の節形式を生成する）、`verify-r9.sh` の R9-1、`verify-m1-corpus.sh` の 2（§39 の `module UserStore`）と 3（節構文のペア）、および `cargo test` の終了コードを見る m0 の 2〜4、m1-corpus の 7、m2 の 1 と 5、m3 の 9、m7 の 3。これ以外の赤があれば R14 の欠陥
+- 14-b. 判定器（`scripts/verify-r14.sh`）: (1) 名前・record・constructor・入れ子のパターンを乱数で生成し、`let p? = e ->` の parse → 正規形印字 → 再 parse の往復。`let p ? =` は同じ木。(2) `let? x = e ->` と `do? e ->` は E100 でアンカーが `?`。(3) `let x? = 純粋値` と `let _? = 純粋値` は E303、`let _? = e`（`e` は Option か Result）は E504、`do 純粋値` は E303。(4) `let p? =` と `do` の連鎖を実行し、成功と失敗の両経路で判定器側の値と一致。(5) 網羅的でないパターン（`let Some(x)? = e`）を生成して E402 で、アンカーはそのパターン
+- 14-c. 審査合格後に lock を更新
+- 14-d. 位置摂動プローブが E303 E504 に当たる
+
+### R15 コーパスのディレクトリ化
+
+機械的な変更だけを含む。振る舞いの変更を混ぜない。
+
+- `tests/accept/X.hd` → `tests/accept/X/main.hd`、`tests/reject/EXXX.hd` → `tests/reject/EXXX/main.hd`（`git mv`）
+- `crates/hado/tests/**` と `scripts/*.sh` の `tests/accept/*.hd` `tests/reject/*.hd` を `tests/accept/*/main.hd` `tests/reject/*/main.hd` に。ケース名はディレクトリ名から取る
+- `docs/corpus.md` の配置説明を「1 ケース 1 ディレクトリ。ヘッダタグは `main.hd` に置く」に。`docs/spec-trace.md` のコーパスのパス（`tests/reject/E111.hd` など）も新しい配置に
+- **lock の再生成。** `sha256sum tests/accept/*/main.hd tests/reject/*/main.hd stdlib/*.hd`。`AGENTS.md` の「実装の工程で更新しない」の例外を本項が与える（R10 と同じ）
+
+R15 の判定:
+
+- 15-a. 各門番スクリプトの末尾の `PASSED: n/N` と、`cargo test` の passed / failed の数が、R14 終了時と同一。R14 で残った赤は同じ赤のまま
+- 15-b. lock のハッシュ列が R14 終了時と同一（`cut -d' ' -f1` の diff が空）
+- 15-c. `tests/accept` `tests/reject` の直下に `.hd` が無く、各ディレクトリに `main.hd` がちょうど 1 つ
+
+### R16 節構文
+
+仕様は §3 §5 §27 §34 §35 §39 §40 §41 §47 §49 §50 に反映済み。このラウンドは入口ファイル 1 つの範囲で新構文を固める。ディレクトリの読み込みと `.hdi` は R17。
+
+コーパス:
+
+| ファイル | 変更 | 根拠 |
+|---|---|---|
+| `user_store/` `namespace/` `E601/` `E514/` `E602/` | 節形式に書き直す。`module type` `sig` `struct` `end` を外し、`implement X as X` に。期待するコードは維持 | §34, §35 |
+| 受理の新設 `sections/` | 外の record、`module Store`、`implement Store as MemoryStore` と `implement Store as FileStore`、`implement` 節の中だけの本体付きの型、両方を呼ぶ `main`。`// item: 節構文` | §34, §35, §41 |
+| 拒否の `item:` | `E602/` に `// item: 節構文` を付ける | §35 |
+| `stdlib/*.hd` | 外の型 + `module X` + `implement X as X` に書き直す | §49 |
+
+実装の注意（決定ではない）:
+
+- lexer: `implement` `as` をキーワードに足し、`sig` `struct` `end` をキーワードから外す
+- parser: `program := outer_item* section*`。見出しを見て節を切る。`module type` と `module X :` は文法に無いので E100 で落ちる
+- 名前解決: 契約と実装を別の名前空間に。`implement X as Y` の `X` は契約、`Y.f` の `Y` は実装。top-level は定義順に依存しない（2.2 の相互再帰）ので、`implement` が `module` より前にあってもよい
+- E513: 実装の無い契約と、参照されない実装。E204: 契約の無い `implement`。E602 のアンカーは `implement`。短い名前を E514 は `unused-implement-def`、E602 は `contract-mismatch` に
+- 外の `def` は入口ファイルなので R16 では常に許す
+- 正規形の印字は節形式
+- 門番の述語を、厳しさを保って新構文に置き換える。`verify-m3.sh` の 11（stdlib に行頭 `def` が無い）は「stdlib の `def` は全て見出しの後にある（外に `def` が無い）」に。`verify-m7.sh` の signature 検査（`module X : SIG = struct` と `module type SIG = sig` の正規表現）は `^module X$` と `^implement X as X$` の 2 行の在庫照合に。member の宣言と定義が 2 回現れる検査はそのまま
+
+R16 の判定:
+
+- 16-a. 全門番と `cargo test` が通過。R17 に依存する赤は無い
+- 16-b. 判定器（`scripts/verify-r16.sh`）: (1) 契約と実装の数と順序を乱数で生成し、parse → 正規形印字 → 再 parse の往復。`implement` が `module` より前でも同じ。(2) `module type X = sig ... end` と `module X : SIG = struct ... end` は E100。(3) 1 つの契約を 2 つの実装が満たし、両方を `main` から呼んで実行結果が判定器側の値と一致。(4) 実装の無い契約と参照されない実装は E513、契約の無い `implement` は E204、契約の本体付きの型は E100、契約の型に実装修飾 `Y.T` を書くと E204、契約に無い抽象型の実体化 `type U = Int` は E204 で `U` を指す、契約と実装の型の不一致は E602 で `implement` を指す。(5) `implement` 節の ADT・record を外から `Y.Entry` と参照すると E204、`Y.T` の field access は E601、契約で修飾した `X.T` は E204、2 つの実装が同名の内側型を持つのは適法、内側型が外の型か契約の抽象型と同名なら E205 で内側を指す。修飾参照の E204 は解決できない最初の名前を指す（`X.T` は `X`、`Y.Entry` は `Entry`）
+- 16-c. `grep -rEn '\<(sig|struct|end)\>|module type' stdlib/` が空（`append` のような部分一致は対象外）
+- 16-d. 審査合格後に lock を更新
+- 16-e. 位置摂動プローブが E602 E514 に当たる
+
+### R17 複数ファイル
+
+仕様は §54 に反映済み。
+
+コーパス:
+
+| ファイル | 変更 | 根拠 |
+|---|---|---|
+| 受理の新設 `multi_file/` | `main.hd`（外の record と `main`）、`store.hdi`（外の型と `module Store`）、`memory_store.hd` `file_store.hd`（それぞれ `implement Store as ...`）。`// item: 節構文` | §54 |
+| `docs/corpus.md` | 「複数ファイルのケースは同じディレクトリに `.hd` `.hdi` を足す。タグは `main.hd` に置く」を足す | — |
+
+拒否コーパスは §50 の行と 1 対 1 なので、複数ファイルの E100 E205 E513 は判定器のプローブに置く。
+
+実装の注意（決定ではない）:
+
+- CLI: 入口ファイルのディレクトリの `.hd` `.hdi` を全て読む。順序は入口を先、残りをパスのバイト順。`.hdi` に `implement` があれば E100。入口以外の外に `def` があれば E100
+- 診断: ファイルのパスを持つ。既存の 1 ファイルの出力形式（行と列）は入口ファイルでは変えない
+- lock はケースディレクトリの全ファイルを対象にする（`tests/accept/*/*.hd tests/accept/*/*.hdi tests/reject/*/*.hd tests/reject/*/*.hdi stdlib/*.hd`）
+
+R17 の判定:
+
+- 17-a. 全門番（m0、m1-spec、m1-corpus、m2〜m7、r9、r11〜r14、r16、r17）が終了コード 0、`cargo test` 全件通過
+- 17-b. 判定器（`scripts/verify-r17.sh`）: (1) 契約の数、実装の数、ファイルへの配り方を乱数で生成してディレクトリを作り、build して実行結果が判定器側の値と一致。(2) 同じ名前空間の同名の宣言（契約同士、実装名同士、外の型同士）を 2 ファイルに置くと E205 で、アンカーはファイル順（入口、パスのバイト順）で 2 番目。同じ契約を別名の実装で 2 ファイルから満たすのは適法。(3) どこからも参照されない `.hd` の実装は E513。(4) `.hdi` の `implement` と、入口以外の外の `def` は E100 で、診断の先頭がそのファイルのパス、行と列はその `implement` か `def`（`パス:行:列: error[E100]`）。`.hdi` を入口に渡すと CLI が拡張子で拒否。(5) 入口以外のファイルを `hado check` に渡すと、本来の入口のパスと最初の外の `def` の行・列で E100。(6) 無関係な壊れた `.hd` を同じディレクトリに置くとビルドが失敗する。(7) `.hdi` の契約の型に `Y.T` を書くと E204
+- 17-c. 審査合格後に lock を更新。lock の行数が `tests/accept` `tests/reject` `stdlib` のディスク上の `.hd` `.hdi` の実数と一致
+- 17-d. 位置摂動プローブが、複数ファイルのケースの `main.hd` 以外のファイルでも行と列を保つ
+
+R17 の終了時に `git tag v0.1.2` を打つ。
+
+### スコープ外
+
+11.3 の項目と 6 節の「v0.2 へ保留」。warning の導入。
+
+### 着手時点の実測
+
+2026-09-08、仕様と 11〜12 節を書いた後に全門番を順に回した。
+
+| 門番 | 赤のチェック | 原因 | 戻すラウンド |
+|---|---|---|---|
+| `cargo test` | `parse_corpus::corpus_counts`、`r9_grammar::grammar_generated_programs_preserve_every_declaration`（2 failed） | §50 が 57 行で拒否が 58 本（E113）。§41 の EBNF から生成した `let p? =` と節形式を現行パーサが読めない | R14（E113、`let p? =`）、R16（節形式） |
+| `verify-m0.sh` | 2 cargo-test、3 walk、4 tail（4/7） | `cargo test` の終了コードを見る | 同上 |
+| `verify-m1-spec.sh` | 1 headings（5/6） | 見出しの改名（表題 §22 §23 §34 §35）を `git diff` が削除と数える。コミット後に消える | 本ラウンドのコミット |
+| `verify-m1-corpus.sh` | 1 reject-1:1（E113 が §50 に無い）、2 sec39（`module UserStore` が受理に無い）、3 pairs（11.2 の 2 項目に受理と拒否が無い）、7 no-regressions（m0 が赤）（3/7） | 仕様先行 | R14（1、3 の let p? =）、R16（2、3 の節構文、7） |
+| `verify-m2.sh` | 1 accept-29（`cargo` が exit 101）、2 e1xx-13（E1xx が 14 → 13）、5 gates（5/8） | 同上。初回は 6 protected-files も赤だったが、実走中に文書を編集したためで、編集を止めて回すと 5/8 | R14, R16 |
+| `verify-m3.sh` | 9 gates（11/12） | m0 m1-spec m1-corpus m2 が赤 | R16 |
+| `verify-r9.sh` | R9-1 字句・全文法の往復（4/5） | §41 の新形式 | R16 |
+| `verify-m7.sh` | 3（2/3） | `cargo test` の終了コード | R16 |
+| `verify-m4`〜`m6`、`r11`〜`r13` | 無し | — | — |
