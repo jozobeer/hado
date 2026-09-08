@@ -62,7 +62,7 @@ R3・R5・R6 で繰り返し見つかった（`docs/ledger.md`）。コーパス
 |---|---|
 | `verify-m0.sh` | ワークスペース・依存・ISA flags・ランタイムの記号・walk と tail のテスト |
 | `verify-m1-spec.sh` | §1〜§42 の見出しが無傷、新設節が §43 以降、エラーコード表の形式、対応表が計画の項目と一致 |
-| `verify-m1-corpus.sh` | 拒否がコード表と 1 対 1（件数は §50 から導く）、§39 の例の被覆、2.2、9.2、11.2 の項目の被覆、`corpus.rs` が本当に列挙していること |
+| `verify-m1-corpus.sh` | 拒否がコード表と 1 対 1（件数は §50 から導く）、§39 の例の被覆、2.2、9.2、11.2、13.2 の項目の被覆、`corpus.rs` が本当に列挙していること |
 | `verify-m2.sh` | 受理全件が parse、E1xx が指定コードと指定位置で落ちる、非 E1xx が parse、式木の往復 |
 | `verify-m3.sh` | `hado check` の CLI、受理と拒否、型の往復、暗記の排除、corpus-lock |
 | `verify-m4.sh` 〜 `verify-m7.sh` | M4〜M7 の完了条件（`docs/plan.md`） |

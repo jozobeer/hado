@@ -165,7 +165,7 @@ let = local binding
 
 プログラムの入口は、根のファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。
 
-`main` の型は単相で、Fn と抽象型を含んではならない。`def main = Nil` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は不透明な `UserStore.T` を含み印字すれば中身が見えるため E705 とする。
+`main` の型は単相で、Fn と抽象型を含んではならない。`def main = []` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は不透明な `UserStore.T` を含み印字すれば中身が見えるため E705 とする。
 
 `main` の要求は実行ファイルという成果物の規則である。`main` が無い、または `main` が引数を持つプログラムは E206 とする。`main` の値の印字は第51節に従う。
 
@@ -250,7 +250,7 @@ fn(x
 )
 ```
 
-括弧で閉じるので、`List.map users fn(user => user.name)` のように並置の引数へ直接置ける。`(fn(...))` と二重に囲むのは冗長である。
+括弧で閉じるので、`List.map users fn(user => user.name)` のように並置の引数へ直接置ける。外側にさらに括弧を付ける必要は無い。
 
 ---
 
@@ -1478,8 +1478,8 @@ section         := module_section | implement_section | functor_section | apply_
 ```text
 definition      := "def" name "=" expression
                  | "def" ["rec"] name parameters return_type? "=>" expression
-                 | "def" ["rec"] name parameters return_type? condition_arm+ pattern_fallback    第53節
-                 | "def" ["rec"] name pattern_arm+ pattern_fallback?       第52節。arity は 1
+                 | "def" ["rec"] name parameters return_type? condition_arms                  第53節
+                 | "def" ["rec"] name pattern_arms                                            第52節。arity は 1
 parameters      := param+
                  | "(" typed_param ("," typed_param)* ")"
 param           := name
@@ -1579,8 +1579,8 @@ binding         := "let" pattern "=" expression "->" expression
 rail_binding    := "let" pattern "?" "=" expression "->" expression
 rail_discard    := "do" expression "->" expression
 lambda          := "fn" "(" lambda_params "=>" expression ")"
-                 | "fn" "(" lambda_params condition_arm+ pattern_fallback ")"      第53節
-                 | "fn" "(" pattern_arm+ pattern_fallback? ")"                    第52節
+                 | "fn" "(" lambda_params condition_arms ")"                     第53節
+                 | "fn" "(" pattern_arms ")"                                     第52節
 lambda_params   := param ("," param)*
                  | typed_param ("," typed_param)*
 ```
@@ -1592,15 +1592,17 @@ lambda_params   := param ("," param)*
 ```text
 branch          := boolean_branch | condition_branch | pattern_branch
 boolean_branch  := "if" expression "=>" arm_body "|" arm_body
-condition_branch := "if" condition_arm+ pattern_fallback?
+condition_branch := "if" condition_arms
+condition_arms  := (condition_arm | pattern_fallback)+
 condition_arm   := "|" expression "=>" arm_body
-pattern_branch  := "if" expression pattern_arm* pattern_fallback?
+pattern_branch  := "if" expression pattern_arms
+pattern_arms    := (pattern_arm | pattern_fallback)+
 pattern_arm     := "|" pattern "=>" arm_body
 pattern_fallback := "|" arm_body
 arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
 ```
 
-`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第20節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。fallback の有無と位置は文法では緩く読み、E401（条件列に fallback が無い）と E404（fallback の後に腕がある）は網羅性の段階で当てる（第50節）。
+`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第20節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第50節）。
 
 パターン:
 
@@ -1619,7 +1621,7 @@ field_pattern   := name
 literal_pattern := ["-"] int | ["-"] float | char | string | bool
 ```
 
-`pattern_fallback` は必ず最後に置く（E404）。pattern branch に fallback が無い場合は網羅性を検証する（E402）。
+`pattern_fallback` は必ず最後に 1 つ置く（E404）。pattern branch に fallback が無い場合は網羅性を検証する（E402）。
 
 `if` の 3 形は直後の構文で区別する。
 
@@ -1789,7 +1791,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | コード | 短い名前 | 節 | 段階 | アンカー |
 |---|---|---|---|---|
 | E100 | syntax-error | §41 | 構文 | 文法に合わない最初のトークン |
-| E101 | nested-branch | §20 | 構文 | 内側の `if` |
+| E101 | nested-branch | §20 | 構文 | 内側の `if` か `fn` |
 | E102 | rec-on-value | §4 | 構文 | `rec` |
 | E103 | float-literal-form | §43 | 字句 | リテラル |
 | E104 | comment-form | §43 | 字句 | コメントの先頭（`--` `#` の 1 文字目） |
@@ -1981,7 +1983,7 @@ def main = ... store::MemoryStore.find 1 ... store::NotFound ...
 
 `::` は名前空間の区切りにしか使わない。パスの後には契約か実装か型か constructor の大文字名が来る。値と抽象型は実装の後に `.` で続ける（`store::MemoryStore.find`、`Int store::Stack.T`）。パターンの constructor も同じ綴りで書く（`| store::NotFound => ...`）。
 
-型・契約・実装・constructor の 4 つの名前空間はディレクトリごとに持つ。E205 の「同じ名前空間の同名」はディレクトリの中で数える。`color/` と `light/` がそれぞれ `Red` を持ってもよい。サブディレクトリの名前が根の同じ名前空間の名前（外の型、契約、実装、constructor、prelude の名前）と同じなら、その中で無修飾の綴りが 2 つの候補を持つので E205 とし、サブディレクトリ側の宣言を指す。
+型・契約・実装・constructor の 4 つの名前空間はディレクトリごとに持つ。E205 の「同じ名前空間の同名」はディレクトリの中で数える。`color/` と `light/` がそれぞれ `Red` を持ってもよい。根の名前はどこからも無修飾で見えるので、サブディレクトリの中の宣言が根の同じ名前空間の宣言（外の型、契約、実装、constructor、prelude の名前）と同名なら、そのディレクトリの中で無修飾の綴りが 2 つの候補を持つ。これは E205 とし、サブディレクトリ側の宣言を指す。`store/` の中に `type Option` や `type Error`（根に `Error` があるとき）は書けない。
 
 `.hdi` の規則は第54節と同じで、どのディレクトリにも置ける。外の `def` を置けるのは根のファイルだけである（第54節）。prelude は根に連結され、`List.map` や `Some` はどこからも無修飾で参照する（第49節）。
 
