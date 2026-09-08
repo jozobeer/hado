@@ -1602,7 +1602,7 @@ pattern_fallback := "|" arm_body
 arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
 ```
 
-`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第20節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第50節）。
+`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第20節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第50節）。`=>` を持つ腕が 1 本も無い列（`if | 5`、`def f x | 5`、`fn(| 5)`）は E100 とし、先頭の `|` を指す。
 
 パターン:
 
@@ -1807,7 +1807,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E202 | dunder-in-user | §47 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §47 | 名前解決 | `__` 名 |
 | E204 | unbound-name | §47 | 名前解決 | 名前 |
-| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節。名前空間の単位は第55節 |
+| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節。名前空間の単位と、根との同名でサブディレクトリ側を指す規則は第55節 |
 | E206 | entry-form | §5 | 名前解決 | `def main`。無ければ 1:1 |
 | E207 | rec-cycle-value | §4 | 名前解決 | 閉路に含まれる値定義の `def` |
 | E208 | missing-rec | §4 | 名前解決 | `rec` の無い `def` |
