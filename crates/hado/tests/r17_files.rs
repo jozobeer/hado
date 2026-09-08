@@ -147,3 +147,47 @@ fn interface_files_reject_implementation_types_and_cannot_be_entries() {
         }
     }
 }
+
+#[test]
+fn single_file_entry_diagnostics_keep_existing_positions() {
+    for padding in 0..8 {
+        let case = Case::new();
+        let source = format!("{}{}def helper x => x + 1", "\n".repeat(padding), " ".repeat(padding));
+        case.write("main.hd", &source);
+        let path = case.0.join("main.hd");
+        let expected = hado::check_source(&source, &path.to_string_lossy()).err().unwrap();
+        assert_eq!(expected.code.as_deref(), Some("E206"));
+        let actual = case.command("check", "main.hd");
+        assert_eq!(actual.stderr, format!("{expected}\n").as_bytes());
+        assert_eq!(actual.status.code(), Some(1));
+    }
+}
+
+#[test]
+fn lexical_errors_in_later_files_precede_earlier_syntax_errors() {
+    for padding in 0..8 {
+        let case = Case::new();
+        case.write("main.hd", "def main = [)");
+        let source = format!("{}{}# invalid comment", "\n".repeat(padding), " ".repeat(padding));
+        case.write("later.hdi", &source);
+        case.reject("check", "main.hd", "later.hdi", &source, "E104", "#");
+    }
+}
+
+#[test]
+fn implementation_diagnostics_retain_anchors_from_each_file() {
+    for padding in 0..8 {
+        for (contract, body, argument, code, anchor) in [
+            ("def run(x: Int): Bool", "def run x => x + 1", "1", "E602", "implement"),
+            ("def run(x: Int): Int", "def dead x => x + 2 def run x => x + 1", "1", "E514", "def dead"),
+            ("def run(x: Option<Int>): Int", "def run x => if x | Some(n) => n", "(Some(1))", "E402", "if x"),
+        ] {
+            let case = Case::new();
+            case.write("main.hd", &format!("def main = M.run {argument}"));
+            case.write("contract.hdi", &format!("module S {contract}"));
+            let source = format!("{}{}implement S as M\n{body}", "\n".repeat(padding), " ".repeat(padding));
+            case.write("implementation.hd", &source);
+            case.reject("check", "main.hd", "implementation.hd", &source, code, anchor);
+        }
+    }
+}

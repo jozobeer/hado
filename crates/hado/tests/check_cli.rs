@@ -11,7 +11,9 @@ fn cli_usage_and_basic_types() {
         assert!(output.stdout.is_empty());
         assert_eq!(output.stderr, b"usage: hado check [--print-type] <file> | dump-mono <file> | build <file.hd>\n");
     }
-    let path = std::env::temp_dir().join(format!("hado-cli-{}.hd", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hado-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.hd");
     for (source, ty) in [
         ("def main = 1 + 2", "Int"),
         ("def main = 1.5 * 2.0", "Float"),
@@ -48,7 +50,7 @@ fn cli_usage_and_basic_types() {
         "{stderr}"
     );
     assert_eq!(stderr.lines().count(), 1);
-    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -64,14 +66,16 @@ fn float_remainder_reports_a_positioned_type_error() {
 
 #[test]
 fn cli_rejects_noncanonical_identity_binding() {
-    let path = std::env::temp_dir().join(format!("hado-canonical-{}.hd", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hado-canonical-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.hd");
     std::fs::write(&path, "def main = let x = 1 -> x").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("check")
         .arg(&path)
         .output()
         .unwrap();
-    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert_eq!(
@@ -105,6 +109,8 @@ fn reject_corpus_reports_declared_codes_through_cli() {
             .output()
             .unwrap();
         let diagnostic = String::from_utf8(output.stderr).unwrap();
+        let baseline = hado::check_source(&source, &path.to_string_lossy()).err().unwrap();
+        assert_eq!(diagnostic, format!("{baseline}\n"), "single-file diagnostic changed: {}", path.display());
         let positioned = diagnostic.strip_prefix(&format!("{}:", path.display()));
         let valid_position_and_code = positioned.is_some_and(|positioned| {
             let mut parts = positioned.splitn(3, ':');
@@ -127,14 +133,16 @@ fn reject_corpus_reports_declared_codes_through_cli() {
 
 #[test]
 fn dump_mono_exposes_typed_arithmetic() {
-    let path = std::env::temp_dir().join(format!("hado-mono-{}.hd", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hado-mono-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.hd");
     std::fs::write(&path, "def main = 1 + 2").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("dump-mono")
         .arg(&path)
         .output()
         .unwrap();
-    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
     assert!(output.status.success(), "{:?}", output);
     assert!(output.stderr.is_empty());
     let text = String::from_utf8(output.stdout).unwrap();

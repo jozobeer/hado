@@ -76,7 +76,9 @@ fn scalar_types() -> [Ty; 6] {
 #[test]
 fn generated_type_round_trip_twenty() {
     let mut generator = Generator(0x543E_5EED);
-    let path = std::env::temp_dir().join(format!("hado-round-{}.hd", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hado-round-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.hd");
     for index in 0..20 {
         let expected = scalar_types()[index % 6].clone();
         let source = format!("def main = {}", generator.expression(&expected, 3));
@@ -96,7 +98,7 @@ fn generated_type_round_trip_twenty() {
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         println!("type_round_ok: {index} {expected}");
     }
-    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
     println!("type_round_n: 20");
 }
 

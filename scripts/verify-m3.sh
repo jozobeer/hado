@@ -80,25 +80,27 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
     rounds = errors = 0
     for i in range(20):
         ty = ['Int','Bool'][choice(2)]
-        p = P(temp)/f'round_{i}.hd'
+        p = P(temp)/f'round_{i}'/'main.hd'
+        p.parent.mkdir()
         p.write_text('def main = '+expression(ty,3))
         r = check(p,True)
         rounds += r.returncode == 0 and r.stdout == ty+'\n' and not r.stderr
     report(6, 'type-round-20', rounds == 20)
     for i in range(10):
-        p = P(temp)/f'error_{i}.hd'
+        p = P(temp)/f'error_{i}'/'main.hd'
+        p.parent.mkdir()
         p.write_text(f'def main = ({expression("Int",3)} + {expression("Bool",3)})')
         r = check(p)
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
 source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
-corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*/main.hd')]
+corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*/*') if p.suffix in ('.hd', '.hdi')]
 lib = P('crates/hado/src/lib.rs').read_text()
 types = P('crates/hado/src/types.rs').read_text()
 names = P('crates/hado/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
-glue &= not any('"'+(p.parent.name+'/main.hd')+'"' in source or str(p) in source for p in corpus)
+glue &= not any('"'+(p.parent.name+'/'+p.name)+'"' in source or str(p) in source for p in corpus)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
 tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1')

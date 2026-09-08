@@ -34,7 +34,9 @@ fn slash_division_and_comment_have_distinct_runtime_results() {
         ("comment", "def main = 1 // 2", "1\n"),
         ("quoted", "def main = \"-- # //\"", "-- # //\n"),
     ] {
-        let path = dir.join(format!("{name}.hd"));
+        let case_dir = dir.join(format!("{name}"));
+        std::fs::create_dir_all(&case_dir).unwrap();
+        let path = case_dir.join("main.hd");
         std::fs::write(&path, source).unwrap();
         let build = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
             .arg("build").arg(&path).output().unwrap();

@@ -53,7 +53,7 @@ fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     Ok(if *status == 0 { (0, bytes, Vec::new()) } else { (1, Vec::new(), bytes) })
 }
 
-fn try_accept(rel: &str, text: &str) -> Result<(), String> {
+fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     let (status, stdout, stderr) = expected_output(text)?;
     let stem = rel.replace('/', "_");
     let work = std::env::temp_dir().join(format!("hado-corpus-{}-{stem}", std::process::id()));
@@ -61,7 +61,7 @@ fn try_accept(rel: &str, text: &str) -> Result<(), String> {
     let obj = work.join(format!("{stem}.o"));
     let exe = work.join(format!("{stem}.exe"));
     let result = (|| {
-        hado::compile_source_to_object(text, rel, &obj)?;
+        compile(&obj)?;
         hado::link_executable(&obj, &exe)?;
         let out = std::process::Command::new(&exe).output().map_err(|e| e.to_string())?;
         if out.status.code() != Some(status) || out.stderr != stderr || out.stdout != stdout {
@@ -77,7 +77,7 @@ fn try_accept(rel: &str, text: &str) -> Result<(), String> {
 
 fn try_reject(rel: &str, text: &str) -> Result<(), String> {
     let code = header_value(text, "// error:").ok_or("missing error code")?;
-    match hado::check_source(text, rel) {
+    match hado::project::Project::load(&repo_root().join(rel)).and_then(|project| project.check()) {
         Err(error) if error.code.as_deref() == Some(code.as_str()) => Ok(()),
         Err(error) => Err(format!("expected {code}, got {error}")),
         Ok(_) => Err(format!("expected {code}, but checking succeeded")),
@@ -108,7 +108,9 @@ fn corpus() {
     for rel in &rels {
         let text = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
         let result = if rel.starts_with("tests/accept/") {
-            try_accept(rel, &text)
+            try_accept(rel, &text, |object| {
+                hado::project::Project::load(&root.join(rel)).map_err(|error| error.to_string())?.compile_to_object(object)
+            })
         } else {
             try_reject(rel, &text)
         };
@@ -136,7 +138,10 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
             ("missing", success.clone(), String::new(), false),
             ("both", success, format!("// expect: {number}\n// expect-error: {number}"), false),
         ] {
-            let result = try_accept(&format!("generated-{index}-{case}"), &format!("{header}\n{source}"));
+            let text = format!("{header}\n{source}");
+            let result = try_accept(&format!("generated-{index}-{case}"), &text, |object| {
+                hado::compile_source_to_object(&text, "generated.hd", object)
+            });
             assert_eq!(result.is_ok(), accepted, "{case}: {result:?}");
         }
     }

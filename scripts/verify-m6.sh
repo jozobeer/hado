@@ -6,6 +6,7 @@ hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python
 python3 - "$hado_target_dir/debug/hado" "$@" <<'PY'
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,8 +46,9 @@ with tempfile.TemporaryDirectory(prefix="hado-m6-") as temporary:
             continue
         is_error, expected = headers[0]
         output = (expected + "\n").encode() if expected else b""
-        copied = Path(temporary) / source.name
-        copied.write_text(text)
+        case = Path(temporary) / source.parent.name
+        shutil.copytree(source.parent, case)
+        copied = case / source.name
         passed += verify(source, copied, b"" if is_error else output,
                          output if is_error else b"", int(is_error))
 print(f"PASSED: {passed}/{total}")

@@ -62,7 +62,9 @@ fn native_execution_uses_the_concrete_representation() {
         ("type Data = { number: Int }", "Data", "{ number = x }", "value.number + 1"),
     ].into_iter().enumerate() {
         for index in 1..6 {
-            let path = dir.join(format!("case{case}_{index}.hd"));
+            let case_dir = dir.join(format!("case{case}_{index}"));
+            std::fs::create_dir_all(&case_dir).unwrap();
+            let path = case_dir.join("main.hd");
             let source = program(prefix, &[SIGNATURE, &module("M", representation, make, get)], &format!("M.get (M.make {index})"));
             std::fs::write(&path, source).unwrap();
             let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
@@ -140,7 +142,9 @@ fn native_data_payloads_use_module_abstract_representations() {
                 let data = if record { "type Box = { value: M.T }" } else { "type Box = | Wrap(M.T)" };
                 let body = if record { format!("let box = {{ value = M.make {index} }} -> M.get box.value") }
                     else { format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value") };
-                let path = dir.join(format!("case{case}_{record}_{index}.hd"));
+                let case_dir = dir.join(format!("case{case}_{record}_{index}"));
+                std::fs::create_dir_all(&case_dir).unwrap();
+                let path = case_dir.join("main.hd");
                 let source = program(data, &[&module("M", representation, make, get), SIGNATURE], &body);
                 std::fs::write(&path, source).unwrap();
                 let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();

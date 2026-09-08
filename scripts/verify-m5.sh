@@ -62,7 +62,8 @@ with tempfile.TemporaryDirectory(prefix="hado-m5-") as temporary:
         ("closure-tail", "def apply f x => f x\ndef main = apply (fn x => x + 1) 41", ['TailCallClosure {']),
     ]
     for name, source, required in probes:
-        path = Path(temporary) / (name + ".hd")
+        path = Path(temporary) / name / "main.hd"
+        path.parent.mkdir()
         path.write_text(source)
         result = dump(path)
         report(name, valid_ir(result) and all(text in result.stdout for text in required), result.stderr.strip() or result.stdout)

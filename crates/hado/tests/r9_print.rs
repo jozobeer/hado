@@ -16,7 +16,9 @@ fn generated_lists_print_source_not_constructor_chains() {
             ("nested", "List<List<Int>>", format!("[{expected}, []]"), format!("[{expected}, []]")),
             ("option", "Option<List<Int>>", format!("Some({expected})"), format!("Some({expected})")),
         ] {
-            let path = dir.join(format!("{case}-{length}.hd"));
+            let case_dir = dir.join(format!("{case}-{length}"));
+            std::fs::create_dir_all(&case_dir).unwrap();
+            let path = case_dir.join("main.hd");
             std::fs::write(&path, format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})")).unwrap();
             let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
             assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
