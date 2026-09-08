@@ -17,10 +17,13 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
     })
 }
 
-pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, path: &str) -> Vec<Diagnostic> {
+pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, other_entry_roots: &[String], path: &str) -> Vec<Diagnostic> {
     let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
     let graph = collector.graph(ast);
-    let used = transitive_references(&Key::Value("main".into()), &graph);
+    let mut used = transitive_references(&Key::Value("main".into()), &graph);
+    for name in other_entry_roots {
+        used.extend(transitive_references(&Key::Value(name.clone()), &graph));
+    }
     let mut diagnostics: Vec<_> = ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
         let referenced = match &key {

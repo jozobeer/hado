@@ -1,3 +1,4 @@
+mod file_scopes;
 pub mod build;
 pub mod project;
 pub mod emit;
@@ -94,6 +95,7 @@ struct ParsedSource {
     ast: parser::Ast,
     trusted_start: Option<usize>,
     prelude_items: usize,
+    other_entry_roots: Vec<String>,
 }
 
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
@@ -134,7 +136,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    Ok(ParsedSource { ast, trusted_start, prelude_items })
+    Ok(ParsedSource { ast, trusted_start, prelude_items, other_entry_roots: Vec::new() })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
@@ -142,7 +144,7 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
 }
 
 fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
-    let ParsedSource { ast, trusted_start, prelude_items } = parsed;
+    let ParsedSource { ast, trusted_start, prelude_items, other_entry_roots } = parsed;
     let name_error = names::resolve_with_prelude(ast, path, *trusted_start).err();
     let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start) {
         Ok(result) => result,
@@ -152,7 +154,7 @@ fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Di
     if let Err(error) = check::check_ast(ast, path) {
         diagnostics.push(error);
     }
-    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, path));
+    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, path));
     match diagnostics.into_iter().map(|error| check::arm_diagnostic(ast, error)).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),

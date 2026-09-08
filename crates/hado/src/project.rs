@@ -22,9 +22,10 @@ impl Project {
     pub fn load(entry: &Path) -> Result<Self, Diagnostic> {
         let token_files = read_files(entry)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
-        let ast = parse_files(&token_files)?;
+        let (ast, other_entry_roots) = parse_files(&token_files)?;
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
-        let parsed = crate::with_prelude(ast, &files[0].path, last_line)?;
+        let mut parsed = crate::with_prelude(ast, &files[0].path, last_line)?;
+        parsed.other_entry_roots = other_entry_roots;
         Ok(Self { parsed, files })
     }
 
@@ -52,17 +53,27 @@ impl Project {
 fn sibling_paths(entry: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
     let parent = entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut siblings = Vec::new();
-    for sibling in std::fs::read_dir(parent).map_err(|error| io_error(parent, error))? {
-        let path = sibling.map_err(|error| io_error(parent, error))?.path();
-        if path.file_name() != entry.file_name() && path.is_file()
-            && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
-            siblings.push(path);
-        }
-    }
+    collect_sources(parent, &mut siblings)?;
+    siblings.retain(|path| !(path.parent() == Some(parent) && path.file_name() == entry.file_name()));
     siblings.sort_by(|a, b| a.as_os_str().as_encoded_bytes().cmp(b.as_os_str().as_encoded_bytes()));
     let mut paths = vec![entry.to_path_buf()];
     paths.extend(siblings);
     Ok(paths)
+}
+
+fn collect_sources(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Diagnostic> {
+    for entry in std::fs::read_dir(directory).map_err(|error| io_error(directory, error))? {
+        let entry = entry.map_err(|error| io_error(directory, error))?;
+        let path = entry.path();
+        let kind = entry.file_type().map_err(|error| io_error(&path, error))?;
+        if kind.is_dir() {
+            collect_sources(&path, paths)?;
+        } else if path.is_file()
+            && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            paths.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
@@ -91,18 +102,24 @@ fn read_file(path: &Path, offset: usize) -> Result<TokenFile, Diagnostic> {
     Ok(TokenFile { source: SourceFile { path: path.to_string_lossy().into_owned(), offset }, tokens })
 }
 
-fn parse_files(files: &[TokenFile]) -> Result<Ast, Diagnostic> {
+fn parse_files(files: &[TokenFile]) -> Result<(Ast, Vec<String>), Diagnostic> {
+    let root = Path::new(&files[0].source.path).parent().unwrap_or(Path::new(""));
     let mut ast = parse_file(&files[0].tokens, Path::new(&files[0].source.path), true)?;
-    for file in &files[1..] {
-        let parsed = parse_file(&file.tokens, Path::new(&file.source.path), false)
+    let mut roots = crate::file_scopes::isolate(&mut ast, 0);
+    for (index, file) in files.iter().enumerate().skip(1) {
+        let path = Path::new(&file.source.path);
+        let parent = path.parent().unwrap_or(Path::new(""));
+        let root_file = parent == root || (root.as_os_str().is_empty() && parent == Path::new("."));
+        let mut parsed = parse_file(&file.tokens, path, root_file)
             .map_err(|mut error| { error.line -= file.source.offset; error })?;
+        roots.extend(crate::file_scopes::isolate(&mut parsed, index));
         ast.append(parsed);
     }
-    Ok(ast)
+    Ok((ast, roots))
 }
 
-fn parse_file(tokens: &[Tok], path: &Path, entry: bool) -> Result<Ast, Diagnostic> {
-    let role_error = role_error(tokens, path, entry);
+fn parse_file(tokens: &[Tok], path: &Path, root_file: bool) -> Result<Ast, Diagnostic> {
+    let role_error = role_error(tokens, path, root_file);
     let parsed = crate::parser::parse_tokens(tokens, &path.to_string_lossy());
     match (parsed, role_error) {
         (Ok(ast), None) => Ok(ast),
@@ -111,12 +128,12 @@ fn parse_file(tokens: &[Tok], path: &Path, entry: bool) -> Result<Ast, Diagnosti
     }
 }
 
-fn role_error(tokens: &[Tok], path: &Path, entry: bool) -> Option<Diagnostic> {
+fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic> {
     let interface = path.extension().is_some_and(|extension| extension == "hdi");
     let mut outer = true;
     for token in tokens {
         let invalid = (interface && token.kind == TokKind::KwImplement)
-            || (!entry && outer && token.kind == TokKind::Def);
+            || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic { path: path.to_string_lossy().into_owned(), line: token.span.line,
                 col: token.span.col, code: Some("E100".into()),
@@ -131,6 +148,9 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
     if let Some(file) = files.iter().rev().find(|file| file.offset < error.line) {
         error.path = file.path.clone();
         error.line -= file.offset;
+    }
+    for index in 0..files.len() {
+        error.message = error.message.replace(&format!("file{index}$"), "");
     }
     error
 }
