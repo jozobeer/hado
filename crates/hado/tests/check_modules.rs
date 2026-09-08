@@ -41,7 +41,7 @@ fn abstract_types_hide_record_representation() {
 
 #[test]
 fn recursive_type_restrictions_apply_inside_modules() {
-    let source = "def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M type Nest<T> = | Leaf(T) | Next(Nest<List<T>>) def value x => x";
+    let source = "def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M type T Nest = | Leaf(T) | Next(T List Nest) def value x => x";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E302")
@@ -88,7 +88,7 @@ fn unused_private_module_definition_is_rejected() {
 
 #[test]
 fn signature_specialization_preserves_comparison_constraints() {
-    let source = "def inc x => x + 1\ndef main = M.equal inc\nmodule S def equal(f: Fn<Int, Int>): Bool\nimplement S as M def equal f => f == f";
+    let source = "def inc x => x + 1\ndef main = M.equal inc\nmodule S def equal(f: Fn(Int => Int)): Bool\nimplement S as M def equal f => f == f";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E703")
@@ -135,11 +135,11 @@ fn abstract_annotations_match_exported_function_types_across_modules() {
 #[test]
 fn generic_signatures_require_independent_type_parameters() {
     for source in [
-        "def main = 0\nmodule S def id<A>(x: A): A\nimplement S as M def id x => x + 1",
-        "def main = 0\nmodule S def convert<A, B>(x: A): B\nimplement S as M def convert x => x",
+        "def main = 0\nmodule S def A id(x: A): A\nimplement S as M def id x => x + 1",
+        "def main = 0\nmodule S def (A, B) convert(x: A): B\nimplement S as M def convert x => x",
     ] {
         assert!(check_source(source, "t").is_err(), "{source}");
     }
-    let source = "def main = if M.id true => M.id 42 | 0\nmodule S def id<A>(x: A): A\nimplement S as M def id x => x";
+    let source = "def main = if M.id true => M.id 42 | 0\nmodule S def A id(x: A): A\nimplement S as M def id x => x";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }

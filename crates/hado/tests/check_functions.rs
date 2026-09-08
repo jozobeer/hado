@@ -13,7 +13,7 @@ fn top_level_functions_are_polymorphic() {
 #[test]
 fn local_functions_are_monomorphic() {
     let error = check_source(
-        "def main = let id = fn x => x -> let a = id 1 -> (a > 0) && id true",
+        "def main = let id = fn(x => x) -> let a = id 1 -> (a > 0) && id true",
         "t",
     )
     .err()
@@ -25,7 +25,7 @@ fn local_functions_are_monomorphic() {
 fn application_checks_arity_and_occurs() {
     for (source, code) in [
         ("def f x y => x\ndef main = f 1", "E301"),
-        ("def main = fn x => x x", "E306"),
+        ("def main = fn(x => x x)", "E306"),
         ("def main = missing", "E204"),
     ] {
         assert_eq!(
@@ -67,12 +67,12 @@ fn numeric_functions_respect_constraints_before_defaulting() {
             "def twice (x: Float) => x + x\ndef main = twice 1.5",
             Ty::Float,
         ),
-        ("def main = (fn x => x + x) 1.5", Ty::Float),
+        ("def main = fn(x => x + x) 1.5", Ty::Float),
     ] {
         assert_eq!(check_source(source, "t").unwrap().main, expected);
     }
     assert_eq!(
-        check_source("def main = (fn x => x + x) true", "t")
+        check_source("def main = fn(x => x + x) true", "t")
             .err()
             .unwrap()
             .code
@@ -84,7 +84,7 @@ fn numeric_functions_respect_constraints_before_defaulting() {
 #[test]
 fn division_result_follows_resolved_operand_type() {
     assert_eq!(
-        check_source("def main = (fn x => x / x) 2", "t")
+        check_source("def main = fn(x => x / x) 2", "t")
             .unwrap()
             .main,
         Ty::Adt(
@@ -93,21 +93,21 @@ fn division_result_follows_resolved_operand_type() {
         )
     );
     assert_eq!(
-        check_source("def main = (fn x => x / x) 2.0", "t")
+        check_source("def main = fn(x => x / x) 2.0", "t")
             .unwrap()
             .main,
         Ty::Float
     );
-    assert!(check_source("def main = (fn x => x % x) 2.0", "t").is_err());
+    assert!(check_source("def main = fn(x => x % x) 2.0", "t").is_err());
 }
 
 #[test]
 fn function_annotations_check_arguments_and_results() {
-    let source = "def apply (f: Fn<Int, Bool>, x: Int) => f x\ndef main = apply (fn n => n == 1) 2";
+    let source = "def apply (f: Fn(Int => Bool), x: Int) => f x\ndef main = apply fn(n => n == 1) 2";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
-    let source = "def apply (f: Fn<(Int, Bool), Int>) => f 1 true\ndef main = apply (fn a b => if b => a | a + 1)";
+    let source = "def apply (f: Fn(Int, Bool => Int)) => f 1 true\ndef main = apply fn(a, b => if b => a | a + 1)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
-    let source = "def apply (f: Fn<Int, Bool>) => f 1\ndef main = apply (fn n => n + 1)";
+    let source = "def apply (f: Fn(Int => Bool)) => f 1\ndef main = apply fn(n => n + 1)";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E305")
@@ -132,9 +132,9 @@ fn compare_is_a_polymorphic_value() {
 
 #[test]
 fn deferred_division_results_flow_into_numeric_operators() {
-    let source = "def main = -((fn x => x / x) 2.0)";
+    let source = "def main = -(fn(x => x / x) 2.0)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Float);
-    let source = "def main = -((fn x => x / x) 2)";
+    let source = "def main = -(fn(x => x / x) 2)";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E305")
@@ -163,7 +163,7 @@ fn equality_rejects_functions_inside_generic_containers() {
 
 #[test]
 fn equality_rejects_fixed_function_fields() {
-    let source = "type Handler = { run: Fn<Int, Int> }\ndef inc x => x + 1\ndef main = { run = inc } == { run = inc }";
+    let source = "type Handler = { run: Fn(Int => Int) }\ndef inc x => x + 1\ndef main = { run = inc } == { run = inc }";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E703")
@@ -174,7 +174,7 @@ fn equality_rejects_fixed_function_fields() {
 fn equality_inspects_recursive_payloads_without_looping() {
     let source = "type Tree = | Leaf(Int) | Branch(Tree, Tree)\ndef main = Leaf(1) == Leaf(2)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
-    let source = "type Tree = | Leaf(Fn<Int, Int>) | Branch(Tree, Tree)\ndef inc x => x + 1\ndef main = Leaf(inc) == Leaf(inc)";
+    let source = "type Tree = | Leaf(Fn(Int => Int)) | Branch(Tree, Tree)\ndef inc x => x + 1\ndef main = Leaf(inc) == Leaf(inc)";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E703")
@@ -184,7 +184,7 @@ fn equality_inspects_recursive_payloads_without_looping() {
 #[test]
 fn phantom_function_parameter_does_not_make_a_value_contain_a_function() {
     let source =
-        "type Token<T> = | Token\ndef eq (x: Token<Fn<Int, Int>>) => x == x\ndef main = eq Token";
+        "type T Token = | Token\ndef eq (x: Fn(Int => Int) Token) => x == x\ndef main = eq Token";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
 }
 
@@ -217,8 +217,8 @@ fn compare_constraints_follow_local_aliases_and_pipes() {
 #[test]
 fn equality_constraints_wait_for_local_argument_types() {
     for source in [
-        "def inc x => x + 1\ndef main = (fn x => x == x) inc",
-        "def inc x => x + 1\ndef main = let eq = fn x => x == x -> eq inc",
+        "def inc x => x + 1\ndef main = fn(x => x == x) inc",
+        "def inc x => x + 1\ndef main = let eq = fn(x => x == x) -> eq inc",
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),
@@ -226,7 +226,7 @@ fn equality_constraints_wait_for_local_argument_types() {
         );
     }
     assert_eq!(
-        check_source("def main = (fn x => x == x) 1", "t")
+        check_source("def main = fn(x => x == x) 1", "t")
             .unwrap()
             .main,
         Ty::Bool

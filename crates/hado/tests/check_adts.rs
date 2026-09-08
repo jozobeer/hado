@@ -2,7 +2,7 @@ use hado::{check_source, types::Ty};
 
 #[test]
 fn generic_constructors_infer_payloads() {
-    let source = "type Choice<T> = | Empty | Present(T)\ndef main = Present(7)";
+    let source = "type T Choice = | Empty | Present(T)\ndef main = Present(7)";
     assert_eq!(
         check_source(source, "t").unwrap().main,
         Ty::Adt("Choice".into(), vec![Ty::Int])
@@ -11,7 +11,7 @@ fn generic_constructors_infer_payloads() {
 
 #[test]
 fn constructor_parameters_share_constraints() {
-    let source = "type Pair<T> = | Pair(T, T)\ndef main = Pair(1, true)";
+    let source = "type T Pair = | Pair(T, T)\ndef main = Pair(1, true)";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E305")
@@ -60,9 +60,9 @@ fn pattern_bindings_do_not_escape_their_arm() {
 #[test]
 fn recursive_type_cycles_preserve_parameters() {
     for source in [
-        "type Tree<T> = | Leaf(T) | Branch(Tree<List<T>>)\ndef main = 1",
-        "type A<T> = | ANode(B<List<T>>)\ntype B<U> = | BNode(A<U>)\ndef main = 1",
-        "type Pair<A, B> = | End | Next(Pair<B, A>)\ndef main = 1",
+        "type T Tree = | Leaf(T) | Branch(T List Tree)\ndef main = 1",
+        "type T A = | ANode(T List B)\ntype U B = | BNode(U A)\ndef main = 1",
+        "type (A, B) Pair = | End | Next((B, A) Pair)\ndef main = 1",
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),
@@ -70,9 +70,9 @@ fn recursive_type_cycles_preserve_parameters() {
             "{source}"
         );
     }
-    let source = "type A<T> = | AEnd | ANode(B<T>)\ntype B<U> = | BNode(A<U>)\ndef main = if ANode(BNode(AEnd)) == ANode(BNode(AEnd)) => 1 | 0";
+    let source = "type T A = | AEnd | ANode(T B)\ntype U B = | BNode(U A)\ndef main = if ANode(BNode(AEnd)) == ANode(BNode(AEnd)) => 1 | 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
-    let source = "type Wrap<T> = | Wrapped(List<List<T>>)\ndef main = if Wrapped([[1]]) == Wrapped([[1]]) => 1 | 0";
+    let source = "type T Wrap = | Wrapped(T List List)\ndef main = if Wrapped([[1]]) == Wrapped([[1]]) => 1 | 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 
@@ -110,6 +110,6 @@ fn main_requires_a_monomorphic_type() {
     for source in ["def main = []", "def main = Some([])"] {
         assert_eq!(check_source(source, "t").err().unwrap().code.as_deref(), Some("E701"));
     }
-    let source = "def empty (n: Int): List<Int> => if n == 0 => [] | [n]\ndef main = empty 0";
+    let source = "def empty (n: Int): Int List => if n == 0 => [] | [n]\ndef main = empty 0";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Adt("List".into(), vec![Ty::Int]));
 }

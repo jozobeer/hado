@@ -94,8 +94,8 @@ fn generated_chains_execute_success_and_each_failure_path() {
         for fail in 0..4 {
             let source = format!(
                 "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
-                 def first (flag: Int): Result<Entry, Int> => if flag == 1 => Error({n}) | Ok({{ field = Box({n}) }})\n\
-                 def step (flag: Int, stage: Int): Result<Unit, Int> => if flag == stage => Error({n} + stage) | Ok()\n\
+                 def first (flag: Int): (Entry, Int) Result => if flag == 1 => Error({n}) | Ok({{ field = Box({n}) }})\n\
+                 def step (flag: Int, stage: Int): (Unit, Int) Result => if flag == stage => Error({n} + stage) | Ok()\n\
                  def run flag => let {{ field = Box(x) }}? = first flag -> do step flag 2 -> do step flag 3 -> let Box(y)? = Ok(Box(x + 4)) -> Ok(y + 1)\n\
                  def unwrap | Ok(x) => x | Error(e) => 0 - e\n\
                  def main = unwrap (run {fail})"

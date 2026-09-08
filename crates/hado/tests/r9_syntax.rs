@@ -92,7 +92,7 @@ fn arm_functions_and_negative_patterns_parse() {
     for index in 1..20 {
         for source in [
             format!("def f{index} | -{index} => 1 | 0 def main = f{index} {index}"),
-            format!("def main = fn | -{index}.5 => true | false"),
+            format!("def main = fn(| -{index}.5 => true | false)"),
             format!("def rec f{index} | None => 0 | Some(x) => f{index} None"),
             format!("def f{index} | Some (x) => x | None => {index}"),
         ] {
@@ -136,7 +136,7 @@ fn type_definition_contexts_are_distinct() {
 #[test]
 fn incomplete_grammar_forms_are_rejected() {
     for source in [
-        "def main = fn => 1",
+        "def main = fn(=> 1)",
         "def f(x) => x",
         "def f _ => 1",
         "module S def f x",
@@ -167,7 +167,7 @@ fn overloaded_operator_is_the_anchor() {
 
 #[test]
 fn application_groups_separate_constructor_arguments() {
-    let source = "def main = fold values (Nil) (fn reversed value => Cons(value, reversed))";
+    let source = "def main = fold values (Nil) fn(reversed, value => Cons(value, reversed))";
     let ast = parse_source(source, "generated").unwrap();
     let normal = hado::parser::canonical_program(&ast);
     let restored = parse_source(&normal, "normalized").unwrap();
@@ -176,7 +176,7 @@ fn application_groups_separate_constructor_arguments() {
 
 #[test]
 fn fallback_requires_a_pattern_arm() {
-    for source in ["def f | 5", "def main = fn | 5", "def main = if x | 5"] {
+    for source in ["def f | 5", "def main = fn(| 5)", "def main = if x | 5"] {
         assert_eq!(
             parse_source(source, "generated")
                 .unwrap_err()
@@ -189,9 +189,9 @@ fn fallback_requires_a_pattern_arm() {
 
 #[test]
 fn lambdas_may_branch_but_cannot_hide_nested_branches() {
-    assert!(parse_source("def main = fn x => if x => 1 | 0", "generated").is_ok());
+    assert!(parse_source("def main = fn(x => if x => 1 | 0)", "generated").is_ok());
     for source in [
-        "def main = if true => fn x => if x => 1 | 0 | fn x => x",
+        "def main = if true => fn(x => if x => 1 | 0) | fn(x => x)",
         "def main = if true => let x = 1 -> if x > 0 => 1 | 0 | 0",
         "def main = if true => do Ok() -> if true => 1 | 0 | 0",
     ] {
@@ -230,7 +230,6 @@ fn identifier_namespaces_follow_the_grammar() {
 #[test]
 fn prefix_expressions_require_grouping_inside_applications_and_operators() {
     for source in [
-        "def main = f fn x => x",
         "def main = f let x = 1 -> x",
         "def main = 1 + if true => 2 | 3",
         "def main = - if true => 2 | 3",
@@ -238,7 +237,7 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
         assert_eq!(parse_source(source, "generated").unwrap_err().code.as_deref(), Some("E100"), "{source}");
     }
     for source in [
-        "def main = f (fn x => x)",
+        "def main = f fn(x => x)",
         "def main = f (let x = 1 -> x)",
         "def main = 1 + (if true => 2 | 3)",
     ] {
@@ -261,7 +260,7 @@ fn integer_field_receivers_remain_separate_from_float_tokens() {
 fn implementation_aliases_only_realize_declared_abstract_types() {
     for index in 0..20 {
         let prefix = format!("implement S{index} as M{index} type ");
-        for body in ["Int", "List<Int>", "Fn<Int, Int>", "Other.T"] {
+        for body in ["Int", "Int List", "Fn(Int => Int)", "Other.T"] {
             let source = format!("def main = 1\n{prefix}Extra{index} = {body}\nmodule S{index} type T");
             parse_source(&source, "generated").unwrap();
             let error = hado::check_source(&source, "generated").err().unwrap();
@@ -276,10 +275,10 @@ fn implementation_aliases_only_realize_declared_abstract_types() {
 }
 
 #[test]
-fn abstract_type_aliases_cannot_declare_type_parameters() {
+fn abstract_aliases_reject_legacy_type_parameter_spelling() {
     for spacing in ["", "  ", "\n  "] {
         let prefix = format!("module S type T\nimplement S as M type T{spacing}");
-        let source = format!("{prefix}<A> = List<A>");
+        let source = format!("{prefix}<A> = A List");
         let error = parse_source(&source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
         assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1));
@@ -355,9 +354,9 @@ fn broken_heading_precedes_later_duplicate_contracts() {
 }
 
 #[test]
-fn alias_parameters_precede_a_malformed_alias_body() {
+fn legacy_alias_parameters_precede_a_malformed_alias_body() {
     let prefix = "module S type T\nimplement S as M type T";
-    let source = format!("{prefix}<A> = List<)");
+    let source = format!("{prefix}<A> = (Int, ) List");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
     assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
@@ -366,8 +365,8 @@ fn alias_parameters_precede_a_malformed_alias_body() {
 #[test]
 fn malformed_alias_body_precedes_alias_name_resolution() {
     let prefix = "implement S as M type Extra =";
-    let source = format!("{prefix}List<)\nmodule S type T");
+    let source = format!("{prefix}(Int, ) Result\nmodule S type T");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
-    assert_eq!((error.line, error.col), (1, prefix.len() + "List<".len() + 1), "{error}");
+    assert_eq!((error.line, error.col), (1, prefix.len() + "(Int, ".len() + 1), "{error}");
 }

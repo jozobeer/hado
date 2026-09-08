@@ -12,9 +12,9 @@ fn generated_lists_print_source_not_constructor_chains() {
         }).collect();
         let expected = format!("[{}]", values.join(", "));
         for (case, ty, expression, output) in [
-            ("plain", "List<Int>", expected.clone(), expected.clone()),
-            ("nested", "List<List<Int>>", format!("[{expected}, []]"), format!("[{expected}, []]")),
-            ("option", "Option<List<Int>>", format!("Some({expected})"), format!("Some({expected})")),
+            ("plain", "Int List", expected.clone(), expected.clone()),
+            ("nested", "Int List List", format!("[{expected}, []]"), format!("[{expected}, []]")),
+            ("option", "Int List Option", format!("Some({expected})"), format!("Some({expected})")),
         ] {
             let case_dir = dir.join(format!("{case}-{length}"));
             std::fs::create_dir_all(&case_dir).unwrap();
@@ -59,8 +59,8 @@ fn nested_text_is_quoted_but_outer_result_payload_is_raw() {
                 ("top", format!("def main = {encoded}"), value.clone(), 0),
                 ("nested", format!("def main = Some({encoded})"), format!("Some({encoded})"), 0),
                 ("list", format!("def main = [{encoded}]"), format!("[{encoded}]"), 0),
-                ("ok", format!("def identity (x: Result<{ty}, Int>) => x\ndef main = identity (Ok({encoded}))"), value.clone(), 0),
-                ("error", format!("def identity (x: Result<Int, {ty}>) => x\ndef main = identity (Error({encoded}))"), value, 1),
+                ("ok", format!("def identity (x: ({ty}, Int) Result) => x\ndef main = identity (Ok({encoded}))"), value.clone(), 0),
+                ("error", format!("def identity (x: (Int, {ty}) Result) => x\ndef main = identity (Error({encoded}))"), value, 1),
             ] {
                 let path = dir.join(format!("{index}-{kind}-{case}"));
                 hado::build::executable(&source, "text-print.hd", &path).unwrap();

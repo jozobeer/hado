@@ -48,7 +48,7 @@ p = reject[0]
 original = p.read_bytes()
 try:
     header = '\n'.join(original.decode().splitlines()[:2])
-    p.write_text(header+'\ntype Nest<T> = | Leaf(T) | Node(Nest<List<T>>)\ndef main = 1\n')
+    p.write_text(header+'\ntype T Nest = | Leaf(T) | Node(T List Nest)\ndef main = 1\n')
     r = check(p)
     report(4, 'swap', 'error[E302]' in r.stderr and 'error[E201]' not in r.stderr)
 finally: p.write_bytes(original)
@@ -82,7 +82,16 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         ty = ['Int','Bool'][choice(2)]
         p = P(temp)/f'round_{i}'/'main.hd'
         p.parent.mkdir()
-        p.write_text('def main = '+expression(ty,3))
+        value = expression(ty,3)
+        for _ in range(1 + choice(3)):
+            container = choice(3)
+            if container == 0:
+                value, ty = f'[{value}]', f'{ty} List'
+            elif container == 1:
+                value, ty = f'Some({value})', f'{ty} Option'
+            else:
+                value, ty = f'Ok({value})', f'({ty}, String) Result'
+        p.write_text(f'def typed(value: {ty}): {ty} => value\ndef main = typed ({value})')
         r = check(p,True)
         rounds += r.returncode == 0 and r.stdout == ty+'\n' and not r.stderr
     report(6, 'type-round-20', rounds == 20)
@@ -120,7 +129,7 @@ expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*
 lock_check = run('sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256')
 report(10,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
 stdlib = [('option','Option'),('result','Result'),('list','List'),('division_error','DivisionError')]
-report(11,'stdlib-types',all(P('stdlib/'+file+'.hd').is_file() and 'type '+ty in P('stdlib/'+file+'.hd').read_text() for file,ty in stdlib) and not any(re.search(r'\bdef\b', re.split(r'\b(?:module|implement)\b', re.sub(r'//[^\n]*', '', p.read_text()), maxsplit=1)[0]) for p in P('stdlib').glob('*.hd')))
+report(11,'stdlib-types',all(P('stdlib/'+file+'.hd').is_file() and re.search(r'^type\s+(?:[A-Z]\w*\s+|\([A-Z]\w*(?:\s*,\s*[A-Z]\w*)+\)\s+)?'+re.escape(ty)+r'\s*=', P('stdlib/'+file+'.hd').read_text(), re.M) for file,ty in stdlib) and not any(re.search(r'\bdef\b', re.split(r'\b(?:module|implement)\b', re.sub(r'//[^\n]*', '', p.read_text()), maxsplit=1)[0]) for p in P('stdlib').glob('*.hd')))
 report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', log)) == 1)
 passed = sum(results.values())
 print(f'PASSED: {passed}/12')

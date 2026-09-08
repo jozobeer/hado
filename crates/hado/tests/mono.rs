@@ -382,17 +382,17 @@ fn concrete_named_function_values_create_closures() {
 
 #[test]
 fn checked_lambdas_retain_types_resolved_by_their_calls() {
-    let source = "def main = (fn x => x) 4";
+    let source = "def main = fn(x => x) 4";
     let checked = hado::check_source(source, "t").unwrap();
     assert_eq!(
-        checked.value_types[&(1, 13)],
+        checked.value_types[&(1, source.find("fn(").unwrap() + 1)],
         hado::types::Ty::Fn(vec![hado::types::Ty::Int], Box::new(hado::types::Ty::Int))
     );
 }
 
 #[test]
 fn anonymous_closures_capture_outer_bindings() {
-    let source = "def main = let offset = 7 -> let f = fn x => x + offset -> f 3";
+    let source = "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -407,7 +407,7 @@ fn anonymous_closures_capture_outer_bindings() {
 #[test]
 fn nested_closures_forward_captures_and_keep_parameter_bindings() {
     use hado::mono::Expression;
-    let source = "def main = let seed = 7 -> let make = fn x => fn y => seed + x + y -> let f = make 2 -> f 3";
+    let source = "def main = let seed = 7 -> let make = fn(x => fn(y => seed + x + y)) -> let f = make 2 -> f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -450,7 +450,7 @@ fn nested_closures_forward_captures_and_keep_parameter_bindings() {
 
 #[test]
 fn lambda_parameter_does_not_capture_shadowed_outer_value() {
-    let source = "def main = let x = 7 -> let f = fn x => x + 1 -> x + f 3";
+    let source = "def main = let x = 7 -> let f = fn(x => x + 1) -> x + f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -460,7 +460,7 @@ fn lambda_parameter_does_not_capture_shadowed_outer_value() {
 
 #[test]
 fn lambdas_inside_polymorphic_functions_are_specialized_per_call() {
-    let source = "def wrap x => let f = fn y => y -> f x\ndef main = (wrap 3 > 0) && wrap true";
+    let source = "def wrap x => let f = fn(y => y) -> f x\ndef main = (wrap 3 > 0) && wrap true";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("name: \"wrap\"").count(), 2);
     assert!(output.contains("signature: Signature { parameters: [Int], result: Int }"));
@@ -533,7 +533,7 @@ fn record_projections_preserve_each_intermediate_type() {
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"inner\", result: Data(\"Inner\", [])"));
     assert!(output.contains("field: \"x\", result: Int"));
-    let source = "type Box<T> = { value: T }\ndef main = let box = { value = true } -> box.value";
+    let source = "type T Box = { value: T }\ndef main = let box = { value = true } -> box.value";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"value\", result: Bool"));
 }
@@ -560,17 +560,17 @@ fn literal_pattern_branches_evaluate_scrutinee_once_and_keep_order() {
 }
 
 #[test]
-fn exhaustive_boolean_patterns_keep_true_and_false_results() {
+fn boolean_branches_keep_true_and_false_results() {
     use hado::mono::{Constant, Expression};
-    for arms in ["true => 10 | false => 20", "false => 20 | true => 10"] {
-        let source = format!("def main = if true | {arms}");
+    for condition in [true, false] {
+        let source = format!("def main = if {condition} => 10 | 20");
         let ast = hado::parser::parse_source(&source, "t").unwrap();
         let checked = hado::check_source(&source, "t").unwrap();
         let program = hado::mono::lower_program(&ast, &checked).unwrap();
         assert_eq!(
             program.entry,
             Expression::Branch {
-                condition: Box::new(Expression::Constant(Constant::Bool(true))),
+                condition: Box::new(Expression::Constant(Constant::Bool(condition))),
                 then: Box::new(Expression::Constant(Constant::Int(10))),
                 otherwise: Box::new(Expression::Constant(Constant::Int(20))),
             }
@@ -589,7 +589,7 @@ fn record_pattern_branches_bind_fields_in_the_arm() {
 
 #[test]
 fn constructor_let_patterns_project_typed_payloads() {
-    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap(3) -> x + 1";
+    let source = "type T Box = | Wrap(T)\ndef main = let Wrap(x) = Wrap(3) -> x + 1";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("Project {"));
     assert!(output.contains("constructor: \"Wrap\", index: 0, result: Int"));

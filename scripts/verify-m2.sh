@@ -122,17 +122,32 @@ diag_line() { # log rel
 diag_col() { # log rel
     grep -F "parse_e1xx_diag: $2 " "$1" | head -n 1 | sed "s|.*parse_e1xx_diag: $2 ||" | cut -d: -f3
 }
-expect_line() { # code -> expected defect line
-    case "$1" in
-        E101) echo 5 ;; E102) echo 3 ;; E103) echo 4 ;;
-        E104) echo 5 ;; E105) echo 4 ;; E106) echo 4 ;; E107) echo 4 ;;
-    esac
+expect_line() { # derive the anchor from the syntax prescribed by the error code
+    python3 - "$1" "$2" <<'PYANCHOR'
+import re, sys
+patterns = {
+    'E101': r'\bfn\s*\(\s*\|',
+    'E102': r'\brec\b',
+    'E103': r'(?<![\w.])\.\d',
+    'E104': r'--|#',
+    'E105': r'\(\s*\d+\s*,',
+    'E106': r'\b[A-Z]\w*\s+\d',
+    'E107': r'\(\s*[+*/%-]',
+}
+with open(sys.argv[2]) as source:
+    for line, text in enumerate(source, 1):
+        if re.search(patterns[sys.argv[1]], text.split('//', 1)[0]):
+            print(line)
+            break
+    else:
+        raise SystemExit('expected diagnostic anchor is absent')
+PYANCHOR
 }
 for n in 101 102 103 104 105 106 107; do
     code="E$n"
     f="tests/reject/$code/main.hd"
     line=$(diag_line "$TMPD/base.log" "$f")
-    want=$(expect_line "$code")
+    want=$(expect_line "$code" "$f")
     [ "$line" = "$want" ] || c4_reasons="$c4_reasons $code:line=$line(want=$want)"
 done
 for pair in "E103:12" "E105:12" "E107:6"; do

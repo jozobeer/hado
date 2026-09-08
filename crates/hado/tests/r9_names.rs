@@ -39,7 +39,7 @@ fn diagnostic_numbers_follow_the_current_specification() {
         ("def main = missing", "E204"),
         ("def rec poly x => poly [x]\ndef main = poly 1", "E307"),
         ("def main = []", "E701"),
-        ("def main = fn x => x + 1", "E702"),
+        ("def main = fn(x => x + 1)", "E702"),
         ("def f x => x + 1\ndef main = f == f", "E703"),
         ("def f x => x + 1\ndef main = compare f f", "E704"),
     ] {
@@ -75,8 +75,8 @@ fn unused_signatures_resolve_all_type_names_at_the_reference() {
     for padding in 0..24 {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         let unknown = format!("Missing{state}");
-        let prefix = format!("{}def convert<A>(value: Fn<A, ", " ".repeat(padding));
-        let source = format!("def main = 1\nmodule API\n{prefix}{unknown}>): A");
+        let prefix = format!("{}def A convert(value: Fn(A => ", " ".repeat(padding));
+        let source = format!("def main = 1\nmodule API\n{prefix}{unknown})): A");
         let diagnostic = error(&source);
         assert_eq!(diagnostic.code.as_deref(), Some("E204"));
         assert_eq!((diagnostic.line, diagnostic.col), (3, prefix.len() + 1));
@@ -85,11 +85,11 @@ fn unused_signatures_resolve_all_type_names_at_the_reference() {
 
 #[test]
 fn signature_type_variables_are_local_to_each_member() {
-    let source = "def main = 1\nmodule S def first<A>(x: A): A def second(x: A): Int";
+    let source = "def main = 1\nmodule S def A first(x: A): A def second(x: A): Int";
     let diagnostic = error(source);
     assert_eq!(diagnostic.code.as_deref(), Some("E204"));
     assert_eq!(diagnostic.col, source.rsplit('\n').next().unwrap().find("second(x: A").unwrap() + "second(x: ".len() + 1);
-    let valid = "def main = M.first 1\nmodule S type T def first<A>(x: A): A def second(x: T): Int\nimplement S as M type Representation = { value: Int } type T = Representation def first x => x def second x => x.value";
+    let valid = "def main = M.first 1\nmodule S type T def A first(x: A): A def second(x: T): Int\nimplement S as M type Representation = { value: Int } type T = Representation def first x => x def second x => x.value";
     check_source(valid, "generated-names.hd").unwrap();
 }
 
@@ -108,8 +108,8 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
         let variable = format!("A{index}");
         for (prefix, suffix) in [
             (format!("type Record = {{ {field}: Int; "), format!("{field}: Bool }}\ndef main = 1")),
-            (format!("def main = 1 module S def id<{variable},"), format!("{variable}>(x: {variable}): {variable}")),
-            (format!("type Data<{variable}, "), format!("{variable}> = | Empty\ndef main = 1")),
+            (format!("def main = 1 module S def ({variable},"), format!("{variable}) id(x: {variable}): {variable}")),
+            (format!("type ({variable}, "), format!("{variable}) Data = | Empty\ndef main = 1")),
             (format!("type Data = | Pack{index} | "), format!("Pack{index}\ndef main = 1")),
         ] {
             let diagnostic = error(&format!("{prefix}{suffix}"));
@@ -134,7 +134,7 @@ fn signature_mismatches_report_the_module_for_all_four_forms() {
             (format!("def {member}(x: Int): Int"), "".to_owned()),
             ("type T".to_owned(), "".to_owned()),
             (format!("def {member}(x: Int): Bool"), format!("def {member} x => x + 1")),
-            (format!("def {member}<A>(x: A): A"), format!("def {member} x => x + 1")),
+            (format!("def A {member}(x: A): A"), format!("def {member} x => x + 1")),
         ] {
             let source = format!("def main = 1\nmodule S {signature}\n{}implement S as M {body}", " ".repeat(index));
             let diagnostic = error(&source);
@@ -161,7 +161,7 @@ fn value_name_resolution_respects_binding_scopes() {
     for source in [
         "def f f => f + 1\ndef main = f 1",
         "def f x => let f = x + 1 -> f + 1\ndef main = f 1",
-        "def f x => (fn f => f + 1) x\ndef main = f 1",
+        "def f x => fn(f => f + 1) x\ndef main = f 1",
         "def f | Some(f) => f + 1 | None => 0\ndef main = f (Some(1))",
     ] {
         hado::check_source(source, "binding-scope.hd").unwrap();

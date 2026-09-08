@@ -180,7 +180,7 @@ fn implementation_diagnostics_retain_anchors_from_each_file() {
         for (contract, body, argument, code, anchor) in [
             ("def run(x: Int): Bool", "def run x => x + 1", "1", "E602", "implement"),
             ("def run(x: Int): Int", "def dead x => x + 2 def run x => x + 1", "1", "E514", "def dead"),
-            ("def run(x: Option<Int>): Int", "def run x => if x | Some(n) => n", "(Some(1))", "E402", "if x"),
+            ("def run(x: Int Option): Int", "def run x => if x | Some(n) => n", "(Some(1))", "E402", "if x"),
         ] {
             let case = Case::new();
             case.write("main.hd", &format!("def main = M.run {argument}"));

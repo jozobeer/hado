@@ -124,8 +124,8 @@ fn bindings_and_fn() {
         "(do g x -> x)"
     );
     assert_eq!(
-        parse_expr_ok("def main = fn x => x + 1"),
-        "(fn x => (x + 1))"
+        parse_expr_ok("def main = fn(x => x + 1)"),
+        "fn(x => (x + 1))"
     );
 }
 
@@ -149,7 +149,7 @@ fn branches() {
 fn defs_modules_types() {
     assert!(parse_source("def add x y => x + y", "t").is_ok());
     assert!(parse_source("def rec ping x => pong x", "t").is_ok());
-    assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
+    assert!(parse_source("type T List2 = | Nil2 | Cons2(T, T List2)", "t").is_ok());
     assert!(parse_source("module S def inc(x: Int): Int", "t").is_ok());
     assert!(parse_source("implement S as M def inc x => x + 1", "t").is_ok());
 }
@@ -157,12 +157,12 @@ fn defs_modules_types() {
 #[test]
 fn adt_accepts_leading_pipe() {
     assert!(parse_source(
-        "type Nest<T> =\n  | Leaf(T)\n  | Node(Nest<List<T>>)",
+        "type T Nest =\n  | Leaf(T)\n  | Node(T List Nest)",
         "t",
     )
     .is_ok());
     assert!(parse_source("type Color =\n  | Red\n  | Green\n  | Blue", "t").is_ok());
-    assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
+    assert!(parse_source("type T List2 = | Nil2 | Cons2(T, T List2)", "t").is_ok());
     assert_eq!(
         type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
         Some(type_expr(TypeKind::Adt(vec![named_type("Red"), named_type("Green"), named_type("Blue")]))),
@@ -171,10 +171,8 @@ fn adt_accepts_leading_pipe() {
 
 #[test]
 fn fn_type_group() {
-    // §37: `Fn<(Int, Int), Int>` is the v0.1 function type. The `( )`
-    // is an argument group, not a tuple.
     assert_eq!(
-        match type_of("type F = { function: Fn<(Int, Int), Int> }") {
+        match type_of("type F = { function: Fn(Int, Int => Int) }") {
             Some(TypeExpr { kind: TypeKind::Record(mut fields), .. }) => Some(fields.remove(0).ty),
             _ => None,
         },
@@ -183,8 +181,8 @@ fn fn_type_group() {
             vec![type_expr(TypeKind::Group(vec![named_type("Int"), named_type("Int")])), named_type("Int")],
         ))),
     );
-    assert!(parse_source("def f(x: Fn<(Int, Int), Int>): Int => 1", "t").is_ok());
-    assert!(parse_source("type F = { function: Fn<Int, String> }", "t").is_ok());
+    assert!(parse_source("def f(x: Fn(Int, Int => Int)): Int => 1", "t").is_ok());
+    assert!(parse_source("type F = { function: Fn(Int => String) }", "t").is_ok());
 }
 
 #[test]
@@ -268,8 +266,8 @@ fn lower_m0_subset() {
 #[test]
 fn typedef_preserves_parameters() {
     for (source, expected) in [
-        ("type List2<T> = | Nil2 | Cons2(T, List2<T>)", vec!["T"]),
-        ("type Pair<A, B> = { first: A; second: B }", vec!["A", "B"]),
+        ("type T List2 = | Nil2 | Cons2(T, T List2)", vec!["T"]),
+        ("type (A, B) Pair = { first: A; second: B }", vec!["A", "B"]),
         ("type Count = | Count(Int)", vec![]),
     ] {
         let ast = parse_source(source, "t").unwrap();

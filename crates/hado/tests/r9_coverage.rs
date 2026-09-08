@@ -67,18 +67,18 @@ fn sole_parameter_branch_checks_all_four_conditions() {
     for source in [
         "def f value => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
         "def f value => if value | Some(value) => value + 1 | 0\ndef main = f (Some(1))",
-        "def main = (fn value => if value | Some(x) => x + 1 | 0) (Some(1))",
+        "def main = fn(value => if value | Some(x) => x + 1 | 0) (Some(1))",
     ] {
         assert_eq!(check_source(source, "coverage.hd").err().unwrap().code.as_deref(), Some("E515"));
     }
     for source in [
         "def f value extra => if value | Some(x) => x + extra | extra\ndef main = f (Some(1)) 2",
-        "def f (value: Option<Int>) => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
+        "def f (value: Int Option) => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
         "def f value: Int => if value | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
         "def f value => if value | Some(_) => Option.is_some value | false\ndef main = f (Some(1))",
         "def f value => (if value | Some(x) => x | 0) + 1\ndef main = f (Some(1))",
         "def f | Some(x) => x + 1 | 0\ndef main = f (Some(1))",
-        "def main = (fn | Some(x) => x + 1 | 0) (Some(1))",
+        "def main = fn(| Some(x) => x + 1 | 0) (Some(1))",
     ] {
         check_source(source, "coverage.hd").unwrap();
     }
@@ -115,7 +115,7 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
     assert_eq!(check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.hd").err().unwrap().code.as_deref(), Some("E100"));
     for (source, name) in [
         ("def f used unused => used + 1\ndef main = f 1 2", "unused"),
-        ("def main = (fn used unused => used + 1) 1 2", "unused"),
+        ("def main = fn(used, unused => used + 1) 1 2", "unused"),
         ("def f outer => let outer = 1 -> outer + 2\ndef main = f 1", "outer"),
         ("def f | Some(unused) => 1 | 0\ndef main = f (Some(1))", "unused"),
         ("type Pair = { left: Int; right: Int }\ndef f (pair: Pair) => if pair | { left; right } => left\ndef main = f { left = 1; right = 2 }", "right }"),
@@ -130,8 +130,8 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
     }
     for source in [
         "def f | Some(_) => 1 | 0\ndef main = f (Some(1))",
-        "def f x => (fn y => x + y) 1\ndef main = f 1",
-        "def f | Some(x) => (fn y => x + y) 1 | 0\ndef main = f (Some(1))",
+        "def f x => fn(y => x + y) 1\ndef main = f 1",
+        "def f | Some(x) => fn(y => x + y) 1 | 0\ndef main = f (Some(1))",
     ] {
         check_source(source, "coverage.hd").unwrap();
     }

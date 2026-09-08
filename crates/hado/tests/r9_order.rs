@@ -23,7 +23,7 @@ fn application_type_errors_point_to_the_failing_argument() {
 #[test]
 fn application_arity_and_non_function_errors_keep_their_own_anchors() {
     for (source, code, anchor) in [
-        ("type Holder = | Hold(Fn<Int, Int>)\ndef main = Hold(fn a b => a + b)", "E301", "Hold(fn"),
+        ("type Holder = | Hold(Fn(Int => Int))\ndef main = Hold(fn(a, b => a + b))", "E301", "Hold(fn"),
         ("def main = 1 |> true", "E305", "true"),
     ] {
         let error = check_source(source, "application-anchor.hd").err().unwrap();
@@ -133,7 +133,7 @@ fn all_type_references_resolve_before_expression_type_errors() {
             format!("type Box{index} = | Pack{index}(Missing{index})"),
             format!("def f (value: Missing{index}) => value"),
             format!("def f value: Missing{index} => value"),
-            format!("def f = fn (value: Missing{index}) => value"),
+            format!("def f = fn(value: Missing{index} => value)"),
         ] {
             let source = format!("def broken = 1 + true\n{declaration}\ndef main = broken");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -147,8 +147,8 @@ fn all_type_references_resolve_before_expression_type_errors() {
 fn recursive_type_errors_point_to_the_changed_argument() {
     for padding in 0..20 {
         for (prefix, suffix) in [
-            ("type Tree<T> = | Leaf(T) | Next(Tree<", "List<T>>)"),
-            ("type Pair<A, B> = | End | Next(Pair<", "B, A>)"),
+            ("type T Tree = | Leaf(T) | Next(", "T List Tree)"),
+            ("type (A, B) Pair = | End | Next((", "B, A) Pair)"),
         ] {
             let prefix = format!("{prefix}{}", " ".repeat(padding));
             let source = format!("{prefix}{suffix}\ndef main = 1");
@@ -161,14 +161,14 @@ fn recursive_type_errors_point_to_the_changed_argument() {
 
 #[test]
 fn recursive_type_errors_use_source_order_across_declarations() {
-    let first = "type A<T> = | WrapA(A<List<T>>)";
-    let second = "type Z<T> = | WrapZ(Z<Option<T>>)";
+    let first = "type T A = | WrapA(T List A)";
+    let second = "type T Z = | WrapZ(T Option Z)";
     for (left, right) in [(first, second), (second, first)] {
         for padding in 0..12 {
             let source = format!("{}{left}\n{right}\ndef main = 1", " ".repeat(padding));
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E302"));
-            let changed = if left == first { "List" } else { "Option" };
+            let changed = if left == first { "T List" } else { "T Option" };
             assert_eq!((error.line, error.col), (1, padding + left.find(changed).unwrap() + 1));
         }
     }
@@ -243,7 +243,7 @@ fn invalid_function_bodies_preserve_known_call_arity() {
 
 #[test]
 fn failed_patterns_do_not_leak_shadowing_bindings() {
-    let source = "type A = { good: Int }\ntype B = { bad: Int }\ntype Pair<X, Y> = | Pair(X, Y)\ndef main = let x = { good = 1 } -> (let Pair(x, Some(n)) = Pair({ bad = 1 }, 2) -> n) + x.good";
+    let source = "type A = { good: Int }\ntype B = { bad: Int }\ntype (X, Y) Pair = | Pair(X, Y)\ndef main = let x = { good = 1 } -> (let Pair(x, Some(n)) = Pair({ bad = 1 }, 2) -> n) + x.good";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
@@ -280,10 +280,10 @@ fn recursive_type_failures_keep_call_arity_without_cascades() {
 fn invalid_module_bodies_do_not_fake_polymorphism_errors() {
     for (definition, expected) in [
         ("def f x => x + true", "E305"),
-        ("def f x => if x => (fn y => y + y) x | false", "E305"),
+        ("def f x => if x => fn(y => y + y) x | false", "E305"),
         ("def rec f x => f [x]", "E307"),
     ] {
-        let source = format!("def main = M.f 1\nmodule S def f<A>(x: A): A\nimplement S as M {definition}");
+        let source = format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
     }
@@ -294,9 +294,9 @@ fn invalid_module_bodies_retain_explicit_signature_mismatches() {
     for definition in [
         "def f (x: Int) => x + true",
         "def f x y => x + y + true",
-        "def f = fn x y => x + y + true",
+        "def f = fn(x, y => x + y + true)",
     ] {
-        let source = format!("def main = M.f 1\nmodule S def f<A>(x: A): A\nimplement S as M {definition}");
+        let source = format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
         assert_eq!((error.line, error.col), (3, 1));
@@ -305,8 +305,8 @@ fn invalid_module_bodies_retain_explicit_signature_mismatches() {
 
 #[test]
 fn deferred_numeric_errors_use_source_order_not_record_schema_order() {
-    let prefix = "type R = { a: Bool; b: Bool }\ndef main = { b = (fn x => ";
-    let source = format!("{prefix}x + x) true; a = (fn y => y + y) true }}");
+    let prefix = "type R = { a: Bool; b: Bool }\ndef main = { b = fn(x => ";
+    let source = format!("{prefix}x + x) true; a = fn(y => y + y) true }}");
     let error = check_source(&source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E305"));
     let line = prefix.lines().last().unwrap();
@@ -356,7 +356,7 @@ fn failed_modules_retain_public_contracts_without_fake_names() {
     for (signature, implementation, use_site) in [
         ("def run(x: Int): Int", "def run x => true", "M.run 1"),
         ("type T def make(x: Int): T", "def make x => x", "M.make 1"),
-        ("def id<A>(x: A): A", "def id x => x + 1", "M.id true"),
+        ("def A id(x: A): A", "def id x => x + 1", "M.id true"),
     ] {
         let source = format!("def first = {use_site}\n\n\ndef main = first\nmodule S {signature}\nimplement S as M {implementation}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -389,7 +389,7 @@ fn module_errors_follow_source_order_even_with_outer_dependencies() {
 #[test]
 fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
     for index in 0..20 {
-        let declaration = format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Tree{index}<List<T>>)");
+        let declaration = format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})");
         let first = "def first = true + 1";
         let source = format!("{first}\n{declaration}\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -399,7 +399,7 @@ fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
         let source = format!("{declaration}\n{first}\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E302"), "{error}");
-        assert_eq!((error.line, error.col), (1, declaration.find("List<T>").unwrap() + 1));
+        assert_eq!((error.line, error.col), (1, declaration.find("T List").unwrap() + 1));
     }
 }
 
@@ -407,8 +407,8 @@ fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
 fn recursive_type_recovery_preserves_known_payloads_and_breaks_growing_cycles() {
     for index in 0..20 {
         for declaration in [
-            format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Tree{index}<List<T>>)"),
-            format!("type Tree{index}<T> = | Leaf{index}(Int) | Next{index}(Branch{index}<List<T>>)\ntype Branch{index}<T> = | Back{index}(Tree{index}<T>)"),
+            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})"),
+            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Branch{index})\ntype T Branch{index} = | Back{index}(T Tree{index})"),
         ] {
             let source = format!("def first = Leaf{index}(true)\n{declaration}\ndef main = first");
             assert_eq!(code(&source), "E305", "{source}");
@@ -450,7 +450,7 @@ fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
     for (prefix, call, suffix) in [
         ("def rec poly x => let invoke = poly -> ", "invoke [x]", "\ndef main = poly 1"),
         ("def rec f x => ", "g [x]", "\ndef rec g y => f y\ndef main = f 1"),
-        ("def rec poly x => if true => (fn poly => poly 1) (fn n => n) | ", "poly [x]", "\ndef main = poly 1"),
+        ("def rec poly x => if true => fn(poly => poly 1) fn(n => n) | ", "poly [x]", "\ndef main = poly 1"),
         ("def rec poly x y => ", "poly y [x]", "\ndef main = poly 1 1"),
     ] {
         let source = format!("{prefix}{call}{suffix}");
@@ -465,8 +465,8 @@ fn indirect_polymorphic_recursion_points_to_its_definition() {
     for index in 0..20 {
         let name = format!("poly{index}");
         for (helper, body) in [
-            ("", format!("(fn invoke => invoke [x]) {name}")),
-            ("", format!("let call = fn invoke => invoke [x] -> call {name}")),
+            ("", format!("fn(invoke => invoke [x]) {name}")),
+            ("", format!("let call = fn(invoke => invoke [x]) -> call {name}")),
             ("def apply f x => f x\n", format!("apply {name} [x]")),
             ("def identity x => x\n", format!("(identity {name}) [x]")),
         ] {
@@ -477,9 +477,9 @@ fn indirect_polymorphic_recursion_points_to_its_definition() {
             assert_eq!((error.line, error.col), (index + helper.lines().count() + 1, index + 1), "{source}: {error}");
         }
     }
-    assert_eq!(code("def main = (fn invoke => invoke invoke) (fn x => x)"), "E306");
+    assert_eq!(code("def main = fn(invoke => invoke invoke) fn(x => x)"), "E306");
     check_source(
-        "def rec poly x => (fn poly => poly [x]) (fn values => values)\ndef main = poly 1",
+        "def rec poly x => fn(poly => poly [x]) fn(values => values)\ndef main = poly 1",
         SOURCE_PATH,
     ).unwrap();
 }
@@ -502,7 +502,7 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
     for (prefix, expression, suffix, code) in [
         ("def equal x y => x ", "== y", "\ndef alias = equal\ndef identity x => x\ndef main = alias identity identity", "E703"),
         ("def cmp x y => ", "compare x y", "\ndef alias = cmp\ndef identity x => x\ndef main = alias identity identity", "E704"),
-        ("def identity x => x\ndef main = M.equal identity identity\nmodule S def equal<T>(x: T, y: T): Bool\nimplement S as M def equal x y => x", "== y", "", "E703"),
+        ("def identity x => x\ndef main = M.equal identity identity\nmodule S def T equal(x: T, y: T): Bool\nimplement S as M def equal x y => x", "== y", "", "E703"),
         ("def identity x => x\ndef main = (identity ", "== identity)", " == true", "E703"),
     ] {
         let source = format!("{prefix}{expression}{suffix}");
@@ -513,7 +513,7 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
     for source in [
         "def equal x y => x == y\ndef alias = equal\ndef main = alias 1 2",
         "def cmp x y => compare x y\ndef alias = cmp\ndef main = alias 1 2",
-        "def main = M.equal 1 2\nmodule S def equal<T>(x: T, y: T): Bool\nimplement S as M def equal x y => x == y",
+        "def main = M.equal 1 2\nmodule S def T equal(x: T, y: T): Bool\nimplement S as M def equal x y => x == y",
     ] {
         check_source(source, SOURCE_PATH).unwrap_or_else(|error| panic!("{source}: {error}"));
     }

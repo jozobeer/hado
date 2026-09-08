@@ -20,7 +20,7 @@ fn program(outer: &str, sections: &[&str], body: &str) -> String {
 fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
     for padding in 0..20 {
         let signature = "module S type T type U def id(x: Int): Int";
-        for body in ["type T = T type U = Int", "type T = U type U = T", "type T = List<T> type U = Int"] {
+        for body in ["type T = T type U = Int", "type T = U type U = T", "type T = T List type U = Int"] {
             let implementation = format!("{}implement S as M {body} def id x => x", " ".repeat(padding));
             let source = program("", &[signature, &implementation], "M.id 1");
             let error = check_source(&source, "cyclic-alias.hd").err().unwrap();
@@ -80,7 +80,7 @@ fn native_execution_uses_the_concrete_representation() {
 
 #[test]
 fn opaque_values_cannot_hide_function_payloads_from_monomorphization() {
-    for (representation, make) in [("Fn<Int, Int>", "fn y => x + y"), ("{ callback: Fn<Int, Int> }", "{ callback = fn y => x + y }")] {
+    for (representation, make) in [("Fn(Int => Int)", "fn(y => x + y)"), ("{ callback: Fn(Int => Int) }", "{ callback = fn(y => x + y) }")] {
         let implementation = if representation.starts_with('{') {
             format!("implement S as M type Representation = {representation} type T = Representation def make x => {make}")
         } else { format!("implement S as M type T = {representation} def make x => {make}") };
@@ -91,7 +91,7 @@ fn opaque_values_cannot_hide_function_payloads_from_monomorphization() {
 
 #[test]
 fn signature_type_variables_shadow_abstract_type_names() {
-    let source = program("", &["module S type T def make(x: Int): T def identity<T>(x: T): T", "implement S as M type T = Int def make x => x def identity x => x"], "M.identity true");
+    let source = program("", &["module S type T def make(x: Int): T def T identity(x: T): T", "implement S as M type T = Int def make x => x def identity x => x"], "M.identity true");
     assert_eq!(check_source(&source, "module-types.hd").unwrap().main, Ty::Bool);
 }
 

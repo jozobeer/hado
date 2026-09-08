@@ -63,7 +63,7 @@ fn aggregate_layout_aligns_fields_and_total_size() {
 #[test]
 fn record_layout_specializes_fields_in_declaration_order() {
     let checked = hado::check_source(
-        "type Row<T> = { flag: Bool; value: T; marker: Char }\ndef main = { flag = true; value = 0; marker = 'a' }",
+        "type T Row = { flag: Bool; value: T; marker: Char }\ndef main = { flag = true; value = 0; marker = 'a' }",
         "t",
     )
     .unwrap();

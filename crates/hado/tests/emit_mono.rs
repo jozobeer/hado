@@ -95,8 +95,8 @@ fn mono_object_links_and_executes_recursive_calls() {
 fn closures_execute_direct_values_and_captured_environments() {
     for (index, source, expected) in [
         (0, "def inc x => x + 1\ndef main = let f = inc -> f 4", "5\n"),
-        (1, "def main = let offset = 7 -> let f = fn x => x + offset -> f 3", "10\n"),
-        (2, "def main = let offset = 7 -> let f = fn x => x + offset -> (f 3) + (f 5)", "22\n"),
+        (1, "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3", "10\n"),
+        (2, "def main = let offset = 7 -> let f = fn(x => x + offset) -> (f 3) + (f 5)", "22\n"),
     ] {
         let path = std::env::temp_dir().join(format!("hado-closure-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
@@ -122,7 +122,7 @@ fn records_execute_with_declared_layout() {
 fn tail_calls_survive_arity_changes_and_captured_indirection() {
     let cases = [
         "def rec ping n => if n == 0 => 42 | pong (n - 1) 1 2 3 4 5 6 7 8\ndef rec pong n a b c d e f g h => if n == 0 => a + b + c + d + e + f + g + h | ping (n - 1)\ndef main = ping 100000000",
-        "def rec loop offset n => if n == 0 => offset | let f = fn x => loop offset x -> f (n - 1)\ndef main = loop 42 100000000",
+        "def rec loop offset n => if n == 0 => offset | let f = fn(x => loop offset x) -> f (n - 1)\ndef main = loop 42 100000000",
     ];
     for (index, source) in cases.iter().enumerate() {
         let path = std::env::temp_dir().join(format!("hado-tail-path-{}-{index}", std::process::id()));
@@ -137,7 +137,7 @@ fn tail_calls_survive_arity_changes_and_captured_indirection() {
 
 #[test]
 fn constructor_payloads_execute_with_tagged_layout() {
-    let source = "type Box<T> = | Wrap(T)\ndef main = let Wrap(x) = Wrap(40) -> x + 2";
+    let source = "type T Box = | Wrap(T)\ndef main = let Wrap(x) = Wrap(40) -> x + 2";
     let path = std::env::temp_dir().join(format!("hado-constructor-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
@@ -151,7 +151,7 @@ fn constructor_switches_execute_immediate_and_boxed_variants() {
     for (index, source, expected) in [
         (0, "type Flag = | On | Off\ndef choose | On => 17 | Off => 29\ndef main = choose Off", "29\n"),
         (1, "def choose | Some(n) => n + 1 | None => 9\ndef main = choose (Some(41))", "42\n"),
-        (2, "def choose (option: Option<Int>) => if option | Some(n) => n + 1 | None => 9\ndef main = choose None", "9\n"),
+        (2, "def choose (option: Int Option) => if option | Some(n) => n + 1 | None => 9\ndef main = choose None", "9\n"),
     ] {
         let path = std::env::temp_dir().join(format!("hado-switch-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
@@ -528,7 +528,7 @@ fn module_value_thunks_preserve_lexical_scope() {
 
 #[test]
 fn polymorphic_global_function_values_specialize_the_thunk_result() {
-    let source = "def identity = fn x => x\ndef main = if identity true => identity 42 | 0";
+    let source = "def identity = fn(x => x)\ndef main = if identity true => identity 42 | 0";
     let path = std::env::temp_dir().join(format!("hado-polymorphic-thunk-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
@@ -540,11 +540,11 @@ fn polymorphic_global_function_values_specialize_the_thunk_result() {
 #[test]
 fn unit_output_preserves_result_status_and_nested_payloads() {
     for (index, (expression, ty, status, stdout, stderr)) in [
-        ("Ok()", "Result<Unit, Int>", 0, "", ""),
-        ("Error(())", "Result<Int, Unit>", 1, "", ""),
-        ("Some(())", "Option<Unit>", 0, "Some(())\n", ""),
-        ("Ok(Error(()))", "Result<Result<Int, Unit>, Int>", 0, "Error(())\n", ""),
-        ("Error(Ok())", "Result<Int, Result<Unit, Int>>", 1, "", "Ok(())\n"),
+        ("Ok()", "(Unit, Int) Result", 0, "", ""),
+        ("Error(())", "(Int, Unit) Result", 1, "", ""),
+        ("Some(())", "Unit Option", 0, "Some(())\n", ""),
+        ("Ok(Error(()))", "((Int, Unit) Result, Int) Result", 0, "Error(())\n", ""),
+        ("Error(Ok())", "(Int, (Unit, Int) Result) Result", 1, "", "Ok(())\n"),
     ].into_iter().enumerate() {
         let path = std::env::temp_dir().join(format!("hado-unit-result-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.hd", &path).unwrap();

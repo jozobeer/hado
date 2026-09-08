@@ -124,8 +124,8 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
     for index in 0..8 {
         let number = index * 17 + 3;
         let success = format!("def main = {number}");
-        let failure = format!("def identity (x: Result<Unit, Int>): Result<Unit, Int> => x\ndef main = identity (Error({number}))");
-        let empty_failure = "def identity (x: Result<Int, Unit>) => x\ndef main = identity (Error(()))";
+        let failure = format!("def identity (x: (Unit, Int) Result): (Unit, Int) Result => x\ndef main = identity (Error({number}))");
+        let empty_failure = "def identity (x: (Int, Unit) Result) => x\ndef main = identity (Error(()))";
         for (case, source, header, accepted) in [
             ("stdout", success.clone(), format!("// expect: {number}"), true),
             ("stderr", failure.clone(), format!("// expect-error: {number}"), true),

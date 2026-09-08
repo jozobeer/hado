@@ -35,18 +35,19 @@ fn generated_functions_reject_long_form_and_execute_short_form() {
         let padding = format!("{}{}", "\n".repeat(random(&mut state, 4) as usize), " ".repeat(random(&mut state, 9) as usize));
         for lambda in [false, true] {
             let source = |body: &str| if lambda {
-                format!("{padding}def main = (fn {params} {body}) {args}")
+                let params = if typed { params.trim_start_matches('(').trim_end_matches(')').to_string() } else { names.join(", ") };
+                format!("{padding}def main = fn({params} {body}) {args}")
             } else {
                 let ret = if typed { ": Int" } else { "" };
                 format!("{padding}def probe {params}{ret} {body}\ndef main = probe {args}")
             };
-            rejected(&source(&format!("=> if {arms}")), "E517", if lambda { "fn " } else { "def probe" });
-            rejected(&source(&format!("=> (if {arms})")), "E517", if lambda { "fn " } else { "def probe" });
+            rejected(&source(&format!("=> if {arms}")), "E517", if lambda { "fn(" } else { "def probe" });
+            rejected(&source(&format!("=> (if {arms})")), "E517", if lambda { "fn(" } else { "def probe" });
             let short = source(&arms);
             check_source(&short, "conditions.hd").unwrap();
             assert_round_trip(&short);
             execute(&short, expected, serial * 2 + usize::from(lambda));
-            let continuation = source(&format!("=> let bound = {} + 1 -> if | bound > 0 => {} | 2", names.join(" + "), names.join(" + ")));
+            let continuation = source(&format!("=> let bound = {} + 1 -> if bound > 0 => {} | 2", names.join(" + "), names.join(" + ")));
             check_source(&continuation, "conditions.hd").unwrap();
         }
     }
@@ -78,17 +79,17 @@ fn condition_and_pattern_functions_keep_their_diagnostics() {
     rejected("def main | true => 1 | 0", "E206", "def main");
     rejected("def f x | Some(y) => y | 0\ndef main = f 1", "E204", "y)");
     rejected("def f x | x > 0 => 1\ndef main = f 1", "E401", "def f");
-    rejected("def main = (fn x | x > 0 => 1) 1", "E401", "fn ");
+    rejected("def main = fn(x | x > 0 => 1) 1", "E401", "fn(");
     rejected("def f x | x > 0 => 1 | x > 0 => 2 | 0\ndef main = f 1", "E406", "| x > 0 => 2");
     rejected("def f x => if x | Some(y) => y | None => 0\ndef main = f (Some(1))", "E515", "def f");
 }
 
 #[test]
 fn condition_columns_require_a_condition_arm() {
-    for source in ["def f x | 1", "def main = fn x | 1", "def main = if | 1"] {
+    for source in ["def f x | 1", "def main = fn(x | 1)", "def main = if | 1"] {
         let error = parser::parse_source(source, "empty.hd").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
-        assert_eq!((error.line, error.col), (1, source.len() + 1));
+        assert_eq!((error.line, error.col), (1, source.find('|').unwrap() + 1));
     }
 }
 

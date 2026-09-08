@@ -144,7 +144,7 @@ fn repeated_or_unreachable_conditions_are_rejected() {
 #[test]
 fn identical_branches_ignore_local_names_but_preserve_free_names() {
     let ast = parse_source(
-        "def main = if true => (fn x => x + 1) | (fn y => y + 1)",
+        "def main = if true => fn(x => x + 1) | fn(y => y + 1)",
         "t",
     )
     .unwrap();
@@ -153,7 +153,7 @@ fn identical_branches_ignore_local_names_but_preserve_free_names() {
         Some("E502")
     );
     let ast = parse_source(
-        "def main = if true => (fn x => x + a) | (fn y => y + b)",
+        "def main = if true => fn(x => x + a) | fn(y => y + b)",
         "t",
     )
     .unwrap();
@@ -193,7 +193,7 @@ fn non_boolean_literal_patterns_require_fallback_at_any_depth() {
         let source = format!("{source} | 0");
         check::check_ast(&parse_source(&source, "t").unwrap(), "t").unwrap();
     }
-    let ast = parse_source("def f | true => 1 | false => 0", "t").unwrap();
+    let ast = parse_source("def f | Some(true) => 1 | Some(false) => 0 | None => -1", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -296,7 +296,7 @@ fn fallback_must_be_last_in_both_branch_forms() {
 fn unused_let_binding_respects_shadowing() {
     for source in [
         "def main = let x = 1 -> 2",
-        "def main = let x = 1 -> (fn x => x + 2) 3",
+        "def main = let x = 1 -> fn(x => x + 2) 3",
     ] {
         assert_eq!(
             hado::check_source(source, "t")
@@ -308,7 +308,7 @@ fn unused_let_binding_respects_shadowing() {
         );
     }
     for source in [
-        "def main = let x = 1 -> (fn y => x + y) 3",
+        "def main = let x = 1 -> fn(y => x + y) 3",
         "def main = let x = 1 -> let x = x + 1 -> x + 2",
     ] {
         hado::check_source(source, "t").unwrap();
@@ -457,8 +457,8 @@ fn boolean_patterns_must_cover_both_values_without_redundant_fallback() {
         );
     }
     for source in [
-        "def main = if true | true => 1 | false => 0",
-        "def main = if true | true => 1 | 0",
+        "def main = if true => 1 | 0",
+        "def main = if false => 1 | 0",
     ] {
         hado::check_source(source, "t").unwrap();
     }

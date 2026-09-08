@@ -99,10 +99,10 @@ impl Generator {
     }
 
     fn type_params(&mut self) -> String {
-        if self.choose("type_params?", 2) == 0 { return String::new(); }
-        self.mark("type_params", 1, 0);
+        if self.choose("type_vars?", 2) == 0 { return String::new(); }
         let count = self.random(3) + 1;
-        format!("< {} >", self.list(count, |g| g.name(true), " , "))
+        self.mark("type_vars", 2, usize::from(count > 1));
+        if count == 1 { self.name(true) } else { format!("( {} )", self.list(count, |g| g.name(true), " , ")) }
     }
 
     fn type_definition(&mut self) -> String {
@@ -113,7 +113,7 @@ impl Generator {
             let count = self.random(3) + 1;
             self.list(count, |g| format!("| {}", g.constructor()), " ")
         } else { self.record_type() };
-        format!("type {name} {params} = {body}")
+        format!("type {params} {name} = {body}")
     }
 
     fn constructor(&mut self) -> String {
@@ -133,22 +133,30 @@ impl Generator {
     }
 
     fn type_expr(&mut self, depth: usize) -> String {
-        let choice = if depth == 0 { self.mark("type_expr", 4, 0); 0 } else { self.choose("type_expr", 4) };
-        match choice {
-            0 => self.name(true),
+        self.mark("type_expr", 1, 0);
+        let choice = if depth == 0 { 0 } else { self.random(3) };
+        self.mark("type_atom", 3, choice);
+        let mut source = match choice {
+            0 => self.type_ref(),
             1 => {
-                let count = self.random(3) + 1;
-                format!("{} < {} >", self.name(true), self.list(count, |g| g.type_expr(depth - 1), " , "))
+                let count = self.random(3) + 2;
+                format!("( {} ) {}", self.list(count, |g| g.type_expr(depth - 1), " , "), self.type_ref())
             }
-            2 => format!("{} . {}", self.name(true), self.name(true)),
-            _ => format!("Fn < {} , {} >", self.fn_params(depth - 1), self.type_expr(depth - 1)),
-        }
+            _ => format!("Fn ( {} => {} )", self.fn_params(depth - 1), self.type_expr(depth - 1)),
+        };
+        let count = self.choose("type_ref*", 3);
+        for _ in 0..count { source.push_str(&format!(" {}", self.type_ref())); }
+        source
+    }
+
+    fn type_ref(&mut self) -> String {
+        if self.choose("type_ref", 2) == 0 { self.name(true) }
+        else { format!("{} . {}", self.name(true), self.name(true)) }
     }
 
     fn fn_params(&mut self, depth: usize) -> String {
-        if self.choose("fn_params", 2) == 0 { return self.type_expr(depth); }
         let count = self.random(3) + 1;
-        format!("( {} )", self.list(count, |g| g.type_expr(depth), " , "))
+        self.list(count, |g| g.type_expr(depth), " , ")
     }
 
     fn module_section(&mut self, abstract_member: bool) -> (String, String, String) {
@@ -171,12 +179,13 @@ impl Generator {
         let name = self.name(false);
         let params = self.type_params();
         let count = self.random(3) + 1;
-        format!("def {name} {params} ( {} ) : {}", self.list(count, |g| g.typed_param(), " , "), self.type_expr(2))
+        format!("def {params} {name} ( {} ) : {}", self.list(count, |g| { g.mark("contract_param", 1, 0); g.typed_param() }, " , "), self.type_expr(2))
     }
 
     fn implement_section(&mut self) -> String {
         self.mark("implement_section", 1, 0);
         let (signature, sig_name, abstract_name) = self.module_section(true);
+        self.mark("contract_ref", 1, 0);
         self.declarations += 1;
         let count = self.choose("implement_item*", 3);
         let items = self.list(count, |g| g.implement_item(&abstract_name), " ");
@@ -203,19 +212,18 @@ impl Generator {
     }
 
     fn prefix(&mut self, depth: usize, in_arm: bool) -> String {
-        let choice = self.random(if in_arm { 4 } else { 5 });
+        let choice = self.random(if in_arm { 3 } else { 4 });
         self.prefix_variant(depth, in_arm, choice)
     }
 
     fn prefix_variant(&mut self, depth: usize, in_arm: bool, choice: usize) -> String {
-        self.mark("prefix_form", 5, choice);
+        self.mark("prefix_form", 4, choice);
         match choice {
-            0 => self.lambda(depth, in_arm),
-            1 | 2 => {
-                self.mark(if choice == 1 { "binding" } else { "rail_binding" }, 1, 0);
-                format!("let {}{} = ( {} ) -> {}", self.pattern(2), if choice == 1 { "" } else { "?" }, self.expression(depth, in_arm), self.expression(depth, in_arm))
+            0 | 1 => {
+                self.mark(if choice == 0 { "binding" } else { "rail_binding" }, 1, 0);
+                format!("let {}{} = ( {} ) -> {}", self.pattern(2), if choice == 0 { "" } else { "?" }, self.expression(depth, in_arm), self.expression(depth, in_arm))
             }
-            3 => {
+            2 => {
                 self.mark("rail_discard", 1, 0);
                 format!("do ( {} ) -> {}", self.expression(depth, in_arm), self.expression(depth, in_arm))
             }
@@ -226,12 +234,19 @@ impl Generator {
     fn lambda(&mut self, depth: usize, in_arm: bool) -> String {
         let choice = if in_arm { self.mark("lambda", 3, 0); 0 } else { self.choose("lambda", 3) };
         if choice == 0 {
-            format!("fn {} => {}", self.parameters(), self.expression(depth, in_arm))
+            format!("fn ( {} => {} )", self.lambda_params(), self.expression(depth, in_arm))
         } else if choice == 1 {
-            format!("( fn {} )", self.arms(depth))
+            format!("fn ( {} )", self.arms(depth))
         } else {
-            format!("( fn {} {} )", self.parameters(), self.condition_arms(depth))
+            format!("fn ( {} {} )", self.lambda_params(), self.condition_arms(depth))
         }
+    }
+
+    fn lambda_params(&mut self) -> String {
+        let count = self.random(3) + 1;
+        if self.choose("lambda_params", 2) == 0 {
+            self.list(count, |g| { g.mark("param", 1, 0); g.name(false) }, " , ")
+        } else { self.list(count, |g| g.typed_param(), " , ") }
     }
 
     fn pipe(&mut self, depth: usize, in_arm: bool) -> String {
@@ -293,7 +308,7 @@ impl Generator {
             0 => self.name(false),
             1 => {
                 self.mark("dunder_name", 1, 0);
-                self.mark("primary", 13, 7);
+                self.mark("primary", 14, 7);
                 format!("__{}", self.name(false))
             }
             2 => format!("{} . {}", self.name(true), self.name(false)),
@@ -311,9 +326,9 @@ impl Generator {
 
     fn primary(&mut self, depth: usize, in_arm: bool) -> String {
         let alternatives = if depth == 0 { &[0, 1, 2, 3, 4, 5, 6, 8, 9][..] }
-            else { &[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12][..] };
+            else { &[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13][..] };
         let choice = alternatives[self.random(alternatives.len())];
-        self.mark("primary", 13, choice);
+        self.mark("primary", 14, choice);
         match choice {
             0..=5 => self.literal(choice),
             6 => self.name(false),
@@ -322,6 +337,7 @@ impl Generator {
             9 => self.constructor_expr(depth - 1, in_arm),
             10 => self.record_expr(depth - 1, in_arm),
             11 => self.list_expr(depth - 1, in_arm),
+            12 => self.lambda(depth - 1, in_arm),
             _ => format!("( {} )", self.expression(depth - 1, in_arm)),
         }
     }
@@ -395,6 +411,7 @@ impl Generator {
     }
 
     fn condition_arms(&mut self, depth: usize) -> String {
+        self.mark("condition_arms", 1, 0);
         let count = self.random(3) + 1;
         let arms = self.list(count, |g| {
             g.mark("condition_arm", 1, 0);
@@ -404,6 +421,7 @@ impl Generator {
     }
 
     fn arms(&mut self, depth: usize) -> String {
+        self.mark("pattern_arms", 1, 0);
         let count = self.random(3) + 1;
         let arms = self.list(count, |g| {
             g.mark("pattern_arm", 1, 0);
@@ -415,8 +433,8 @@ impl Generator {
     }
 
     fn arm_body(&mut self, depth: usize) -> String {
-        let choice = if depth == 0 { 0 } else { self.random(5) };
-        self.mark("arm_body", 5, choice);
+        let choice = if depth == 0 { 0 } else { self.random(4) };
+        self.mark("arm_body", 4, choice);
         if choice == 0 { self.pipe(depth, true) } else { self.prefix_variant(depth - 1, true, choice - 1) }
     }
 

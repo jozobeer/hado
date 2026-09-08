@@ -28,7 +28,7 @@ for module, members in required.items():
     print(f"{'OK' if ok else 'NG'}: {module} signature")
     for member in members.split():
         total += 1
-        ok = len(re.findall(r"\bdef\s+(?:rec\s+)?" + member + r"\b", source)) >= 2
+        ok = len(re.findall(r"\bdef\s+(?:rec\s+)?(?:[A-Z]\w*\s+|\([A-Z]\w*(?:\s*,\s*[A-Z]\w*)+\)\s+)?" + re.escape(member) + r"\b", source)) >= 2
         passed += ok
         print(f"{'OK' if ok else 'NG'}: {module}.{member} declaration and definition")
 print(f"prelude inventory: {passed}/{total}")

@@ -56,7 +56,7 @@ fn build_executes_nested_parenthesized_constructors() {
     let dir = std::env::temp_dir().join(format!("hado-constructor-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.hd");
-    std::fs::write(&source, "type Pair = | Pair(Int, Option<Int>)\ndef sum | Pair(left, Some(right)) => left + right | Pair(left, None) => left\ndef main = sum (Pair(30, Some(12)))").unwrap();
+    std::fs::write(&source, "type Pair = | Pair(Int, Int Option)\ndef sum | Pair(left, Some(right)) => left + right | Pair(left, None) => left\ndef main = sum (Pair(30, Some(12)))").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();

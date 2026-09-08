@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix="hado-m5-") as temporary:
         ("comparison", "def main = compare 1 2", ['name: "compare_Int"', 'name: "print_Int"']),
         ("runtime-call", 'def main = String.length "hello"', ['CallRuntime { function: StringLength']),
         ("direct-tail", "def rec down n => if n == 0 => 42 | down (n - 1)\ndef main = down 3", ['TailCall { function: FunctionId']),
-        ("closure-tail", "def apply f x => f x\ndef main = apply (fn x => x + 1) 41", ['TailCallClosure {']),
+        ("closure-tail", "def apply f x => f x\ndef main = apply fn(x => x + 1) 41", ['TailCallClosure {']),
     ]
     for name, source, required in probes:
         path = Path(temporary) / name / "main.hd"

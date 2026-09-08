@@ -33,7 +33,7 @@ fn typed_record_patterns_bind_field_types() {
 fn unique_fields_infer_record_parameters() {
     let source = "type User = { name: String; age: Int }\ndef name user => user.name\ndef main = name { name = \"a\"; age = 3 }";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::String);
-    let source = "type Box<T> = { value: T }\ndef unbox box => box.value\ndef a = unbox { value = 1 }\ndef main = (a > 0) && unbox { value = true }";
+    let source = "type T Box = { value: T }\ndef unbox box => box.value\ndef a = unbox { value = 1 }\ndef main = (a > 0) && unbox { value = true }";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
 }
 
