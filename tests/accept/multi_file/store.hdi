@@ -1,0 +1,3 @@
+type Input = { value: Int }
+module Store
+def run(input: Input): Int

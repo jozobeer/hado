@@ -1,0 +1,5 @@
+// spec: §54
+// expect: 42
+// item: 節構文
+type Request = { amount: Int }
+def main = let request = { amount = 20 } -> MemoryStore.run { value = request.amount } + FileStore.run { value = request.amount + 1 }

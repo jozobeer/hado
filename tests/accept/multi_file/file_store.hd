@@ -1,0 +1,2 @@
+implement Store as FileStore
+def run input => input.value + 1
