@@ -679,7 +679,7 @@ R13 の終了時に `git tag v0.1.1` を打つ。
 
 | ID | 論点 | 決定 | 仕様の節 |
 |---|---|---|---|
-| Q1 | 範囲 | 9.3 の 4 項目を全て検討する。結果は入れる 2、やらない 2（11.3） | — |
+| Q1 | 範囲 | 9.3 の 4 項目を全て検討する。結果は入れる 2、やらない 2（11.3 の先頭 2 項目） | — |
 | Q2 | module の探索 | 入口ファイルと同じディレクトリ。サブディレクトリと検索パスは無い。Q16 で「全て読む」に改めた | §54 |
 | Q3 | ファイル名と module 名 | 当初は UpperCamel → snake_case の導出。Q19 で削除し、名前は見出しだけで決める | §54 |
 | Q4〜Q8 | 契約の書き方 | `.hdi` は残す。契約ファイルは実装を知らず、満たす契約は実装側が宣言する | §34, §54 |
@@ -871,7 +871,7 @@ R17 の終了時に `git tag v0.1.2` を打つ。
 |---|---|---|---|
 | `cargo test` | `parse_corpus::corpus_counts`、`r9_grammar::grammar_generated_programs_preserve_every_declaration`（2 failed） | §50 が 57 行で拒否が 58 本（E113）。§41 の EBNF から生成した `let p? =` と節形式を現行パーサが読めない | R14（E113、`let p? =`）、R16（節形式） |
 | `verify-m0.sh` | 2 cargo-test、3 walk、4 tail（4/7） | `cargo test` の終了コードを見る | 同上 |
-| `verify-m1-spec.sh` | 1 headings（5/6） | 見出しの改名（表題 §22 §23 §34 §35）を `git diff` が削除と数える。コミット後に消える | 本ラウンドのコミット |
+| `verify-m1-spec.sh` | 1 headings（5/6） | 見出しの改名（表題 §22 §23 §34 §35）を `git diff` が削除と数える。コミット `d89262d` の後は 6/6（実測） | — |
 | `verify-m1-corpus.sh` | 1 reject-1:1（E113 が §50 に無い）、2 sec39（`module UserStore` が受理に無い）、3 pairs（11.2 の 2 項目に受理と拒否が無い）、7 no-regressions（m0 が赤）（3/7） | 仕様先行 | R14（1、3 の let p? =）、R16（2、3 の節構文、7） |
 | `verify-m2.sh` | 1 accept-29（`cargo` が exit 101）、2 e1xx-13（E1xx が 14 → 13）、5 gates（5/8） | 同上。初回は 6 protected-files も赤だったが、実走中に文書を編集したためで、編集を止めて回すと 5/8 | R14, R16 |
 | `verify-m3.sh` | 9 gates（11/12） | m0 m1-spec m1-corpus m2 が赤 | R16 |

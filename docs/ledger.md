@@ -642,6 +642,7 @@ advisor の指摘で、前提に埋めていた 3 点（`implement` 節の本体
 | 1 | 仕様の改訂。§22 §23 §26 §40 §41 §49 §50 の `let?` `do?`、§34 §35 の全面書き換え、§5 §27 §39 §46 §47 の追随、§54 の新設 |
 | 2 | `docs/plan.md` 11 節と 12 節、`docs/spec-trace.md` `docs/spec-coverage.md` `docs/corpus.md` の追随、`docs/wants.md` の整理 |
 | 3 | `verify-m1-spec.sh` と `verify-m1-corpus.sh` の項目導出に 11.2 と §54 を含め、全門番を実走（下表） |
+| 4 | 判定者レビュー。muse spark 1.3（contributor-free）が 3 回で 13、11、7 件を指摘し、全件を反映した（主なもの: 14-a の除外、`item:` 名のバッククォート、`Y.T` の可視性、E513 の条件、`.hdi` と契約の名前解決、診断形式、E1xx の件数、m3-11 と m7-2 の門番の置換、局所名前空間、修飾参照と E100 のアンカー）。4 回目は muse spark がリミットに当たったため deepseek v4 flash に切り替え、指摘 0 件（PASS）。3 回目の反映後に別セッションが `d89262d` としてコミットした |
 
 **手順 3 の時点で赤の門番（実測）**
 
@@ -649,7 +650,7 @@ advisor の指摘で、前提に埋めていた 3 点（`implement` 節の本体
 |---|---|---|---|
 | `cargo test` | `parse_corpus::corpus_counts`、`r9_grammar::grammar_generated_programs_preserve_every_declaration`（2 failed） | §50 が 57 行で拒否が 58 本（E113）。§41 の EBNF から生成した `let p? =` と節形式を現行パーサが読めない | R14（E113、`let p? =`）、R16（節形式） |
 | `verify-m0.sh` | 2 cargo-test、3 walk、4 tail（4/7） | `cargo test` の終了コードを見る | 同上 |
-| `verify-m1-spec.sh` | 1 headings（5/6） | 見出しの改名（表題 §22 §23 §34 §35）を `git diff` が削除と数える。コミット後に消える | 本ラウンドのコミット |
+| `verify-m1-spec.sh` | 1 headings（5/6） | 見出しの改名（表題 §22 §23 §34 §35）を `git diff` が削除と数える。コミット `d89262d` の後は 6/6（実測） | — |
 | `verify-m1-corpus.sh` | 1 reject-1:1（E113 が §50 に無い）、2 sec39（`module UserStore` が受理に無い）、3 pairs（11.2 の 2 項目に受理と拒否が無い）、7 no-regressions（m0 が赤）（3/7） | 仕様先行 | R14（1、3 の let p? =）、R16（2、3 の節構文、7） |
 | `verify-m2.sh` | 1 accept-29（`cargo` が exit 101）、2 e1xx-13（E1xx が 14 → 13）、5 gates（5/8） | 同上。初回は 6 protected-files も赤だったが、実走中に文書を編集したためで、編集を止めて回すと 5/8 | R14, R16 |
 | `verify-m3.sh` | 9 gates（11/12） | m0 m1-spec m1-corpus m2 が赤 | R16 |
