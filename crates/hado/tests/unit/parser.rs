@@ -165,7 +165,7 @@ fn adt_accepts_leading_pipe() {
     assert!(parse_source("type T List2 = | Nil2 | Cons2(T, T List2)", "t").is_ok());
     assert_eq!(
         type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
-        Some(type_expr(TypeKind::Adt(vec![named_type("Red"), named_type("Green"), named_type("Blue")]))),
+        Some(type_expr(TypeKind::Adt(["Red", "Green", "Blue"].into_iter().map(|name| crate::parser::ConstructorDecl { name: crate::parser::DeclaredName { name: name.into(), span: Span { line: 1, col: 1 } }, payload: crate::parser::ConstructorPayload::Nullary }).collect()))),
     );
 }
 

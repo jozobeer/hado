@@ -231,7 +231,29 @@ pub enum TypeKind {
     /// `(Int, Int)` argument group inside `Fn(...)`.
     Group(Vec<TypeExpr>),
     Record(Vec<TypeField>),
-    Adt(Vec<TypeExpr>),
+    Adt(Vec<ConstructorDecl>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstructorDecl {
+    pub name: DeclaredName,
+    pub payload: ConstructorPayload,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstructorPayload {
+    Nullary,
+    Positional(Vec<TypeExpr>),
+}
+
+impl ConstructorPayload {
+    pub fn types(&self) -> &[TypeExpr] {
+        match self { Self::Nullary => &[], Self::Positional(types) => types }
+    }
+
+    pub fn types_mut(&mut self) -> &mut [TypeExpr] {
+        match self { Self::Nullary => &mut [], Self::Positional(types) => types }
+    }
 }
 
 /// A parsed program: an ordered list of top-level items.
@@ -878,13 +900,13 @@ impl Parser<'_> {
         Ok(TypeExpr { kind: TypeKind::Record(fields), span })
     }
 
-    fn parse_constructor_type(&mut self) -> Result<TypeExpr, Diagnostic> {
+    fn parse_constructor_type(&mut self) -> Result<ConstructorDecl, Diagnostic> {
         let span = self.span();
         let name = self.expect_upper_name("a constructor name")?;
-        if self.kind() != &TokKind::LParen { return Ok(TypeExpr { kind: TypeKind::Name(name), span }); }
+        if self.kind() != &TokKind::LParen { return Ok(ConstructorDecl { name: DeclaredName { name, span }, payload: ConstructorPayload::Nullary }); }
         self.bump();
         let args = self.parse_type_list(&TokKind::RParen)?;
-        Ok(TypeExpr { kind: TypeKind::Apply(name, args), span })
+        Ok(ConstructorDecl { name: DeclaredName { name, span }, payload: ConstructorPayload::Positional(args) })
     }
 
     fn parse_type_list(&mut self, end: &TokKind) -> Result<Vec<TypeExpr>, Diagnostic> {

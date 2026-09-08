@@ -88,21 +88,16 @@ fn references(def: &TypeDef) -> Vec<(&str, &[TypeExpr], Span)> {
             }
             TypeKind::Adt(variants) => {
                 for variant in variants {
-                    payload(variant, &mut result);
+                    for ty in variant.payload.types() { collect(ty, &mut result); }
                 }
             }
-            _ => payload(body, &mut result),
+            TypeKind::Apply(_, args) => {
+                for arg in args { collect(arg, &mut result); }
+            }
+            _ => {}
         }
     }
     result
-}
-
-fn payload<'a>(variant: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr], Span)>) {
-    if let TypeKind::Apply(_, args) = &variant.kind {
-        for arg in args {
-            collect(arg, result);
-        }
-    }
 }
 
 fn collect<'a>(ty: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr], Span)>) {
@@ -114,7 +109,10 @@ fn collect<'a>(ty: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr], Span
                 collect(arg, result);
             }
         }
-        TypeKind::Group(args) | TypeKind::Adt(args) => {
+        TypeKind::Adt(variants) => {
+            for variant in variants { for ty in variant.payload.types() { collect(ty, result); } }
+        }
+        TypeKind::Group(args) => {
             for arg in args {
                 collect(arg, result);
             }

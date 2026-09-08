@@ -116,9 +116,7 @@ fn constructor_owners(items: &[Item]) -> BTreeMap<String, Key> {
         if let Item::TypeDef(def) = item {
             if let Some(TypeExpr { kind: TypeKind::Adt(variants), .. }) = &def.ty {
                 for variant in variants {
-                    if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &variant.kind {
-                        owners.insert(name.clone(), Key::Type(def.name.clone()));
-                    }
+                    owners.insert(variant.name.name.clone(), Key::Type(def.name.clone()));
                 }
             }
         }
@@ -304,9 +302,7 @@ fn type_expression(ty: &TypeExpr, scope: &Scope, references: &mut References) {
         TypeKind::Record(fields) => { for field in fields { type_expression(&field.ty, scope, references); } }
         TypeKind::Adt(variants) => {
             for variant in variants {
-                if let TypeKind::Apply(_, args) = &variant.kind {
-                    for arg in args { type_expression(arg, scope, references); }
-                }
+                for arg in variant.payload.types() { type_expression(arg, scope, references); }
             }
         }
     }

@@ -74,10 +74,7 @@ fn record(name: &str, span: Span, seen: &mut HashSet<String>, ambiguous: &mut Ha
 
 fn constructor_names(def: &crate::parser::TypeDef) -> Vec<(&String, Span)> {
     match def.ty.as_ref().map(|ty| &ty.kind) {
-        Some(TypeKind::Adt(variants)) => variants.iter().filter_map(|variant| match &variant.kind {
-            TypeKind::Name(name) | TypeKind::Apply(name, _) => Some((name, variant.span)),
-            _ => None,
-        }).collect(),
+        Some(TypeKind::Adt(variants)) => variants.iter().map(|variant| (&variant.name.name, variant.name.span)).collect(),
         _ => Vec::new(),
     }
 }

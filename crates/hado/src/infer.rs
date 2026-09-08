@@ -739,14 +739,11 @@ impl Checker<'_> {
         }
         let variants = match &body.kind {
             TypeKind::Adt(variants) => variants.as_slice(),
-            _ => std::slice::from_ref(body),
+            _ => return Err(self.error(def.span, None, "record definitions are not implemented")),
         };
         for (tag, variant) in variants.iter().enumerate() {
             self.register_constructor(variant, &parameters, &result, def.span, rejected)?;
-            let name = match &variant.kind {
-                TypeKind::Name(name) | TypeKind::Apply(name, _) => name,
-                _ => unreachable!("registered constructor"),
-            };
+            let name = &variant.name.name;
             let tag = u32::try_from(tag).map_err(|_| self.error(def.span, None, "too many constructors"))?;
             self.constructor_tags.insert(name.clone(), tag);
         }
@@ -755,22 +752,16 @@ impl Checker<'_> {
 
     fn register_constructor(
         &mut self,
-        variant: &TypeExpr,
+        variant: &crate::parser::ConstructorDecl,
         parameters: &HashMap<String, Ty>,
         result: &Ty,
         span: Span,
         rejected: &[Span],
     ) -> Result<(), Diagnostic> {
-        let (name, payload) = match &variant.kind {
-            TypeKind::Name(name) => (name, Vec::new()),
-            TypeKind::Apply(name, args) => (
-                name,
-                args.iter()
-                    .map(|arg| self.registered_payload_type(arg, parameters, span, rejected))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            _ => return Err(self.error(span, None, "record definitions are not implemented")),
-        };
+        let name = &variant.name.name;
+        let payload = variant.payload.types().iter()
+            .map(|arg| self.registered_payload_type(arg, parameters, span, rejected))
+            .collect::<Result<Vec<_>, _>>()?;
         let ty = if payload.is_empty() {
             result.clone()
         } else {

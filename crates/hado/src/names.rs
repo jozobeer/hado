@@ -329,9 +329,7 @@ fn resolve_type_names(
         }
         TypeKind::Adt(variants) => {
             for variant in variants {
-                if let TypeKind::Apply(_, payloads) = &variant.kind {
-                    for payload in payloads { resolve_type_names(payload, types, path, diagnostics); }
-                }
+                for payload in variant.payload.types() { resolve_type_names(payload, types, path, diagnostics); }
             }
         }
     }
@@ -396,9 +394,7 @@ fn register_type_members(
     match &body.kind {
         TypeKind::Adt(variants) => {
             for variant in variants {
-                if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &variant.kind {
-                    register(names, name, variant.span, path)?;
-                }
+                register(names, &variant.name.name, variant.name.span, path)?;
             }
         }
         TypeKind::Record(fields) => {

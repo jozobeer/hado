@@ -21,9 +21,7 @@ impl Scope {
                     if let Some(ty) = &def.ty {
                         if let TypeKind::Adt(variants) = &ty.kind {
                             for variant in variants {
-                                if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &variant.kind {
-                                    scope.constructors.insert(name.clone());
-                                }
+                                scope.constructors.insert(variant.name.name.clone());
                             }
                         }
                     }

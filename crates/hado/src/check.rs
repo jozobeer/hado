@@ -96,7 +96,8 @@ fn node_type_has_span(node: &Node, span: crate::parser::Span) -> bool {
 fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
     if ty.span == span { return true; }
     match &ty.kind {
-        crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) | crate::parser::TypeKind::Adt(args) => args.iter().any(|ty| type_has_span(ty, span)),
+        crate::parser::TypeKind::Adt(variants) => variants.iter().any(|variant| variant.name.span == span || variant.payload.types().iter().any(|ty| type_has_span(ty, span))),
+        crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => args.iter().any(|ty| type_has_span(ty, span)),
         crate::parser::TypeKind::Record(fields) => fields.iter().any(|field| type_has_span(&field.ty, span)),
         _ => false,
     }
@@ -170,11 +171,8 @@ fn references_type_parameter(ty: &TypeExpr, parameter: &str) -> bool {
     }
 }
 
-fn constructor_uses_type_parameter(variant: &TypeExpr, parameter: &str) -> bool {
-    match &variant.kind {
-        TypeKind::Apply(_, arguments) => arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
-        _ => false,
-    }
+fn constructor_uses_type_parameter(variant: &crate::parser::ConstructorDecl, parameter: &str) -> bool {
+    variant.payload.types().iter().any(|ty| references_type_parameter(ty, parameter))
 }
 
 fn check_unused<'a>(

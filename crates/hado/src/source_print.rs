@@ -189,10 +189,12 @@ fn type_source(ty: &TypeExpr) -> String {
         ),
         TypeKind::Adt(variants) => variants
             .iter()
-            .map(|variant| match &variant.kind {
-                TypeKind::Apply(name, args) => format!("| {name}({})", type_list(args)),
-                TypeKind::Name(name) => format!("| {name}"),
-                _ => unreachable!("constructor definition"),
+            .map(|variant| {
+                let name = &variant.name.name;
+                match &variant.payload {
+                    crate::parser::ConstructorPayload::Positional(args) => format!("| {name}({})", type_list(args)),
+                    crate::parser::ConstructorPayload::Nullary => format!("| {name}"),
+                }
             })
             .collect::<Vec<_>>()
             .join(" "),

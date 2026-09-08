@@ -147,7 +147,13 @@ impl Instance<'_> {
                 self.qualified_type(name);
                 for argument in arguments { self.ty(argument); }
             }
-            TypeKind::Group(types) | TypeKind::Adt(types) => {
+            TypeKind::Adt(variants) => {
+                for variant in variants {
+                    self.declared(&mut variant.name);
+                    for ty in variant.payload.types_mut() { self.ty(ty); }
+                }
+            }
+            TypeKind::Group(types) => {
                 for ty in types { self.ty(ty); }
             }
             TypeKind::Record(fields) => {
