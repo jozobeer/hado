@@ -13,18 +13,18 @@ def run(*args):
 def report(number, label, ok):
     results[number] = bool(ok)
     print(f'{"OK" if ok else "NG"}: {number} {label}', flush=True)
-build = run('cargo', 'build', '--offline', '-p', 'shin', '--bin', 'shin')
+build = run('cargo', 'build', '--offline', '-p', 'hado', '--bin', 'hado')
 metadata = run('cargo', 'metadata', '--offline', '--format-version', '1', '--no-deps')
 try:
-    shin = str(P(json.loads(metadata.stdout)['target_directory']) / 'debug/shin')
+    hado = str(P(json.loads(metadata.stdout)['target_directory']) / 'debug/hado')
 except (ValueError, KeyError):
-    shin = 'target/debug/shin'
+    hado = 'target/debug/hado'
 def check(path, print_type=False):
-    return run(shin, 'check', *(['--print-type'] if print_type else []), str(path))
+    return run(hado, 'check', *(['--print-type'] if print_type else []), str(path))
 def success(r): return r.returncode == 0 and not r.stdout and not r.stderr
-usage = [run(shin), run(shin, 'check')]
-report(1, 'cli', build.returncode == 0 and os.access(shin, os.X_OK) and all(r.returncode == 2 and not r.stdout and r.stderr.startswith('usage: shin ') and '<file>' in r.stderr for r in usage))
-accept = sorted(P('tests/accept').glob('*.shin'))
+usage = [run(hado), run(hado, 'check')]
+report(1, 'cli', build.returncode == 0 and os.access(hado, os.X_OK) and all(r.returncode == 2 and not r.stdout and r.stderr.startswith('usage: hado ') and '<file>' in r.stderr for r in usage))
+accept = sorted(P('tests/accept').glob('*.hd'))
 accepted = 0
 for p in accept:
     r = check(p)
@@ -34,7 +34,7 @@ for p in accept:
     else: print(r.stderr.strip())
 report(2, f'accept-{len(accept)}', bool(accept) and len(accept) == accepted)
 codes = ['E201','E203','E204','E301','E302','E303','E304','E601','E602']
-reject = [P(f'tests/reject/{code}.shin') for code in codes]
+reject = [P(f'tests/reject/{code}.hd') for code in codes]
 lines = {}
 for code,p in zip(codes,reject):
     r = check(p)
@@ -76,26 +76,26 @@ def expression(kind,depth):
         op = ['<','<=','>','>='][choice(4)]
         return f'({expression("Int",depth-1)} {op} {expression("Int",depth-1)})'
     return f'(not {expression("Bool",depth-1)})'
-with tempfile.TemporaryDirectory(prefix='shin-m3-') as temp:
+with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
     rounds = errors = 0
     for i in range(20):
         ty = ['Int','Bool'][choice(2)]
-        p = P(temp)/f'round_{i}.shin'
+        p = P(temp)/f'round_{i}.hd'
         p.write_text('def main = '+expression(ty,3))
         r = check(p,True)
         rounds += r.returncode == 0 and r.stdout == ty+'\n' and not r.stderr
     report(6, 'type-round-20', rounds == 20)
     for i in range(10):
-        p = P(temp)/f'error_{i}.shin'
+        p = P(temp)/f'error_{i}.hd'
         p.write_text(f'def main = ({expression("Int",3)} + {expression("Bool",3)})')
         r = check(p)
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
-source = '\n'.join(p.read_text() for p in [*P('crates/shin/src').rglob('*.rs'), P('crates/shin/tests/corpus.rs')])
-corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*.shin')]
-lib = P('crates/shin/src/lib.rs').read_text()
-types = P('crates/shin/src/types.rs').read_text()
-names = P('crates/shin/src/names.rs').read_text()
+source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
+corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in P(folder).glob('*.hd')]
+lib = P('crates/hado/src/lib.rs').read_text()
+types = P('crates/hado/src/types.rs').read_text()
+names = P('crates/hado/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
 glue &= not any('"'+p.name+'"' in source or str(p) in source for p in corpus)
@@ -114,11 +114,11 @@ for script,total in [('m0',7),('m1-spec',6),('m1-corpus',7),('m2',8)]:
 report(9,'gates',gates)
 lock_entries = P('tests/corpus.sha256').read_text().splitlines()
 lock_paths = [line.split(maxsplit=1)[1].lstrip('*') for line in lock_entries if len(line.split(maxsplit=1)) == 2]
-expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*.shin')}
+expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*.hd')}
 lock_check = run('sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256')
 report(10,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
 stdlib = [('option','Option'),('result','Result'),('list','List'),('division_error','DivisionError')]
-report(11,'stdlib-types',all(P('stdlib/'+file+'.shin').is_file() and 'type '+ty in P('stdlib/'+file+'.shin').read_text() for file,ty in stdlib) and not any(re.search(r'^def ',p.read_text(),re.M) for p in P('stdlib').glob('*.shin')))
+report(11,'stdlib-types',all(P('stdlib/'+file+'.hd').is_file() and 'type '+ty in P('stdlib/'+file+'.hd').read_text() for file,ty in stdlib) and not any(re.search(r'^def ',p.read_text(),re.M) for p in P('stdlib').glob('*.hd')))
 report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', log)) == 1)
 passed = sum(results.values())
 print(f'PASSED: {passed}/12')

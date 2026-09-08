@@ -29,7 +29,7 @@ pub fn finalize(mut self, frontend_config: TargetFrontendConfig)
 1. ISA を作る（次節の flags）。`cranelift_native::builder() -> Result<isa::Builder, &'static str>`（`cranelift-native-0.135.1/src/lib.rs:16`）。`isa::Builder::finish(&self, shared_flags: settings::Flags) -> CodegenResult<OwnedTargetIsa>`（`cranelift-codegen-0.135.1/src/isa/mod.rs:225`）。`OwnedTargetIsa = Arc<dyn TargetIsa>`。
 2. `ObjectBuilder::new(isa, name, default_libcall_names()) -> ModuleResult<Self>`（`cranelift-object-0.135.1/src/backend.rs:50-54`）。`default_libcall_names` は `cranelift_module`。
 3. `ObjectModule::new(builder) -> Self`（同 `261`）。
-4. `module.declare_function(name, linkage, &signature) -> ModuleResult<FuncId>`。C から呼ぶ `shin_entry` は `Linkage::Export`。内部は `Linkage::Local`。C ランタイムは `Linkage::Import`。
+4. `module.declare_function(name, linkage, &signature) -> ModuleResult<FuncId>`。C から呼ぶ `hado_entry` は `Linkage::Export`。内部は `Linkage::Local`。C ランタイムは `Linkage::Import`。
 5. `Context::new()`。`ctx.func = Function::with_name_signature(UserFuncName::user(0, func_id.as_u32()), sig)`。
 6. `FunctionBuilderContext::new()`。`FunctionBuilder::new(&mut ctx.func, &mut func_ctx)`（`cranelift-frontend-0.135.1/src/frontend.rs:323`）。
 7. `create_block`、`switch_to_block`、入口なら `append_block_params_for_function_params`、`bcx.ins()...`、`seal_all_blocks`、`finalize(module.target_config())`。
@@ -61,9 +61,9 @@ bcx.ins().return_call(callee, &args); // -> Inst
 
 `InstBuilder::return_call(self, FN: FuncRef, args: &[Value]) -> Inst`（docs.rs cranelift-codegen 0.135.1）。ブロック終端。
 
-`shin_entry` は `CallConv::SystemV`。そこから `tail` 側へは `bcx.ins().call(func_ref, &args)`。`return_call` は使わない。verifier は callee の規約が caller と同じで、かつ tail を許すことを要求する（`verifier/mod.rs:1710-1734`）。lowering も caller が `Tail` でない `return_call` を拒否する（`machinst/abi.rs:1824-1829`）。
+`hado_entry` は `CallConv::SystemV`。そこから `tail` 側へは `bcx.ins().call(func_ref, &args)`。`return_call` は使わない。verifier は callee の規約が caller と同じで、かつ tail を許すことを要求する（`verifier/mod.rs:1710-1734`）。lowering も caller が `Tail` でない `return_call` を拒否する（`machinst/abi.rs:1824-1829`）。
 
-ランタイム extern（印字・`shin_alloc`）は `CallConv::SystemV` の `Linkage::Import`。末尾位置でも `call` + `return`。
+ランタイム extern（印字・`hado_alloc`）は `CallConv::SystemV` の `Linkage::Import`。末尾位置でも `call` + `return`。
 
 x64 の整数引数レジスタは Tail でも SysV と同じ 6 本（`isa/x64/abi.rs:1021-1039`）。9 引数はスタックに乗る。
 

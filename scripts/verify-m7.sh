@@ -20,7 +20,7 @@ required = {
 }
 passed = total = 0
 for module, members in required.items():
-    path = Path("stdlib") / (module.lower() + ".shin")
+    path = Path("stdlib") / (module.lower() + ".hd")
     source = path.read_text() if path.exists() else ""
     signature = re.search(r"\bmodule\s+" + module + r"\s*:\s*(\w+)\s*=\s*struct\b", source)
     total += 1

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build --offline --bin shin
-shin_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-python3 - "$shin_target_dir/debug/shin" "$@" <<'PY'
+cargo build --offline --bin hado
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+python3 - "$hado_target_dir/debug/hado" "$@" <<'PY'
 from pathlib import Path
 import re
 import subprocess
@@ -31,8 +31,8 @@ def verify(name, copied, stdout, stderr=b"", status=0):
         print(f"NG: {name}: timeout")
     return False
 
-with tempfile.TemporaryDirectory(prefix="shin-m6-") as temporary:
-    for source in sorted(Path("tests/accept").glob("*.shin")):
+with tempfile.TemporaryDirectory(prefix="hado-m6-") as temporary:
+    for source in sorted(Path("tests/accept").glob("*.hd")):
         text = source.read_text()
         if not include_prelude and re.search(r"^-- needs: prelude\s*$", text, re.M):
             continue

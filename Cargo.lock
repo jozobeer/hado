@@ -255,6 +255,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hado"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "cranelift-native",
+ "cranelift-object",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -386,18 +398,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "shin"
-version = "0.1.0"
-dependencies = [
- "cc",
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-module",
- "cranelift-native",
- "cranelift-object",
 ]
 
 [[package]]
