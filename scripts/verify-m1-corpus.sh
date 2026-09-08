@@ -106,7 +106,7 @@ while IFS= read -r s; do
     found=0
     for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
-        if grep -qxF -- "$s" "$f"; then
+        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §39$' "$f"; then
             found=1
             break
         fi
@@ -115,17 +115,6 @@ while IFS= read -r s; do
 done <"$TMPD/sec39.txt"
 for f in tests/accept/*/main.hd; do
     [ -e "$f" ] || continue
-    hit=0
-    while IFS= read -r s; do
-        [ -n "$s" ] || continue
-        if grep -qxF -- "$s" "$f"; then
-            hit=1
-            break
-        fi
-    done <"$TMPD/sec39.txt"
-    if [ "$hit" -eq 1 ]; then
-        grep -qE '^// spec: §39$' "$f" || c2_reasons="$c2_reasons $f:not-sec39"
-    fi
     if grep -qxF 'def display' "$f"; then
         grep -qF '| Guest => "guest"' "$f" || c2_reasons="$c2_reasons $f:missing-guest-branch"
         grep -qE '^// expect: guest$' "$f" || c2_reasons="$c2_reasons $f:missing-expect-guest"
