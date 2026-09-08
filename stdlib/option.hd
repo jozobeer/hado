@@ -1,13 +1,11 @@
 type Option<T> = | None | Some(T)
-module type OPTION = sig
-  def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
-  def unwrap_or<A>(value: Option<A>, fallback: A): A
-  def is_some<A>(value: Option<A>): Bool
-  def ok_or<A, E>(value: Option<A>, error: E): Result<A, E>
-end
-module Option : OPTION = struct
-  def map value f => if value | Some(x) => Some(f x) | None => None
-  def unwrap_or value fallback => if value | Some(x) => x | None => fallback
-  def is_some | Some(_) => true | None => false
-  def ok_or value error => if value | Some(x) => Ok(x) | None => Error(error)
-end
+module Option
+def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
+def unwrap_or<A>(value: Option<A>, fallback: A): A
+def is_some<A>(value: Option<A>): Bool
+def ok_or<A, E>(value: Option<A>, error: E): Result<A, E>
+implement Option as Option
+def map value f => if value | Some(x) => Some(f x) | None => None
+def unwrap_or value fallback => if value | Some(x) => x | None => fallback
+def is_some | Some(_) => true | None => false
+def ok_or value error => if value | Some(x) => Ok(x) | None => Error(error)

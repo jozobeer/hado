@@ -1,8 +1,6 @@
-module type STRING = sig
-  def length(value: String): Int
-  def concat(left: String, right: String): String
-end
-module String : STRING = struct
-  def length value => __string_length value
-  def concat left right => __string_concat left right
-end
+module String
+def length(value: String): Int
+def concat(left: String, right: String): String
+implement String as String
+def length value => __string_length value
+def concat left right => __string_concat left right

@@ -1,10 +1,8 @@
 // spec: §47
 // expect: 3
 // item: 名前空間
-module type S = sig
-  def inc(x: Int): Int
-end
-module M : S = struct
-  def inc x => x + 1
-end
 def main = M.inc 2
+module S
+def inc(x: Int): Int
+implement S as M
+def inc x => x + 1

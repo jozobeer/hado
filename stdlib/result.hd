@@ -1,11 +1,9 @@
 type Result<T, E> = | Ok(T) | Error(E)
-module type RESULT = sig
-  def map<A, B, E>(value: Result<A, E>, f: Fn<A, B>): Result<B, E>
-  def map_error<A, E, F>(value: Result<A, E>, f: Fn<E, F>): Result<A, F>
-  def is_ok<A, E>(value: Result<A, E>): Bool
-end
-module Result : RESULT = struct
-  def map value f => let x? = value -> Ok(f x)
-  def map_error value f => if value | Ok(x) => Ok(x) | Error(error) => Error(f error)
-  def is_ok | Ok(_) => true | Error(_) => false
-end
+module Result
+def map<A, B, E>(value: Result<A, E>, f: Fn<A, B>): Result<B, E>
+def map_error<A, E, F>(value: Result<A, E>, f: Fn<E, F>): Result<A, F>
+def is_ok<A, E>(value: Result<A, E>): Bool
+implement Result as Result
+def map value f => let x? = value -> Ok(f x)
+def map_error value f => if value | Ok(x) => Ok(x) | Error(error) => Error(f error)
+def is_ok | Ok(_) => true | Error(_) => false

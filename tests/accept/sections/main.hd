@@ -1,0 +1,15 @@
+// spec: §35
+// expect: 42
+// item: 節構文
+type Input = { value: Int }
+def main = MemoryStore.read { value = 20 } + FileStore.read { value = 20 }
+module Store
+def read(input: Input): Int
+implement Store as MemoryStore
+type Entry = { number: Int }
+def unpack item => item.number
+def read input => unpack { number = input.value + 1 }
+implement Store as FileStore
+type Entry = | Entry(Int)
+def unpack | Entry(n) => n
+def read input => unpack (Entry(input.value + 1))

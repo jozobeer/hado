@@ -1,13 +1,12 @@
 // spec: §35
 // error: E601
 // item: module
-module type S = sig
-  type T
-  def make(x: Int): T
-end
-module M : S = struct
-  type T = { name: String; age: Int }
-  def make x => { name = "a"; age = x }
-end
+type User = { name: String; age: Int }
 def get_name t => t.name
 def main = get_name (M.make 3)
+module S
+type T
+def make(x: Int): T
+implement S as M
+type T = User
+def make x => { name = "a"; age = x }

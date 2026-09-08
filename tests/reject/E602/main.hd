@@ -1,10 +1,9 @@
 // spec: §35
 // error: E602
-module type S = sig
-  def inc(x: Int): Int
-  def dec(x: Int): Int
-end
-module M : S = struct
-  def inc x => x + 1
-end
+// item: 節構文
 def main = M.inc 1
+module S
+def inc(x: Int): Int
+def dec(x: Int): Int
+implement S as M
+def inc x => x + 1

@@ -1,25 +1,23 @@
 type List<T> = | Nil | Cons(T, List<T>)
-module type LIST = sig
-  def map<A, B>(values: List<A>, f: Fn<A, B>): List<B>
-  def filter<A>(values: List<A>, predicate: Fn<A, Bool>): List<A>
-  def fold<A, B>(values: List<A>, initial: B, f: Fn<(B, A), B>): B
-  def length<A>(values: List<A>): Int
-  def reverse<A>(values: List<A>): List<A>
-  def append<A>(left: List<A>, right: List<A>): List<A>
-  def sort<A>(values: List<A>, comparator: Fn<(A, A), Int>): List<A>
-end
-module List : LIST = struct
-  def rec map values f => if values | [] => [] | [head, ...tail] => [f head, ...map tail f]
-  def retain head tail keep => if keep => [head, ...tail] | tail
-  def rec filter values predicate => if values | [] => [] | [head, ...tail] => retain head (filter tail predicate) (predicate head)
-  def rec fold values initial f => if values | [] => initial | [head, ...tail] => fold tail (f initial head) f
-  def rec length | [] => 0 | [_, ...tail] => 1 + length tail
-  def reverse values => fold values [] (fn reversed value => [value, ...reversed])
-  def rec append left right => if left | [] => right | [head, ...tail] => [head, ...append tail right]
-  def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
-  def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
-  def rec merge left right comparator => if left | [] => right | [a, ...rest_a] => merge_right left a rest_a right comparator
-  def rec merge_right left a rest_a right comparator => if right | [] => left | [b, ...rest_b] => merge_heads left a rest_a right b rest_b comparator
-  def rec merge_heads left a rest_a right b rest_b comparator => if comparator a b <= 0 => [a, ...merge rest_a right comparator] | [b, ...merge left rest_b comparator]
-  def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => merge (sort (odds values) comparator) (sort (evens values) comparator) comparator
-end
+module List
+def map<A, B>(values: List<A>, f: Fn<A, B>): List<B>
+def filter<A>(values: List<A>, predicate: Fn<A, Bool>): List<A>
+def fold<A, B>(values: List<A>, initial: B, f: Fn<(B, A), B>): B
+def length<A>(values: List<A>): Int
+def reverse<A>(values: List<A>): List<A>
+def append<A>(left: List<A>, right: List<A>): List<A>
+def sort<A>(values: List<A>, comparator: Fn<(A, A), Int>): List<A>
+implement List as List
+def rec map values f => if values | [] => [] | [head, ...tail] => [f head, ...map tail f]
+def retain head tail keep => if keep => [head, ...tail] | tail
+def rec filter values predicate => if values | [] => [] | [head, ...tail] => retain head (filter tail predicate) (predicate head)
+def rec fold values initial f => if values | [] => initial | [head, ...tail] => fold tail (f initial head) f
+def rec length | [] => 0 | [_, ...tail] => 1 + length tail
+def reverse values => fold values [] (fn reversed value => [value, ...reversed])
+def rec append left right => if left | [] => right | [head, ...tail] => [head, ...append tail right]
+def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
+def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
+def rec merge left right comparator => if left | [] => right | [a, ...rest_a] => merge_right left a rest_a right comparator
+def rec merge_right left a rest_a right comparator => if right | [] => left | [b, ...rest_b] => merge_heads left a rest_a right b rest_b comparator
+def rec merge_heads left a rest_a right b rest_b comparator => if comparator a b <= 0 => [a, ...merge rest_a right comparator] | [b, ...merge left rest_b comparator]
+def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => merge (sort (odds values) comparator) (sort (evens values) comparator) comparator

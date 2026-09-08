@@ -1,11 +1,9 @@
 // spec: §35
 // error: E514
 // item: module
-module type S = sig
-  def used(x: Int): Int
-end
-module M : S = struct
-  def used x => x
-  def dead x => x
-end
 def main = M.used 1
+module S
+def used(x: Int): Int
+implement S as M
+def used x => x
+def dead x => x
