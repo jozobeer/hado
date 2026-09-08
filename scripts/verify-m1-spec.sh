@@ -142,7 +142,7 @@ else
     fail 4 "error-codes:$ec_reasons"
 fi
 
-# --- check 5: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2) ---
+# --- check 5: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2) ---
 cov_reasons=""
 if [ ! -f "$COV" ]; then
     cov_reasons="$cov_reasons missing-file"
@@ -199,7 +199,17 @@ else
             if ($0 ~ /^\|/) print name
         }
     ' "$PLAN" >"$TMPD/plan112.txt"
-    cat "$TMPD/plan22.txt" "$TMPD/plan23.txt" "$TMPD/plan92.txt" "$TMPD/plan112.txt" >"$TMPD/plan_items.txt"
+    awk -F '|' '
+        /^### 13\.2/ { p=1; next }
+        /^### 13\.3/ { p=0 }
+        p {
+            name=$2
+            gsub(/^ +| +$/, "", name)
+            if (name=="" || name=="項目" || name ~ /^-+$/) next
+            if ($0 ~ /^\|/) print name
+        }
+    ' "$PLAN" >"$TMPD/plan132.txt"
+    cat "$TMPD/plan22.txt" "$TMPD/plan23.txt" "$TMPD/plan92.txt" "$TMPD/plan112.txt" "$TMPD/plan132.txt" >"$TMPD/plan_items.txt"
     nrows=$(wc -l <"$TMPD/cov.tsv" | tr -d ' ')
     nplan=$(wc -l <"$TMPD/plan_items.txt" | tr -d ' ')
     if [ "$nrows" -ne "$nplan" ]; then

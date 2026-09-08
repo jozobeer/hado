@@ -1,4 +1,4 @@
-# 言語仕様案 v0.1.2
+# 言語仕様案 v0.1.3
 
 ## 1. 設計思想
 
@@ -122,7 +122,7 @@ def add(x: Int, y: Int): Int =>
 
 `def name = expression` は値定義専用であり、関数定義に `=` を使わない。
 
-関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）は E109 とする。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。本体が条件列だけの関数は、第53節の形で書く。
+関数定義の引数は 1 個以上である。引数を持たない `=>` の定義（`def f => 1`）は E109 とする。使わない引数は `_` で受けるが、書ける場所は第27節が限る。引数が 1 つで、その引数を分岐の入口としてしか使わない関数は、第52節の形で書く。本体が条件列だけの関数は、第53節の形で書く。
 
 ---
 
@@ -163,9 +163,9 @@ let = local binding
 
 `let` の本体は `->` の右側に続く継続である。`let` は値を束縛するために使い、成功・失敗の伝播は行わない。
 
-プログラムの入口は、入口ファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。
+プログラムの入口は、根のファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。
 
-`main` の型は単相で、Fn を含んではならない。`def main = Nil` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702 とする。
+`main` の型は単相で、Fn と抽象型を含んではならない。`def main = Nil` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は不透明な `UserStore.T` を含み印字すれば中身が見えるため E705 とする。
 
 `main` の要求は実行ファイルという成果物の規則である。`main` が無い、または `main` が引数を持つプログラムは E206 とする。`main` の値の印字は第51節に従う。
 
@@ -203,49 +203,54 @@ do validate input ->
 next
 ```
 
-`->` は、関数型の表記には使わない。関数型は第37節で定める `Fn<...>` を使う。
+`->` は、関数型の表記には使わない。関数型は第37節で定める `Fn(...)` を使う。
 
-`main` の本体は expression であり、`let` の継続に使う `->` では書かない。入口は `def main = expression` である。
+`main` は `def main = expression` の形で、`=>` を持たない。本体は expression なので、`let` や `do` の継続を含んでよい。
 
 ---
 
 # 7. 匿名関数
 
-匿名関数には `fn` を使う。
+匿名関数には `fn` を使い、全体を括弧で閉じる。
 
 ```ocaml
-fn x => x + 1
+fn(x => x + 1)
 ```
 
-複数引数：
+複数引数はカンマで区切る。型注釈は引数ごとに書く。
 
 ```ocaml
-fn x y => x + y
+fn(x, y => x + y)
+fn(x: Int, y: Int => x + y)
 ```
 
 `=>` は、関数の引数列と本体を分ける。
 
-名前付き関数も同じ規則を使う。
+名前付き関数も同じ規則を使うが、`def` は次の項目で終わりが決まるので括弧で閉じない。引数は空白で区切る。
 
 ```ocaml
 def add x y => x + y
 ```
 
-`=>` は関数定義と匿名関数においてのみ、入力と結果の対応を表す。
+`=>` は関数定義と匿名関数と関数型（第37節）においてのみ、入力と結果の対応を表す。
 
-匿名関数も、引数のパターン分岐の形（第52節）と条件列の形（第53節）を取れる。
+匿名関数も、引数のパターン分岐の形（第52節）と条件列の形（第53節）を取れる。どちらも `)` で閉じる。
 
 ```ocaml
-fn
+fn(
 | Guest => "guest"
 | Member(user) => user.name
+)
 ```
 
 ```ocaml
-fn x
+fn(x
 | x > 1 => x
 | 0
+)
 ```
+
+括弧で閉じるので、`List.map users fn(user => user.name)` のように並置の引数へ直接置ける。`(fn(...))` と二重に囲むのは冗長である。
 
 ---
 
@@ -266,16 +271,16 @@ def add(x: Int, y: Int): Int =>
 def add x y => x + y
 ```
 
-関数型を明示する必要がある場合は、`Fn<...>` を使う。
+関数型を明示する必要がある場合は、`Fn(...)` を使う。
 
 ```text
-Fn<Int, String>
-Fn<(Int, Int), Int>
+Fn(Int => String)
+Fn(Int, Int => Int)
 ```
 
 `Fn` は n 引数の関数型である。定義の引数数と呼び出しの引数数は一致しなければならない。部分適用は許可しない（E301）。
 
-`def` で定義した関数名を引数なしで参照すると、`Fn<...>` 型の値になる。
+`def` で定義した関数名を引数なしで参照すると、`Fn(...)` 型の値になる。
 
 関数の呼び出しは並置 `f x y`、constructor の呼び出しは括弧 `Some(x)` とする。大文字で始まる名前は constructor である。constructor を先頭に置く並置（`Some 1`）は E106 とする。`inc(1)` は `inc (1)` と同じ並置である（空白は意味を持たない。第41節）。
 
@@ -302,34 +307,37 @@ def identity x => x
 
 # 10. Generics
 
-型パラメータには `< >` を使う。
+型引数は型名の前に置く（後置の適用）。2 つ以上は括弧で囲む。
 
 ```ocaml
-Option<T>
-Result<T, E>
-List<T>
+T Option
+(T, E) Result
+T List
+Int List Option          // (Int List) Option。左から結合する
 ```
 
-型定義：
+型定義では、型変数を名前の前で宣言する。
 
 ```ocaml
-type Option<T> =
+type T Option =
   | None
   | Some(T)
 ```
 
 ```ocaml
-type Result<T, E> =
+type (T, E) Result =
   | Ok(T)
   | Error(E)
 ```
 
+宣言した型変数が右辺に現れない型定義（`type T Phantom = | Phantom(Int)`）は E518 とする。契約の抽象型の実体化（第35節）と契約の関数の型変数（第34節）にも同じ規則を当てる。
+
 型定義の閉路（自己再帰と相互再帰）の中では、型引数は宣言の型引数と同一でなければならない。
 
 ```ocaml
-type Nest<T> =
+type T Nest =
   | Leaf(T)
-  | Node(Nest<List<T>>)
+  | Node(T List Nest)
 ```
 
 は E302 とする。派生パスの実体化を有限に保つためである。
@@ -460,6 +468,8 @@ if x > 10 => Large | Small
 
 Boolean branchでは、`|` の右側は必ずelse側の式であり、fallback構文ではない。
 
+Bool の値を分岐する形はこの 1 つに限る。同じ意味になる Bool リテラルの pattern 分岐（`if b | true => x | false => y`、`if b | true => x | y`）と、腕が 1 本だけの条件列（`if | b => x | y`）は E520 とする。第52節の形（`def f | true => x | false => y`）も同じである。入れ子の中の Bool リテラルパターン（`Some(true)`）は対象外である。
+
 ---
 
 # 15. 条件列
@@ -528,7 +538,7 @@ pattern branchでは、各branchはpatternと `=>` と式で構成する。
 
 pattern branchは、ADTの構造に基づいて網羅的でなければならない。
 
-リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Int と Float のリテラルパターンは先頭に `-` を置け、それはリテラルの一部である。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。
+リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Int と Float のリテラルパターンは先頭に `-` を置け、それはリテラルの一部である。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。Bool の値そのものを分岐する形は第14節の Boolean branch に限る（E520）。
 
 最上位の変数パターン `| x => ...` は禁止する（E512）。入れ子の中の変数パターンは許可する。
 
@@ -661,7 +671,7 @@ if state
 | C => ...
 ```
 
-ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、同一のexpression内にbranch expressionを直接ネストすることである。
+ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、branch expression の腕の中に branch expression を置くことである。腕の中の `let` の継続や、腕の中の `fn(...)` の本体に置いた branch も同じである。`fn(| ...)` と `fn(x | ...)` の腕形式は branch として数える。
 
 ---
 
@@ -670,18 +680,18 @@ if state
 失敗は主に、
 
 ```ocaml
-Option<T>
-Result<T, E>
+T Option
+(T, E) Result
 ```
 
 で表現する。
 
 ```ocaml
-type Option<T> =
+type T Option =
   | None
   | Some(T)
 
-type Result<T, E> =
+type (T, E) Result =
   | Ok(T)
   | Error(E)
 ```
@@ -857,9 +867,11 @@ users
 |> List.sort compare
 ```
 
+`x |> f a b` は `f x a b` なので、`users |> List.map fn(u => u.name)` は `List.map users fn(u => u.name)` である。
+
 `|>` にOption / Resultの特殊意味は持たせない。
 
-`|>` の右辺は値名前空間の関数（名前か適用）に限る。constructor を置くこと（`x |> Some`）は E106 とする。
+`|>` の右辺は値名前空間の関数（名前、適用、`fn(...)`）に限る。constructor を置くこと（`x |> Some`）は E106 とする。
 
 ---
 
@@ -868,19 +880,21 @@ users
 記号の意味を明確に分ける。
 
 ```text
-=    value binding / value definition
-=>   function body separator / pattern result separator / Boolean result separator
+=    value binding / value definition / functor application
+=>   function body separator / pattern result separator / Boolean result separator / function type
 ->   local continuation separator
 |    branch alternative / fallback marker
 |>   data flow
 ?    failure-aware binding (pattern suffix)
 ...  rest of a List
+::   namespace path separator
+.    member access / field access
 ```
 
 例えば、
 
 ```ocaml
-fn x => x + 1
+fn(x => x + 1)
 ```
 
 は、
@@ -932,9 +946,11 @@ next
 
 `x` が継続内で使われていないならコンパイルエラー（E505）。
 
-E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第19節）。引数に `_` は書けないので、引数を使わない関数は書けない。
+E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第19節）。
 
-未使用の判定は、外の `def` と `type`、契約、実装、`implement` 節の中の ADT と record にも適用する（E513）。契約の抽象型の実体化 `type T = User` は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
+引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 2 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => Ok()`、`def save(_: T): (Unit, Error) Result => Ok()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
+
+未使用の判定は、外の `def` と `type`、契約、実装、functor、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第54節）ので、ファイルの中で数える。契約の抽象型の実体化 `type T = User` は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。functor の引数は E521（第56節）。型変数は E518（第10節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
 
 ---
 
@@ -1062,33 +1078,49 @@ OCamlのmodule systemの思想を取り入れる。`module` は契約であり�
 ```ocaml
 module UserStore
 type T
-def find(id: Int): Option<T>
-def save(user: T): Result<Unit, Error>
+def find(id: Int): T Option
+def save(user: T): (Unit, Error) Result
 ```
 
 ここでの `Error` は prelude の constructor `Error` とは別物であり、契約を書く側が定義する型である。契約の中の型名は、実装があるかどうかによらず解決される。
 
-契約の型宣言は本体を持たない `type T` に限る。本体を持つ型宣言は E100 とする。外に見せたい型は最初の見出しより前の「外」（第54節）で定義し、契約にはその名前を書く。
+契約の型宣言は本体を持たない `type T` に限る。本体を持つ型宣言は E100 とする。外に見せたい型は最初の見出しより前の「外」（第54節）で定義し、契約にはその名前を書く。抽象型は型引数を持てる。宣言は型定義と同じく名前の前に置く。
+
+```ocaml
+module Stack
+type A T
+def A empty: A T
+def A push(stack: A T, value: A): A T
+def A top(stack: A T): A Option
+```
+
+引数を取らない member は `def name: 型` で宣言し、実装は `def name = expression` で満たす（`Stack.empty`）。
 
 abstract type：
 
 ```ocaml
 module UserId
 type T
-def make(value: Int): Option<T>
+def make(value: Int): T Option
 def value(id: T): Int
 ```
 
-契約の関数は、名前の直後に型変数を宣言できる。
+契約の関数は、名前の前に型変数を宣言できる。
 
 ```ocaml
 module Option
-def map<A, B>(value: Option<A>, f: Fn<A, B>): Option<B>
+def (A, B) map(value: A Option, f: Fn(A => B)): B Option
 ```
 
-宣言した型変数はその関数の型の中だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204 とする。
+宣言した型変数はその関数の型の中だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204、使われない型変数は E518 とする。
 
-契約の中では実装の名前空間を解決しない。契約の型に `MemoryStore.T` のような実装修飾の型を書くと E204 とする。
+契約の中の修飾型 `X.T` は、契約 `X` の抽象型 `T` を指す。契約は実装の名前を書かない。`X.T` が型として定まるのは、プログラムの中で契約 `X` を満たす実装がちょうど 1 つのときで、その実装の `T` である。実装が 0 か 2 つ以上なら E603 とし、その `X.T` を指す。functor の定義は実装に数えず、functor の適用結果は数える（第56節）。
+
+```ocaml
+module UserStore
+type T
+def find(id: UserId.T): T Option        // 契約 UserId の T
+```
 
 `val` は使わない。契約側も実装側も、
 
@@ -1098,13 +1130,13 @@ def = named definition
 
 で統一する。
 
-契約への参照は `implement X as Y` の見出しだけである。実装が 1 つも無い契約は参照されていないので E513 とする。
+契約への参照は `implement` の見出しと、契約の中の `X.T` である。実装が 1 つも無い契約は E513 とする。
 
 ---
 
 # 35. implement（実装）
 
-実装は `implement X as Y` の見出しで始まる。`X` は満たす契約、`Y` は実装の名前で、どちらも省けない。契約と実装は別の名前空間（第47節）なので、1 対 1 の module は `implement UserStore as UserStore` と書く。
+実装は `implement X as Y` の見出しで始まる。`X` は満たす契約、`Y` は実装の名前で、どちらも省けない。契約と実装は別の名前空間（第47節）なので、1 対 1 の module は `implement UserStore as UserStore` と書く。契約が別のディレクトリにあれば、名前は第55節のパスで書く。
 
 ```ocaml
 implement UserStore as UserStore
@@ -1115,11 +1147,23 @@ def save user =>
   ...
 ```
 
-実装は契約の全ての member と型を持ち、それぞれの型が一致し、契約の型変数に対して十分に多相でなければならない。満たさなければ E602 とし、`implement` を指す。実装は契約に載らない定義を持てる。`def` に加えて本体付きの型（ADT と record）も書け、それはその実装の中だけで見える。外から `MemoryStore.Entry` のように参照すると E204 とする。
+実装は契約の全ての member と型を持ち、それぞれの型が一致し、契約の型変数に対して十分に多相でなければならない。満たさなければ E602 とし、`implement` を指す。実装は契約に載らない定義を持てる。`def` に加えて本体付きの型（ADT と record）も書け、それはその実装の中だけで見える。外から `MemoryStore.Entry` のように参照すると E204 とする。契約に載らない `def` も外からは見えない（E204）。
 
-型の参照 `Y.T` は、実装 `Y` の契約が宣言する抽象型 `T` を指し、外からは不透明である。`type T = User` の実体化は新しい名前を作らず、`Y.T` の中身を外に見せない。契約が宣言していない抽象型を実体化する `type U = Int` は E204 とし、`U` を指す。契約で修飾した `X.T` は無く、E204 とする。
+契約の member を満たす `def` は、使わない引数を `_` で受けられる（第27節）。
 
-実装の中の ADT と record は実装ごとの局所名前空間にあり、2 つの実装が同名の型を持ってよい。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す。
+型の参照 `Y.T` は、実装 `Y` の契約が宣言する抽象型 `T` を指し、外からは不透明である。`type T = User` の実体化は新しい名前を作らず、`Y.T` の中身を外に見せない。型引数付きの抽象型は、実体化の左辺でも型変数を名乗る。
+
+```ocaml
+implement Stack as Stack
+type A T = A List
+def empty = []
+def push stack value => [value, ...stack]
+def top | [] => None | [value, ..._] => Some(value)
+```
+
+契約が `type A T` なら実体化も型引数 1 つで、数が違えば E602 とする。右辺に現れない型変数（`type A T = Int`）は E518 とする。契約が宣言していない抽象型を実体化する `type U = Int` は E204 とし、`U` を指す。
+
+実装の中の ADT と record は実装ごとの局所名前空間にあり、2 つの実装が同名の型を持ってよい。その constructor も実装ごとの局所名前空間にあり、2 つの実装が `Idle` を持ってよい。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す。
 
 抽象型の実体化で別名を展開した結果、同じ別名へ戻って実体が確定しない場合（`type T = T`、`type T = U` と `type U = T` など）は E602 とし、その `implement` を指す。名前を持つ ADT や record の再帰型は、この別名の循環とは区別する。
 
@@ -1141,11 +1185,11 @@ implement Store as FileStore
 ...
 ```
 
-参照は実装の名前で行う（`MemoryStore.find`）。`implement X as Y` の `X` に当たる契約が無ければ E204、実装 `Y` がどこからも参照されなければ E513 とする。
+参照は実装の名前で行う（`MemoryStore.find`）。`implement X as Y` の `X` に当たる契約が無ければ E204、実装 `Y` がどこからも参照されなければ E513 とする。実装を引数に取る実装（functor）は第56節が定める。
 
 0.1.1 までの `module type X = sig ... end` と `module X : SIG = struct ... end` は文法に無く、E100 となる。`sig` `struct` `end` はキーワードではない。
 
-Functorやfirst-class moduleは入れない。
+first-class module は入れない。
 
 ---
 
@@ -1162,7 +1206,7 @@ Char
 String
 ```
 
-Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `Result<Int, DivisionError>` を返す。除数 0 は `Error(DivisionByZero)` とする。
+Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `(Int, DivisionError) Result` を返す。除数 0 は `Error(DivisionByZero)` とする。
 
 `DivisionError` の variant は `DivisionByZero` のみとする。返すのは Int の `/` と `%` に限る。
 
@@ -1177,9 +1221,9 @@ Char は Unicode スカラ値とする。String は不変の UTF-8 とする。
 parameterized type：
 
 ```text
-Option<T>
-Result<T, E>
-List<T>
+T Option
+(T, E) Result
+T List
 ```
 
 ---
@@ -1188,21 +1232,27 @@ List<T>
 
 関数型については `Int -> String` のようなML記法を採用しない。
 
-関数型は `Fn<...>` で表す。
+関数型は `Fn(引数列 => 戻り)` で表す。必ず括弧で閉じる。
 
 単一引数：
 
 ```text
-Fn<Int, String>
+Fn(Int => String)
 ```
 
 複数引数：
 
 ```text
-Fn<(Int, Int), Int>
+Fn(Int, Int => Int)
 ```
 
-`Fn<(Int, Int), Int>` の `( )` は引数列であり、tuple は持たない。式やパターンに tuple の構文を書くと E105 とする。
+関数を返す関数：
+
+```text
+Fn(Int => Fn(Int => Int))
+```
+
+`Fn(Int, Int => Int)` の `Int, Int` は引数列であり、tuple は持たない。式やパターンに tuple の構文を書くと E105 とする。型式の `(Int, String) Result` は 2 つ以上の型引数を囲む括弧で、tuple ではない（第10節）。
 
 `Fn` は n 引数である。定義と呼び出しの引数数は一致必須であり、部分適用は持たない。規則は第8節に従う。
 
@@ -1211,7 +1261,7 @@ Fn<(Int, Int), Int>
 signatureでは通常、
 
 ```ocaml
-def parse(input: String): Result<User, Error>
+def parse(input: String): (User, Error) Result
 ```
 
 のように書く。
@@ -1233,7 +1283,6 @@ classes
 inheritance
 GADT
 polymorphic variants
-functors
 first-class modules
 macros
 effect system
@@ -1244,7 +1293,7 @@ async / await
 concurrency primitives
 ```
 
-operator overloading の禁止は維持する（E107）。組み込み算術演算子は、ユーザーが定義できない固定集合への型指向解決である。
+operator overloading の禁止は維持する（E107）。組み込み算術演算子は、ユーザーが定義できない固定集合への型指向解決である。functor は第56節で入れた。
 
 必要になった段階で追加を検討する。
 
@@ -1320,8 +1369,8 @@ pipeline：
 ```ocaml
 def active_names users =>
   users
-  |> List.filter (fn user => user.active)
-  |> List.map (fn user => user.name)
+  |> List.filter fn(user => user.active)
+  |> List.map fn(user => user.name)
 ```
 
 契約と実装：
@@ -1329,15 +1378,25 @@ def active_names users =>
 ```ocaml
 module UserStore
 type T
-def find(id: Int): Option<T>
-def save(user: T): Result<Unit, Error>
-def delete(user: T): Result<Unit, Error>
+def find(id: Int): T Option
+def save(user: T): (Unit, Error) Result
+def delete(user: T): (Unit, Error) Result
 
 implement UserStore as UserStore
 type T = User
 def find id => ...
 def save user => ...
 def delete user => ...
+```
+
+Functor：
+
+```ocaml
+implement Store as MakeStore(Id: UserId)
+type T = { id: Id.T; name: String }
+def create name number => { id = Id.make number; name = name }
+
+implement Store as PlainStore = MakeStore(IntId)
 ```
 
 ---
@@ -1355,11 +1414,12 @@ let p? =
 do
 ->
 
-fn
+fn(...)
 =>
+Fn(...)
 
 type
-<T>
+T Option
 ADT
 record
 
@@ -1372,6 +1432,7 @@ _
 module
 implement
 as
+::
 ```
 
 ---
@@ -1391,24 +1452,26 @@ string          := '"' (string_escape | 文字)* '"'
 string_escape   := "\n" | "\t" | "\\" | '\"'           これ以外は E110
 bool            := "true" | "false"
 unit            := "()"
-name            := lower (letter | digit | "_")*       値・field・引数の名前
+name            := lower (letter | digit | "_")*       値・field・引数・名前空間の名前
 upper_name      := upper (letter | digit | "_")*       型・constructor・契約・実装・型変数の名前
 dunder_name     := "__" name                           stdlib 限定の組み込み名（第47節）
 comment         := "//" 行末までの文字                   `--` と `#` は E104
 ```
 
-`_` 単独は wildcard であり名前ではない。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
+`_` 単独は wildcard であり名前ではない。`::` は名前空間の区切り（第55節）、`.` は member と field の区切りで、どちらも 1 つのトークンである。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
+
+キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `as` `not` `true` `false` と `Fn` である。名前には使えない。
 
 プログラム:
 
 ```text
 program         := outer_item* section*
 outer_item      := type_definition
-                 | definition                                             入口ファイルに限る（第54節）
-section         := module_section | implement_section
+                 | definition                                             根のファイルに限る（第54節）
+section         := module_section | implement_section | functor_section | apply_section
 ```
 
-最初の見出し（`module` か `implement`）より前が「外」、以後が節の列である。見出しは式や項目の中に現れないので、節の終わりは次の見出しかファイル末尾で決まる。`program` は 1 ファイルの文法で、複数ファイルの結合は第54節が定める。
+最初の見出し（`module` か `implement`）より前が「外」、以後が節の列である。見出しは式や項目の中に現れないので、節の終わりは次の見出しかファイル末尾で決まる。`program` は 1 ファイルの文法で、複数ファイルとディレクトリの結合は第54節と第55節が定める。
 
 名前付き定義:
 
@@ -1417,9 +1480,11 @@ definition      := "def" name "=" expression
                  | "def" ["rec"] name parameters return_type? "=>" expression
                  | "def" ["rec"] name parameters return_type? condition_arm+ pattern_fallback    第53節
                  | "def" ["rec"] name pattern_arm+ pattern_fallback?       第52節。arity は 1
-parameters      := name+
+parameters      := param+
                  | "(" typed_param ("," typed_param)* ")"
-typed_param     := name ":" type_expr
+param           := name
+                 | "_"                                                    第27節の条件を満たす def と fn に限る（E519）
+typed_param     := param ":" type_expr
 return_type     := ":" type_expr
 ```
 
@@ -1428,45 +1493,56 @@ return_type     := ":" type_expr
 型定義:
 
 ```text
-type_definition := "type" upper_name type_params? "=" ("|" constructor)+
-                 | "type" upper_name type_params? "=" record_type
-type_params     := "<" upper_name ("," upper_name)* ">"
+type_definition := "type" type_vars? upper_name "=" ("|" constructor)+
+                 | "type" type_vars? upper_name "=" record_type
+type_vars       := upper_name
+                 | "(" upper_name ("," upper_name)* ")"                   2 つ以上
 constructor     := upper_name ["(" type_expr ("," type_expr)* ")"]
 record_type     := "{" field_type (";" field_type)* "}"
 field_type      := name ":" type_expr
 ```
 
-型の右辺はこの 2 形に限る。別名（`type Id = Int`）は無い（第12節）。
+型変数は名前の前で宣言する（`type T Option = ...`、`type (T, E) Result = ...`）。型の右辺はこの 2 形に限る。別名（`type Id = Int`）は無い（第12節）。
 
 型式:
 
 ```text
-type_expr       := upper_name ["<" type_expr ("," type_expr)* ">"]        型か型変数
-                 | upper_name "." upper_name                              実装の抽象型（UserStore.T）
-                 | "Fn" "<" fn_params "," type_expr ">"
-fn_params       := type_expr
-                 | "(" type_expr ("," type_expr)* ")"
+type_expr       := type_atom type_ref*                                     後置の適用。左から結合
+type_atom       := type_ref
+                 | "(" type_expr "," type_expr ("," type_expr)* ")"       2 つ以上の型引数
+                 | "Fn" "(" type_expr ("," type_expr)* "=>" type_expr ")"  関数型（第37節）
+type_ref        := path? upper_name ["." upper_name]                       型か型変数。`X.T` は抽象型（第34節、第35節）
+path            := (name "::")+                                            名前空間（第55節）
 ```
+
+`Int List` は `List` に `Int` を与えた型で、`Int List Option` は `(Int List) Option` である。型引数が 1 つのとき括弧は書かない（`(Int) List` は E100）。`Fn` はキーワードなので、`Fn(` が後置の適用に読まれることはない。型の印字（`hado check --print-type` と診断）はこの形の正準形で、カンマの後に空白を 1 つ置く（`(Int, String) Result`、`Fn(Int, Int => Int)`）。
 
 module:
 
 ```text
 module_section  := "module" upper_name module_item*
-module_item     := "type" upper_name
-                 | "def" name type_params? "(" typed_param ("," typed_param)* ")" ":" type_expr
-implement_section := "implement" upper_name "as" upper_name implement_item*
+module_item     := "type" type_vars? upper_name                                          抽象型
+                 | "def" type_vars? name ":" type_expr                                   値 member
+                 | "def" type_vars? name "(" contract_param ("," contract_param)* ")" ":" type_expr
+contract_param  := name ":" type_expr
+implement_section := "implement" contract_ref "as" upper_name implement_item*
+functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item*
+functor_param   := upper_name ":" contract_ref
+apply_section   := "implement" contract_ref "as" upper_name "=" impl_ref "(" impl_ref ("," impl_ref)* ")"
+contract_ref    := path? upper_name
+impl_ref        := path? upper_name
 implement_item  := definition
                  | type_definition
-                 | "type" upper_name "=" type_expr                        契約の抽象型の実体化に限る
+                 | "type" type_vars? upper_name "=" type_expr             契約の抽象型の実体化に限る
 ```
 
-契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書く。`as` はキーワードで、名前には使えない。
+契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書き、型変数は名前の前で宣言する（`def (A, B) map(...)`）。`as` はキーワードで、名前には使えない。`functor_section` と `apply_section` は第56節が定め、`apply_section` の後に `implement_item` を置くと E100 である。
 
 式（優先順位の低い方から）:
 
 ```text
 expression      := pipe | prefix_form
-prefix_form     := lambda | binding | rail_binding | rail_discard | branch
+prefix_form     := binding | rail_binding | rail_discard | branch
 pipe            := or ("|>" or)*
 or              := and ("||" and)*
 and             := compare ("&&" compare)*
@@ -1479,13 +1555,14 @@ postfix         := primary ("." name)*                                     field
 primary         := int | float | char | string | bool | unit
                  | name
                  | dunder_name                                            呼び出しの先頭に限る（E203）
-                 | upper_name "." name                                    実装の値（List.map）
+                 | path? upper_name "." name                              実装の値（List.map、store::MemoryStore.find）
                  | constructor_expr
                  | record_expr
                  | list_expr
+                 | lambda                                                 `fn(` で始まり `)` で閉じる
                  | "(" expression ")"
 constructor_expr := "Ok" "(" ")"                                          Unit payload の正準形（第21節）
-                 | upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
+                 | path? upper_name ["(" expression ("," expression)* ")"]     引数は括弧（E106）
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
 list_expr       := "[" "]"
                  | "[" expression ("," expression)* ["," "..." expression] "]"
@@ -1493,7 +1570,7 @@ list_expr       := "[" "]"
 
 `...` の後は `]` まで 1 つの式である。
 
-`prefix_form` は括弧で囲めば `primary` になる（`(fn x => x + 1)`）。
+`prefix_form` は括弧で囲めば `primary` になる。`lambda` は自分の括弧で閉じるので `primary` であり、`List.map xs fn(x => x + 1)` のように並置の引数に直接置ける。
 
 継続と匿名関数:
 
@@ -1501,32 +1578,36 @@ list_expr       := "[" "]"
 binding         := "let" pattern "=" expression "->" expression
 rail_binding    := "let" pattern "?" "=" expression "->" expression
 rail_discard    := "do" expression "->" expression
-lambda          := "fn" parameters "=>" expression
-                 | "fn" parameters condition_arm+ pattern_fallback        第53節
-                 | "fn" pattern_arm+ pattern_fallback?                    第52節
+lambda          := "fn" "(" lambda_params "=>" expression ")"
+                 | "fn" "(" lambda_params condition_arm+ pattern_fallback ")"      第53節
+                 | "fn" "(" pattern_arm+ pattern_fallback? ")"                    第52節
+lambda_params   := param ("," param)*
+                 | typed_param ("," typed_param)*
 ```
+
+`fn` の引数はカンマで区切る（`fn(x, y => x + y)`、`fn(x: Int, y: Int => x + y)`）。型注釈の有無を混ぜることはできない（E100）。3 つの形はいずれも `)` で終わるので、分岐の腕の中に置いても後続の腕を飲まない。
 
 分岐:
 
 ```text
 branch          := boolean_branch | condition_branch | pattern_branch
 boolean_branch  := "if" expression "=>" arm_body "|" arm_body
-condition_branch := "if" condition_arm+ pattern_fallback
+condition_branch := "if" condition_arm+ pattern_fallback?
 condition_arm   := "|" expression "=>" arm_body
-pattern_branch  := "if" expression pattern_arm+ pattern_fallback?
+pattern_branch  := "if" expression pattern_arm* pattern_fallback?
 pattern_arm     := "|" pattern "=>" arm_body
 pattern_fallback := "|" arm_body
-arm_body        := pipe | lambda | binding | rail_binding | rail_discard    branch を直接置けない（E101）
+arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
 ```
 
-`arm_body` の継続や lambda の本体に branch を置くことも E101 である（第20節）。文法は直接の入れ子だけを除く。
+`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第20節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。fallback の有無と位置は文法では緩く読み、E401（条件列に fallback が無い）と E404（fallback の後に腕がある）は網羅性の段階で当てる（第50節）。
 
 パターン:
 
 ```text
 pattern         := "_"
                  | name
-                 | upper_name ["(" pattern ("," pattern)* ")"]
+                 | path? upper_name ["(" pattern ("," pattern)* ")"]
                  | record_pattern
                  | list_pattern
                  | literal_pattern
@@ -1602,7 +1683,7 @@ Unit は `()` とする。
 
 演算子は次に限る。算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&&` `||` `not`。
 
-算術 `+ - * /` と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相であり、単相化時に確定する。未確定なら Int とする。`%` は Int 専用であり、Float に当てると E305 である。`/` と `%` の戻り型は第36節に従う。
+算術 `+ - * /` と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相であり、単相化時に確定する。未確定なら Int とする。`def` の一般化の時点で確定しない場合もその `def` の中で Int に固定するので、`def div x y => x / y` は `Fn(Int, Int => (Int, DivisionError) Result)` であり、`div 1.0 2.0` は E305 である。`%` は Int 専用であり、Float に当てると E305 である。`/` と `%` の戻り型は第36節に従う。
 
 文字列連結演算子は置かない。
 
@@ -1618,7 +1699,7 @@ Unit は `()` とする。
 
 Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相化時に判明する。
 
-`compare a b` は順序に応じて `-1`、`0`、`1` を返す。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。
+`compare a b` は順序に応じて `-1`、`0`、`1` を返す。`compare` は値の空間の組み込みで、修飾なしで参照する（第47節）。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。
 
 ---
 
@@ -1639,17 +1720,17 @@ def rec map values f =>
 
 `...` の後ろに要素を置く形（`[...init, last]`、`[first, ...middle, last]`）は持たない。cons list は末尾に O(1) で触れず、照合の中に走査と `init` `middle` の割り当てが隠れるためである。末尾が要るときは `List.reverse` してから先頭で照合する。
 
-`Nil` と `Cons` を利用者のコードに書くことは冗長である。式に書けば E510、パターンに書けば E516 とする。`List` 型の定義は prelude が持ち、constructor は糖衣の展開先としてだけ存在する。
+`Nil` と `Cons` を利用者のコードに書くことは冗長である。式に書けば E510、パターンに書けば E516 とする。`List` 型の定義（`type T List = | Nil | Cons(T, T List)`）は prelude が持ち、constructor は糖衣の展開先としてだけ存在する。
 
 ---
 
 # 47. 名前空間
 
-名前空間は型・契約・実装・constructor・値の 5 つとする。どの名前空間でも解決できない名前の参照は E204 とする。`Option<T>`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前は契約、`.` の左の名前は実装として解く。
+名前空間は型・契約・実装・constructor・値の 5 つとする。型・契約・実装・constructor の 4 つはディレクトリごとに持ち、値の空間はファイルごとに持つ（第54節、第55節）。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
 
-型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record は、その実装だけの局所的な型の空間にあり、実装同士の同名は E205 にならない。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す（第35節）。修飾した参照 `A.B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
+型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record とその constructor は、その実装だけの局所的な空間にあり、実装同士の同名は E205 にならない。外の型や契約の抽象型と同名なら E205 とし、実装の中の宣言を指す（第35節）。修飾した参照 `A.B` と `a::B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
-prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照できる。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。
+prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照できる。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。`compare` は値の空間の組み込みで、修飾なしで参照できる（第45節）。
 
 `__` で始まる名前は呼び出し位置でしか参照できず、値化はファイルの場所によらず E203 とする。呼び出し位置では `stdlib/` のファイルでのみ解決し、ユーザーコードでは E202 とする。
 
@@ -1672,6 +1753,10 @@ prelude の各 module は、外の型と `module X` と `implement X as X` を 1
 prelude は組み込みを次の形で包む。
 
 ```ocaml
+module String
+def length(s: String): Int
+
+implement String as String
 def length s => __string_length s
 ```
 
@@ -1720,7 +1805,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E202 | dunder-in-user | §47 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §47 | 名前解決 | `__` 名 |
 | E204 | unbound-name | §47 | 名前解決 | 名前 |
-| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節 |
+| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節。名前空間の単位は第55節 |
 | E206 | entry-form | §5 | 名前解決 | `def main`。無ければ 1:1 |
 | E207 | rec-cycle-value | §4 | 名前解決 | 閉路に含まれる値定義の `def` |
 | E208 | missing-rec | §4 | 名前解決 | `rec` の無い `def` |
@@ -1754,12 +1839,19 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E515 | if-on-sole-parameter | §52 | 冗長 | `def` か `fn` |
 | E516 | list-pattern-form | §46 | 冗長 | パターンの `Cons` か `Nil` |
 | E517 | if-chain-on-parameters | §53 | 冗長 | `def` か `fn` |
+| E518 | unused-type-parameter | §10 | 冗長 | 使われない型変数の宣言 |
+| E519 | underscore-parameter | §27 | 冗長 | `_` |
+| E520 | boolean-branch-form | §14 | 冗長 | `if`。第52節の形では `def` か `fn` |
+| E521 | unused-functor-parameter | §56 | 冗長 | 引数名 |
 | E601 | opaque-type | §35 | 型 | field access の `.` |
 | E602 | contract-mismatch | §35 | 型 | `implement` |
+| E603 | contract-type-unresolved | §34 | 型 | 契約修飾の型 `X.T` |
+| E604 | functor-reapplied | §56 | 型 | 2 回目の `implement` |
 | E701 | main-polymorphic | §5 | 単相化 | `def main` |
 | E702 | main-contains-fn | §5 | 単相化 | `def main` |
 | E703 | eq-on-fn | §45 | 単相化 | 演算子 |
 | E704 | compare-on-fn | §45 | 単相化 | `compare` |
+| E705 | main-contains-abstract | §5 | 単相化 | `def main` |
 
 関数・constructor の適用で、仮引数型と実引数型の単一化が E305 または E306 になる場合は、問題の実引数の先頭を指す。複数の引数は渡される順に照合する。パイプの左辺は第1引数として扱い、その元の式の位置を使う。例えば `add1 "hi"` は `"hi"`、`x x` の出現検査失敗は第2の `x` を指す。呼び出す値が関数でない場合は、その値の式の先頭を指す。E301 と E307 のアンカーは表の規則に従う。
 
@@ -1805,7 +1897,7 @@ def rec length
 | [_, ...tail] => 1 + length tail
 ```
 
-arity は 1 である。腕の規則は第16節から第19節と同じで、網羅性（E402）、到達不能（E403）、重複（E405）、fallback の位置（E404）、`_` の禁止（E503）、最上位の変数パターンの禁止（E512）をそのまま当てる。`fn` も同じ形を取る（第7節）。
+arity は 1 である。腕の規則は第16節から第19節と同じで、網羅性（E402）、到達不能（E403）、重複（E405）、fallback の位置（E404）、`_` の禁止（E503）、最上位の変数パターンの禁止（E512）、Bool リテラルだけの腕の禁止（E520）をそのまま当てる。`fn` も同じ形を取り、`fn(| Guest => "guest" | Member(user) => user.name)` と括弧で閉じる（第7節）。
 
 この形で書ける関数を、引数名と `if` を付けて書くことは冗長であり E515 とする。E515 は次の 4 条件を全て満たすときに当たる。
 
@@ -1828,7 +1920,7 @@ def classify score
 | Fail
 ```
 
-引数の数と型注釈は制限しない。`def sign_of (a: Int, b: Int): Int | a < b => -1 | a > b => 1 | 0` も同じ形である。腕の規則は第15節と同じで、fallback の必須（E401）と重複条件（E406）をそのまま当てる。`if` をアンカーにする診断は `def` か `fn` を指す（§50）。`fn` も同じ形を取る（第7節）。
+引数の数と型注釈は制限しない。`def sign_of (a: Int, b: Int): Int | a < b => -1 | a > b => 1 | 0` も同じ形である。腕の規則は第15節と同じで、fallback の必須（E401）と重複条件（E406）をそのまま当てる。`if` をアンカーにする診断は `def` か `fn` を指す（§50）。`fn` も同じ形を取り、`fn(x | x > 1 => x | 0)` と括弧で閉じる（第7節）。腕が 1 本の条件列は `if` 形では E520 だが、この形（`def f x | c => a | b`）は `=> if c => a | b` を E517 が退けるので正準形である。
 
 引数を持たない `def main | true => 1 | 0` は第52節の pattern 腕として読まれ、`main` が引数を持つので E206 になる。引数ゼロの条件列の形は存在しない。
 
@@ -1840,14 +1932,85 @@ def classify score
 
 # 54. 複数ファイル
 
-プログラムは、`hado build` か `hado check` に渡した入口ファイルと、同じディレクトリにある全ての `.hd` `.hdi`、および prelude からなる。サブディレクトリと検索パスは無い。ディレクトリのファイルは参照の有無によらず全て読み、全ての検査を受ける。
+プログラムは、`hado build` か `hado check` に渡したファイルのディレクトリ（根）と、その下の全てのサブディレクトリにある `.hd` `.hdi`、および prelude からなる。設定ファイルと検索パスは無い。読んだファイルは参照の有無によらず全て検査を受ける。サブディレクトリは名前空間になる（第55節）。
 
-各ファイルは第41節の `program` の形で、プログラムはその和である。外の型と節はファイルの境界を越えて 1 つの名前空間に入る。ファイルの中身は、最初の見出しより前の「外」と、見出しで始まる節の列である。外に置けるのは本体付きの型で、プログラム全体で修飾なしに見える。入口ファイルの外にはさらに `def` を置け、`main` もここに置く。入口以外のファイルの外に `def` があれば E100 とし、その `def` を指す。入口に渡せるのは `.hd` だけで、`.hdi` を渡すと CLI が拡張子で拒否する（診断ではない）。
+各ファイルは第41節の `program` の形で、プログラムはその和である。ファイルの中身は、最初の見出しより前の「外」と、見出しで始まる節の列である。外に置けるのは本体付きの型で、そのディレクトリの名前空間に入る。根のファイルの外にはさらに `def` を置ける。外の `def` はそのファイルの中だけで見え、同じファイルの節から参照できる。根以外のファイルの外に `def` があれば E100 とし、その `def` を指す。
 
-`.hd` には `module` と `implement` の両方の節を置ける。`.hdi` には外の型と `module` の節だけを置け、`implement` があれば E100 とし、その `implement` を指す。`.hdi` は契約だけを置くファイルである。契約の中では実装の名前空間を解決しない（第34節）ので、`.hdi` から実装を参照する経路は無い。
+`main` を持つ根のファイルが入口ファイルである。入口ファイルは 1 つのディレクトリに複数あってよく、渡したファイルの `main` が起点になる。渡したファイルに `main` が無ければ E206 とする。外の `def` はファイルごとの値の空間にあるので、複数のファイルが `main` を持っても E205 にならない。渡さなかった入口ファイルの `main` は、そのファイルの中で参照されなくても E513 にならない。`main` を持たない根のファイルも外の `def` を置け、その `def` はファイルの中で使われなければ E513 である。入口に渡せるのは `.hd` だけで、`.hdi` を渡すと CLI が拡張子で拒否する（診断ではない）。
 
-ファイル名は自由で、名前はソースの見出しだけで決まる。1 ファイルに 1 つの契約か実装を置き、ファイル名をその名前の snake_case にするのを慣習とする。
+`.hd` には `module` と `implement` の両方の節を置ける。`.hdi` には外の型と `module` の節だけを置け、`implement`（functor と適用を含む）があれば E100 とし、その `implement` を指す。`.hdi` は契約だけを置くファイルである。
 
-全ての節はプログラム全体の top-level である。同じ名前空間の同名の宣言はファイルをまたいでも E205 とし、2 回目の宣言を指す。ファイルをまたぐ順序は、入口ファイルを先、残りをパスのバイト順とする。第50節の「アンカー位置のソース順」は、ファイルの順序、行、列の辞書式で比べる。実装の無い契約と参照されない実装は E513 とする（第34節、第35節）。
+ファイル名は自由で、名前はディレクトリ名とソースの見出しだけで決まる。1 ファイルに 1 つの契約か実装を置き、ファイル名をその名前の snake_case にするのを慣習とする。
 
-`hado check` に入口以外のファイルを渡すと、そのファイルが入口として扱われ、ファイルの順序もそれを先頭に組み直す。本来の入口ファイルは外の `def` で E100 になり、アンカーはそのファイルの最初の外の `def`、診断のパスはそのファイルである。
+全ての節はプログラム全体の top-level である。同じ名前空間の同名の宣言はファイルをまたいでも E205 とし、2 回目の宣言を指す。ファイルをまたぐ順序は、入口ファイルを先、残りを根からの相対パスのバイト順とする。第50節の「アンカー位置のソース順」は、ファイルの順序、行、列の辞書式で比べる。実装の無い契約と参照されない実装は E513 とする（第34節、第35節）。
+
+`hado check` に入口以外のファイルを渡すと、そのファイルが入口として扱われ、ファイルの順序もそれを先頭に組み直す。渡したファイルに `main` が無ければ E206、サブディレクトリのファイルを渡すとそのディレクトリが根の別のプログラムになる。
+
+---
+
+# 55. ディレクトリと名前空間
+
+根のサブディレクトリ 1 つが名前空間 1 つである。名前はディレクトリ名そのままで、`name` の字句（小文字で始まる）でなければ CLI が拒否する（診断ではない）。入れ子のディレクトリは入れ子の名前空間になる。根は名前を持たない。
+
+```text
+app/
+  main.hd               根。外の型 Error などは無修飾でどこからも見える
+  store/
+    store.hdi           契約 Store       → store::Store
+    memory_store.hd     実装 MemoryStore → store::MemoryStore
+    backend/
+      disk.hd           実装 Disk        → store::backend::Disk
+  id/
+    user_id.hdi         契約 UserId      → id::UserId
+    int_id.hd           実装 IntId       → id::IntId
+```
+
+参照の綴りは 2 つに限る。自分のディレクトリの名前は無修飾、それ以外は根からの絶対パスである。親や兄弟のディレクトリの名前を無修飾で参照すると E204 になる。根の名前はどこからも無修飾で参照する。
+
+```ocaml
+// store/memory_store.hd
+implement Store as MemoryStore              // 同じディレクトリの契約
+def find id => ...id::IntId.value id...     // 別のディレクトリの実装
+
+// store/backend/disk.hd
+implement store::Store as Disk              // 親のディレクトリでも絶対パス
+
+// main.hd
+def main = ... store::MemoryStore.find 1 ... store::NotFound ...
+```
+
+`::` は名前空間の区切りにしか使わない。パスの後には契約か実装か型か constructor の大文字名が来る。値と抽象型は実装の後に `.` で続ける（`store::MemoryStore.find`、`Int store::Stack.T`）。パターンの constructor も同じ綴りで書く（`| store::NotFound => ...`）。
+
+型・契約・実装・constructor の 4 つの名前空間はディレクトリごとに持つ。E205 の「同じ名前空間の同名」はディレクトリの中で数える。`color/` と `light/` がそれぞれ `Red` を持ってもよい。サブディレクトリの名前が根の同じ名前空間の名前（外の型、契約、実装、constructor、prelude の名前）と同じなら、その中で無修飾の綴りが 2 つの候補を持つので E205 とし、サブディレクトリ側の宣言を指す。
+
+`.hdi` の規則は第54節と同じで、どのディレクトリにも置ける。外の `def` を置けるのは根のファイルだけである（第54節）。prelude は根に連結され、`List.map` や `Some` はどこからも無修飾で参照する（第49節）。
+
+---
+
+# 56. Functor
+
+実装を引数に取る実装を functor と呼ぶ。定義は引数付きの `implement` 見出しで始まり、本文は実装と同じである。引数は「実装名: 契約名」で、本文の中では引数を実装として参照する。引数は 2 つ以上書ける。
+
+```ocaml
+implement Store as MakeStore(Id: UserId)
+type T = { id: Id.T; name: String }
+def create name number => { id = Id.make number; name = name }
+def describe user => String.concat user.name (Int.to_string (Id.value user.id))
+```
+
+本文は引数の契約だけを見て 1 回検査する。`Id.T` は本文の中でも不透明で、`Id.value` を通してしか中身に触れない。契約 `Store` を満たさなければ E602 で、`implement` を指す。本文で参照されない引数は E521 とし、その引数名を指す。functor は `.hdi` に置けない（E100）。
+
+適用は本文の無い `implement` 見出しで、`=` の右に functor と引数を書く。
+
+```ocaml
+implement Store as PlainStore = MakeStore(IntId)
+implement Store as OffsetStore = MakeStore(OffsetId)
+```
+
+適用結果は普通の実装で、`PlainStore.create`、`PlainStore.T` と参照する。`PlainStore.T` と `OffsetStore.T` は別の型である。見出しに書いた契約と functor の契約が違えば E602、引数がその位置の契約を満たさなければ E602 で、どちらも `implement` を指す。引数には実装と適用結果を書け、functor そのものは書けない（E204）。適用の見出しの後に本文を置くと E100 とする。
+
+同じ functor に同じ引数列（位置ごとに同じ実装名）を 2 回適用すると、2 回目の `implement` で E604 とする。同じ型が要るときは 1 つの適用結果を使う。
+
+functor は適用されて初めて実装になる。`MakeStore.create` のように functor を直接参照すると E204、一度も適用されない functor は E513 とする。適用結果は普通の実装と同じで、どこからも参照されなければ E513 である。契約 `X` の実装の数（第34節の `X.T`、実装の無い契約の E513）は適用結果で数え、functor の定義は数えない。
+
+functor の本文の `def` は契約の member を満たすので、使わない引数を `_` で受けられる（第27節）。
