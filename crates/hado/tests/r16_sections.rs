@@ -77,7 +77,7 @@ fn section_errors_preserve_namespace_and_declaration_anchors() {
         for (source, code, anchor) in [
             ("def main = 1\nmodule Unused\ndef run(x: Int): Int", "E513", "module Unused"),
             ("def main = 1\nmodule S\ndef run(x: Int): Int\nimplement S as Unused\ndef run x => x + 1", "E513", "implement S"),
-            ("def main = M.run 1\nimplement Missing as M\ndef run x => x + 1", "E204", "Missing"),
+            ("def main = 1\nimplement Missing as M\ndef run x => x + 1", "E204", "Missing"),
             ("def main = 1\nmodule S\ntype T = Int", "E100", "= Int"),
             ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype U = Int\ndef run x => x + 1", "E204", "U ="),
             ("def main = M.run 1\nmodule S\ndef run(x: Int): Bool\nimplement S as M\ndef run x => x + 1", "E602", "implement S"),
@@ -107,6 +107,9 @@ fn abstract_types_are_opaque_and_local_data_names_do_not_escape() {
         ("def take (x: S.T): Int => 1\ndef main = take (M.make 1)", "E204", "S.T"),
     ] {
         rejected(&format!("{outer}\n{sections}"), code, anchor);
+    }
+    for separator in [".", " . ", ".\n  "] {
+        rejected(&format!("def take (x: M{separator}Entry): Int => 1\ndef main = take (M.make 1)\n{sections}"), "E204", "Entry");
     }
     rejected(&format!("def main = M.make 1\nmodule Bad\ndef consume(x: M.T): Int\n{sections}"), "E204", "M.T");
     rejected("type Entry = { number: Int }\ndef main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype Entry = | Entry(Int)\ndef run x => x + 1", "E205", "Entry = |");
