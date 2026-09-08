@@ -39,7 +39,7 @@ ok
 
 ```
 $ hado check tests/reject/E508.hd
-tests/reject/E508.hd:6:21: error[E508]: failure bound at 6:5 is propagated unchanged; use let? or do?
+tests/reject/E508.hd:6:21: error[E508]: failure bound at 6:5 is propagated unchanged; use let p? = or do
 ```
 
 ## 検証

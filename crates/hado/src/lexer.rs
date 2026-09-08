@@ -15,8 +15,8 @@ pub enum TokKind {
     Def,
     KwRec,
     KwLet,
-    KwLetQ,
-    KwDoQ,
+    Question,
+    KwDo,
     KwFn,
     KwIf,
     KwModule,
@@ -71,8 +71,8 @@ impl std::fmt::Display for TokKind {
             TokKind::Def => write!(f, "def"),
             TokKind::KwRec => write!(f, "rec"),
             TokKind::KwLet => write!(f, "let"),
-            TokKind::KwLetQ => write!(f, "let?"),
-            TokKind::KwDoQ => write!(f, "do?"),
+            TokKind::Question => write!(f, "?"),
+            TokKind::KwDo => write!(f, "do"),
             TokKind::KwFn => write!(f, "fn"),
             TokKind::KwIf => write!(f, "if"),
             TokKind::KwModule => write!(f, "module"),
@@ -240,6 +240,10 @@ impl Lexer<'_> {
     fn lex_token(&mut self) -> Result<TokKind, LexError> {
         let c = self.peek().expect("lex_token called at EOF");
         match c {
+            '?' => {
+                self.bump();
+                Ok(TokKind::Question)
+            }
             '(' => {
                 self.bump();
                 if self.peek() == Some(')') {
@@ -507,19 +511,11 @@ impl Lexer<'_> {
             self.bump();
         }
         let word = &self.src[start..self.i];
-        // `let?` / `do?` are single tokens.
-        if (word == "let" || word == "do") && self.peek() == Some('?') {
-            self.bump();
-            return Ok(if word == "let" {
-                TokKind::KwLetQ
-            } else {
-                TokKind::KwDoQ
-            });
-        }
         let kind = match word {
             "def" => TokKind::Def,
             "rec" => TokKind::KwRec,
             "let" => TokKind::KwLet,
+            "do" => TokKind::KwDo,
             "fn" => TokKind::KwFn,
             "if" => TokKind::KwIf,
             "module" => TokKind::KwModule,

@@ -211,7 +211,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 line: pat.span.line,
                 col: pat.span.col,
                 code: Some("E504".into()),
-                message: "use do? to discard a success value".into(),
+                message: "use do to discard a success value".into(),
             });
         }
     }
@@ -295,7 +295,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 col: body.span.col,
                 code: Some("E508".into()),
                 message: format!(
-                    "failure bound at {}:{} is propagated unchanged; use let? or do?",
+                    "failure bound at {}:{} is propagated unchanged; use let p? = or do",
                     pattern.span.line, pattern.span.col
                 ),
             });

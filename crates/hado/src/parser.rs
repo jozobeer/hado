@@ -1,7 +1,7 @@
 //! Recursive-descent parser for the hado grammar of §41, §43 and §44.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
-//! local bindings (`let` / `let?` / `do?`), anonymous functions (`fn`),
+//! local bindings (`let` / `let p? =` / `do`), anonymous functions (`fn`),
 //! the three branch forms (Boolean branch, condition column, pattern
 //! branch), patterns, records, list literals, modules (`sig` / `struct`)
 //! and type definitions. Every node carries a `Span`.
@@ -919,9 +919,8 @@ impl Parser<'_> {
         match self.kind() {
             TokKind::KwIf => self.parse_branch(),
             TokKind::KwFn => self.parse_fun(),
-            TokKind::KwLet => self.parse_let(false),
-            TokKind::KwLetQ => self.parse_let(true),
-            TokKind::KwDoQ => self.parse_do(),
+            TokKind::KwLet => self.parse_let(),
+            TokKind::KwDo => self.parse_do(),
             _ => self.parse_pipe(),
         }
     }
@@ -1424,10 +1423,12 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_let(&mut self, question: bool) -> Result<Node, Diagnostic> {
+    fn parse_let(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
-        self.bump(); // `let` / `let?`
+        self.bump();
         let pat = self.parse_pattern()?;
+        let question = self.kind() == &TokKind::Question;
+        if question { self.bump(); }
         self.expect(&TokKind::Eq)?;
         let value = self.parse_expr()?;
         self.expect(&TokKind::DashArrow)?;
@@ -1450,7 +1451,7 @@ impl Parser<'_> {
 
     fn parse_do(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
-        self.bump(); // `do?`
+        self.bump();
         let value = self.parse_expr()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
@@ -1717,10 +1718,10 @@ pub fn canonical(node: &Node) -> String {
             format!("(let {pat} = {} -> {})", canonical(value), canonical(body))
         }
         NodeKind::LetQ { pat, value, body } => {
-            format!("(let? {pat} = {} -> {})", canonical(value), canonical(body))
+            format!("(let {pat}? = {} -> {})", canonical(value), canonical(body))
         }
         NodeKind::DoQ { value, body } => {
-            format!("(do? {} -> {})", canonical(value), canonical(body))
+            format!("(do {} -> {})", canonical(value), canonical(body))
         }
         NodeKind::Fn { params, body } => {
             format!("(fn{})", source_print::function_tail(params, None, body))
