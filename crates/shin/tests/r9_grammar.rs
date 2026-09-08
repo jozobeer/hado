@@ -509,7 +509,7 @@ fn grammar_generated_programs_preserve_every_declaration() {
         assert_eq!(shapes(&ast.items), shapes(&restored.items), "sample {sample}: {source}\n{canonical}");
         assert_eq!(canonical, parser::canonical_program(&restored));
     }
-    let spec = include_str!("../../../docs/spec.0.1.md");
+    let spec = include_str!("../../../docs/0.1.1/spec.md");
     let grammar = spec.split("# 41.").nth(1).unwrap().split("# 42.").next().unwrap();
     let rules: BTreeSet<_> = grammar.lines().filter_map(|line| line.split_once(":=").map(|(name, _)| name.trim())).collect();
     let visited: BTreeSet<_> = generator.choices.keys().copied().collect();
