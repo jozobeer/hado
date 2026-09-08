@@ -2,6 +2,12 @@ use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, Pat
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     let mut diagnostics = Vec::new();
+    for span in &ast.long_condition_functions {
+        diagnostics.push(Diagnostic {
+            path: path.into(), line: span.line, col: span.col,
+            code: Some("E517".into()), message: "write condition arms directly after the function parameters".into(),
+        });
+    }
     for span in &ast.written_list_patterns {
         diagnostics.push(Diagnostic {
             path: path.into(), line: span.line, col: span.col,

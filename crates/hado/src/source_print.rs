@@ -90,6 +90,16 @@ pub(super) fn function_tail(params: &[Param], ret: Option<&TypeExpr>, body: &Nod
             return output;
         }
     }
+    if let NodeKind::CondBranch { arms, fallback } = &body.kind {
+        let mut output = format!("{}{}", parameters(params), return_type(ret));
+        for (condition, value) in arms {
+            output.push_str(&format!(" | {} => {}", canonical(condition), canonical(value)));
+        }
+        if let Some(value) = fallback {
+            output.push_str(&format!(" | {}", canonical(value)));
+        }
+        return output;
+    }
     format!(
         "{}{} => {}",
         parameters(params),

@@ -245,6 +245,7 @@ pub struct Ast {
     pub branch_anchors: Vec<(Span, Span)>,
     pub equality_anchors: Vec<(Span, Span, Span)>,
     pub written_list_patterns: Vec<Span>,
+    pub long_condition_functions: Vec<Span>,
 }
 
 impl Ast {
@@ -411,6 +412,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         branch_anchors: Vec::new(),
         equality_anchors: Vec::new(),
         written_list_patterns: Vec::new(),
+        long_condition_functions: Vec::new(),
         diagnostics: Vec::new(),
     };
     let ast = parser.parse_program();
@@ -428,6 +430,7 @@ struct Parser<'a> {
     branch_anchors: Vec<(Span, Span)>,
     equality_anchors: Vec<(Span, Span, Span)>,
     written_list_patterns: Vec<Span>,
+    long_condition_functions: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -485,7 +488,7 @@ impl Parser<'_> {
     fn parse_program(&mut self) -> Ast {
         let span = self.span();
         let items = self.parse_items(TypeContext::TopLevel);
-        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), written_list_patterns: self.written_list_patterns.clone() }
+        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
     }
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
@@ -591,8 +594,9 @@ impl Parser<'_> {
             }))
         } else {
             let params = self.parse_params()?;
-            if params.is_empty() && self.kind() == &TokKind::Arrow {
-                return Err(self.error(Some("E109"), "function requires a parameter"));
+            if params.is_empty() {
+                let code = if self.kind() == &TokKind::Arrow { "E109" } else { "E100" };
+                return Err(self.error(Some(code), "function requires a parameter"));
             }
             let ret = if self.kind() == &TokKind::Colon {
                 self.bump();
@@ -600,8 +604,7 @@ impl Parser<'_> {
             } else {
                 None
             };
-            self.expect(&TokKind::Arrow)?;
-            let body = self.parse_expr()?;
+            let body = self.parse_function_body(span)?;
             Ok(Item::Def(Def {
                 name,
                 name_span,
@@ -1363,6 +1366,9 @@ impl Parser<'_> {
             let pipe = self.span();
             self.bump();
             let head = self.parse_branch_expr()?;
+            if arms.is_empty() && self.kind() != &TokKind::Arrow {
+                return Err(self.error(Some("E100"), "condition column requires a condition arm"));
+            }
             if self.kind() == &TokKind::Arrow {
                 self.bump();
                 let body = self.parse_branch_expr()?;
@@ -1387,6 +1393,18 @@ impl Parser<'_> {
         }
     }
 
+    fn parse_function_body(&mut self, span: Span) -> Result<Node, Diagnostic> {
+        if self.kind() == &TokKind::Pipe {
+            return self.parse_cond_branch(span);
+        }
+        self.expect(&TokKind::Arrow)?;
+        let body = self.parse_expr()?;
+        if matches!(&body.kind, NodeKind::CondBranch { .. }) {
+            self.long_condition_functions.push(span);
+        }
+        Ok(body)
+    }
+
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump(); // `fn`
@@ -1396,8 +1414,7 @@ impl Parser<'_> {
         }
         let params = self.parse_params()?;
         if params.is_empty() { return Err(self.error(None, "lambda requires a parameter")); }
-        self.expect(&TokKind::Arrow)?;
-        let body = self.parse_expr()?;
+        let body = self.parse_function_body(span)?;
         Ok(Node {
             kind: NodeKind::Fn {
                 params,
