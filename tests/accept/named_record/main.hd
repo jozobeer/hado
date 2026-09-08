@@ -1,0 +1,6 @@
+// spec: §12
+// expect: 42
+// item: record
+type User = Payload { id: Int; name: String }
+def number user => let Payload { id = n } = user -> n
+def main = number (Payload { name = "a"; id = 37 }) + (Payload { id = 5; name = "b" }).id
