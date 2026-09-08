@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build --offline --bin shin
-shin_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-python3 - "$shin_target_dir/debug/shin" <<'PY'
+cargo build --offline --bin hado
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+python3 - "$hado_target_dir/debug/hado" <<'PY'
 from pathlib import Path
 import re
 import subprocess
@@ -12,8 +12,8 @@ import sys
 failed = False
 all_passed = all_total = 0
 for kind, files in [
-    ("reject", sorted(Path("tests/reject").glob("E[45]*.shin"))),
-    ("accept", sorted(Path("tests/accept").glob("*.shin"))),
+    ("reject", sorted(Path("tests/reject").glob("E[45]*.hd"))),
+    ("accept", sorted(Path("tests/accept").glob("*.hd"))),
 ]:
     total = passed = 0
     for path in files:

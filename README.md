@@ -1,4 +1,4 @@
-# shin
+# hado
 
 ML 系の型システムと ADT を核に、より小さく、より平坦に、より一意に書ける言語。Rust で書いたコンパイラが検査と実行ファイル生成を行う。
 
@@ -16,20 +16,20 @@ ML 系の型システムと ADT を核に、より小さく、より平坦に、
 
 ## 使い方
 
-`cargo build --offline` で `target/debug/shin` ができる（`CARGO_TARGET_DIR` を設定していればその下）。
+`cargo build --offline` で `target/debug/hado` ができる（`CARGO_TARGET_DIR` を設定していればその下）。
 
 ```
-shin check [--print-type] <file>    # 検査。--print-type で main の型を印字
-shin dump-mono <file>               # 単相化後のプログラムを印字
-shin build <file.shin>              # 入力の隣に実行ファイルを置く
+hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
+hado dump-mono <file>               # 単相化後のプログラムを印字
+hado build <file.hd>              # 入力の隣に実行ファイルを置く
 ```
 
-`tests/accept/create_user.shin` を別の場所へコピーして試す（コーパスの隣に実行ファイルを作らないため）。
+`tests/accept/create_user.hd` を別の場所へコピーして試す（コーパスの隣に実行ファイルを作らないため）。
 
 ```
-$ shin check --print-type hello.shin
+$ hado check --print-type hello.hd
 Result<String,String>
-$ shin build hello.shin && ./hello
+$ hado build hello.hd && ./hello
 ok
 ```
 
@@ -38,8 +38,8 @@ ok
 拒否の例:
 
 ```
-$ shin check tests/reject/E508.shin
-tests/reject/E508.shin:6:21: error[E508]: failure bound at 6:5 is propagated unchanged; use let? or do?
+$ hado check tests/reject/E508.hd
+tests/reject/E508.hd:6:21: error[E508]: failure bound at 6:5 is propagated unchanged; use let? or do?
 ```
 
 ## 検証
@@ -52,9 +52,9 @@ bash scripts/verify-*.sh      # 門番。最後に PASSED: n/N
 ## 構成
 
 ```
-crates/shin/      コンパイラ本体。lexer → parser → 名前解決・型 → 検査 → 単相化 → Cranelift
+crates/hado/      コンパイラ本体。lexer → parser → 名前解決・型 → 検査 → 単相化 → Cranelift
 runtime/          C のランタイム。build.rs が静的ライブラリにする
-stdlib/           prelude。shin 自身で書き、全プログラムに暗黙に連結する
+stdlib/           prelude。hado 自身で書き、全プログラムに暗黙に連結する
 tests/accept/     受理コーパス。expect: タグに実行結果を持つ
 tests/reject/     拒否コーパス。エラーコードごとに 1 ファイル
 scripts/          門番スクリプト

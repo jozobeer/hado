@@ -35,7 +35,7 @@ fi
 
 # --- check 3: walk ---
 walk_reasons=""
-grep -Fq '"3"' crates/shin/tests/walk.rs || walk_reasons="$walk_reasons missing-expected-stdout-3"
+grep -Fq '"3"' crates/hado/tests/walk.rs || walk_reasons="$walk_reasons missing-expected-stdout-3"
 [ "$walk_ok" = "1" ] || walk_reasons="$walk_reasons walk-test-not-passing"
 if [ -z "$walk_reasons" ]; then
     pass 3 "walk"
@@ -45,7 +45,7 @@ fi
 
 # --- check 4: tail ---
 tail_reasons=""
-grep -Eq '100_000_000|100000000' crates/shin/tests/tail.rs || tail_reasons="$tail_reasons missing-depth-const"
+grep -Eq '100_000_000|100000000' crates/hado/tests/tail.rs || tail_reasons="$tail_reasons missing-depth-const"
 [ "$tail_ok" = "1" ] || tail_reasons="$tail_reasons tail-test-not-passing"
 if [ -z "$tail_reasons" ]; then
     pass 4 "tail"
@@ -56,10 +56,10 @@ fi
 # --- check 5: dependencies ---
 dep_reasons=""
 for c in cranelift-codegen cranelift-frontend cranelift-module cranelift-object cranelift-native; do
-    grep -Eq "^${c}[[:space:]]*=[[:space:]]*\"0\.135\"" crates/shin/Cargo.toml \
+    grep -Eq "^${c}[[:space:]]*=[[:space:]]*\"0\.135\"" crates/hado/Cargo.toml \
         || dep_reasons="$dep_reasons $c!=0.135"
 done
-if awk '/^\[/{sec=$0} sec=="[build-dependencies]" && /^cc[[:space:]]*=[[:space:]]*"1"/{found=1} END{exit !found}' crates/shin/Cargo.toml; then
+if awk '/^\[/{sec=$0} sec=="[build-dependencies]" && /^cc[[:space:]]*=[[:space:]]*"1"/{found=1} END{exit !found}' crates/hado/Cargo.toml; then
     :
 else
     dep_reasons="$dep_reasons cc!=1-in-build-deps"
@@ -76,13 +76,13 @@ check_set() {
     grep -Eq "set\([[:space:]]*\"$2\"[[:space:]]*,[[:space:]]*\"$3\"[[:space:]]*\)" "$1" \
         || flag_reasons="$flag_reasons $1:$2!=$3"
 }
-check_set crates/shin/src/emit.rs is_pic true
-check_set crates/shin/src/emit.rs preserve_frame_pointers true
-check_set crates/shin/src/emit.rs opt_level none
-check_set crates/shin/tests/tail.rs is_pic true
-check_set crates/shin/tests/tail.rs preserve_frame_pointers true
-check_set crates/shin/tests/tail.rs opt_level none
-if grep -rEq 'set\([[:space:]]*"enable_verifier"[[:space:]]*,[[:space:]]*"false"[[:space:]]*\)' crates/shin; then
+check_set crates/hado/src/emit.rs is_pic true
+check_set crates/hado/src/emit.rs preserve_frame_pointers true
+check_set crates/hado/src/emit.rs opt_level none
+check_set crates/hado/tests/tail.rs is_pic true
+check_set crates/hado/tests/tail.rs preserve_frame_pointers true
+check_set crates/hado/tests/tail.rs opt_level none
+if grep -rEq 'set\([[:space:]]*"enable_verifier"[[:space:]]*,[[:space:]]*"false"[[:space:]]*\)' crates/hado; then
     flag_reasons="$flag_reasons enable_verifier=false-present"
 fi
 if [ -z "$flag_reasons" ]; then
@@ -93,7 +93,7 @@ fi
 
 # --- check 7: runtime words, each independently ---
 rt_reasons=""
-for w in GC_INIT shin_entry shin_alloc GC_malloc; do
+for w in GC_INIT hado_entry hado_alloc GC_malloc; do
     grep -rq -- "$w" runtime/ || rt_reasons="$rt_reasons missing-$w"
 done
 if [ -z "$rt_reasons" ]; then

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build --offline --bin shin
-shin_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-python3 - "$shin_target_dir/debug/shin" <<'PY'
+cargo build --offline --bin hado
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+python3 - "$hado_target_dir/debug/hado" <<'PY'
 from pathlib import Path
 import re
 import subprocess
@@ -41,19 +41,19 @@ def valid_ir(result):
             return False
     return True
 
-for path in sorted(Path("tests/accept").glob("*.shin")):
+for path in sorted(Path("tests/accept").glob("*.hd")):
     if re.search(r"^-- needs: prelude\s*$", path.read_text(), re.M):
         continue
     result = dump(path)
     report(path, valid_ir(result), result.stderr.strip() or result.stdout)
 
-for path in sorted(Path("tests/reject").glob("*.shin")):
+for path in sorted(Path("tests/reject").glob("*.hd")):
     expected = re.search(r"^-- error: (E\d+)\s*$", path.read_text(), re.M)
     result = dump(path)
     diagnostic = re.fullmatch(re.escape(str(path)) + r":\d+:\d+: error\[(E\d+)\]: [^\n]+\n", result.stderr)
     report(path, result.returncode == 1 and not result.stdout and expected and diagnostic and expected[1] == diagnostic[1], result.stderr.strip())
 
-with tempfile.TemporaryDirectory(prefix="shin-m5-") as temporary:
+with tempfile.TemporaryDirectory(prefix="hado-m5-") as temporary:
     probes = [
         ("equality", "def main = 1 == 2", ['name: "eq_Int"', 'name: "print_Bool"']),
         ("comparison", "def main = compare 1 2", ['name: "compare_Int"', 'name: "print_Int"']),
@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix="shin-m5-") as temporary:
         ("closure-tail", "def apply f x => f x\ndef main = apply (fn x => x + 1) 41", ['TailCallClosure {']),
     ]
     for name, source, required in probes:
-        path = Path(temporary) / (name + ".shin")
+        path = Path(temporary) / (name + ".hd")
         path.write_text(source)
         result = dump(path)
         report(name, valid_ir(result) and all(text in result.stdout for text in required), result.stderr.strip() or result.stdout)
