@@ -584,7 +584,7 @@ impl Parser<'_> {
                 span,
             }))
         } else {
-            let params = self.parse_params()?;
+            let params = self.parse_params(false)?;
             if params.is_empty() {
                 let code = if self.kind() == &TokKind::Arrow { "E109" } else { "E100" };
                 return Err(self.error(Some(code), "function requires a parameter"));
@@ -612,10 +612,11 @@ impl Parser<'_> {
         let type_params = self.parse_type_parameters()?;
         let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
-        if self.kind() != &TokKind::LParen {
-            return Err(self.error(None, "signature parameters require type annotations"));
-        }
-        let params = self.parse_params()?;
+        let params = match self.kind() {
+            TokKind::Colon => Vec::new(),
+            TokKind::LParen => self.parse_params(true)?,
+            _ => return Err(self.error(None, "expected a value type or annotated contract parameters")),
+        };
         self.expect(&TokKind::Colon)?;
         let ret = Some(self.parse_type()?);
         Ok(Item::SigDef(SigDef {
@@ -631,7 +632,6 @@ impl Parser<'_> {
     fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
-        let parameter_start = self.span();
         let mut params = Vec::new();
         if self.kind() == &TokKind::LParen {
             params = self.parse_type_parameters()?;
@@ -642,16 +642,12 @@ impl Parser<'_> {
         let name_span = self.span();
         let name = self.expect_upper_name("a declaration name")?;
         let ty = if context == TypeContext::Signature {
-            if !params.is_empty() || self.kind() == &TokKind::Eq {
-                return Err(self.error(None, "signature types are abstract and have no parameters"));
+            if self.kind() == &TokKind::Eq {
+                return Err(self.error(None, "signature types are abstract and have no body"));
             }
             None
         } else {
             self.expect(&TokKind::Eq)?;
-            if context == TypeContext::Implementation && !params.is_empty()
-                && matches!(self.kind(), TokKind::Name(_)) {
-                return Err(self.error_at(parameter_start, Some("E100"), "abstract type realizations cannot declare type parameters"));
-            }
             Some(self.parse_type_body(context)?)
         };
         Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, span }))
@@ -662,9 +658,7 @@ impl Parser<'_> {
         self.expect(&TokKind::KwModule)?;
         let name_span = self.span();
         let name = self.expect_upper_name("a contract name")?;
-        let type_anchor_start = self.qualified_type_anchors.len();
         let items = self.parse_items(TypeContext::Signature);
-        self.qualified_type_anchors.truncate(type_anchor_start);
         Ok(Item::ModuleSig(ModuleSig { name, name_span, items, span }))
     }
 
@@ -710,17 +704,26 @@ impl Parser<'_> {
 
     // --- parameters and types ---
 
-    fn parse_params(&mut self) -> Result<Vec<Param>, Diagnostic> {
+    fn expect_parameter_name(&mut self, contract: bool) -> Result<String, Diagnostic> {
+        if !contract && matches!(self.kind(), TokKind::Name(name) if name == "_") {
+            self.bump();
+            Ok("_".into())
+        } else {
+            self.expect_lower_name("a parameter name")
+        }
+    }
+
+    fn parse_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
         let mut params = Vec::new();
         if self.kind() == &TokKind::LParen {
             self.bump();
+            if contract && self.kind() == &TokKind::RParen {
+                return Err(self.error(None, "contract functions require at least one parameter"));
+            }
             if self.kind() != &TokKind::RParen {
                 loop {
                     let span = self.span();
-                    let pname = self.expect_name("a parameter name")?;
-                    if !pname.chars().next().is_some_and(char::is_lowercase) {
-                        return Err(self.error_at(span, None, "expected a lowercase parameter name"));
-                    }
+                    let pname = self.expect_parameter_name(contract)?;
                     self.expect(&TokKind::Colon)?;
                     let ty = Some(self.parse_type()?);
                     params.push(Param {
@@ -737,13 +740,9 @@ impl Parser<'_> {
             }
             self.expect(&TokKind::RParen)?;
         } else {
-            while let TokKind::Name(n) = self.kind() {
+            while matches!(self.kind(), TokKind::Name(_)) {
                 let span = self.span();
-                let n = n.clone();
-                if !n.chars().next().is_some_and(char::is_lowercase) {
-                    return Err(self.error(None, "expected a lowercase parameter name"));
-                }
-                self.bump();
+                let n = self.expect_parameter_name(contract)?;
                 params.push(Param {
                     name: n,
                     ty: None,
@@ -865,7 +864,7 @@ impl Parser<'_> {
         while matches!(self.kind(), TokKind::Name(name) if name.starts_with(char::is_uppercase)) {
             let reference = self.parse_type_ref()?;
             let TypeKind::Name(name) = reference.kind else { unreachable!() };
-            let span = ty.span;
+            let span = if name.contains('.') { reference.span } else { ty.span };
             let args = match ty.kind { TypeKind::Group(args) => args, _ => vec![ty] };
             ty = TypeExpr { kind: TypeKind::Apply(name, args), span };
         }
@@ -1398,7 +1397,7 @@ impl Parser<'_> {
 
     fn parse_lambda_param(&mut self, typed: Option<bool>) -> Result<Param, Diagnostic> {
         let span = self.span();
-        let name = self.expect_lower_name("a parameter name")?;
+        let name = self.expect_parameter_name(false)?;
         let annotated = self.kind() == &TokKind::Colon;
         if typed.is_some_and(|expected| expected != annotated) {
             return Err(self.error(Some("E100"), "lambda parameters must all have annotations or all omit them"));

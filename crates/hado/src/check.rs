@@ -1,4 +1,4 @@
-use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, PatternKind};
+use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, PatternKind, TypeExpr, TypeKind};
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -23,7 +23,7 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     if let Err(error) = crate::names::check_cycles(ast, path) {
         diagnostics.push(error);
     }
-    check_items(&ast.items, path, &mut diagnostics);
+    check_items(&ast.items, &ast.items, None, path, &mut diagnostics);
     match diagnostics.into_iter().map(|error| arm_diagnostic(ast, error)).min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
@@ -43,9 +43,20 @@ pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
 fn qualified_type_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
     if error.code.as_deref() != Some("E204") { return error; }
     let member = ast.qualified_type_anchors.iter().find_map(|(module, member)| {
-        (module.span.line == error.line && module.span.col == error.col
-            && ast.items.iter().any(|item| matches!(item, Item::ModuleImpl(implementation) if implementation.name == module.name)))
-            .then_some(*member)
+        let in_contract = ast.items.iter().any(|item| match item {
+            Item::ModuleSig(signature) => signature.items.iter().any(|item| match item {
+                Item::SigDef(def) => def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter())
+                    .any(|ty| type_has_span(ty, module.span)),
+                _ => false,
+            }),
+            _ => false,
+        });
+        let known = ast.items.iter().any(|item| match item {
+            Item::ModuleSig(signature) if in_contract => signature.name == module.name,
+            Item::ModuleImpl(implementation) if !in_contract => implementation.name == module.name,
+            _ => false,
+        });
+        (module.span.line == error.line && module.span.col == error.col && known).then_some(*member)
     });
     if let Some(member) = member {
         error.line = member.line;
@@ -54,22 +65,86 @@ fn qualified_type_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
     error
 }
 
-fn check_items(items: &[Item], path: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
+    if ty.span == span { return true; }
+    match &ty.kind {
+        crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => args.iter().any(|ty| type_has_span(ty, span)),
+        _ => false,
+    }
+}
+
+fn check_items(
+    items: &[Item], contracts: &[Item], members: Option<&[Item]>,
+    path: &str, diagnostics: &mut Vec<Diagnostic>,
+) {
     for item in items {
+        check_type_parameters(item, path, diagnostics);
         match item {
-            Item::Def(def) => match &def.kind {
-                DefKind::Value(body) => check_node(body, path, diagnostics, false),
-                DefKind::Function { params, ret, body } => {
-                    check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
-                    if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
-                        diagnostics.push(error);
-                    }
-                    check_node(body, path, diagnostics, body.span == def.span);
-                }
-            },
-            Item::ModuleImpl(module) => check_items(&module.items, path, diagnostics),
+            Item::Def(def) => check_definition(def, is_contract_member(members, &def.name), path, diagnostics),
+            Item::ModuleImpl(module) => check_items(&module.items, contracts, contract_members(contracts, &module.sig), path, diagnostics),
+            Item::ModuleSig(signature) => check_items(&signature.items, contracts, None, path, diagnostics),
             _ => {}
         }
+    }
+}
+
+fn contract_members<'a>(items: &'a [Item], name: &str) -> Option<&'a [Item]> {
+    items.iter().find_map(|item| match item {
+        Item::ModuleSig(signature) if signature.name == name => Some(signature.items.as_slice()),
+        _ => None,
+    })
+}
+
+fn is_contract_member(members: Option<&[Item]>, name: &str) -> bool {
+    members.is_some_and(|items| items.iter().any(|item| matches!(item, Item::SigDef(member) if member.name == name)))
+}
+
+fn check_definition(def: &crate::parser::Def, contract_member: bool, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    match &def.kind {
+        DefKind::Value(body) => check_node(body, path, diagnostics, false),
+        DefKind::Function { params, ret, body } => {
+            if !contract_member {
+                for param in params.iter().filter(|param| param.name == "_") {
+                    diagnostics.push(Diagnostic { path: path.into(), line: param.span.line, col: param.span.col,
+                        code: Some("E519".into()), message: "underscore parameters require a contract member or anonymous function".into() });
+                }
+            }
+            check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
+            if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
+                diagnostics.push(error);
+            }
+            check_node(body, path, diagnostics, body.span == def.span);
+        }
+    }
+}
+
+fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let (parameters, types): (&[_], Vec<&TypeExpr>) = match item {
+        Item::TypeDef(def) if def.ty.is_some() => (&def.params, def.ty.iter().collect()),
+        Item::SigDef(def) => (&def.type_params, def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()).collect()),
+        _ => return,
+    };
+    for parameter in parameters {
+        if types.iter().any(|ty| references_type_parameter(ty, &parameter.name)) { continue; }
+        diagnostics.push(Diagnostic { path: path.into(), line: parameter.span.line, col: parameter.span.col,
+            code: Some("E518".into()), message: format!("type parameter {} is unused", parameter.name) });
+    }
+}
+
+fn references_type_parameter(ty: &TypeExpr, parameter: &str) -> bool {
+    match &ty.kind {
+        TypeKind::Name(name) => name == parameter,
+        TypeKind::Apply(name, arguments) => name == parameter || arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
+        TypeKind::Group(arguments) => arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
+        TypeKind::Record(fields) => fields.iter().any(|field| references_type_parameter(&field.ty, parameter)),
+        TypeKind::Adt(variants) => variants.iter().any(|variant| constructor_uses_type_parameter(variant, parameter)),
+    }
+}
+
+fn constructor_uses_type_parameter(variant: &TypeExpr, parameter: &str) -> bool {
+    match &variant.kind {
+        TypeKind::Apply(_, arguments) => arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
+        _ => false,
     }
 }
 
@@ -78,7 +153,7 @@ fn check_unused<'a>(
     path: &str, diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (name, span) in bindings {
-        if name == "$argument" || crate::names::references(body, name) { continue; }
+        if matches!(name, "$argument" | "_") || crate::names::references(body, name) { continue; }
         diagnostics.push(Diagnostic { path: path.into(), line: span.line, col: span.col,
             code: Some("E505".into()), message: format!("binding {name} is unused") });
     }

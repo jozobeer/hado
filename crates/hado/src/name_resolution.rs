@@ -79,7 +79,7 @@ impl Resolver<'_> {
                     let body = match &def.kind {
                         DefKind::Value(body) => body,
                         DefKind::Function { params, body, .. } => {
-                            local.values.extend(params.iter().map(|param| param.name.clone()));
+                            local.values.extend(params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                             body
                         }
                     };
@@ -134,7 +134,7 @@ impl Resolver<'_> {
             }
             NodeKind::Fn { params, body } => {
                 let mut local = scope.clone();
-                local.values.extend(params.iter().map(|param| param.name.clone()));
+                local.values.extend(params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                 self.expression(body, &local, current, false);
             }
             NodeKind::PatternBranch { scrutinee, arms, fallback } => {

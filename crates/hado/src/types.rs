@@ -296,10 +296,39 @@ impl Scheme {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeRealization {
+    pub parameters: Vec<u32>,
+    pub body: Ty,
+}
+
+impl TypeRealization {
+    pub(crate) fn apply(&self, arguments: &[Ty]) -> Ty {
+        assert_eq!(self.parameters.len(), arguments.len(), "checked abstract type arity");
+        let substitutions: HashMap<_, _> = self.parameters.iter().copied().zip(arguments.iter()).collect();
+        self.body.map_variables(&|id| substitutions.get(&id).map_or(Ty::Var(id), |ty| (*ty).clone()))
+    }
+}
+
 impl Ty {
-    pub(crate) fn reveal(&self, names: &HashMap<String, Ty>) -> Self {
+    pub(crate) fn abstract_names(&self, names: &mut BTreeSet<String>) {
         match self {
-            Self::Abstract(name, _) if names.contains_key(name) => names[name].reveal(names),
+            Ty::Abstract(name, args) => {
+                names.insert(name.clone());
+                for arg in args { arg.abstract_names(names); }
+            }
+            Ty::Adt(_, args) => { for arg in args { arg.abstract_names(names); } }
+            Ty::Fn(args, result) => {
+                for arg in args { arg.abstract_names(names); }
+                result.abstract_names(names);
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn reveal(&self, names: &HashMap<String, TypeRealization>) -> Self {
+        match self {
+            Self::Abstract(name, args) if names.contains_key(name) => names[name].apply(args).reveal(names),
             Self::Abstract(name, args) => Self::Abstract(name.clone(), args.iter().map(|ty| ty.reveal(names)).collect()),
             Self::Adt(name, args) => Self::Adt(name.clone(), args.iter().map(|ty| ty.reveal(names)).collect()),
             Self::Fn(args, result) => Self::Fn(args.iter().map(|ty| ty.reveal(names)).collect(), Box::new(result.reveal(names))),
@@ -318,7 +347,7 @@ impl Ty {
 }
 
 impl Scheme {
-    pub(crate) fn reveal(&self, names: &HashMap<String, Ty>) -> Self {
+    pub(crate) fn reveal(&self, names: &HashMap<String, TypeRealization>) -> Self {
         Self {
             variables: self.variables.clone(),
             ty: self.ty.reveal(names),

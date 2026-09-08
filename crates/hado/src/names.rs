@@ -116,7 +116,7 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
         }
         NodeKind::Fn { params, body } => {
             let mut bound = bound.clone();
-            bound.extend(params.iter().map(|p| p.name.clone()));
+            bound.extend(params.iter().filter(|p| p.name != "_").map(|p| p.name.clone()));
             free_names(body, &bound, result);
         }
         NodeKind::BoolBranch { cond, then, els } => {
@@ -243,20 +243,23 @@ fn declaration_types(
     for item in items {
         match item {
             Item::ModuleSig(signature) => {
-                let contract_types = types.iter().filter(|name| !name.contains('.')).cloned().collect();
+                let mut contract_types: BTreeSet<_> = types.iter().filter(|name| !name.contains('.')).cloned().collect();
+                for (contract, members) in &signatures {
+                    contract_types.extend(members.iter().map(|member| format!("{contract}.{member}")));
+                }
                 declaration_types(&signature.items, &contract_types, &signatures, path, diagnostics);
             }
             Item::ModuleImpl(module) => declaration_types(&module.items, &types, &signatures, path, diagnostics),
             Item::SigDef(def) => {
                 let mut local = types.clone();
-                local.extend(def.type_params.iter().map(|param| param.name.clone()));
+                local.extend(def.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                 for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
                     resolve_type_names(ty, &local, path, diagnostics);
                 }
             }
             Item::TypeDef(def) => {
                 let mut local = types.clone();
-                local.extend(def.params.iter().map(|param| param.name.clone()));
+                local.extend(def.params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                 if let Some(ty) = &def.ty { resolve_type_names(ty, &local, path, diagnostics); }
             }
             Item::Def(def) => {
@@ -445,7 +448,7 @@ fn dependency_graph(ast: &Ast) -> BTreeMap<String, BTreeSet<String>> {
             match &def.kind {
                 DefKind::Value(body) => free_names(body, &BTreeSet::new(), &mut references),
                 DefKind::Function { params, body, .. } => {
-                    let bound = params.iter().map(|p| p.name.clone()).collect();
+                    let bound = params.iter().filter(|p| p.name != "_").map(|p| p.name.clone()).collect();
                     free_names(body, &bound, &mut references);
                 }
             }

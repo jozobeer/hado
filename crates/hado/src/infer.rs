@@ -1,17 +1,18 @@
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
 use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
-use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError};
+use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError, TypeRealization};
 use crate::Checked;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
-    aliases: HashMap<String, (TypeExpr, Span)>,
+    contract_types: crate::contract_types::Contracts,
+    aliases: HashMap<String, (Vec<crate::parser::DeclaredName>, TypeExpr, Span)>,
     ambiguous_modules: HashSet<String>,
     ambiguous_signatures: HashSet<String>,
     ambiguous_types: HashSet<String>,
     ambiguous_constructors: HashSet<String>,
-    abstract_representations: HashMap<String, Ty>,
+    abstract_representations: HashMap<String, TypeRealization>,
     deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
     module_records: HashMap<String, (Vec<String>, Scheme)>,
@@ -51,14 +52,17 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
 }
 
 pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
+    let contracts = crate::contract_types::Contracts::collect(&ast.items);
+    let contract_diagnostics = contracts.diagnostics(ast, path);
     let mut checker = Checker {
+        contract_types: contracts,
         aliases: HashMap::new(),
         ambiguous_modules: HashSet::new(),
         ambiguous_signatures: HashSet::new(),
         ambiguous_types: HashSet::new(),
         ambiguous_constructors: HashSet::new(),
         abstract_representations: HashMap::new(),
-        deferred: Vec::new(),
+        deferred: contract_diagnostics,
         module_constructors: HashMap::new(),
         module_records: HashMap::new(),
         trusted_start,
@@ -147,6 +151,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
         checker.check_ambiguous_modules(&ast.items, &signatures);
         checker.resolve_projections(true)?;
+        checker.check_realization_cycles(&ast.items);
         for constraint in &checker.comparison_constraints {
             if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
                 checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
@@ -163,6 +168,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         }
         if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
+        }
+        if checker.contains_abstract(&checker.inference.resolve(&main), &mut Vec::new()) {
+            checker.deferred.push(checker.error(definitions["main"].span, Some("E705"), "main cannot return a value containing an abstract type"));
         }
         Ok(main)
     })();
@@ -296,7 +304,7 @@ impl Checker<'_> {
             let prefix = format!("{}.", self.module_path.join("."));
             for (name, representation) in &mut self.abstract_representations {
                 if name.starts_with(&prefix) {
-                    *representation = representation.qualify_data_types(&type_names);
+                    representation.body = representation.body.qualify_data_types(&type_names);
                 }
             }
             for (name, scheme) in &mut self.module_definitions {
@@ -376,7 +384,7 @@ impl Checker<'_> {
                 for parameter in &member.type_params {
                     parameters.insert(parameter.name.clone(), self.inference.fresh());
                 }
-                let ty = self.signature_type(member, &parameters)?;
+                let ty = self.signature_type(member, &parameters, true)?;
                 exports.insert(member.name.clone(), self.inference.generalize(&ty, &[]));
             }
         }
@@ -408,7 +416,7 @@ impl Checker<'_> {
                 self.aliases.remove(&def.name);
                 if let Some(ty) = &def.ty {
                     if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
-                        self.aliases.insert(def.name.clone(), (ty.clone(), ast.span));
+                        self.aliases.insert(def.name.clone(), (def.params.clone(), ty.clone(), ast.span));
                     }
                 }
             }
@@ -469,9 +477,13 @@ impl Checker<'_> {
                     ));
                 }
                 let qualified = format!("{}.{}", self.module_path.join("."), def.name);
-                let reference = TypeExpr { kind: TypeKind::Name(def.name.clone()), span: def.name_span };
-                let representation = self.annotation(&reference, def.name_span)?;
-                self.abstract_representations.insert(qualified.clone(), representation);
+                let parameters: HashMap<_, _> = def.params.iter().map(|p| (p.name.clone(), self.inference.fresh())).collect();
+                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span }).collect();
+                let kind = if arguments.is_empty() { TypeKind::Name(def.name.clone()) } else { TypeKind::Apply(def.name.clone(), arguments) };
+                let reference = TypeExpr { kind, span: def.name_span };
+                let body = self.payload_type(&reference, &parameters, def.name_span)?;
+                let parameters = def.params.iter().map(|p| match parameters[&p.name] { Ty::Var(id) => id, _ => unreachable!() }).collect();
+                self.abstract_representations.insert(qualified.clone(), TypeRealization { parameters, body });
                 abstract_names.insert(def.name.clone(), qualified);
             }
         }
@@ -490,6 +502,9 @@ impl Checker<'_> {
             if !definitions.contains_key(&declaration.name) {
                 return Err(self.error(module.span, Some("E602"), "missing signature member"));
             }
+            if matches!(definitions[&declaration.name].kind, DefKind::Value(_)) != declaration.params.is_empty() {
+                return Err(self.error(module.span, Some("E602"), "signature member requires the declared definition form"));
+            }
             let scheme = self.values[&declaration.name].clone();
             let (mut actual, constraints) = self.inference.instantiate_constrained(&scheme);
             if !ambiguous_values.contains(&declaration.name) && self.inference.resolve(&actual).has_error() {
@@ -498,7 +513,7 @@ impl Checker<'_> {
             }
             self.record_comparisons(constraints, declaration.span);
             let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
-            let expected = self.signature_type(declaration, &parameters)?;
+            let expected = self.signature_type(declaration, &parameters, false)?;
             self.inference
                 .unify(&actual, &expected)
                 .map_err(|_| self.error(module.span, Some("E602"), "signature type mismatch"))?;
@@ -513,7 +528,7 @@ impl Checker<'_> {
             let mut public_parameters: HashMap<_, _> = abstract_names.iter().map(|(name, public)|
                 (name.clone(), Ty::Abstract(public.clone(), vec![]))).collect();
             public_parameters.extend(parameters);
-            let public_type = self.signature_type(declaration, &public_parameters)?;
+            let public_type = self.signature_type(declaration, &public_parameters, true)?;
             exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints));
         }
         let roots = exports.keys().cloned().collect::<Vec<_>>();
@@ -523,7 +538,13 @@ impl Checker<'_> {
         Ok(exports)
     }
 
-    fn signature_type(&self, declaration: &crate::parser::SigDef, parameters: &HashMap<String, Ty>) -> Result<Ty, Diagnostic> {
+    fn signature_type(&self, declaration: &crate::parser::SigDef, parameters: &HashMap<String, Ty>, public: bool) -> Result<Ty, Diagnostic> {
+        let mut bindings: HashMap<_, _> = self.contract_types.types.iter().map(|(name, implementation)| {
+            let ty = implementation.as_ref().map_or(Ty::Error, |name| Ty::Abstract(name.clone(), vec![]));
+            (name.clone(), ty)
+        }).collect();
+        bindings.extend(parameters.clone());
+        let parameters = &bindings;
         let args = declaration
             .params
             .iter()
@@ -537,10 +558,13 @@ impl Checker<'_> {
         let result = declaration.ret.as_ref().ok_or_else(|| {
             self.error(declaration.span, None, "signature requires a return type")
         })?;
-        Ok(Ty::Fn(
-            args,
-            Box::new(self.payload_type(result, parameters, declaration.span)?),
-        ))
+        let result = self.payload_type(result, parameters, declaration.span)?;
+        let ty = if declaration.params.is_empty() { result } else { Ty::Fn(args, Box::new(result)) };
+        if public { return Ok(ty); }
+        let prefix = format!("{}.", self.module_path.join("."));
+        let local = self.abstract_representations.iter().filter(|(name, _)| name.starts_with(&prefix))
+            .map(|(name, representation)| (name.clone(), representation.clone())).collect();
+        Ok(ty.reveal(&local))
     }
 
     fn definition_group(
@@ -769,25 +793,7 @@ impl Checker<'_> {
         if rejected.iter().any(|reference| reference.line == expr.span.line && reference.col == expr.span.col) {
             return Ok(Ty::Error);
         }
-        match &expr.kind {
-            TypeKind::Apply(name, args) if name == "Fn" && args.len() == 2 => {
-                let inputs = match &args[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => std::slice::from_ref(&args[0]) };
-                Ok(Ty::Fn(inputs.iter().map(|ty| self.recovering_payload_type(ty, parameters, span, rejected)).collect::<Result<_, _>>()?, Box::new(self.recovering_payload_type(&args[1], parameters, span, rejected)?)))
-            }
-            TypeKind::Name(name) if parameters.contains_key(name) => Ok(parameters[name].clone()),
-            TypeKind::Name(name) if self.aliases.contains_key(name) => self.annotation(expr, span),
-            TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
-                Ok(Ty::Adt(name.clone(), vec![]))
-            }
-            TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.recovering_payload_type(arg, parameters, span, rejected))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Ty::Adt(name.clone(), args))
-            }
-            _ => self.annotation(expr, span),
-        }
+        self.annotation_inner(expr, span, parameters, rejected, &mut Vec::new())
     }
 
     fn error(&self, span: Span, code: Option<&str>, message: &str) -> Diagnostic {
@@ -1208,8 +1214,9 @@ impl Checker<'_> {
                 Some(annotation) => self.annotation(annotation, param.span)?,
                 None => self.inference.fresh(),
             };
-            self.values
-                .insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
+            if param.name != "_" {
+                self.values.insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
+            }
             args.push(ty);
         }
         let result = self.expression(body)?;
@@ -1428,70 +1435,67 @@ impl Checker<'_> {
     }
 
     fn annotation(&self, annotation: &TypeExpr, span: Span) -> Result<Ty, Diagnostic> {
-        self.annotation_inner(annotation, span, &mut Vec::new())
+        self.annotation_inner(annotation, span, &HashMap::new(), &[], &mut Vec::new())
     }
 
-    fn annotation_inner(&self, annotation: &TypeExpr, span: Span, visiting: &mut Vec<String>) -> Result<Ty, Diagnostic> {
-        if matches!(&annotation.kind, TypeKind::Name(name) | TypeKind::Apply(name, _) if name.split_once('.').is_some_and(|(module, _)| self.ambiguous_modules.contains(module))) {
+    fn annotation_inner(
+        &self, annotation: &TypeExpr, span: Span, parameters: &HashMap<String, Ty>,
+        rejected: &[Span], visiting: &mut Vec<String>,
+    ) -> Result<Ty, Diagnostic> {
+        if rejected.iter().any(|reference| reference.line == annotation.span.line && reference.col == annotation.span.col) {
             return Ok(Ty::Error);
         }
-        if matches!(&annotation.kind, TypeKind::Name(name) | TypeKind::Apply(name, _) if self.ambiguous_types.contains(name)) {
-            return Ok(Ty::Error);
+        let (name, arguments) = match &annotation.kind {
+            TypeKind::Name(name) => (name, &[][..]),
+            TypeKind::Apply(name, args) => (name, args.as_slice()),
+            _ => return Err(self.error(span, None, "type annotation is not implemented")),
+        };
+        if name.split_once('.').is_some_and(|(module, _)| self.ambiguous_modules.contains(module))
+            || self.ambiguous_types.contains(name) { return Ok(Ty::Error); }
+        if name == "Fn" && arguments.len() == 2 {
+            let inputs = match &arguments[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => &arguments[..1] };
+            let inputs = inputs.iter().map(|input| self.annotation_inner(input, span, parameters, rejected, visiting)).collect::<Result<_, _>>()?;
+            let output = self.annotation_inner(&arguments[1], span, parameters, rejected, visiting)?;
+            return Ok(Ty::Fn(inputs, Box::new(output)));
         }
-        if let TypeKind::Name(name) = &annotation.kind {
-            if let Some((target, module)) = self.aliases.get(name) {
-                if visiting.contains(name) {
-                    return Err(self.error(*module, Some("E602"), "cyclic abstract type instantiation"));
-                }
-                visiting.push(name.clone());
-                let result = self.annotation_inner(target, target.span, visiting);
-                visiting.pop();
-                return result;
-            }
+        let args = arguments.iter().map(|arg| self.annotation_inner(arg, span, parameters, rejected, visiting)).collect::<Result<Vec<_>, _>>()?;
+        if let Some(ty) = parameters.get(name) {
+            return match ty {
+                Ty::Abstract(public, _) => {
+                    if self.abstract_types.values().any(|(arity, name)| name == public && *arity != args.len()) {
+                        return Err(self.error(annotation.span, None, "type argument count differs"));
+                    }
+                    Ok(Ty::Abstract(public.clone(), args))
+                },
+                Ty::Error => Ok(Ty::Error),
+                _ if args.is_empty() => Ok(ty.clone()),
+                _ => Err(self.error(span, None, "type parameter cannot take arguments")),
+            };
         }
-        match &annotation.kind {
-            TypeKind::Name(name) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == 0) => {
-                Ok(Ty::Abstract(self.abstract_types[name].1.clone(), vec![]))
+        let prefix = format!("{}.", self.module_path.join("."));
+        let alias_name = name.strip_prefix(&prefix).unwrap_or(name);
+        if let Some((formal, target, module)) = self.aliases.get(alias_name) {
+            if formal.len() != args.len() {
+                return Err(self.error(span, None, "type argument count differs"));
             }
-            TypeKind::Apply(name, args) if self.abstract_types.get(name).is_some_and(|(arity, _)| *arity == args.len()) => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.annotation_inner(arg, span, visiting))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Ty::Abstract(self.abstract_types[name].1.clone(), args))
+            if visiting.iter().any(|name| name == alias_name) {
+                return Err(self.error(*module, Some("E602"), "cyclic abstract type instantiation"));
             }
-            TypeKind::Apply(name, args) if name == "Fn" && args.len() == 2 => {
-                let inputs = match &args[0].kind {
-                    TypeKind::Group(inputs) => inputs.as_slice(),
-                    _ => std::slice::from_ref(&args[0]),
-                };
-                let inputs = inputs
-                    .iter()
-                    .map(|input| self.annotation_inner(input, span, visiting))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let output = self.annotation_inner(&args[1], span, visiting)?;
-                Ok(Ty::Fn(inputs, Box::new(output)))
-            }
-            TypeKind::Name(name) if self.type_arities.get(name) == Some(&0) => {
-                Ok(Ty::Adt(name.clone(), vec![]))
-            }
-            TypeKind::Apply(name, args) if self.type_arities.get(name) == Some(&args.len()) => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.annotation_inner(arg, span, visiting))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Ty::Adt(name.clone(), args))
-            }
-            TypeKind::Name(name) => match name.as_str() {
-                "Int" => Ok(Ty::Int),
-                "Float" => Ok(Ty::Float),
-                "Bool" => Ok(Ty::Bool),
-                "Char" => Ok(Ty::Char),
-                "String" => Ok(Ty::String),
-                "Unit" => Ok(Ty::Unit),
-                _ => Err(self.error(annotation.span, Some("E204"), &format!("unknown type {name}"))),
-            },
-            _ => Err(self.error(span, None, "type annotation is not implemented")),
+            let substituted = formal.iter().zip(args).map(|(formal, arg)| (formal.name.clone(), arg)).collect();
+            visiting.push(alias_name.to_owned());
+            let result = self.annotation_inner(target, target.span, &substituted, rejected, visiting);
+            visiting.pop();
+            return result;
+        }
+        if let Some((arity, qualified)) = self.abstract_types.get(name) {
+            if *arity == args.len() { return Ok(Ty::Abstract(qualified.clone(), args)); }
+        }
+        if self.type_arities.get(name) == Some(&args.len()) { return Ok(Ty::Adt(name.clone(), args)); }
+        if !args.is_empty() { return Err(self.error(span, None, "type annotation is not implemented")); }
+        match name.as_str() {
+            "Int" => Ok(Ty::Int), "Float" => Ok(Ty::Float), "Bool" => Ok(Ty::Bool),
+            "Char" => Ok(Ty::Char), "String" => Ok(Ty::String), "Unit" => Ok(Ty::Unit),
+            _ => Err(self.error(annotation.span, Some("E204"), &format!("unknown type {name}"))),
         }
     }
 
@@ -1554,13 +1558,53 @@ impl Checker<'_> {
         self.comparison_constraints.extend(constraints);
     }
 
+    fn check_realization_cycles(&mut self, items: &[Item]) {
+        let graph: HashMap<_, _> = self.abstract_representations.iter().map(|(name, representation)| {
+            let mut references = std::collections::BTreeSet::new();
+            representation.body.abstract_names(&mut references);
+            (name.clone(), references)
+        }).collect();
+        for item in items {
+            let Item::ModuleImpl(module) = item else { continue; };
+            let prefix = format!("{}.", module.name);
+            let cyclic = graph.keys().filter(|name| name.starts_with(&prefix)).any(|name|
+                realization_reaches(name, name, &graph, &mut HashSet::new()));
+            if cyclic {
+                self.deferred.push(self.error(module.span, Some("E602"), "cyclic abstract type instantiation"));
+            }
+        }
+    }
+
+    fn contains_abstract(&self, ty: &Ty, visited: &mut Vec<Ty>) -> bool {
+        if matches!(ty, Ty::Abstract(..)) { return true; }
+        if visited.contains(ty) { return false; }
+        visited.push(ty.clone());
+        match ty {
+            Ty::Fn(args, result) => return args.iter().any(|arg| self.contains_abstract(arg, visited)) || self.contains_abstract(result, visited),
+            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_abstract(arg, visited)) => return true,
+            _ => {}
+        }
+        let Ty::Adt(name, _) = ty else { return false; };
+        self.constructors.values()
+            .chain(self.records.values().map(|(_, scheme)| scheme))
+            .chain(self.module_constructors.values().map(|(_, scheme)| scheme))
+            .chain(self.module_records.values().map(|(_, scheme)| scheme))
+            .any(|scheme| {
+                let mut inference = self.inference.clone();
+                let instantiated = inference.instantiate(scheme);
+                let Ty::Fn(payload, result) = instantiated else { return false; };
+                if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
+                payload.iter().any(|field| self.contains_abstract(&inference.resolve(field), visited))
+            })
+    }
+
     fn contains_function(&self, ty: &Ty, visited: &mut Vec<Ty>) -> bool {
         if matches!(ty, Ty::Fn(..)) { return true; }
         if visited.contains(ty) { return false; }
         visited.push(ty.clone());
-        if let Ty::Abstract(name, _) = ty {
+        if let Ty::Abstract(name, args) = ty {
             return self.abstract_representations.get(name).is_some_and(|representation|
-                self.contains_function(representation, visited));
+                self.contains_function(&representation.apply(args), visited));
         }
         let Ty::Adt(name, _) = ty else { return false; };
         self.constructors.values()
@@ -1596,4 +1640,13 @@ impl Checker<'_> {
             _ => Ok(ty.clone()),
         }
     }
+}
+
+fn realization_reaches(
+    current: &str, target: &str, graph: &HashMap<String, std::collections::BTreeSet<String>>,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if !visited.insert(current.into()) { return false; }
+    graph.get(current).is_some_and(|references| references.iter().any(|next|
+        next == target || realization_reaches(next, target, graph, visited)))
 }

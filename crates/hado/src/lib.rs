@@ -50,11 +50,12 @@ pub fn link_executable(
 
 pub mod infer;
 mod dependencies;
+mod contract_types;
 mod name_resolution;
 
 #[derive(Clone)]
 pub struct Checked {
-    pub abstract_representations: std::collections::HashMap<String, types::Ty>,
+    pub abstract_representations: std::collections::HashMap<String, types::TypeRealization>,
     pub module_constructors: std::collections::HashMap<String, (u32, types::Scheme)>,
     pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
     pub module_definitions: std::collections::HashMap<String, types::Scheme>,

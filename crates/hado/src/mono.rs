@@ -307,7 +307,7 @@ impl Lowerer {
             if let NodeKind::Name(module) = &record.kind {
                 let qualified = self.resolve_definition(&format!("{module}.{}", field.name));
                 if self.schemes.contains_key(&qualified) {
-                    return self.function_value(&qualified, node.span);
+                    return self.definition_reference(&qualified, node.span);
                 }
             }
             let record = self.expression(record)?;
@@ -357,14 +357,7 @@ impl Lowerer {
                 return self.construct(name, vec![], ty);
             }
             if !self.scope.contains_key(name) {
-                let qualified = self.resolve_definition(name);
-                if matches!(self.definitions.get(&qualified).map(|definition| &definition.kind), Some(crate::parser::DefKind::Value(_))) {
-                    let ty = self.value_types.get(&(node.span.line, node.span.col)).ok_or("missing value reference type")?;
-                    let expected = Type::try_from(&self.specialization.resolve(ty)).map_err(|_| "unresolved value reference")?;
-                    let (id, signature) = self.specialize_function(&qualified, vec![], Some(&expected))?;
-                    return Expression::call_direct(id, &signature, vec![]);
-                }
-                return self.function_value(name, node.span);
+                return self.definition_reference(name, node.span);
             }
             let (id, ty) = self
                 .scope
@@ -625,6 +618,9 @@ impl Lowerer {
             if let crate::parser::NodeKind::Name(module) = &module.kind {
                 let qualified = self.resolve_definition(&format!("{module}.{}", member.name));
                 if self.schemes.contains_key(&qualified) {
+                    if self.is_value_definition(&qualified) {
+                        return Expression::call_closure(self.expression(callee)?, arguments);
+                    }
                     return self.direct_call(&qualified, arguments);
                 }
             }
@@ -1162,7 +1158,7 @@ impl Lowerer {
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
             if !self.scope.contains_key(name) {
                 let qualified = self.resolve_definition(name);
-                if matches!(self.definitions.get(&qualified).map(|definition| &definition.kind), Some(crate::parser::DefKind::Value(_))) {
+                if self.is_value_definition(&qualified) {
                     let closure = self.expression(callee)?;
                     return Expression::call_closure(closure, arguments);
                 }
@@ -1213,7 +1209,7 @@ impl Lowerer {
         for (param, ty) in params.iter().zip(types) {
             let id = self.next;
             self.next += 1;
-            self.scope.insert(param.name.clone(), (id, ty));
+            if param.name != "_" { self.scope.insert(param.name.clone(), (id, ty)); }
             parameters.push(id);
         }
         let id = FunctionId(self.next_function);
@@ -1486,7 +1482,11 @@ impl Lowerer {
         name.into()
     }
 
-    fn function_value(
+    fn is_value_definition(&self, name: &str) -> bool {
+        matches!(self.definitions.get(name).map(|definition| &definition.kind), Some(crate::parser::DefKind::Value(_)))
+    }
+
+    fn definition_reference(
         &mut self,
         name: &str,
         span: crate::parser::Span,
@@ -1495,11 +1495,14 @@ impl Lowerer {
             .value_types
             .get(&(span.line, span.col))
             .ok_or("missing function reference type")?;
-        let ty = self.specialization.resolve(inferred);
-        let Type::Closure(parameters, result) =
-            Type::try_from(&ty).map_err(|_| "function value needs concrete types")?
-        else {
-            return Err("value is not a function".into());
+        let ty = Type::try_from(&self.specialization.resolve(inferred))
+            .map_err(|_| "definition reference needs concrete types")?;
+        if self.is_value_definition(&self.resolve_definition(name)) {
+            let (function, signature) = self.specialize_function(name, vec![], Some(&ty))?;
+            return Expression::call_direct(function, &signature, vec![]);
+        }
+        let Type::Closure(parameters, result) = ty else {
+            return Err("function definition requires a function type".into());
         };
         let (function, signature) = self.specialize_function(name, parameters, Some(&result))?;
         Ok(Expression::MakeClosure {
@@ -1562,7 +1565,7 @@ impl Lowerer {
         for (param, ty) in params.iter().zip(&types) {
             let id = self.next;
             self.next += 1;
-            self.scope.insert(param.name.clone(), (id, ty.clone()));
+            if param.name != "_" { self.scope.insert(param.name.clone(), (id, ty.clone())); }
             parameters.push(id);
         }
         let id = FunctionId(self.next_function);

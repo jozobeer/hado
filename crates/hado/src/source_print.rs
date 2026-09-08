@@ -124,6 +124,7 @@ fn function_tail_with_parameters(params: &[Param], ret: Option<&TypeExpr>, body:
 }
 
 fn parameters(params: &[Param]) -> String {
+    if params.is_empty() { return String::new(); }
     if params.iter().all(|param| param.ty.is_none()) {
         return format!(
             " {}",

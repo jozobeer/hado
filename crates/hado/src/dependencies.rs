@@ -145,7 +145,17 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
-        self.graph_items(&ast.items, &Scope::default())
+        let mut graph = self.graph_items(&ast.items, &Scope::default());
+        let contracts = crate::contract_types::Contracts::collect(&ast.items);
+        for (key, references) in &mut graph {
+            if matches!(key, Key::Signature(_)) {
+                *references = references.iter().map(|reference| match reference {
+                    Key::Module(name) => contracts.implementation(name).map_or_else(|| reference.clone(), |implementation| Key::Module(implementation.into())),
+                    _ => reference.clone(),
+                }).collect();
+            }
+        }
+        graph
     }
 
     fn graph_items(&self, items: &[Item], scope: &Scope) -> BTreeMap<Key, References> {
