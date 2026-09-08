@@ -95,12 +95,16 @@ fn duplicate_names_follow_entry_then_byte_path_order() {
 fn file_role_errors_keep_original_paths_and_positions() {
     for padding in 0..8 {
         for (file, invalid, anchor) in [
-            ("contract.hdi", "implement S as M", "implement"),
-            ("other.hd", "def helper x => x", "def"),
+            ("contract.hdi", "implement S as M\ndef value = 1", "implement"),
             ("contract.hdi", "def helper x => x", "def"),
         ] {
             let case = Case::new();
-            case.write("main.hd", "def main = 1\nmodule S");
+            let main = if invalid.starts_with("implement") {
+                "def main = M.value\nmodule S\ndef value: Int"
+            } else {
+                "def main = 1"
+            };
+            case.write("main.hd", main);
             let source = format!("{}{}{}", "\n".repeat(padding % 3), " ".repeat(padding), invalid);
             case.write(file, &source);
             for command in ["check", "build", "dump-mono"] {
@@ -111,18 +115,35 @@ fn file_role_errors_keep_original_paths_and_positions() {
         let source = format!("{}{}def helper x => x + 1\ndef main = helper 1", "\n".repeat(padding % 3), " ".repeat(padding));
         case.write("main.hd", &source);
         case.write("other.hd", "");
-        case.reject("check", "other.hd", "main.hd", &source, "E100", "def helper");
+        for command in ["check", "build", "dump-mono"] {
+            case.reject(command, "other.hd", "other.hd", "", "E206", "");
+        }
+
+        let case = Case::new();
+        case.write("main.hd", "def main = 1");
+        let source = format!("{}{}def helper x => x", "\n".repeat(padding % 3), " ".repeat(padding));
+        case.write("other.hd", &source);
+        for command in ["check", "build", "dump-mono"] {
+            case.reject(command, "main.hd", "other.hd", &source, "E513", "def helper");
+        }
     }
 }
 
 #[test]
-fn every_sibling_is_checked_and_subdirectories_are_ignored() {
+fn every_source_file_is_checked_and_other_extensions_are_ignored() {
     let case = Case::new();
     case.write("main.hd", "def main = 1");
     std::fs::create_dir(case.0.join("nested")).unwrap();
-    case.write("nested/broken.hd", "def main = [)");
     case.write("ignored.txt", "def main = [)");
     assert!(case.command("check", "main.hd").status.success());
+    case.write("nested/broken.hd", "type Data = [)");
+    case.reject("check", "main.hd", "nested/broken.hd", "type Data = [)", "E100", "[");
+    std::fs::remove_file(case.0.join("nested/broken.hd")).unwrap();
+    case.write("nested/helper.hd", "\n  def helper x => x");
+    for command in ["check", "build", "dump-mono"] {
+        case.reject(command, "main.hd", "nested/helper.hd", "\n  def helper x => x", "E100", "def helper");
+    }
+    std::fs::remove_file(case.0.join("nested/helper.hd")).unwrap();
     case.write("unused.hd", "module S\nimplement S as M");
     case.reject("check", "main.hd", "unused.hd", "module S\nimplement S as M", "E513", "implement");
     std::fs::remove_file(case.0.join("unused.hd")).unwrap();
