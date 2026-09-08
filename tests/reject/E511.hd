@@ -1,8 +1,7 @@
 // spec: §16
 // error: E511
 // item: リテラルパターン
-def f x =>
-  if
+def f x
   | x == 1 => "one"
   | x == 2 => "two"
   | "other"

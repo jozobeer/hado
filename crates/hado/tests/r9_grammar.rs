@@ -57,10 +57,11 @@ impl Generator {
     fn definition(&mut self) -> String {
         self.declarations += 1;
         let name = self.name(false);
-        match self.choose("definition", 3) {
+        match self.choose("definition", 4) {
             0 => format!("def {name} = {}", self.expression(3, false)),
             1 => format!("def {}{name} {} {} => {}", self.rec(), self.parameters(), self.return_type(), self.expression(3, false)),
-            _ => format!("def {}{name} {}", self.rec(), self.arms(2)),
+            2 => format!("def {}{name} {}", self.rec(), self.arms(2)),
+            _ => format!("def {}{name} {} {} {}", self.rec(), self.parameters(), self.return_type(), self.condition_arms(2)),
         }
     }
 
@@ -214,11 +215,13 @@ impl Generator {
     }
 
     fn lambda(&mut self, depth: usize, in_arm: bool) -> String {
-        let choice = if in_arm { self.mark("lambda", 2, 0); 0 } else { self.choose("lambda", 2) };
+        let choice = if in_arm { self.mark("lambda", 3, 0); 0 } else { self.choose("lambda", 3) };
         if choice == 0 {
             format!("fn {} => {}", self.parameters(), self.expression(depth, in_arm))
-        } else {
+        } else if choice == 1 {
             format!("( fn {} )", self.arms(depth))
+        } else {
+            format!("( fn {} {} )", self.parameters(), self.condition_arms(depth))
         }
     }
 
@@ -373,14 +376,22 @@ impl Generator {
             }
             1 => {
                 self.mark("condition_branch", 1, 0);
-                let count = self.random(3) + 1;
-                format!("if {} | {}", self.list(count, |g| format!("| {} => {}", g.pipe(depth, true), g.arm_body(depth)), " "), self.arm_body(depth))
+                format!("if {}", self.condition_arms(depth))
             }
             _ => {
                 self.mark("pattern_branch", 1, 0);
                 format!("if {} {}", self.pipe(depth, true), self.arms(depth))
             }
         }
+    }
+
+    fn condition_arms(&mut self, depth: usize) -> String {
+        let count = self.random(3) + 1;
+        let arms = self.list(count, |g| {
+            g.mark("condition_arm", 1, 0);
+            format!("| {} => {}", g.pipe(depth, true), g.arm_body(depth))
+        }, " ");
+        format!("{arms} | {}", self.arm_body(depth))
     }
 
     fn arms(&mut self, depth: usize) -> String {

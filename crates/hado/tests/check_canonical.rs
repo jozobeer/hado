@@ -128,8 +128,8 @@ fn duplicate_patterns_ignore_bound_variable_names() {
 #[test]
 fn repeated_or_unreachable_conditions_are_rejected() {
     for source in [
-        "def f x => if | x > 1 => 1 | x > 1 => 2 | 0",
-        "def f x => if | true => 1 | x > 1 => 2 | 0",
+        "def f x | x > 1 => 1 | x > 1 => 2 | 0",
+        "def f x | true => 1 | x > 1 => 2 | 0",
     ] {
         let ast = parse_source(source, "t").unwrap();
         assert_eq!(
@@ -137,7 +137,7 @@ fn repeated_or_unreachable_conditions_are_rejected() {
             Some("E406")
         );
     }
-    let ast = parse_source("def f x => if | x > 2 => 1 | x > 1 => 2 | 0", "t").unwrap();
+    let ast = parse_source("def f x | x > 2 => 1 | x > 1 => 2 | 0", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -162,14 +162,14 @@ fn identical_branches_ignore_local_names_but_preserve_free_names() {
 
 #[test]
 fn condition_columns_require_fallback_even_after_true() {
-    for source in ["def f x => if | x > 1 => 1", "def main = if | true => 1"] {
+    for source in ["def f x | x > 1 => 1", "def main = if | true => 1"] {
         let ast = parse_source(source, "t").unwrap();
         assert_eq!(
             check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
             Some("E401")
         );
     }
-    let ast = parse_source("def f x => if | x > 1 => 1 | 0", "t").unwrap();
+    let ast = parse_source("def f x | x > 1 => 1 | 0", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -207,7 +207,7 @@ fn equality_columns_for_one_variable_require_pattern_syntax() {
         "x == true",
         "x == 1.5",
     ] {
-        let source = format!("def f x => if | {conditions} => 2 | 0");
+        let source = format!("def f x | {conditions} => 2 | 0");
         let ast = parse_source(&source, "t").unwrap();
         assert_eq!(
             check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
@@ -222,7 +222,7 @@ fn equality_columns_for_one_variable_require_pattern_syntax() {
         "f x == 1",
     ] {
         let params = if conditions.contains('y') { "x y" } else { "x" };
-        let source = format!("def f {params} => if | {conditions} => 2 | 0");
+        let source = format!("def f {params} | {conditions} => 2 | 0");
         check::check_ast(&parse_source(&source, "t").unwrap(), "t").unwrap();
     }
 }
