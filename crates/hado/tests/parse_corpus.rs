@@ -304,7 +304,7 @@ fn parens_needed(child: &Node, parent: BinOp, is_left: bool) -> bool {
 }
 
 /// Random separator between two tokens: a space or a newline (+indent) with
-/// an optional `--` line comment. Never empty, so `-` never becomes `--`.
+/// an optional `//` line comment. Never empty, so `-` never becomes `--`.
 fn ws(rng: &mut Rng, indent: usize) -> String {
     match rng.below(4) {
         0 => " ".to_string(),
@@ -342,7 +342,7 @@ fn render(rng: &mut Rng, node: &Node, indent: usize) -> String {
         NodeKind::Int(n) => n.to_string(),
         NodeKind::Neg(c) => {
             // The unary minus always carries a trailing space so a nested
-            // `Neg(Neg(..))` renders as `- - 2`, never the `--` comment.
+            // `Neg(Neg(..))` renders as `- - 2`, never the forbidden `--` marker.
             let need = matches!(c.kind, NodeKind::Bin(..));
             let s = render(rng, c, indent + 1);
             let operand = if need || rng.chance(40) {
