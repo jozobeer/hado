@@ -95,8 +95,11 @@ struct ParsedSource {
 }
 
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
-    let mut parsed_source = parser::parse_source_partial(source, path)?;
-    let ast = &mut parsed_source.ast;
+    let ast = parser::parse_source(source, path)?;
+    with_prelude(ast, path, source.lines().count())
+}
+
+fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
     let mut prelude = Vec::new();
     for (name, source) in [
         ("stdlib/division_error.hd", include_str!("../../../stdlib/division_error.hd")),
@@ -108,7 +111,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
     }
     let mut trusted_start = None;
     if !std::path::Path::new(path).components().any(|part| part.as_os_str() == "stdlib") {
-        let mut line = source.lines().count() + 2;
+        let mut line = source_lines + 2;
         trusted_start = Some(line + 1);
         for module in [
             include_str!("../../../stdlib/list.hd"),
@@ -129,23 +132,26 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    let ast = parsed_source.finish(path)?;
     Ok(ParsedSource { ast, trusted_start, prelude_items })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
-    let ParsedSource { ast, trusted_start, prelude_items } = parse_with_prelude(source, path)?;
-    let name_error = names::resolve_with_prelude(&ast, path, trusted_start).err();
-    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(&ast, path, trusted_start) {
+    check_parsed(&parse_with_prelude(source, path)?, path)
+}
+
+fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
+    let ParsedSource { ast, trusted_start, prelude_items } = parsed;
+    let name_error = names::resolve_with_prelude(ast, path, *trusted_start).err();
+    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start) {
         Ok(result) => result,
-        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order).unwrap()),
+        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).map(|error| check::arm_diagnostic(ast, error)).min_by_key(diagnostic_order).unwrap()),
     };
     diagnostics.extend(name_error);
-    if let Err(error) = check::check_ast(&ast, path) {
+    if let Err(error) = check::check_ast(ast, path) {
         diagnostics.push(error);
     }
-    diagnostics.extend(dependencies::diagnostics(&ast, &checked, prelude_items, path));
-    match diagnostics.into_iter().map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order) {
+    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, path));
+    match diagnostics.into_iter().map(|error| check::arm_diagnostic(ast, error)).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
     }
@@ -178,8 +184,12 @@ mod coverage;
 pub mod mono;
 
 pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic> {
-    let checked = check_source(source, path)?;
-    let ParsedSource { ast, .. } = parse_with_prelude(source, path)?;
+    dump_parsed(&parse_with_prelude(source, path)?, path)
+}
+
+fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diagnostic> {
+    let checked = check_parsed(parsed, path)?;
+    let ast = &parsed.ast;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {
         path: path.into(), line: ast.span.line, col: ast.span.col, code: None,
         message: "main must be a value definition for lowering".into(),

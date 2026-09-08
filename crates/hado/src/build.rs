@@ -2,10 +2,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn executable(source: &str, source_path: &str, output: &Path) -> Result<(), String> {
+    executable_with(output, |object| crate::compile_source_to_object(source, source_path, object))
+}
+
+pub(crate) fn executable_with(output: &Path, compile: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     let scratch = Scratch::beside(output)?;
     let object = scratch.0.join("program.o");
     let executable = scratch.0.join("program");
-    crate::compile_source_to_object(source, source_path, &object)?;
+    compile(&object)?;
     crate::link_executable(&object, &executable)?;
     std::fs::rename(executable, output).map_err(|e| e.to_string())
 }
