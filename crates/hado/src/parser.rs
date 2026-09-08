@@ -93,7 +93,7 @@ pub enum NodeKind {
     /// Field access `user.name` / qualified name `M.inc`.
     Field(Box<Node>, FieldName),
     Record(Vec<(DeclaredName, Node)>),
-    List(Vec<Node>),
+    List(Vec<Node>, Option<Box<Node>>),
     Let {
         pat: Pattern,
         value: Box<Node>,
@@ -147,6 +147,9 @@ pub enum PatternKind {
 
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(list) = source_print::list_pattern(self) {
+            return write!(f, "{list}");
+        }
         match &self.kind {
             PatternKind::Underscore => write!(f, "_"),
             PatternKind::Name(n) => write!(f, "{n}"),
@@ -241,6 +244,7 @@ pub struct Ast {
     pub branches_after_fallback: Vec<Span>,
     pub branch_anchors: Vec<(Span, Span)>,
     pub equality_anchors: Vec<(Span, Span, Span)>,
+    pub written_list_patterns: Vec<Span>,
 }
 
 impl Ast {
@@ -406,6 +410,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
         equality_anchors: Vec::new(),
+        written_list_patterns: Vec::new(),
         diagnostics: Vec::new(),
     };
     let ast = parser.parse_program();
@@ -422,6 +427,7 @@ struct Parser<'a> {
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
     equality_anchors: Vec<(Span, Span, Span)>,
+    written_list_patterns: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -479,7 +485,7 @@ impl Parser<'_> {
     fn parse_program(&mut self) -> Ast {
         let span = self.span();
         let items = self.parse_items(TypeContext::TopLevel);
-        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone() }
+        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), written_list_patterns: self.written_list_patterns.clone() }
     }
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
@@ -1176,8 +1182,7 @@ impl Parser<'_> {
             }
             TokKind::LBracket => {
                 self.bump();
-                let items = self.parse_list_items()?;
-                NodeKind::List(items)
+                self.parse_list_items()?
             }
             other => {
                 return Err(self.error(
@@ -1254,22 +1259,24 @@ impl Parser<'_> {
         Ok(fields)
     }
 
-    fn parse_list_items(&mut self) -> Result<Vec<Node>, Diagnostic> {
+    fn parse_list_items(&mut self) -> Result<NodeKind, Diagnostic> {
         let mut items = Vec::new();
-        if self.kind() == &TokKind::RBracket {
-            self.bump();
-            return Ok(items);
-        }
-        loop {
+        let mut tail = None;
+        while self.kind() != &TokKind::RBracket {
             items.push(self.parse_expr()?);
-            if self.kind() == &TokKind::Comma {
+            if self.kind() != &TokKind::Comma { break; }
+            self.bump();
+            if self.kind() == &TokKind::Ellipsis {
                 self.bump();
-            } else {
+                tail = Some(Box::new(self.parse_expr()?));
                 break;
+            }
+            if self.kind() == &TokKind::RBracket {
+                return Err(self.error(None, "expected an expression after comma"));
             }
         }
         self.expect(&TokKind::RBracket)?;
-        Ok(items)
+        Ok(NodeKind::List(items, tail))
     }
 
     fn parse_branch(&mut self) -> Result<Node, Diagnostic> {
@@ -1441,6 +1448,38 @@ impl Parser<'_> {
 
     // --- patterns ---
 
+    fn parse_list_pattern(&mut self) -> Result<Pattern, Diagnostic> {
+        let span = self.span();
+        self.bump();
+        let mut items = Vec::new();
+        let mut tail = Pattern { kind: PatternKind::Name("Nil".into()), span };
+        while self.kind() != &TokKind::RBracket {
+            items.push(self.parse_pattern()?);
+            if self.kind() != &TokKind::Comma { break; }
+            self.bump();
+            if self.kind() == &TokKind::Ellipsis {
+                self.bump();
+                tail = self.parse_list_rest()?;
+                break;
+            }
+            if self.kind() == &TokKind::RBracket {
+                return Err(self.error(None, "expected a pattern after comma"));
+            }
+        }
+        self.expect(&TokKind::RBracket)?;
+        for head in items.into_iter().rev() {
+            tail = Pattern { kind: PatternKind::Constructor("Cons".into(), vec![head, tail]), span };
+        }
+        Ok(tail)
+    }
+
+    fn parse_list_rest(&mut self) -> Result<Pattern, Diagnostic> {
+        if !matches!(self.kind(), TokKind::Name(name) if name == "_" || name.starts_with(char::is_lowercase)) {
+            return Err(self.error(None, "List rest pattern must be a name or _"));
+        }
+        self.parse_pattern()
+    }
+
     fn parse_pattern(&mut self) -> Result<Pattern, Diagnostic> {
         let span = self.span();
         let kind = match self.kind() {
@@ -1450,6 +1489,9 @@ impl Parser<'_> {
             }
             TokKind::Name(n) => {
                 let name = n.clone();
+                if matches!(name.as_str(), "Nil" | "Cons") {
+                    self.written_list_patterns.push(span);
+                }
                 self.bump();
                 if self.kind() == &TokKind::LParen && name.chars().next().is_some_and(char::is_uppercase) {
                     self.bump();
@@ -1470,6 +1512,7 @@ impl Parser<'_> {
                     PatternKind::Name(name)
                 }
             }
+            TokKind::LBracket => return self.parse_list_pattern(),
             TokKind::LBrace => {
                 self.bump();
                 if self.kind() == &TokKind::RBrace { return Err(self.error(None, "record pattern requires a field")); }
@@ -1559,7 +1602,7 @@ fn contains_branch(node: &Node) -> Option<Span> {
         NodeKind::Call(_, args) => args.iter().find_map(contains_branch),
         NodeKind::Field(l, _) => contains_branch(l),
         NodeKind::Record(fields) => fields.iter().find_map(|(_, v)| contains_branch(v)),
-        NodeKind::List(items) => items.iter().find_map(contains_branch),
+        NodeKind::List(items, tail) => items.iter().chain(tail.iter().map(Box::as_ref)).find_map(contains_branch),
         NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
             contains_branch(value).or_else(|| contains_branch(body))
         }
@@ -1645,13 +1688,13 @@ pub fn canonical(node: &Node) -> String {
                 .join("; ");
             format!("{{ {inner} }}")
         }
-        NodeKind::List(items) => {
-            let inner = items
+        NodeKind::List(items, tail) => {
+            let mut inner = items
                 .iter()
                 .map(canonical)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{inner}]")
+                .collect::<Vec<_>>();
+            if let Some(tail) = tail { inner.push(format!("...{}", canonical(tail))); }
+            format!("[{}]", inner.join(", "))
         }
         NodeKind::Let { pat, value, body } => {
             format!("(let {pat} = {} -> {})", canonical(value), canonical(body))

@@ -1,5 +1,25 @@
 use super::*;
 
+pub(super) fn list_pattern(pattern: &Pattern) -> Option<String> {
+    match &pattern.kind {
+        PatternKind::Name(name) if name == "Nil" => return Some("[]".into()),
+        PatternKind::Constructor(name, args) if name == "Nil" && args.is_empty() => return Some("[]".into()),
+        PatternKind::Constructor(name, args) if name == "Cons" && args.len() == 2 => {}
+        _ => return None,
+    }
+    let mut parts = Vec::new();
+    let mut rest = pattern;
+    while let PatternKind::Constructor(name, args) = &rest.kind {
+        if name != "Cons" || args.len() != 2 { break; }
+        parts.push(args[0].to_string());
+        rest = &args[1];
+    }
+    if !matches!(&rest.kind, PatternKind::Name(name) if name == "Nil") {
+        parts.push(format!("...{rest}"));
+    }
+    Some(format!("[{}]", parts.join(", ")))
+}
+
 pub fn canonical_program(ast: &Ast) -> String {
     items(&ast.items)
 }

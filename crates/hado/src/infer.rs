@@ -253,7 +253,7 @@ impl Checker<'_> {
             let saved = self.clone();
             self.module_path.push(module.name.clone());
             let ast = Ast { items: module.items.clone(), span: module.span,
-                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), equality_anchors: Vec::new() };
+                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), equality_anchors: Vec::new() };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
             if let Err(error) = result { diagnostics.push(error); }
@@ -455,7 +455,7 @@ impl Checker<'_> {
             span: module.span,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
-            equality_anchors: Vec::new(),
+            written_list_patterns: Vec::new(), equality_anchors: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();
@@ -888,7 +888,7 @@ impl Checker<'_> {
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
             },
-            NodeKind::List(items) => self.list(items),
+            NodeKind::List(items, tail) => self.list(items, tail.as_deref()),
             NodeKind::Record(fields) => self.record(fields, node.span),
             NodeKind::Field(value, field) => {
                 let ty = self.project(value, field)?;
@@ -1036,15 +1036,14 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&payload[index]))
     }
 
-    fn list(&mut self, items: &[Node]) -> Result<Ty, Diagnostic> {
+    fn list(&mut self, items: &[Node], tail: Option<&Node>) -> Result<Ty, Diagnostic> {
         let element = self.inference.fresh();
         for item in items {
             self.branch_result(item, &element)?;
         }
-        Ok(Ty::Adt(
-            "List".into(),
-            vec![self.inference.resolve(&element)],
-        ))
+        let list = Ty::Adt("List".into(), vec![element]);
+        if let Some(tail) = tail { self.branch_result(tail, &list)?; }
+        Ok(self.inference.resolve(&list))
     }
 
     fn pattern_branch(
