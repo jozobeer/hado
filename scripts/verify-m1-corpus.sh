@@ -189,9 +189,9 @@ while IFS= read -r v || [ -n "$v" ]; do
     grep -qFx -- "$v" "$TMPD/items22_uniq.txt" || c3_reasons="$c3_reasons unknown-item:$v"
 done <"$TMPD/all_items_uniq.txt"
 if [ -z "$c3_reasons" ]; then
-    pass 3 "pairs-22-20"
+    pass 3 "pairs"
 else
-    fail 3 "pairs-22-20:$c3_reasons"
+    fail 3 "pairs:$c3_reasons"
 fi
 
 # --- check 4: short-circuit accept corpus for && and || ---
