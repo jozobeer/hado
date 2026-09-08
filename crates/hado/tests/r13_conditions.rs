@@ -74,6 +74,7 @@ fn assert_round_trip(source: &str) {
 
 #[test]
 fn condition_and_pattern_functions_keep_their_diagnostics() {
+    rejected("def f x | x == 1 => 2 | 0\ndef main = f 1", "E511", "def f");
     rejected("def main | true => 1 | 0", "E206", "def main");
     rejected("def f x | Some(y) => y | 0\ndef main = f 1", "E204", "y)");
     rejected("def f x | x > 0 => 1\ndef main = f 1", "E401", "def f");
@@ -87,6 +88,7 @@ fn condition_columns_require_a_condition_arm() {
     for source in ["def f x | 1", "def main = fn x | 1", "def main = if | 1"] {
         let error = parser::parse_source(source, "empty.hd").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
+        assert_eq!((error.line, error.col), (1, source.len() + 1));
     }
 }
 
@@ -116,4 +118,15 @@ fn long_form_provenance_survives_modules_and_printing_is_canonical() {
     rejected("def f x => if | missing > x => 1 | 0\ndef main = f 1", "E204", "missing");
     rejected("def f x => if | x > 0 => 1\ndef main = f 1", "E401", "if ");
     check_source("def f x => if x > 0 => 1 | 0\ndef main = f 1", "boolean.hd").unwrap();
+}
+
+#[test]
+fn condition_functions_cannot_have_an_empty_parameter_list() {
+    for source in ["def f: Int | true => 1 | 0", "def f() | true => 1 | 0", "def f(): Int | true => 1 | 0"] {
+        let error = parser::parse_source(source, "zero.hd").unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
+    }
+    let error = parser::parse_source("def f => 1", "zero.hd").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E109"));
+    assert_eq!((error.line, error.col), (1, 7));
 }
