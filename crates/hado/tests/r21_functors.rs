@@ -241,3 +241,17 @@ fn parameter_types_remain_opaque_even_when_actual_representations_support_the_op
         }
     }
 }
+
+#[test]
+fn application_substitutes_comparison_constraints_from_the_checked_body() {
+    let case = Case::new();
+    case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int");
+    case.write("argument.hd", "implement Input as Concrete\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)");
+    let source = "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))";
+    case.write("functor.hd", source);
+    case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
+    case.write("main.hd", "def main = Applied.run 7");
+    for command in ["check", "build", "dump-mono"] {
+        case.reject(command, "main.hd", "functor.hd", "E704", source.find("compare").unwrap());
+    }
+}
