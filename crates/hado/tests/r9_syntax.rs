@@ -5,15 +5,15 @@ use hado::parser::parse_source;
 fn module_declarations_are_top_level_only() {
     for padding in 0..20 {
         for nested in [
-            "module Inner : S = struct end",
-            "module type Inner = sig end",
-            "module Inner : S = struct def broken = ) end",
+            "implement S as Inner",
+            "module Inner",
+            "implement S as Inner def broken = )",
         ] {
-            let prefix = format!("module type S = sig end\nmodule Outer : S = struct\n{}", " ".repeat(padding));
-            let source = format!("{prefix}{nested}\nend\ndef main = 1");
+            let prefix = format!("def main = 1\nmodule S\nimplement S as Outer def run x => (\n{}", " ".repeat(padding));
+            let source = format!("{prefix}{nested})");
             let error = parse_source(&source, "nested-module.hd").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-            assert_eq!((error.line, error.col), (3, padding + 1), "{error}");
+            assert_eq!((error.line, error.col), (4, padding + 1), "{error}");
         }
     }
 }
@@ -63,7 +63,7 @@ fn generated_syntax_diagnostics() {
             (format!("def f{index} => {index}"), "E109"),
             (format!("def main = {constructor} {index}"), "E106"),
             (format!("def main = {index} |> {constructor}"), "E106"),
-            (format!("module M{index} = struct def f x => x end"), "E113"),
+            (format!("module M{index} = struct def f x => x end"), "E100"),
         ] {
             let error = parse_source(&source, "generated").unwrap_err();
             assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
@@ -120,14 +120,14 @@ fn type_definition_contexts_are_distinct() {
         for source in [
             format!("type Alias{index} = Int"),
             format!("type Sum{index} = | Case{index}({{ field: Int }})"),
-            format!("module type S{index} = sig type T = Int end"),
-            format!("module type S{index} = sig type T<A> end"),
+            format!("module S{index} type T = Int"),
+            format!("module S{index} type T<A>"),
         ] {
             let error = parse_source(&source, "generated").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{source}");
         }
         let source = format!(
-            "module type S{index} = sig type T def f(x: T): Int end module M{index} : S{index} = struct type T = Int def f x => x end def main = M{index}.f {index}"
+            "def main = M{index}.f {index}\nmodule S{index} type T def f(x: T): Int\nimplement S{index} as M{index} type T = Int def f x => x"
         );
         assert!(parse_source(&source, "generated").is_ok());
     }
@@ -139,8 +139,8 @@ fn incomplete_grammar_forms_are_rejected() {
         "def main = fn => 1",
         "def f(x) => x",
         "def f _ => 1",
-        "module type S = sig def f x end",
-        "module type S = sig def f(x: Int) end",
+        "module S def f x",
+        "module S def f(x: Int)",
         "def main = {}",
         "def main = let {} = x -> 1",
     ] {
@@ -214,9 +214,9 @@ fn identifier_namespaces_follow_the_grammar() {
             format!("type Choice{index} = | lower{index}"),
             format!("type Box{index}<lower> = | Box{index}(Int)"),
             format!("type Record{index} = {{ Upper: Int }}"),
-            format!("module lower{index} : S = struct end"),
-            format!("module type lower{index} = sig end"),
-            format!("module type S = sig def Upper{index}(x: Int): Int end"),
+            format!("implement S as lower{index}"),
+            format!("module lower{index}"),
+            format!("module S def Upper{index}(x: Int): Int"),
             format!("def main = {{ Upper{index} = 1 }}"),
             format!("def main = value.Upper{index}"),
             "def main = _".into(),
@@ -258,18 +258,18 @@ fn integer_field_receivers_remain_separate_from_float_tokens() {
 }
 
 #[test]
-fn struct_aliases_only_realize_declared_abstract_types() {
+fn implementation_aliases_only_realize_declared_abstract_types() {
     for index in 0..20 {
-        let prefix = format!("module M{index} : S{index} = struct type Extra{index} = ");
+        let prefix = format!("implement S{index} as M{index} type ");
         for body in ["Int", "List<Int>", "Fn<Int, Int>", "Other.T"] {
-            let source = format!("{prefix}{body} end\nmodule type S{index} = sig type T end\ndef main = 1");
-            let error = parse_source(&source, "generated").unwrap_err();
-            assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+            let source = format!("def main = 1\n{prefix}Extra{index} = {body}\nmodule S{index} type T");
+            parse_source(&source, "generated").unwrap();
+            let error = hado::check_source(&source, "generated").err().unwrap();
+            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+            assert_eq!((error.line, error.col), (2, prefix.len() + 1));
         }
-
         for body in ["type T = Int", "type Private = | Wrap(Int) type T = Private", "type Private = { value: Int } type T = Private"] {
-            let source = format!("module M{index} : S{index} = struct {body} end\nmodule type S{index} = sig type T end\ndef main = 1");
+            let source = format!("def main = 1\nimplement S{index} as M{index} {body}\nmodule S{index} type T");
             parse_source(&source, "generated").unwrap_or_else(|error| panic!("{error}: {source}"));
         }
     }
@@ -278,8 +278,8 @@ fn struct_aliases_only_realize_declared_abstract_types() {
 #[test]
 fn abstract_type_aliases_cannot_declare_type_parameters() {
     for spacing in ["", "  ", "\n  "] {
-        let prefix = format!("module type S = sig type T end\nmodule M : S = struct type T{spacing}");
-        let source = format!("{prefix}<A> = List<A> end\ndef main = 1");
+        let prefix = format!("module S type T\nimplement S as M type T{spacing}");
+        let source = format!("{prefix}<A> = List<A>");
         let error = parse_source(&source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
         assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1));
@@ -288,14 +288,14 @@ fn abstract_type_aliases_cannot_declare_type_parameters() {
 
 #[test]
 fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
-    let prefix = "module M : LIST = struct type Extra = ";
-    let source = format!("{prefix}Int end\ndef main = 1");
+    let prefix = "implement List as M type ";
+    let source = format!("def main = 1\n{prefix}Extra = Int");
     let error = hado::check_source(&source, "generated").err().unwrap();
-    assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-    assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+    assert_eq!((error.line, error.col), (2, prefix.len() + 1));
     for (source, code) in [
-        ("module M : Missing = struct type T = Int end\ndef main = 1", "E204"),
-        ("module type S = sig type T end\nmodule type S = sig end\nmodule M : S = struct type T = Int end\ndef main = 1", "E205"),
+        ("def main = 1\nimplement Missing as M type T = Int", "E204"),
+        ("def main = 1\nmodule S type T\nmodule S\nimplement S as M type T = Int", "E205"),
     ] {
         let error = hado::check_source(source, "generated").err().unwrap();
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
@@ -303,43 +303,42 @@ fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
 }
 
 #[test]
-fn alias_errors_precede_later_syntax_errors_across_declaration_boundaries() {
+fn syntax_errors_precede_alias_name_errors_across_section_boundaries() {
     for signature_first in [false, true] {
-        for tail in ["end\ndef main = [)", "def broken = [) end\ndef main = 1", "def broken = [)"] {
-            let signature = "module type S = sig type T end\n";
-            let prefix = if signature_first { signature } else { "" };
-            let source = format!("{prefix}module M : S = struct type Extra = Int {tail}\n{}", if signature_first { "" } else { signature });
-            // An unterminated struct cannot expose a later top-level signature.
-            if !signature_first && !tail.contains("end") { continue; }
-            let error = parse_source(&source, "generated").unwrap_err();
-            let expected = source.find("Int").unwrap();
-            let before = &source[..expected];
+        for broken in ["def broken = [)", "def broken x => [)"] {
+            let signature = "module S type T";
+            let implementation = format!("implement S as M type Extra = Int {broken}");
+            let sections = if signature_first { format!("{signature}\n{implementation}") }
+                else { format!("{implementation}\n{signature}") };
+            let source = format!("def main = 1\n{sections}");
+            let error = hado::check_source(&source, "generated").err().unwrap();
+            let before = &source[..source.find(')').unwrap()];
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
             assert_eq!((error.line, error.col), (before.lines().count(), before.rsplit('\n').next().unwrap().len() + 1), "{source}: {error}");
         }
     }
-    let source = "module M : LIST = struct type Extra = Int end\ndef main = [)";
+    let source = "def main = [)\nimplement List as M type Extra = Int";
     let error = hado::check_source(source, "generated").err().unwrap();
-    assert_eq!((error.line, error.col), (1, source.find("Int").unwrap() + 1));
+    assert_eq!((error.line, error.col), (1, "def main = [".len() + 1));
 }
 
 #[test]
 fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
     for source in [
-        "def broken = [)\nmodule type S = sig type T end\nmodule M : S = struct type Extra = Int end",
-        "def broken = [)\nmodule Bad = struct module type S = sig end end\nmodule type S = sig type T end\nmodule M : S = struct type T = Int end",
-        "def broken = [)\nmodule type S = sig def broken(x: Int) Int end\nmodule M : S = struct type Extra = Int end",
+        "def broken = [)\nmodule S type T\nimplement S as M type Extra = Int",
+        "def broken = [)\nmodule Bad = struct  end\nmodule S\nmodule S type T\nimplement S as M type T = Int",
+        "def broken = [)\nmodule S def broken(x: Int) Int\nimplement S as M type Extra = Int",
     ] {
         let error = parse_source(source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"));
         assert_eq!((error.line, error.col), (1, 15), "{error}: {source}");
     }
-    let source = "module M : S = struct type T = Int end\nmodule type S = sig type T def broken(x: Int) Int end";
+    let source = "implement S as M type T = Int\nmodule S type T def broken(x: Int) Int";
     let error = parse_source(source, "generated").unwrap_err();
     assert_eq!(error.line, 2, "an incomplete signature cannot prove an alias invalid: {error}");
     for source in [
-        "module type S = sig type T end\nmodule M : S = struct type T = Int def broken = [)",
-        "module type S = sig type T end\nmodule M : S = struct type T = Int",
+        "module S type T\nimplement S as M type T = Int def broken = [)",
+        "module S type T\nimplement S as M type T =",
         "def main = [)",
     ] {
         assert!(parse_source(source, "generated").is_err());
@@ -348,27 +347,27 @@ fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
 }
 
 #[test]
-fn recovery_does_not_promote_signatures_from_a_broken_module() {
-    let source = "module M : S = struct type T = Int end\nmodule Bad = struct module type S = sig end end\nmodule type S = sig type T end\ndef main = 1";
+fn broken_heading_precedes_later_duplicate_contracts() {
+    let source = "module Bad = struct  end\n\ndef main = 1\nimplement S as M type T = Int\nmodule S\nmodule S type T";
     let error = parse_source(source, "generated").unwrap_err();
-    assert_eq!(error.code.as_deref(), Some("E113"), "{error}");
-    assert_eq!((error.line, error.col), (2, 1));
+    assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+    assert_eq!((error.line, error.col), (1, "module Bad ".len() + 1));
 }
 
 #[test]
 fn alias_parameters_precede_a_malformed_alias_body() {
-    let prefix = "module type S = sig type T end\nmodule M : S = struct type T";
-    let source = format!("{prefix}<A> = List<) end\ndef main = 1");
+    let prefix = "module S type T\nimplement S as M type T";
+    let source = format!("{prefix}<A> = List<)");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
     assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
 }
 
 #[test]
-fn alias_context_precedes_an_error_inside_its_type_arguments() {
-    let prefix = "module M : S = struct type Extra = ";
-    let source = format!("{prefix}List<) end\nmodule type S = sig type T end\ndef main = 1");
+fn malformed_alias_body_precedes_alias_name_resolution() {
+    let prefix = "implement S as M type Extra =";
+    let source = format!("{prefix}List<)\nmodule S type T");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
-    assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
+    assert_eq!((error.line, error.col), (1, prefix.len() + "List<".len() + 1), "{error}");
 }

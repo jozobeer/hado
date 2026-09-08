@@ -6,16 +6,14 @@ fn every_user_declaration_kind_is_checked_for_reachability() {
         for declaration in [
             "def unused x => x + 1".to_owned(),
             format!("type Unused{padding} = | UnusedValue{padding}"),
-            format!("module type Unused{padding} = sig def value(x: Int): Int end"),
-            format!("module M{padding} : S = struct def value x => x + 1 end"),
+            format!("module Unused{padding} def value(x: Int): Int"),
+            format!("implement S as M{padding} def value x => x + 1"),
         ] {
-            let prefix = if declaration.starts_with("module M") { "module type S = sig def value(x: Int): Int end\n" } else { "" };
-            let source = format!("{prefix}{}{declaration}\ndef main = 1", " ".repeat(padding));
+            let contract = if declaration.starts_with("implement") { "module S def value(x: Int): Int" } else { "" };
+            let source = format!("def main = 1\n{}{declaration}\n{contract}", " ".repeat(padding));
             let error = check_source(&source, "unused.hd").err().expect("unused declaration accepted");
-            assert_eq!(error.code.as_deref(), Some("E513"), "{source}");
-            // An unused module also makes its signature unreachable; the earlier declaration wins.
-            let expected = if prefix.is_empty() { (1, padding + 1) } else { (1, 1) };
-            assert_eq!((error.line, error.col), expected, "{source}");
+            assert_eq!(error.code.as_deref(), Some("E513"), "{source}: {error}");
+            assert_eq!((error.line, error.col), (2, padding + 1), "{source}: {error}");
         }
     }
 }
@@ -25,8 +23,8 @@ fn references_through_modules_signatures_and_inferred_records_are_used() {
     for source in [
         "type Box = | Pack(Int)\ndef main = Pack(1)",
         "type Box = { value: Int }\ndef main = { value = 1 }",
-        "type Box = | Pack(Int)\nmodule type S = sig def make(x: Int): Box end\nmodule M : S = struct def make x => Pack(x) end\ndef main = M.make 1",
-        "def add x => x + 1\nmodule type S = sig def run(x: Int): Int end\nmodule M : S = struct def run x => add x end\ndef main = M.run 1",
+        "type Box = | Pack(Int)\n\n\ndef main = M.make 1\nmodule S def make(x: Int): Box\nimplement S as M def make x => Pack(x)",
+        "def add x => x + 1\n\n\ndef main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M def run x => add x",
         "def main = List.length [1, 2]",
         "def main = 1",
     ] {
@@ -37,21 +35,21 @@ fn references_through_modules_signatures_and_inferred_records_are_used() {
 #[test]
 fn unused_module_is_reported_even_when_its_signature_is_used() {
     for index in 0..12 {
-        let source = format!("module type S = sig def run(x: Int): Int end\nmodule Unused{index} : S = struct def run x => x + 1 end\nmodule Used : S = struct def run x => x + 1 end\ndef main = Used.run {index}");
+        let source = format!("def main = Used.run {index}\nmodule S def run(x: Int): Int\nimplement S as Unused{index} def run x => x + 1\nimplement S as Used def run x => x + 1");
         let error = check_source(&source, "unused-module.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E513"));
-        assert_eq!((error.line, error.col), (2, 1));
+        assert_eq!((error.line, error.col), (3, 1));
     }
 }
 
 #[test]
 fn definitions_and_modules_follow_dependencies_in_any_source_order() {
     let declarations = [
-        "module type S = sig def run(x: Int): Int end",
+        "module S def run(x: Int): Int",
         "def increment x => x + 1",
-        "module A : S = struct def run x => increment x end",
+        "implement S as A def run x => increment x",
         "def twice x => A.run (A.run x)",
-        "module B : S = struct def run x => twice x end",
+        "implement S as B def run x => twice x",
         "def main = B.run 40",
     ];
     for rotation in 0..declarations.len() {
@@ -59,7 +57,8 @@ fn definitions_and_modules_follow_dependencies_in_any_source_order() {
             let mut items = declarations.to_vec();
             items.rotate_left(rotation);
             if reverse { items.reverse(); }
-            let source = items.join("\n");
+            let (sections, outer): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| item.starts_with("module") || item.starts_with("implement"));
+            let source = format!("{}\n{}", outer.join("\n"), sections.join("\n"));
             assert_eq!(check_source(&source, "dependencies.hd").unwrap().main, hado::types::Ty::Int);
         }
     }
@@ -71,7 +70,7 @@ fn module_calls_to_outer_definitions_execute() {
     let dir = std::env::temp_dir().join(format!("hado-outer-def-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
-    let source = "def main = M.run 20\nmodule M : S = struct def run x => add (add x) end\ndef add x => x + 1\nmodule type S = sig def run(x: Int): Int end";
+    let source = "def main = M.run 20\n\ndef add x => x + 1\nimplement S as M def run x => add (add x)\nmodule S def run(x: Int): Int";
     std::fs::write(&path, source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));

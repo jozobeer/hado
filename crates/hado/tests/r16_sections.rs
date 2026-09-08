@@ -125,3 +125,21 @@ fn private_records_and_adts_are_scoped_per_implementation() {
         execute(&source, n * 2 + 3, 100 + sample);
     }
 }
+
+#[test]
+fn implementation_local_data_requires_a_reachable_use() {
+    for index in 0..12 {
+        for body in [format!("type Dead{index} = {{ unused{index}: Int }}"), format!("type Dead{index} = | Dead{index}(Int)"), format!("type Dead{index} = | Dead{index}(Other{index}) type Other{index} = | Other{index}(Dead{index})")] {
+            let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M\n{}{}\ndef run x => x + 1", " ".repeat(index), body);
+            rejected(&source, "E513", &format!("type Dead{index}"));
+        }
+        for body in [
+            format!("type Used{index} = {{ value{index}: Int }} def run x => let r = {{ value{index} = x }} -> r.value{index}"),
+            format!("type Used{index} = | Wrap{index}(Int) def run x => let Wrap{index}(n) = Wrap{index}(x) -> n"),
+        ] {
+            let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M {body}");
+            check_source(&source, "local-data.hd").unwrap();
+        }
+    }
+    check_source("def main = M.make 1\nmodule S type T def make(x: Int): T\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x }", "local-data.hd").unwrap();
+}

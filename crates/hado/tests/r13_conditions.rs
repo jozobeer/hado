@@ -109,7 +109,7 @@ fn execute(source: &str, expected: &str, serial: usize) {
 
 #[test]
 fn long_form_provenance_survives_modules_and_printing_is_canonical() {
-    let source = "module type S = sig def f(x: Int): Int end\nmodule M : S = struct def f x => if | x > 0 => 1 | 0 end\ndef main = M.f 2";
+    let source = "def main = M.f 2\nmodule S def f(x: Int): Int\nimplement S as M def f x => if | x > 0 => 1 | 0";
     rejected(source, "E517", "def f x");
     let ast = parser::parse_source(source, "module.hd").unwrap();
     let printed = parser::canonical_program(&ast);

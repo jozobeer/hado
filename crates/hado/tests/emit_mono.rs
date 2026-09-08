@@ -517,7 +517,7 @@ fn functions_can_reference_top_level_values() {
 
 #[test]
 fn module_value_thunks_preserve_lexical_scope() {
-    let source = "module type S = sig def add(x: Int): Int end\nmodule A : S = struct def offset = 2 def add x => x + offset end\nmodule B : S = struct def offset = 5 def add x => x + offset end\ndef main = A.add 10 + B.add 20";
+    let source = "def main = A.add 10 + B.add 20\nmodule S def add(x: Int): Int\nimplement S as A def offset = 2 def add x => x + offset\nimplement S as B def offset = 5 def add x => x + offset";
     let path = std::env::temp_dir().join(format!("hado-module-values-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();

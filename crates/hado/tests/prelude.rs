@@ -10,7 +10,7 @@ fn scalar_prelude_wrappers_check_and_execute() {
         (1, "Int.to_string (-42)", "-42\n"),
         (2, "Float.to_string 1.25", "1.25\n"),
     ] {
-        let source = format!("{modules}\ndef main = {expression}");
+        let source = format!("def main = {expression}\n{modules}");
         let path = std::env::temp_dir().join(format!("hado-prelude-{}-{index}", std::process::id()));
         hado::build::executable(&source, "stdlib/test.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();

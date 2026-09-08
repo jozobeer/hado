@@ -22,9 +22,8 @@ passed = total = 0
 for module, members in required.items():
     path = Path("stdlib") / (module.lower() + ".hd")
     source = path.read_text() if path.exists() else ""
-    signature = re.search(r"\bmodule\s+" + module + r"\s*:\s*(\w+)\s*=\s*struct\b", source)
     total += 1
-    ok = signature is not None and re.search(r"\bmodule\s+type\s+" + signature[1] + r"\s*=\s*sig\b", source)
+    ok = re.search(r"^module " + module + r"$", source, flags=re.M) and re.search(r"^implement " + module + " as " + module + r"$", source, flags=re.M)
     passed += bool(ok)
     print(f"{'OK' if ok else 'NG'}: {module} signature")
     for member in members.split():

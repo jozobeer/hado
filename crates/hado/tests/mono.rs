@@ -814,7 +814,7 @@ fn specialization_cache_distinguishes_result_types() {
 
 #[test]
 fn qualified_module_calls_resolve_to_the_exported_function() {
-    let source = "module type S = sig def inc(x: Int): Int end\nmodule M : S = struct def inc x => x + 1 end\ndef main = M.inc 2";
+    let source = "def main = M.inc 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.inc\""));
     assert!(output.contains(
@@ -824,7 +824,7 @@ fn qualified_module_calls_resolve_to_the_exported_function() {
 
 #[test]
 fn module_internal_calls_resolve_private_functions_in_their_module() {
-    let source = "module type S = sig def inc(x: Int): Int end\nmodule M : S = struct def helper x => x + 1 def inc x => helper x end\ndef helper x => x + 10\ndef main = M.inc 2 + helper 3";
+    let source = "def helper x => x + 10\ndef main = M.inc 2 + helper 3\nmodule S def inc(x: Int): Int\nimplement S as M def helper x => x + 1 def inc x => helper x";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.helper\""));
     assert!(output.contains("name: \"helper\""));
@@ -848,7 +848,7 @@ fn module_internal_calls_resolve_private_functions_in_their_module() {
 
 #[test]
 fn module_exports_can_be_used_as_function_values() {
-    let source = "module type S = sig def inc(x: Int): Int end\nmodule M : S = struct def inc x => x + 1 end\ndef main = let f = M.inc -> f 2";
+    let source = "def main = let f = M.inc -> f 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0)"));
     assert!(output.contains("TailCallClosure"));
@@ -857,7 +857,7 @@ fn module_exports_can_be_used_as_function_values() {
 
 #[test]
 fn sibling_module_definition_metadata_uses_distinct_paths() {
-    let source = "module type S = sig def run(x: Int): Int end\nmodule A : S = struct def run x => x + 1 end\nmodule B : S = struct def run x => x + 2 end\ndef main = A.run 1 + B.run 1";
+    let source = "def main = A.run 1 + B.run 1\nmodule S def run(x: Int): Int\nimplement S as A def run x => x + 1\nimplement S as B def run x => x + 2";
     let checked = hado::check_source(source, "t").unwrap();
     assert!(checked.module_definitions.contains_key("A.run"));
     assert!(checked.module_definitions.contains_key("B.run"));

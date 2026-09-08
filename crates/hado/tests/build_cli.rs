@@ -5,7 +5,7 @@ fn build_executes_abstract_record_module() {
     let dir = std::env::temp_dir().join(format!("hado-abstract-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.hd");
-    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule M : S = struct type T = { value: Int } def make x => { value = x } def get item => item.value end\nmodule N : S = struct type T = { padding: Bool; other: Int } def make x => { padding = true; other = x } def get item => item.other end\ndef main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)").unwrap();
+    std::fs::write(&source, "def main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x } def get item => item.value\nimplement S as N type Representation = { padding: Bool; other: Int } type T = Representation def make x => { padding = true; other = x } def get item => item.other").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();
@@ -20,7 +20,7 @@ fn build_executes_module_adt_patterns() {
     let dir = std::env::temp_dir().join(format!("hado-adt-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.hd");
-    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule M : S = struct type T = | Empty | Wrap(Int) def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x end\nmodule N : S = struct type T = | Wrap(Int) | Empty def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x end\ndef main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)").unwrap();
+    std::fs::write(&source, "def main = M.get (M.make 30) + N.get (N.make 12) + M.get (M.make 0) + N.get (N.make 0)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as M type Representation = | Empty | Wrap(Int) type T = Representation def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x\nimplement S as N type Representation = | Wrap(Int) | Empty type T = Representation def make x => if x == 0 => Empty | Wrap(x) def get | Empty => 0 | Wrap(x) => x").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();
@@ -71,7 +71,7 @@ fn build_executes_abstract_module_function_values() {
     let dir = std::env::temp_dir().join(format!("hado-nested-module-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("example.hd");
-    std::fs::write(&source, "module type S = sig type T def make(x: Int): T def get(value: T): Int end\nmodule type API = sig def run(x: Int): Int end\nmodule Inner : S = struct\n    type T = { value: Int }\n    def make x => { value = x }\n    def get item => item.value\nend\nmodule Outer : API = struct\n  def consume (item: Inner.T) => let getter = Inner.get -> getter item\n  def run x => consume (Inner.make x)\nend\ndef main = Outer.run 42\n").unwrap();
+    std::fs::write(&source, "def main = Outer.run 42\nmodule S type T def make(x: Int): T def get(value: T): Int\nmodule API def run(x: Int): Int\nimplement S as Inner\n    type Representation = { value: Int } type T = Representation\n    def make x => { value = x }\n    def get item => item.value\nimplement API as Outer\n  def consume (item: Inner.T) => let getter = Inner.get -> getter item\n  def run x => consume (Inner.make x)").unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&source).output().unwrap();
     assert!(built.status.success(), "{built:?}");
     let output = Command::new(dir.join("example")).output().unwrap();

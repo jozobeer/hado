@@ -150,8 +150,8 @@ fn defs_modules_types() {
     assert!(parse_source("def add x y => x + y", "t").is_ok());
     assert!(parse_source("def rec ping x => pong x", "t").is_ok());
     assert!(parse_source("type List2<T> = | Nil2 | Cons2(T, List2<T>)", "t").is_ok());
-    assert!(parse_source("module type S = sig def inc(x: Int): Int end", "t").is_ok());
-    assert!(parse_source("module M : S = struct def inc x => x + 1 end", "t").is_ok());
+    assert!(parse_source("module S def inc(x: Int): Int", "t").is_ok());
+    assert!(parse_source("implement S as M def inc x => x + 1", "t").is_ok());
 }
 
 #[test]

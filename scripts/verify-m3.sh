@@ -118,7 +118,7 @@ expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*
 lock_check = run('sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256')
 report(10,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
 stdlib = [('option','Option'),('result','Result'),('list','List'),('division_error','DivisionError')]
-report(11,'stdlib-types',all(P('stdlib/'+file+'.hd').is_file() and 'type '+ty in P('stdlib/'+file+'.hd').read_text() for file,ty in stdlib) and not any(re.search(r'^def ',p.read_text(),re.M) for p in P('stdlib').glob('*.hd')))
+report(11,'stdlib-types',all(P('stdlib/'+file+'.hd').is_file() and 'type '+ty in P('stdlib/'+file+'.hd').read_text() for file,ty in stdlib) and not any(re.search(r'\bdef\b', re.split(r'\b(?:module|implement)\b', re.sub(r'//[^\n]*', '', p.read_text()), maxsplit=1)[0]) for p in P('stdlib').glob('*.hd')))
 report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', log)) == 1)
 passed = sum(results.values())
 print(f'PASSED: {passed}/12')

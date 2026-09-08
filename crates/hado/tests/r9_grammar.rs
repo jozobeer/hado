@@ -41,16 +41,25 @@ impl Generator {
 
     fn program(&mut self) -> String {
         self.declarations = 0;
-        let count = self.choose("program", 3);
-        self.list(count, |g| g.item(), "\n")
+        self.mark("program", 1, 0);
+        let outer_count = self.choose("outer_item*", 3);
+        let section_count = self.choose("section*", 3);
+        let outer = self.list(outer_count, |g| g.outer_item(), "\n");
+        let sections = self.list(section_count, |g| g.section(), "\n");
+        format!("{outer}\n{sections}")
     }
 
-    fn item(&mut self) -> String {
-        match self.choose("item", 4) {
-            0 => self.definition(),
-            1 => self.type_definition(),
-            2 => self.module_type(false).0,
-            _ => self.module_impl(),
+    fn outer_item(&mut self) -> String {
+        match self.choose("outer_item", 2) {
+            0 => self.type_definition(),
+            _ => self.definition(),
+        }
+    }
+
+    fn section(&mut self) -> String {
+        match self.choose("section", 2) {
+            0 => self.module_section(false).0,
+            _ => self.implement_section(),
         }
     }
 
@@ -142,40 +151,40 @@ impl Generator {
         format!("( {} )", self.list(count, |g| g.type_expr(depth), " , "))
     }
 
-    fn module_type(&mut self, abstract_member: bool) -> (String, String, String) {
-        self.mark("module_type", 1, 0);
+    fn module_section(&mut self, abstract_member: bool) -> (String, String, String) {
+        self.mark("module_section", 1, 0);
         self.declarations += 1;
         let name = self.name(true);
         let abstract_name = self.name(true);
-        let count = self.choose("sig_item*", 3);
-        let mut items = self.list(count, |g| g.sig_item(), " ");
+        let count = self.choose("module_item*", 3);
+        let mut items = self.list(count, |g| g.module_item(), " ");
         if abstract_member {
             self.declarations += 1;
             items.push_str(&format!(" type {abstract_name}"));
         }
-        (format!("module type {name} = sig {items} end"), name, abstract_name)
+        (format!("module {name} {items}"), name, abstract_name)
     }
 
-    fn sig_item(&mut self) -> String {
+    fn module_item(&mut self) -> String {
         self.declarations += 1;
-        if self.choose("sig_item", 2) == 0 { return format!("type {}", self.name(true)); }
+        if self.choose("module_item", 2) == 0 { return format!("type {}", self.name(true)); }
         let name = self.name(false);
         let params = self.type_params();
         let count = self.random(3) + 1;
         format!("def {name} {params} ( {} ) : {}", self.list(count, |g| g.typed_param(), " , "), self.type_expr(2))
     }
 
-    fn module_impl(&mut self) -> String {
-        self.mark("module_impl", 1, 0);
-        let (signature, sig_name, abstract_name) = self.module_type(true);
+    fn implement_section(&mut self) -> String {
+        self.mark("implement_section", 1, 0);
+        let (signature, sig_name, abstract_name) = self.module_section(true);
         self.declarations += 1;
-        let count = self.choose("struct_item*", 3);
-        let items = self.list(count, |g| g.struct_item(&abstract_name), " ");
-        format!("{signature}\nmodule {} : {sig_name} = struct {items} end", self.name(true))
+        let count = self.choose("implement_item*", 3);
+        let items = self.list(count, |g| g.implement_item(&abstract_name), " ");
+        format!("{signature}\nimplement {sig_name} as {} {items}", self.name(true))
     }
 
-    fn struct_item(&mut self, abstract_name: &str) -> String {
-        match self.choose("struct_item", 3) {
+    fn implement_item(&mut self, abstract_name: &str) -> String {
+        match self.choose("implement_item", 3) {
             0 => self.definition(),
             1 => self.type_definition(),
             _ => {
@@ -493,7 +502,7 @@ enum Shape {
     SignatureDefinition(String, Vec<String>, Vec<Param>, Option<TypeExpr>),
     Type(String, Vec<String>, Option<TypeExpr>),
     Signature(String, Vec<Shape>),
-    Module(String, Option<String>, Vec<Shape>),
+    Module(String, String, Vec<Shape>),
 }
 
 fn shapes(items: &[Item]) -> Vec<Shape> {

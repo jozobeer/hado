@@ -76,28 +76,29 @@ fn unused_signatures_resolve_all_type_names_at_the_reference() {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         let unknown = format!("Missing{state}");
         let prefix = format!("{}def convert<A>(value: Fn<A, ", " ".repeat(padding));
-        let source = format!("module type API = sig\n{prefix}{unknown}>): A\nend\ndef main = 1");
+        let source = format!("def main = 1\nmodule API\n{prefix}{unknown}>): A");
         let diagnostic = error(&source);
         assert_eq!(diagnostic.code.as_deref(), Some("E204"));
-        assert_eq!((diagnostic.line, diagnostic.col), (2, prefix.len() + 1));
+        assert_eq!((diagnostic.line, diagnostic.col), (3, prefix.len() + 1));
     }
 }
 
 #[test]
 fn signature_type_variables_are_local_to_each_member() {
-    let source = "module type S = sig def first<A>(x: A): A def second(x: A): Int end\ndef main = 1";
+    let source = "def main = 1\nmodule S def first<A>(x: A): A def second(x: A): Int";
     let diagnostic = error(source);
     assert_eq!(diagnostic.code.as_deref(), Some("E204"));
-    assert_eq!(diagnostic.col, source.find("second(x: A").unwrap() + "second(x: ".len() + 1);
-    let valid = "module type S = sig type T def first<A>(x: A): A def second(x: T): Int end\nmodule M : S = struct type T = { value: Int } def first x => x def second x => x.value end\ndef main = M.first 1";
+    assert_eq!(diagnostic.col, source.rsplit('\n').next().unwrap().find("second(x: A").unwrap() + "second(x: ".len() + 1);
+    let valid = "def main = M.first 1\nmodule S type T def first<A>(x: A): A def second(x: T): Int\nimplement S as M type Representation = { value: Int } type T = Representation def first x => x def second x => x.value";
     check_source(valid, "generated-names.hd").unwrap();
 }
 
 #[test]
-fn signatures_can_reference_exported_qualified_types() {
-    let source = "module type S = sig type T def make(x: Int): T end\nmodule M : S = struct type T = { value: Int } def make x => { value = x } end\nmodule type API = sig def consume(value: M.T): Int end\ndef main = 1";
-    let ast = hado::parser::parse_source(source, "generated-names.hd").unwrap();
-    hado::names::resolve(&ast, "generated-names.hd").unwrap();
+fn signatures_cannot_reference_implementation_types() {
+    let source = "def main = 1\nmodule S type T def make(x: Int): T\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }\nmodule API def consume(value: M.T): Int";
+    let diagnostic = error(source);
+    assert_eq!(diagnostic.code.as_deref(), Some("E204"));
+    assert_eq!((diagnostic.line, diagnostic.col), (4, "module API def consume(value: ".len() + 1));
 }
 
 #[test]
@@ -107,7 +108,7 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
         let variable = format!("A{index}");
         for (prefix, suffix) in [
             (format!("type Record = {{ {field}: Int; "), format!("{field}: Bool }}\ndef main = 1")),
-            (format!("module type S = sig def id<{variable}, "), format!("{variable}>(x: {variable}): {variable} end\ndef main = 1")),
+            (format!("def main = 1 module S def id<{variable},"), format!("{variable}>(x: {variable}): {variable}")),
             (format!("type Data<{variable}, "), format!("{variable}> = | Empty\ndef main = 1")),
             (format!("type Data = | Pack{index} | "), format!("Pack{index}\ndef main = 1")),
         ] {
@@ -120,7 +121,7 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
 
 #[test]
 fn aliases_reference_types_without_declaring_constructors() {
-    let source = "module type S = sig type T type U end\nmodule M : S = struct type T = Int type U = Int end\ndef main = 1";
+    let source = "def main = 1\nmodule S type T type U\nimplement S as M type T = Int type U = Int";
     let ast = hado::parser::parse_source(source, "generated-names.hd").unwrap();
     hado::names::resolve(&ast, "generated-names.hd").unwrap();
 }
@@ -135,10 +136,10 @@ fn signature_mismatches_report_the_module_for_all_four_forms() {
             (format!("def {member}(x: Int): Bool"), format!("def {member} x => x + 1")),
             (format!("def {member}<A>(x: A): A"), format!("def {member} x => x + 1")),
         ] {
-            let source = format!("module type S = sig {signature} end\n{}module M : S = struct {body} end\ndef main = 1", " ".repeat(index));
+            let source = format!("def main = 1\nmodule S {signature}\n{}implement S as M {body}", " ".repeat(index));
             let diagnostic = error(&source);
             assert_eq!(diagnostic.code.as_deref(), Some("E602"), "{source}");
-            assert_eq!((diagnostic.line, diagnostic.col), (2, index + 1));
+            assert_eq!((diagnostic.line, diagnostic.col), (3, index + 1));
         }
     }
 }
@@ -190,7 +191,7 @@ fn unknown_fields_and_module_members_point_to_the_name() {
         for (prefix, suffix) in [
             ("type R = { value: Int }\ndef main = { value = 1 } .", ""),
             ("type R = { value: Int }\ndef get r => r .", "\ndef main = get { value = 1 }"),
-            ("module type S = sig def run(x: Int): Int end\nmodule M : S = struct def run x => x end\ndef main = M .", ""),
+            ("def main = M .", "\nmodule S def run(x: Int): Int\nimplement S as M def run x => x"),
         ] {
             for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
                 let prefix = format!("{prefix}{spacing}");
@@ -209,8 +210,8 @@ fn unknown_fields_and_module_members_point_to_the_name() {
 fn unknown_module_signatures_point_to_the_signature_name() {
     for padding in 0..20 {
         for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
-            let prefix = format!("module M :{spacing}");
-            let source = format!("{prefix}Missing{padding} = struct end\ndef main = 1");
+            let prefix = format!("def main = 1\nimplement {spacing}");
+            let source = format!("{prefix}Missing{padding} as M");
             let diagnostic = error(&source);
             assert_eq!(diagnostic.code.as_deref(), Some("E204"), "{diagnostic}");
             let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
