@@ -24,7 +24,7 @@ hado dump-mono <file>               # 単相化後のプログラムを印字
 hado build <file.hd>              # 入力の隣に実行ファイルを置く
 ```
 
-`tests/accept/create_user.hd` を別の場所へコピーして試す（コーパスの隣に実行ファイルを作らないため）。
+`tests/accept/create_user/main.hd` を別のディレクトリの `hello.hd` へコピーして試す（コーパスの隣に実行ファイルを作らないため）。
 
 ```
 $ hado check --print-type hello.hd
@@ -38,8 +38,8 @@ ok
 拒否の例:
 
 ```
-$ hado check tests/reject/E508.hd
-tests/reject/E508.hd:6:21: error[E508]: failure bound at 6:5 is propagated unchanged; use let p? = or do
+$ hado check tests/reject/E508/main.hd
+main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let p? = or do
 ```
 
 ## 検証
@@ -56,7 +56,7 @@ crates/hado/      コンパイラ本体。lexer → parser → 名前解決・�
 runtime/          C のランタイム。build.rs が静的ライブラリにする
 stdlib/           prelude。hado 自身で書き、全プログラムに暗黙に連結する
 tests/accept/     受理コーパス。expect: タグに実行結果を持つ
-tests/reject/     拒否コーパス。エラーコードごとに 1 ファイル
+tests/reject/     拒否コーパス。エラーコードごとに 1 ケース
 scripts/          門番スクリプト
 docs/             仕様・計画・台帳。常に現行版
 AGENTS.md         エージェント向けの規則
