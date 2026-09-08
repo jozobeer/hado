@@ -43,6 +43,7 @@ pub enum TokKind {
     Semicolon,
     Colon,
     Dot,
+    Ellipsis,
     Plus,
     Minus,
     Star,
@@ -98,6 +99,7 @@ impl std::fmt::Display for TokKind {
             TokKind::Semicolon => write!(f, ";"),
             TokKind::Colon => write!(f, ":"),
             TokKind::Dot => write!(f, "."),
+            TokKind::Ellipsis => write!(f, "..."),
             TokKind::Plus => write!(f, "+"),
             TokKind::Minus => write!(f, "-"),
             TokKind::Star => write!(f, "*"),
@@ -278,6 +280,12 @@ impl Lexer<'_> {
             ':' => {
                 self.bump();
                 Ok(TokKind::Colon)
+            }
+            '.' if self.rest().starts_with("...") => {
+                self.bump();
+                self.bump();
+                self.bump();
+                Ok(TokKind::Ellipsis)
             }
             '.' => {
                 self.bump();

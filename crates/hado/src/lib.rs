@@ -118,6 +118,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);
             ast.equality_anchors.extend(parsed.equality_anchors);
+            ast.written_list_patterns.extend(parsed.written_list_patterns);
             ast.branches_after_fallback.extend(parsed.branches_after_fallback);
             prelude.extend(parsed.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
             line += module.lines().count() + 1;

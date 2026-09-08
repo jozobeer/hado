@@ -2,6 +2,12 @@ use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, Pat
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     let mut diagnostics = Vec::new();
+    for span in &ast.written_list_patterns {
+        diagnostics.push(Diagnostic {
+            path: path.into(), line: span.line, col: span.col,
+            code: Some("E516".into()), message: "use List pattern syntax instead of Nil or Cons".into(),
+        });
+    }
     for span in &ast.branches_after_fallback {
         diagnostics.push(Diagnostic {
             path: path.into(), line: span.line, col: span.col,
@@ -453,21 +459,13 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
 }
 
 fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    let NodeKind::Call(callee, args) = &node.kind else {
-        return Ok(());
-    };
-    if !matches!(&callee.kind, NodeKind::Name(name) if name == "Cons") || args.len() != 2 {
-        return Ok(());
-    }
-    let literal = matches!(&args[1].kind, NodeKind::List(_))
-        || matches!(&args[1].kind, NodeKind::Name(name) if name == "Nil");
-    if literal {
+    if matches!(&node.kind, NodeKind::Name(name) if matches!(name.as_str(), "Nil" | "Cons")) {
         return Err(Diagnostic {
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
             code: Some("E510".into()),
-            message: "use a List literal instead of Cons with a literal tail".into(),
+            message: "use List literal syntax instead of Nil or Cons".into(),
         });
     }
     Ok(())
@@ -485,7 +483,7 @@ pub(crate) fn children(node: &Node) -> Vec<&Node> {
                 .chain(args.iter())
                 .collect()
         }
-        NodeKind::List(items) => items.iter().collect(),
+        NodeKind::List(items, tail) => items.iter().chain(tail.iter().map(Box::as_ref)).collect(),
         NodeKind::Record(fields) => fields.iter().map(|(_, value)| value).collect(),
         NodeKind::Let { value, body, .. }
         | NodeKind::LetQ { value, body, .. }

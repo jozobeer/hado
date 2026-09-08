@@ -94,8 +94,8 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
                 free_names(arg, bound, result);
             }
         }
-        NodeKind::List(items) => {
-            for item in items {
+        NodeKind::List(items, tail) => {
+            for item in items.iter().chain(tail.iter().map(Box::as_ref)) {
                 free_names(item, bound, result);
             }
         }
@@ -422,7 +422,7 @@ pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::D
     }
     for item in &ast.items {
         if let Item::ModuleImpl(module) = item {
-            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], equality_anchors: vec![] }, path) {
+            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], written_list_patterns: vec![], equality_anchors: vec![] }, path) {
                 diagnostics.push(error);
             }
         }

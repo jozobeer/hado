@@ -73,6 +73,7 @@ pub fn same_expression(left: &Node, right: &Node) -> bool {
 pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
     use crate::parser::NodeKind;
     match (&pattern.kind, &node.kind) {
+        (_, NodeKind::List(items, tail)) => rebuilds_list(pattern, items, tail.as_deref()),
         (PatternKind::Name(a), NodeKind::Name(b)) => a == b,
         (PatternKind::Literal(a), _) => same_expression(a, node),
         (PatternKind::Record(patterns), NodeKind::Record(fields)) => {
@@ -97,6 +98,18 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
         }
         _ => false,
     }
+}
+
+fn rebuilds_list(pattern: &Pattern, items: &[Node], tail: Option<&Node>) -> bool {
+    let Some((head, rest)) = items.split_first() else {
+        return match tail {
+            Some(tail) => rebuilds_pattern(pattern, tail),
+            None => matches!(&pattern.kind, PatternKind::Name(name) if name == "Nil"),
+        };
+    };
+    let PatternKind::Constructor(name, parts) = &pattern.kind else { return false; };
+    name == "Cons" && parts.len() == 2
+        && rebuilds_pattern(&parts[0], head) && rebuilds_list(&parts[1], rest, tail)
 }
 
 fn normalized(node: &Node) -> Node {
@@ -190,8 +203,8 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
                 rename(arg, scope, next);
             }
         }
-        NodeKind::List(items) => {
-            for item in items {
+        NodeKind::List(items, tail) => {
+            for item in items.iter_mut().chain(tail.iter_mut().map(Box::as_mut)) {
                 rename(item, scope, next);
             }
         }

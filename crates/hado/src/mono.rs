@@ -326,7 +326,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, String>>()?;
             return Ok(Expression::Record { fields, result });
         }
-        if let NodeKind::List(items) = &node.kind {
+        if let NodeKind::List(items, tail) = &node.kind {
             let ty = self
                 .composite_types
                 .get(&(node.span.line, node.span.col))
@@ -336,7 +336,10 @@ impl Lowerer {
                 .iter()
                 .map(|item| self.expression(item))
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut list = self.construct("Nil", vec![], &ty)?;
+            let mut list = match tail {
+                Some(tail) => self.expression(tail)?,
+                None => self.construct("Nil", vec![], &ty)?,
+            };
             for value in values.into_iter().rev() {
                 list = self.construct("Cons", vec![value, list], &ty)?;
             }
