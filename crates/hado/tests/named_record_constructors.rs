@@ -250,3 +250,27 @@ fn identical_named_field_sets_do_not_unify_distinct_nominal_types() {
 fn bare_record_pattern_does_not_destructure_a_named_constructor_value() {
     rejection(&format!("{BASIC}\ndef main = let {{ left; right }} = Payload {{ left = 7; right = 3 }} -> left + right"), "E305", "{ left; right }");
 }
+
+#[test]
+fn nested_unknown_field_precedes_an_earlier_field_type_error() {
+    rejection("type Inner = Inside { value: Int }\ntype Data = Payload { item: Inner; number: Int }\ndef main = Payload { number = true; item = Inside { wrong = 1 } }", "E204", "wrong");
+}
+#[test]
+fn nested_unknown_pattern_field_precedes_an_earlier_pattern_type_error() {
+    rejection("type Inner = Inside { value: Int }\ntype Data = Payload { item: Inner; number: Int }\ndef read\n| Payload { number = true; item = Inside { wrong } } => wrong\ndef main = read (Payload { number = 1; item = Inside { value = 2 } })", "E204", "wrong");
+}
+
+#[test]
+fn local_constructor_names_shadow_outer_payload_forms_and_restore_them() {
+    for outer_named in [false, true] {
+        for inner_named in [false, true] {
+            let outer_type = if outer_named { "Payload { x: Int }" } else { "| Payload(Int)" };
+            let outer_value = if outer_named { "Payload { x = 1 }" } else { "Payload(1)" };
+            let outer_read = if outer_named { "def root value => value.x" } else { "def root | Payload(x) => x" };
+            let inner_type = if inner_named { "Payload { y: Int }" } else { "| Payload(Int)" };
+            let inner_value = if inner_named { "Payload { y = x }" } else { "Payload(x)" };
+            let inner_read = if inner_named { "def read value => value.y" } else { "def read | Payload(y) => y" };
+            source_case(&format!("type Data = {outer_type}\n{outer_read}\ndef main = root ({outer_value}) + M.read (M.make 2) + root ({outer_value})\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement S as M\ntype T = {inner_type}\ndef make x => {inner_value}\n{inner_read}")).run("4");
+        }
+    }
+}
