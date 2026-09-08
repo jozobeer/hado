@@ -11,6 +11,7 @@ fail() { echo "NG: $1 $2"; }
 
 SPEC="docs/0.1.1/spec.md"
 COV="docs/0.1.1/spec-coverage.md"
+PLAN="docs/0.1.1/plan.md"
 CORPUS_RS="crates/shin/tests/corpus.rs"
 
 TMPD="$(mktemp -d)"
@@ -36,13 +37,13 @@ awk -F '|' '
     }
 ' "$TMPD/sec50.txt" >"$TMPD/codes.tsv"
 
-# --- shared: 2.2 item names (coverage column extraction, 2.2 rows only) ---
+# --- shared: corpus item names (coverage column extraction, 2.2 and 9.2 rows) ---
 awk -F '|' '
     {
         t=$2; name=$3
         gsub(/^ +| +$/, "", t)
         gsub(/^ +| +$/, "", name)
-        if (t != "2.2") next
+        if (t != "2.2" && t != "9.2") next
         if (name == "" || name == "項目名") next
         print name
     }
@@ -139,11 +140,22 @@ else
     fail 2 "sec39-examples:$c2_reasons"
 fi
 
-# --- check 3: accept covers all 22 items; reject covers 20 (2 exempt) ---
+# --- check 3: accept covers all items of plan 2.2 and 9.2; reject covers all but the 2 exempt ---
 c3_reasons=""
 n_items=$(wc -l <"$TMPD/items22.txt" | tr -d ' ')
-if [ "$n_items" -ne 22 ]; then
-    c3_reasons="$c3_reasons item-count=$n_items(want-22)"
+n_plan=$(awk -F '|' '
+    /^### 2\.2/ || /^### 9\.2/ { p=1; next }
+    /^### 2\.3/ || /^### 9\.3/ { p=0 }
+    p {
+        name=$2
+        gsub(/^ +| +$/, "", name)
+        if (name=="" || name=="項目" || name ~ /^-+$/) next
+        if ($0 ~ /^\|/) n++
+    }
+    END { print n+0 }
+' "$PLAN")
+if [ "$n_items" -ne "$n_plan" ]; then
+    c3_reasons="$c3_reasons item-count=$n_items(want-$n_plan)"
 fi
 while IFS= read -r name || [ -n "$name" ]; do
     [ -n "$name" ] || continue
