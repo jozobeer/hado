@@ -290,3 +290,17 @@ fn a_parameter_shadows_a_global_implementation_without_reusing_its_representatio
     case.write("main.hd", "def main = Applied.run 7 + Arg.read (Arg.make 2)");
     case.run("main.hd", 2);
 }
+
+#[test]
+fn an_unknown_type_on_a_known_parameter_points_to_the_member() {
+    let case = Case::new();
+    case.write("contracts.hdi", "module Input\ntype U\nmodule Output\ntype T\ndef run(x: Int): Int");
+    case.write("argument.hd", "implement Input as Concrete\ntype U = Int");
+    let source = "implement Output as Make(Arg: Input)\ntype T = Arg.Missing\ndef run x => x";
+    case.write("functor.hd", source);
+    case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
+    case.write("main.hd", "def main = Applied.run 7");
+    for command in ["check", "build", "dump-mono"] {
+        case.reject(command, "main.hd", "functor.hd", "E204", source.find("Missing").unwrap());
+    }
+}
