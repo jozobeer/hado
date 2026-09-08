@@ -1475,7 +1475,7 @@ list_expr       := "[" "]"
                  | "[" expression ("," expression)* ["," "..." expression] "]"
 ```
 
-`...` の後は `]` まで 1 つの式である。要素を伴わない `[...xs]` は文法に無い（E100）。
+`...` の後は `]` まで 1 つの式である。
 
 `prefix_form` は括弧で囲めば `primary` になる（`(fn x => x + 1)`）。
 
@@ -1521,8 +1521,6 @@ field_pattern   := name
                  | name "=" pattern
 literal_pattern := ["-"] int | ["-"] float | char | string | bool
 ```
-
-`...` の後は名前か `_` に限り、他は E100 とする。要素を伴わない `[...xs]` は文法に無い（E100）。
 
 `pattern_fallback` は必ず最後に置く（E404）。pattern branch に fallback が無い場合は網羅性を検証する（E402）。
 
