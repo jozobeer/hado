@@ -1,0 +1,5 @@
+// spec: §53
+// error: E517
+// item: 引数の条件列
+def classify score => if | score >= 70 => 1 | 0
+def main = classify 75
