@@ -255,3 +255,13 @@ fn application_substitutes_comparison_constraints_from_the_checked_body() {
         case.reject(command, "main.hd", "functor.hd", "E704", source.find("compare").unwrap());
     }
 }
+
+#[test]
+fn a_functors_type_is_not_an_implementation_type() {
+    let case = base();
+    let source = "def use(value: Make.T): Int => 1\ndef main = use (A.make 7)";
+    case.write("main.hd", source);
+    for command in ["check", "build", "dump-mono"] {
+        case.reject(command, "main.hd", "main.hd", "E204", source.find("Make.T").unwrap());
+    }
+}
