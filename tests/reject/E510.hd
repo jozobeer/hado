@@ -1,5 +1,5 @@
 // spec: §46
 // error: E510
 // item: List リテラル
-def f x => Cons(x, Nil)
-def main = f 1
+def f x xs => Cons(x, xs)
+def main = f 1 []
