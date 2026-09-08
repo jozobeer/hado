@@ -113,7 +113,7 @@ fn abstract_types_are_opaque_and_local_data_names_do_not_escape() {
     }
     rejected(&format!("def main = M.make 1\nmodule Bad\ndef consume(x: M.T): Int\n{sections}"), "E204", "M.T");
     rejected("type Entry = { number: Int }\ndef main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype Entry = | Entry(Int)\ndef run x => x + 1", "E205", "Entry = |");
-    rejected("def main = M.run 1\nmodule S\ntype Entry\ndef run(x: Int): Int\nimplement S as M\ntype Entry = | Entry(Int)\ndef run x => x + 1", "E205", "Entry = |");
+    rejected("def main = M.run 1\nmodule S\ntype Entry\ndef run(x: Int): Int\nimplement S as M\ntype Entry = { number: Int }\ndef run x => x + 1", "E205", "Entry = {");
 }
 
 #[test]

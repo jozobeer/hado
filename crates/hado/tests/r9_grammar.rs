@@ -111,16 +111,24 @@ impl Generator {
         self.declarations += 1;
         let name = self.name(true);
         let params = self.type_params();
-        let body = if self.choose("type_definition", 2) == 0 {
-            let count = self.random(3) + 1;
-            self.list(count, |g| format!("| {}", g.constructor()), " ")
-        } else { self.record_type() };
+        let body = match self.choose("type_definition", 3) {
+            0 => {
+                let count = self.random(3) + 1;
+                self.list(count, |g| format!("| {}", g.constructor()), " ")
+            }
+            1 => self.record_type(),
+            _ => format!("{} {}", self.name(true), self.record_type()),
+        };
         format!("type {params} {name} = {body}")
     }
 
     fn constructor(&mut self) -> String {
         let name = self.name(true);
-        if self.choose("constructor", 2) == 0 { return name; }
+        match self.choose("constructor", 3) {
+            0 => return name,
+            1 => return format!("{name} {}", self.record_type()),
+            _ => {}
+        }
         let count = self.random(3) + 1;
         format!("{name} ( {} )", self.list(count, |g| g.type_expr(2), " , "))
     }
@@ -361,7 +369,7 @@ impl Generator {
             0..=5 => self.literal(choice),
             6 => self.name(false),
             8 => format!("{} . {}", self.name(true), self.name(false)),
-            9 if depth == 0 => { self.mark("constructor_expr", 3, 0); self.name(true) }
+            9 if depth == 0 => { self.mark("constructor_expr", 4, 0); self.name(true) }
             9 => self.constructor_expr(depth - 1, in_arm),
             10 => self.record_expr(depth - 1, in_arm),
             11 => self.list_expr(depth - 1, in_arm),
@@ -397,9 +405,10 @@ impl Generator {
     }
 
     fn constructor_expr(&mut self, depth: usize, in_arm: bool) -> String {
-        match self.choose("constructor_expr", 3) {
+        match self.choose("constructor_expr", 4) {
             0 => return self.name(true),
             1 => return "Ok ()".into(),
+            2 => return format!("{} {}", self.name(true), self.record_expr(depth, in_arm)),
             _ => {}
         }
         let count = self.random(3) + 1;
@@ -474,8 +483,14 @@ impl Generator {
             1 => self.name(false),
             2 => {
                 let name = self.name(true);
-                let count = self.random(3);
-                if count == 0 { name } else { format!("{name} ( {} )", self.list(count, |g| g.pattern(depth - 1), " , ")) }
+                match self.choose("constructor_pattern_form", 3) {
+                    0 => name,
+                    1 => {
+                        let count = self.random(2) + 1;
+                        format!("{name} ( {} )", self.list(count, |g| g.pattern(depth - 1), " , "))
+                    }
+                    _ => format!("{name} {}", self.record_pattern(depth - 1)),
+                }
             }
             3 => self.record_pattern(depth - 1),
             5 => self.list_pattern(depth - 1),

@@ -66,7 +66,7 @@ fn functor(arity: usize) -> String {
     let fields: Vec<_> = (0..arity).map(|i| format!("slot{i}: P{i}.T")).collect();
     let values: Vec<_> = (0..arity).map(|i| format!("slot{i} = P{i}.make x")).collect();
     let reads: Vec<_> = (0..arity).map(|i| format!("(P{i}.read value.slot{i}) * {}", i + 1)).collect();
-    format!("implement Box as Make({})\ntype T = {{ {} }}\ndef make x => {{ {} }}\ndef read value => {}", params.join(", "), fields.join("; "), values.join("; "), reads.join(" + "))
+    format!("implement Box as Make({})\ntype T = Payload {{ {} }}\ndef make x => Payload {{ {} }}\ndef read value => {}", params.join(", "), fields.join("; "), values.join("; "), reads.join(" + "))
 }
 fn reject_shifted(case: &Case, file: &str, source: &str, code: &str, anchor: &str) {
     for padding in 0..5 {
@@ -195,7 +195,7 @@ fn contract_qualified_type_counts_the_application_but_not_the_functor() {
 #[test]
 fn an_application_result_can_be_passed_to_another_functor() {
     let case = base();
-    case.write("wrap.hd", "implement Box as Wrap(Source: Box)\ntype T = { wrapped: Source.T }\ndef make x => { wrapped = Source.make x }\ndef read value => Source.read value.wrapped + 5");
+    case.write("wrap.hd", "implement Box as Wrap(Source: Box)\ntype T = Payload { wrapped: Source.T }\ndef make x => Payload { wrapped = Source.make x }\ndef read value => Source.read value.wrapped + 5");
     case.write("outer.hd", "implement Box as B = Wrap(A)");
     case.write("main.hd", "def main = B.read (B.make 7)");
     case.run("main.hd", 15);
