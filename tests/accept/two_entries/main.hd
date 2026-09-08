@@ -1,0 +1,5 @@
+// spec: §54
+// expect: 42
+// item: 複数の入口
+def seed = 41
+def main = MemoryStore.run seed

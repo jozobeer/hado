@@ -1,0 +1,2 @@
+module Store
+def run(input: Int): Int

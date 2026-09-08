@@ -1,3 +1,3 @@
 // spec: §5
 // error: E206
-def f x => x + 1
+// item: 複数の入口
