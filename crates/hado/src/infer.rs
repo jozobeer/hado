@@ -110,7 +110,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             .collect();
         for item in &ast.items {
             if let Item::ModuleImpl(module) = item {
-                if let Some(signature) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
+                if let Some(signature) = signatures.get(&module.sig) {
                     checker.module_abstract_parameters(module, signature);
                 }
             }
@@ -225,7 +225,7 @@ impl Checker<'_> {
         self.ambiguous_modules.extend(ambiguous.modules);
         for item in items {
             if let Item::ModuleImpl(module) = item {
-                if module.sig.as_ref().is_some_and(|name| self.ambiguous_signatures.contains(name)) {
+                if self.ambiguous_signatures.contains(&module.sig) {
                     self.ambiguous_modules.insert(module.name.clone());
                 }
             }
@@ -253,7 +253,7 @@ impl Checker<'_> {
             let saved = self.clone();
             self.module_path.push(module.name.clone());
             let ast = Ast { items: module.items.clone(), span: module.span,
-                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new() };
+                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new() };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
             if let Err(error) = result { diagnostics.push(error); }
@@ -268,10 +268,7 @@ impl Checker<'_> {
         signatures: &HashMap<String, &crate::parser::ModuleSig>,
     ) -> Result<(), Diagnostic> {
         if self.ambiguous_modules.contains(&module.name) { return Ok(()); }
-        let name = module
-            .sig
-            .as_ref()
-            .ok_or_else(|| self.error(module.span, Some("E113"), "module requires a signature"))?;
+        let name = &module.sig;
         let signature = signatures
             .get(name)
             .ok_or_else(|| self.error(module.sig_span, Some("E204"), "unknown signature"))?;
@@ -455,7 +452,7 @@ impl Checker<'_> {
             span: module.span,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
-            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(),
+            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();

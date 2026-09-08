@@ -40,7 +40,7 @@ impl Scope {
         let mut modules: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for item in items {
             if let Item::ModuleImpl(module) = item {
-                let members = module.sig.as_ref().and_then(|name| scope.signatures.get(name)).cloned().unwrap_or_default();
+                let members = scope.signatures.get(&module.sig).cloned().unwrap_or_default();
                 modules.entry(module.name.clone()).or_default().extend(members);
             }
         }
@@ -86,9 +86,7 @@ impl Resolver<'_> {
                     self.expression(body, &local, Some(&def.name), false);
                 }
                 Item::ModuleImpl(module) => {
-                    if let Some(name) = &module.sig {
-                        if !scope.signatures.contains_key(name) { self.report(module.sig_span, "E204", name); }
-                    }
+                    if !scope.signatures.contains_key(&module.sig) { self.report(module.sig_span, "E204", &module.sig); }
                     self.items(&module.items, &scope);
                 }
                 _ => {}

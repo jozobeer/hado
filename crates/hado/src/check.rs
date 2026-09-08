@@ -37,6 +37,20 @@ pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
             error.col = pipe.col;
         }
     }
+    qualified_type_diagnostic(ast, error)
+}
+
+fn qualified_type_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
+    if error.code.as_deref() != Some("E204") { return error; }
+    let member = ast.qualified_type_anchors.iter().find_map(|(module, member)| {
+        (module.span.line == error.line && module.span.col == error.col
+            && ast.items.iter().any(|item| matches!(item, Item::ModuleImpl(implementation) if implementation.name == module.name)))
+            .then_some(*member)
+    });
+    if let Some(member) = member {
+        error.line = member.line;
+        error.col = member.col;
+    }
     error
 }
 

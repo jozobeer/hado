@@ -21,10 +21,48 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
     let graph = collector.graph(ast);
     let used = transitive_references(&Key::Value("main".into()), &graph);
-    ast.items.iter().skip(prelude_items).filter_map(|item| {
+    let mut diagnostics: Vec<_> = ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
-        (!used.contains(&key)).then(|| Diagnostic { path: path.into(), line: span.line, col: span.col,
+        let referenced = match &key {
+            Key::Signature(name) => ast.items.iter().any(|item|
+                matches!(item, Item::ModuleImpl(module) if &module.sig == name)),
+            _ => used.contains(&key),
+        };
+        (!referenced).then(|| Diagnostic { path: path.into(), line: span.line, col: span.col,
             code: Some("E513".into()), message: "unused top-level declaration".into() })
+    }).collect();
+    for item in ast.items.iter().skip(prelude_items) {
+        if let Item::ModuleImpl(module) = item {
+            diagnostics.extend(local_data_diagnostics(ast, module, checked, path));
+        }
+    }
+    diagnostics
+}
+
+fn local_data_diagnostics(ast: &Ast, module: &crate::parser::ModuleImpl, checked: &crate::Checked, path: &str) -> Vec<Diagnostic> {
+    let collector = Collector { checked: Some(checked), constructors: constructor_owners(&module.items) };
+    let scope = Scope { local_module: Some(module.name.clone()), ..Scope::default() };
+    let graph = collector.graph_items(&module.items, &scope);
+    let mut used = References::new();
+    for item in &ast.items {
+        if let Item::ModuleSig(contract) = item {
+            if contract.name != module.sig { continue; }
+            for member in &contract.items {
+                let key = match member {
+                    Item::SigDef(def) => Key::Value(def.name.clone()),
+                    Item::TypeDef(def) => Key::Type(def.name.clone()),
+                    _ => continue,
+                };
+                used.extend(transitive_references(&key, &graph));
+            }
+        }
+    }
+    module.items.iter().filter_map(|item| {
+        let Item::TypeDef(def) = item else { return None; };
+        if !matches!(def.ty.as_ref().map(|ty| &ty.kind), Some(TypeKind::Record(_) | TypeKind::Adt(_)))
+            || used.contains(&Key::Type(def.name.clone())) { return None; }
+        Some(Diagnostic { path: path.into(), line: def.span.line, col: def.span.col,
+            code: Some("E513".into()), message: "unused implementation-local type".into() })
     }).collect()
 }
 
@@ -80,6 +118,7 @@ struct Scope {
     modules: BTreeSet<String>,
     signatures: BTreeSet<String>,
     constructors: BTreeSet<String>,
+    local_module: Option<String>,
 }
 
 impl Scope {
@@ -106,10 +145,14 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
-        ast.items.iter().filter_map(|item| {
+        self.graph_items(&ast.items, &Scope::default())
+    }
+
+    fn graph_items(&self, items: &[Item], scope: &Scope) -> BTreeMap<Key, References> {
+        items.iter().filter_map(|item| {
             let (key, _) = declaration(item)?;
             let mut references = References::new();
-            self.item(item, &Scope::default(), &mut references);
+            self.item(item, scope, &mut references);
             Some((key, references))
         }).collect()
     }
@@ -130,9 +173,7 @@ impl Collector<'_> {
             }
             Item::ModuleSig(def) => self.items(&def.items, scope, references),
             Item::ModuleImpl(def) => {
-                if let Some(signature) = &def.sig {
-                    if !scope.signatures.contains(signature) { references.insert(Key::Signature(signature.clone())); }
-                }
+                if !scope.signatures.contains(&def.sig) { references.insert(Key::Signature(def.sig.clone())); }
                 self.items(&def.items, scope, references);
             }
         }
@@ -188,7 +229,11 @@ impl Collector<'_> {
 }
 
 fn type_name(name: &str, scope: &Scope, references: &mut References) {
-    if let Some((module, _)) = name.split_once('.') {
+    if let Some((module, member)) = name.split_once('.') {
+        if scope.local_module.as_deref() == Some(module) {
+            references.insert(Key::Type(member.into()));
+            return;
+        }
         if !scope.modules.contains(module) { references.insert(Key::Module(module.into())); }
     } else if !scope.types.contains(name) {
         references.insert(Key::Type(name.into()));

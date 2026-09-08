@@ -118,6 +118,7 @@ fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);
             ast.equality_anchors.extend(parsed.equality_anchors);
+            ast.qualified_type_anchors.extend(parsed.qualified_type_anchors);
             ast.written_list_patterns.extend(parsed.written_list_patterns);
             ast.long_condition_functions.extend(parsed.long_condition_functions);
             ast.branches_after_fallback.extend(parsed.branches_after_fallback);
@@ -137,7 +138,7 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
     let name_error = names::resolve_with_prelude(&ast, path, trusted_start).err();
     let (checked, mut diagnostics) = match infer::infer_with_diagnostics(&ast, path, trusted_start) {
         Ok(result) => result,
-        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).min_by_key(diagnostic_order).unwrap()),
+        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).map(|error| check::arm_diagnostic(&ast, error)).min_by_key(diagnostic_order).unwrap()),
     };
     diagnostics.extend(name_error);
     if let Err(error) = check::check_ast(&ast, path) {

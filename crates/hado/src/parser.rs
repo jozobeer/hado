@@ -244,6 +244,7 @@ pub struct Ast {
     pub branches_after_fallback: Vec<Span>,
     pub branch_anchors: Vec<(Span, Span)>,
     pub equality_anchors: Vec<(Span, Span, Span)>,
+    pub qualified_type_anchors: Vec<(DeclaredName, Span)>,
     pub written_list_patterns: Vec<Span>,
     pub long_condition_functions: Vec<Span>,
 }
@@ -323,7 +324,7 @@ pub struct ModuleSig {
 pub struct ModuleImpl {
     pub name: String,
     pub name_span: Span,
-    pub sig: Option<String>,
+    pub sig: String,
     pub sig_span: Span,
     pub items: Vec<Item>,
     pub span: Span,
@@ -364,10 +365,7 @@ pub(crate) struct PartialParse {
 }
 
 impl PartialParse {
-    pub(crate) fn finish(mut self, path: &str) -> Result<Ast, Diagnostic> {
-        if let Err(error) = crate::type_realizations::check(&self.ast, path) {
-            self.diagnostics.push(error);
-        }
+    pub(crate) fn finish(self, _path: &str) -> Result<Ast, Diagnostic> {
         match self.diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
             Some(error) => Err(error),
             None => Ok(self.ast),
@@ -411,6 +409,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
         equality_anchors: Vec::new(),
+        qualified_type_anchors: Vec::new(),
         written_list_patterns: Vec::new(),
         long_condition_functions: Vec::new(),
         diagnostics: Vec::new(),
@@ -429,6 +428,7 @@ struct Parser<'a> {
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
     equality_anchors: Vec<(Span, Span, Span)>,
+    qualified_type_anchors: Vec<(DeclaredName, Span)>,
     written_list_patterns: Vec<Span>,
     long_condition_functions: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
@@ -488,62 +488,44 @@ impl Parser<'_> {
     fn parse_program(&mut self) -> Ast {
         let span = self.span();
         let items = self.parse_items(TypeContext::TopLevel);
-        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
+        Ast { items, span, branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), qualified_type_anchors: self.qualified_type_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
+    }
+
+    fn section_boundary(&self) -> bool {
+        matches!(self.kind(), TokKind::KwModule | TokKind::KwImplement | TokKind::Eof)
     }
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
-        loop {
-            if self.kind() == &TokKind::Eof {
-                if context != TypeContext::TopLevel {
-                    self.diagnostics.push(self.error(None, "unterminated `struct`: expected `end`"));
-                }
-                break;
-            }
-            if context != TypeContext::TopLevel && self.kind() == &TokKind::KwEnd {
-                self.bump();
-                break;
-            }
+        while self.kind() != &TokKind::Eof {
+            if context != TypeContext::TopLevel && self.section_boundary() { break; }
             let start = self.pos;
             let item = match self.kind() {
+                TokKind::Def if context == TypeContext::Signature => self.parse_sig_def(),
                 TokKind::Def => self.parse_definition(),
                 TokKind::KwType => self.parse_type_def(context),
-                TokKind::KwModule => {
-                    if context != TypeContext::TopLevel {
-                        self.diagnostics.push(self.error(Some("E100"), "module declarations must be top-level"));
-                    }
-                    self.parse_module()
-                }
-                other => Err(self.error(None, format!("expected `def`, `type`, or `module`, found {other}"))),
+                TokKind::KwModule => self.parse_module(),
+                TokKind::KwImplement => self.parse_implementation(),
+                other => Err(self.error(None, format!("expected a declaration, found {other}"))),
             };
             match item {
                 Ok(item) => items.push(item),
                 Err(error) => {
                     self.diagnostics.push(error);
-                    self.recover_declaration(start, context);
+                    self.recover_declaration(start);
                 }
             }
         }
         items
     }
 
-    fn recover_declaration(&mut self, start: usize, context: TypeContext) {
-        // Rewind only for delimiter accounting; a failed declaration is never retried.
+    fn recover_declaration(&mut self, start: usize) {
         let failed_at = self.pos;
         self.pos = start;
-        let mut depth = 0usize;
         while self.kind() != &TokKind::Eof {
-            if self.pos > start && self.pos >= failed_at && depth == 0 {
-                match self.kind() {
-                    TokKind::Def | TokKind::KwType | TokKind::KwModule => break,
-                    TokKind::KwEnd if context != TypeContext::TopLevel => break,
-                    _ => {}
-                }
-            }
-            match self.kind() {
-                TokKind::KwSig | TokKind::KwStruct => depth += 1,
-                TokKind::KwEnd => depth = depth.saturating_sub(1),
-                _ => {}
+            if self.pos > start && self.pos >= failed_at
+                && matches!(self.kind(), TokKind::Def | TokKind::KwType | TokKind::KwModule | TokKind::KwImplement) {
+                break;
             }
             self.bump();
         }
@@ -686,54 +668,24 @@ impl Parser<'_> {
     fn parse_module(&mut self) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwModule)?;
-        if self.kind() == &TokKind::KwType {
-            // module type NAME = sig ... end
-            self.bump();
-            let name_span = self.span();
-            let name = self.expect_upper_name("a module-type name")?;
-            self.expect(&TokKind::Eq)?;
-            self.expect(&TokKind::KwSig)?;
-            let mut items = Vec::new();
-            while self.kind() != &TokKind::KwEnd {
-                match self.kind() {
-                    TokKind::KwType => items.push(self.parse_type_def(TypeContext::Signature)?),
-                    TokKind::Def => items.push(self.parse_sig_def()?),
-                    TokKind::Eof => {
-                        return Err(self.error(None, "unterminated `sig`: expected `end`"))
-                    }
-                    other => {
-                        return Err(self.error(
-                            None,
-                            format!("expected `type` or `def` in sig, found {other}"),
-                        ))
-                    }
-                }
-            }
-            self.bump();
-            Ok(Item::ModuleSig(ModuleSig { name, name_span, items, span }))
-        } else {
-            // module NAME [: SIG] = struct ... end
-            let name_span = self.span();
-            let name = self.expect_upper_name("a module name")?;
-            let (sig, sig_span) = if self.kind() == &TokKind::Colon {
-                self.bump();
-                let sig_span = self.span();
-                (Some(self.expect_upper_name("a signature name after `:`")?), sig_span)
-            } else {
-                return Err(self.error_at(span, Some("E113"), "module requires a signature"));
-            };
-            self.expect(&TokKind::Eq)?;
-            self.expect(&TokKind::KwStruct)?;
-            let items = self.parse_items(TypeContext::Implementation);
-            Ok(Item::ModuleImpl(ModuleImpl {
-                name,
-                name_span,
-                sig,
-                sig_span,
-                items,
-                span,
-            }))
-        }
+        let name_span = self.span();
+        let name = self.expect_upper_name("a contract name")?;
+        let type_anchor_start = self.qualified_type_anchors.len();
+        let items = self.parse_items(TypeContext::Signature);
+        self.qualified_type_anchors.truncate(type_anchor_start);
+        Ok(Item::ModuleSig(ModuleSig { name, name_span, items, span }))
+    }
+
+    fn parse_implementation(&mut self) -> Result<Item, Diagnostic> {
+        let span = self.span();
+        self.expect(&TokKind::KwImplement)?;
+        let sig_span = self.span();
+        let sig = self.expect_upper_name("a contract name")?;
+        self.expect(&TokKind::KwAs)?;
+        let name_span = self.span();
+        let name = self.expect_upper_name("an implementation name")?;
+        let items = self.parse_items(TypeContext::Implementation);
+        Ok(Item::ModuleImpl(ModuleImpl { name, name_span, sig, sig_span, items, span }))
     }
 
     fn expect_name(&mut self, what: &str) -> Result<String, Diagnostic> {
@@ -889,6 +841,7 @@ impl Parser<'_> {
         }
         if self.kind() == &TokKind::Dot {
             self.bump();
+            self.qualified_type_anchors.push((DeclaredName { name: name.clone(), span }, self.span()));
             name.push('.');
             name.push_str(&self.expect_upper_name("a qualified type name")?);
             return Ok(TypeExpr { kind: TypeKind::Name(name), span });

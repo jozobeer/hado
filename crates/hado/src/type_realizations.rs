@@ -21,17 +21,18 @@ fn check_items<'a>(items: &'a [Item], inherited: &Signatures<'a>, path: &str, er
     }
     let mut signatures = inherited.clone();
     signatures.extend(local);
+    let outer_types: HashSet<_> = items.iter().filter_map(|item| match item { Item::TypeDef(def) => Some(def.name.as_str()), _ => None }).collect();
     for item in items {
         if let Item::ModuleImpl(module) = item {
-            if let Some(Some(signature)) = module.sig.as_deref().and_then(|name| signatures.get(name)) {
-                check_module(module, signature, path, errors);
+            if let Some(Some(signature)) = signatures.get(module.sig.as_str()) {
+                check_module(module, signature, &outer_types, path, errors);
             }
             check_items(&module.items, &signatures, path, errors);
         }
     }
 }
 
-fn check_module(module: &ModuleImpl, signature: &ModuleSig, path: &str, errors: &mut Vec<Diagnostic>) {
+fn check_module(module: &ModuleImpl, signature: &ModuleSig, outer: &HashSet<&str>, path: &str, errors: &mut Vec<Diagnostic>) {
     let abstracts: HashSet<_> = signature.items.iter().filter_map(|item| match item {
         Item::TypeDef(definition) => Some(definition.name.as_str()),
         _ => None,
@@ -39,11 +40,18 @@ fn check_module(module: &ModuleImpl, signature: &ModuleSig, path: &str, errors: 
     for item in &module.items {
         if let Item::TypeDef(definition) = item {
             if let Some(ty) = &definition.ty {
+                if matches!(ty.kind, TypeKind::Adt(_) | TypeKind::Record(_))
+                    && (outer.contains(definition.name.as_str()) || abstracts.contains(definition.name.as_str())) {
+                    errors.push(Diagnostic {
+                        path: path.into(), line: definition.name_span.line, col: definition.name_span.col,
+                        code: Some("E205".into()), message: "local data type conflicts with an existing type".into(),
+                    });
+                }
                 if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(..)) && !abstracts.contains(definition.name.as_str()) {
                     errors.push(Diagnostic {
-                        path: path.into(), line: ty.span.line, col: ty.span.col,
-                        code: Some("E100".into()),
-                        message: "type aliases may only realize signature abstract types".into(),
+                        path: path.into(), line: definition.name_span.line, col: definition.name_span.col,
+                        code: Some("E204".into()),
+                        message: "unknown abstract type realization".into(),
                     });
                 }
             }

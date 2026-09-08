@@ -167,12 +167,13 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
 
 pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
+    if let Err(error) = crate::type_realizations::check(ast, path) { diagnostics.push(error); }
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
     if let Err(error) = check_cycles(ast, path) { diagnostics.push(error); }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
     declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
-    match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
+    match diagnostics.into_iter().map(|error| crate::check::arm_diagnostic(ast, error)).min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
     }
@@ -234,14 +235,17 @@ fn declaration_types(
     }
     for item in items {
         if let Item::ModuleImpl(module) = item {
-            if let Some(exported) = module.sig.as_ref().and_then(|name| signatures.get(name)) {
+            if let Some(exported) = signatures.get(&module.sig) {
                 types.extend(exported.iter().map(|name| format!("{}.{name}", module.name)));
             }
         }
     }
     for item in items {
         match item {
-            Item::ModuleSig(signature) => declaration_types(&signature.items, &types, &signatures, path, diagnostics),
+            Item::ModuleSig(signature) => {
+                let contract_types = types.iter().filter(|name| !name.contains('.')).cloned().collect();
+                declaration_types(&signature.items, &contract_types, &signatures, path, diagnostics);
+            }
             Item::ModuleImpl(module) => declaration_types(&module.items, &types, &signatures, path, diagnostics),
             Item::SigDef(def) => {
                 let mut local = types.clone();
@@ -422,7 +426,7 @@ pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::D
     }
     for item in &ast.items {
         if let Item::ModuleImpl(module) = item {
-            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], written_list_patterns: vec![], long_condition_functions: vec![], equality_anchors: vec![] }, path) {
+            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], written_list_patterns: vec![], long_condition_functions: vec![], equality_anchors: vec![], qualified_type_anchors: vec![] }, path) {
                 diagnostics.push(error);
             }
         }

@@ -56,14 +56,14 @@ fn item(value: &Item) -> String {
             return_type(def.ret.as_ref())
         ),
         Item::ModuleSig(module) => format!(
-            "module type {} = sig\n{}\nend",
+            "module {}\n{}",
             module.name,
             items(&module.items)
         ),
         Item::ModuleImpl(module) => format!(
-            "module {} : {} = struct\n{}\nend",
+            "implement {} as {}\n{}",
+            module.sig,
             module.name,
-            module.sig.as_deref().unwrap_or_default(),
             items(&module.items)
         ),
     }
