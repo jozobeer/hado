@@ -751,4 +751,53 @@ m3のstdlib述語は外のdefを拒否し、m7は同名の契約・実装の見�
 
 審査は `opencode/deepseek-v4-flash`。コーパスのセッション `ses_f7e9e945effeCOscKQkGcAudfQ`、実装のセッション `ses_f7e7cbcc3ffemASNBTOxvYimAm` ともPASS。実装審査は既存テストの意図保全とE601・E204・E205・E602の独立プローブも確認した。新たな仕様への疑義、未対応の指摘、赤の門番はない。最終削りでは余剰成果物を残さず、一時プローブとログは `/tmp` に置いた。
 
-工程コミット: `dffeac9`（コーパス・判定器）、`2e72208`（修飾型アンカー）、`eff63c7`（E601局所表現の保持）、`3478e35`（既存判定の移行・局所型の未使用）。実装は直後の `feat: 契約と実装の節構文を実装する`。本記録以外の作業ツリー差分はない。
+工程コミット: `dffeac9`（コーパス・判定器）、`2e72208`（修飾型アンカー）、`eff63c7`（E601局所表現の保持）、`3478e35`（既存判定の移行・局所型の未使用）。実装は `3bb755a`。本記録以外の作業ツリー差分はない。
+
+
+## R17 複数ファイル（2026-09-09）
+
+入口と同じディレクトリの `.hd`・`.hdi` を読み、入口を先、残りをパスのバイト順にする。各ファイルを個別に解析してから構文木を結合する。内部ではファイルごとに重ならない行範囲を使い、検査後に診断を元のパス・行へ戻す。全ファイルの字句解析を構文解析より先に行い、入口以外の外の `def` と `.hdi` の `implement` をE100にする。CLIの入口は `.hd` に限る。
+
+コーパスの `multi_file/` は入口のrecord、`.hdi` の外の型と契約、2つの実装ファイルからなり、実行結果は20+22=42。事前審査PASS後、全 `.hd`・`.hdi` をlockに固定した。コーパスの実行とM6のコピーもケース全体を扱う。既存のCLIプローブはケースごとにディレクトリを分け、単一ファイルの全拒否診断が従来のソースAPIと一致することを確認する。
+
+追加判定器は実装前に5件すべて赤だった。後続ファイルの字句エラーより先行ファイルの構文エラーを先に返す欠陥も赤で再現し、全ファイルを先に字句解析する形へ修正した。最終的な8テストは、乱数による契約・実装・配置と実行結果、重複の順序、ファイル役割、未使用と壊れた無関係ファイル、診断位置、単一ファイル互換性を検査する。
+
+17-a: `cargo test --offline --no-fail-fast` は **437 passed / 0 failed**。全16門番がexit 0。Rustとtarget directoryはR14と同じで、最終実行は `CARGO_NET_OFFLINE=true`。ログは `/tmp/hado-v012/r17/`。
+
+| コマンド | 出力末尾 |
+|---|---|
+| `bash scripts/verify-m0.sh` | `PASSED: 7/7` |
+| `bash scripts/verify-m1-corpus.sh` | `PASSED: 7/7` |
+| `bash scripts/verify-m1-spec.sh` | `PASSED: 6/6` |
+| `bash scripts/verify-m2.sh` | `PASSED: 8/8` |
+| `bash scripts/verify-m3.sh` | `PASSED: 12/12` |
+| `bash scripts/verify-m4.sh` | `PASSED: 57/57` |
+| `bash scripts/verify-m5.sh` | `PASSED: 91/91` |
+| `bash scripts/verify-m6.sh` | `PASSED: 29/29` |
+| `bash scripts/verify-m7.sh` | `PASSED: 3/3` |
+| `bash scripts/verify-r11.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r12.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r13.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r14.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r16.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r17.sh` | `PASSED: 1/1` |
+| `bash scripts/verify-r9.sh` | `PASSED: 5/5` |
+
+17-b: `r17_files` 8/8。契約・実装の生成配置、CLIの実行結果、ファイル順で2番目のE205、無参照実装のE513、非入口の外のdefとhdiのimplementのE100、入口の切り替え、無関係な壊れたファイル、hdi内の実装修飾型のE204が通過。`.hdi` を入口にしたCLI拡張子エラーも確認した。
+
+17-c: lockは事前審査後に更新し、実装工程では変更していない。lockの99行とディスク上の `.hd`・`.hdi` 99ファイルが一致し、`sha256sum --status -c tests/corpus.sha256` はexit 0。m3のlock・暗記排除も補助ファイルを含める。
+
+17-d: 非入口ファイルのE100・E204・E205・E602・E514・E402と字句エラーについて、改行・空白の摂動後も元ファイルのパス・行・列を確認した。単一ファイルの拒否診断はソースAPIとの全文一致でも確認した。
+
+審査は `opencode/deepseek-v4-flash`。コーパスは `ses_f7e78a670ffe36jLzic6HBZeK4`、実装は `ses_f7e611663ffedWvr8ceGzdzu9u` でPASS。実装審査は隔離コピーを読み、診断段階・ファイル順・prelude・出力・テスト移行を確認した。実行証拠は本体側のログを使った。未対応の指摘、赤の門番、仕様への疑義はない。最終削りでは一時ログと審査用コピーを `/tmp` に置き、リポジトリには判定に必要な成果物だけを残した。
+
+工程コミットは次の通り。共通処理の抽出をファイル収集・結合の振る舞いから分けた。
+
+```
+0a8dc3e test: 複数ファイルのコーパスと生成判定器を固定する
+71c114c test: ファイル単位の実行と診断順序を検証する
+d3c5afd feat: 構文木の検査と実行ファイルの出力を共有する
+e09b52e feat: 同じディレクトリのhdとhdiを結合する
+```
+
+全判定後の `git status --short` は空。本記録をコミットし、R17終了のタグ `v0.1.2` を付ける。R14〜R17の増分は `git log --oneline 5c57d11^..v0.1.2` で確認できる。
