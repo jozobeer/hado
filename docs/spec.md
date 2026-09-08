@@ -175,7 +175,7 @@ let = local binding
 
 `->` は、型の関数矢印や分岐結果の矢印には使わない。
 
-v0.1では、`->` をローカルbindingの継続を示す記号としてのみ使う。
+`->` はローカルbindingの継続を示す記号としてのみ使う。
 
 ```ocaml
 let x = foo ->
@@ -688,7 +688,7 @@ type Result<T, E> =
 
 `null` は持たない。
 
-unchecked exceptionもv0.1では持たない。
+unchecked exception も持たない。
 
 `Ok()` が canonical である。`Ok(())` は拒否する（E509）。
 
@@ -1220,7 +1220,7 @@ def parse(input: String): Result<User, Error>
 
 ---
 
-# 38. v0.1では入れないもの
+# 38. 入れないもの
 
 以下は意図的に外す。
 
@@ -1344,7 +1344,7 @@ def delete user => ...
 
 # 40. コア構文
 
-v0.1の中心となる構文はかなり小さい。
+中心となる構文はかなり小さい。
 
 ```text
 def

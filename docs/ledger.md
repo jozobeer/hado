@@ -1,4 +1,4 @@
-# 実行台帳 v0.1
+# 実行台帳 v0.1 → v0.1.2
 
 `docs/plan.md` を code-perfection-multiagent で実行した記録。ラウンド単位で追記する。
 
