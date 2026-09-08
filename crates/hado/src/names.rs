@@ -58,7 +58,7 @@ pub(crate) fn bindings(pattern: &Pattern) -> Vec<(&str, crate::parser::Span)> {
     match &pattern.kind {
         PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => vec![(name, pattern.span)],
         PatternKind::Constructor(_, args) => args.iter().flat_map(bindings).collect(),
-        PatternKind::Record(fields) => fields.iter().flat_map(|(name, nested)| match nested {
+        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => fields.iter().flat_map(|(name, nested)| match nested {
             Some(nested) => bindings(nested),
             None => vec![(name.name.as_str(), name.span)],
         }).collect(),
@@ -99,7 +99,7 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
                 free_names(item, bound, result);
             }
         }
-        NodeKind::Record(fields) => {
+        NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
             for (_, value) in fields {
                 free_names(value, bound, result);
             }
@@ -193,7 +193,7 @@ fn record_field_duplicates(items: &[Item], path: &str, diagnostics: &mut Vec<cra
 }
 
 fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
-    if let NodeKind::Record(fields) = &node.kind {
+    if let NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) = &node.kind {
         let mut names = BTreeSet::new();
         for (name, _) in fields {
             if let Err(error) = register(&mut names, &name.name, name.span, path) {
@@ -395,6 +395,10 @@ fn register_type_members(
         TypeKind::Adt(variants) => {
             for variant in variants {
                 register(names, &variant.name.name, variant.name.span, path)?;
+                if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
+                    let mut fields_seen = BTreeSet::new();
+                    for field in fields { register(&mut fields_seen, &field.name.name, field.name.span, path)?; }
+                }
             }
         }
         TypeKind::Record(fields) => {

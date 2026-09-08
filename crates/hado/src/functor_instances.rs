@@ -150,6 +150,9 @@ impl Instance<'_> {
             TypeKind::Adt(variants) => {
                 for variant in variants {
                     self.declared(&mut variant.name);
+                    if let crate::parser::ConstructorPayload::Named(fields) = &mut variant.payload {
+                        for field in fields { self.declared(&mut field.name); }
+                    }
                     for ty in variant.payload.types_mut() { self.ty(ty); }
                 }
             }
@@ -170,6 +173,13 @@ impl Instance<'_> {
         match &mut pattern.kind {
             PatternKind::Constructor(_, arguments) => {
                 for argument in arguments { self.pattern(argument); }
+            }
+            PatternKind::NamedConstructor(name, fields) => {
+                self.declared(name);
+                for (name, pattern) in fields {
+                    self.declared(name);
+                    if let Some(pattern) = pattern { self.pattern(pattern); }
+                }
             }
             PatternKind::Record(fields) => {
                 for (name, pattern) in fields {
@@ -239,6 +249,10 @@ impl Instance<'_> {
 
     fn aggregate_children(&self, node: &mut Node) {
         match &mut node.kind {
+            NodeKind::NamedConstructor(name, fields) => {
+                self.declared(name);
+                for (name, value) in fields { self.declared(name); self.node(value); }
+            }
             NodeKind::Record(fields) => {
                 for (name, value) in fields {
                     self.declared(name);

@@ -1,4 +1,5 @@
 mod functors;
+mod named;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
 use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError, TypeRealization};
@@ -20,6 +21,8 @@ struct Checker<'a> {
     abstract_representations: HashMap<String, TypeRealization>,
     deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
+    module_named_constructors: HashMap<String, Vec<String>>,
+    named_constructors: HashMap<String, Vec<String>>,
     module_records: HashMap<String, (Vec<String>, Scheme)>,
     trusted_start: Option<usize>,
     module_path: Vec<String>,
@@ -74,6 +77,8 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         deferred: contract_diagnostics,
         module_constructors: HashMap::new(),
         module_records: HashMap::new(),
+        module_named_constructors: HashMap::new(),
+        named_constructors: HashMap::new(),
         trusted_start,
         module_path: Vec::new(),
         module_definitions: HashMap::new(),
@@ -198,6 +203,8 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         abstract_representations: checker.abstract_representations,
         module_constructors: checker.module_constructors,
         module_records: checker.module_records,
+        module_named_constructors: checker.module_named_constructors,
+        named_constructors: checker.named_constructors.clone(),
         module_definitions: checker.module_definitions.clone(),
         modules: checker.modules.clone(),
         constructor_tags: checker.constructor_tags.clone(),
@@ -221,10 +228,10 @@ impl Checker<'_> {
             self.records.remove(name);
         }
         for name in &ambiguous.declared_constructors {
-            if self.ambiguous_constructors.remove(name) {
-                self.constructors.remove(name);
-                self.constructor_tags.remove(name);
-            }
+            self.ambiguous_constructors.remove(name);
+            self.constructors.remove(name);
+            self.constructor_tags.remove(name);
+            self.named_constructors.remove(name);
         }
         self.ambiguous_types.extend(ambiguous.types);
         self.ambiguous_constructors.extend(ambiguous.constructors);
@@ -345,6 +352,9 @@ impl Checker<'_> {
                         for (name, scheme) in &self.constructors {
                             let result = match scheme.body() { Ty::Fn(_, result) => result.as_ref(), ty => ty };
                             if matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name) {
+                                if let Some(fields) = self.named_constructors.get(name) {
+                                    self.module_named_constructors.insert(format!("{}.{}", self.module_path.join("."), name), fields.clone());
+                                }
                                 self.module_constructors.insert(format!("{}.{}", self.module_path.join("."), name), (self.constructor_tags[name], scheme.qualify_data_types(&type_names)));
                             }
                         }
@@ -361,6 +371,7 @@ impl Checker<'_> {
         self.ambiguous_modules = saved.ambiguous_modules;
         self.ambiguous_signatures = saved.ambiguous_signatures;
         self.ambiguous_constructors = saved.ambiguous_constructors;
+        self.named_constructors = saved.named_constructors;
         self.records = saved.records;
         self.constructors = saved.constructors;
         self.constructor_tags = saved.constructor_tags;
@@ -759,7 +770,10 @@ impl Checker<'_> {
         rejected: &[Span],
     ) -> Result<(), Diagnostic> {
         let name = &variant.name.name;
-        let payload = variant.payload.types().iter()
+        if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
+            self.named_constructors.insert(name.clone(), fields.iter().map(|field| field.name.name.clone()).collect());
+        }
+        let payload = variant.payload.types()
             .map(|arg| self.registered_payload_type(arg, parameters, span, rejected))
             .collect::<Result<Vec<_>, _>>()?;
         let ty = if payload.is_empty() {
@@ -834,7 +848,7 @@ impl Checker<'_> {
     fn expression(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
         let result = self.expression_inner(node);
         let ty = self.recover_inference_error(result, Ty::Error)?;
-        if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..)) {
+        if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..) | NodeKind::NamedConstructor(..)) {
             self.composite_types.insert((node.span.line, node.span.col), ty.clone());
         }
         Ok(ty)
@@ -897,6 +911,7 @@ impl Checker<'_> {
             },
             NodeKind::List(items, tail) => self.list(items, tail.as_deref()),
             NodeKind::Record(fields) => self.record(fields, node.span),
+            NodeKind::NamedConstructor(name, fields) => self.named_construct(name, fields),
             NodeKind::Field(value, field) => {
                 let ty = self.project(value, field)?;
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
@@ -1000,6 +1015,8 @@ impl Checker<'_> {
         let candidates: Vec<_> = self
             .records
             .values()
+            .cloned()
+            .chain(self.named_projection_schemas())
             .filter(|(names, _)| names.iter().any(|name| name == field))
             .map(|(_, scheme)| scheme.clone())
             .collect();
@@ -1027,11 +1044,11 @@ impl Checker<'_> {
         let Ty::Adt(name, _) = self.inference.resolve(ty) else {
             return Err(self.error(receiver, Some("E305"), "field access requires a record"));
         };
-        let (names, scheme) = self
-            .records
-            .get(&name)
-            .cloned()
-            .ok_or_else(|| self.error(receiver, Some("E305"), "field access requires a record"))?;
+        let schema = self.records.get(&name).cloned().or_else(|| self.named_projection_schema(&name));
+        let (names, scheme) = schema.ok_or_else(|| {
+            let code = if self.has_named_variant(&name) { "E204" } else { "E305" };
+            self.error(if code == "E204" { field.span } else { receiver }, Some(code), "field access requires a single record constructor")
+        })?;
         let index = names
             .iter()
             .position(|name| name == &field.name)
@@ -1082,7 +1099,8 @@ impl Checker<'_> {
             let groups = self.constructor_groups();
             let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
             let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-            if let Err(error) = crate::check::adt_coverage(branch_span, arms, fallback, &constructors, &families, self.path) {
+            let arms: Vec<_> = arms.iter().map(|(pattern, body)| (crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned), body.clone())).collect();
+            if let Err(error) = crate::check::adt_coverage(branch_span, &arms, fallback, &constructors, &families, self.path) {
                 self.deferred.push(error);
             }
         }
@@ -1105,6 +1123,7 @@ impl Checker<'_> {
                 self.constructor_pattern(name, args, expected, pattern.span)
             }
             PatternKind::Record(fields) => self.record_pattern(fields, expected, pattern.span),
+            PatternKind::NamedConstructor(name, fields) => self.named_pattern(name, fields, expected),
         }
     }
 
@@ -1114,6 +1133,9 @@ impl Checker<'_> {
         expected: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
+        if matches!(self.inference.resolve(expected), Ty::Adt(ref name, _) if self.has_named_variant(name)) {
+            return Err(self.error(span, Some("E305"), "record pattern requires a constructor name"));
+        }
         if matches!(self.inference.resolve(expected), Ty::Var(_)) {
             let candidates: Vec<_> = self.records.values().filter(|(names, _)|
                 fields.iter().all(|(field, _)| names.contains(&field.name))).map(|(_, scheme)| scheme.clone()).collect();
@@ -1143,6 +1165,9 @@ impl Checker<'_> {
         expected: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
+        if self.named_constructors.contains_key(name) {
+            return Err(self.error(span, Some("E301"), "constructor pattern requires named fields"));
+        }
         let scheme = self
             .constructors
             .get(name)
@@ -1302,6 +1327,10 @@ impl Checker<'_> {
     }
 
     fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
+        if self.named_constructors.contains_key(name) {
+            for arg in args { self.expression(arg)?; }
+            return Err(self.error(span, Some("E301"), "constructor requires named fields"));
+        }
         let scheme = self.constructors[name].clone();
         if scheme.body() == &Ty::Error {
             for argument in args { self.expression(argument)?; }
@@ -1384,7 +1413,8 @@ impl Checker<'_> {
         let groups = self.constructor_groups();
         let families = groups.values().flat_map(|group|
             group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-        if crate::coverage::covers_pattern(pattern, &families) != Some(true) {
+        let expanded = crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned);
+        if crate::coverage::covers_pattern(&expanded, &families) != Some(true) {
             self.deferred.push(self.error(pattern.span, Some("E402"), "binding pattern does not cover its type"));
         }
     }

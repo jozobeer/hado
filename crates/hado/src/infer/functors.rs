@@ -7,6 +7,7 @@ pub(super) struct Template {
     exports: HashMap<String, Scheme>,
     representations: HashMap<String, TypeRealization>,
     definitions: HashMap<String, Scheme>,
+    named_constructors: HashMap<String, Vec<String>>,
     records: HashMap<String, (Vec<String>, Scheme)>,
     constructors: HashMap<String, (u32, Scheme)>,
     values: HashMap<(usize, usize), Ty>,
@@ -81,6 +82,7 @@ impl Checker<'_> {
                 exports: self.modules.get(&module.name).cloned().unwrap_or_default(),
                 representations: owned(&self.abstract_representations, &module.name),
                 definitions: owned(&self.module_definitions, &module.name),
+                named_constructors: owned(&self.module_named_constructors, &module.name),
                 records: owned(&self.module_records, &module.name),
                 constructors: owned(&self.module_constructors, &module.name),
                 values: self.value_types.iter().filter(|(span, _)| !before_values.contains(span)).map(|(span, ty)| (*span, self.inference.resolve(ty))).collect(),
@@ -138,6 +140,9 @@ impl Checker<'_> {
         }
         for (name, (fields, scheme)) in &template.records {
             self.module_records.insert(crate::functor_instances::rename(name, names), (fields.clone(), scheme.rename_modules(names)));
+        }
+        for (name, fields) in &template.named_constructors {
+            self.module_named_constructors.insert(crate::functor_instances::rename(name, names), fields.clone());
         }
         for (name, (tag, scheme)) in &template.constructors {
             self.module_constructors.insert(crate::functor_instances::rename(name, names), (*tag, scheme.rename_modules(names)));

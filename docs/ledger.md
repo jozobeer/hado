@@ -954,3 +954,29 @@ Cursorの初回実装審査は診断文に内部型名が漏れる点でFAIL。C
 R22のコーパス候補と判定器候補はCursor審査PASS（`r22-corpus.log`、`r22-tests.log`）。候補は `/tmp/hado-v013/` のみで、未採用。名前空間未実装の現行CLIで判定器17件は全て赤。R21追加工程を終えてから採用へ進む。
 
 constructor宣言の構造整理は `b4c02a7`。型参照から名前とpayloadを分離し、新構文は加えていない。Cursorが基準と候補のCLI・診断・Functor実行を比較してPASS（`constructor-ast.log`）、隔離コピーの全cargoは同じ491/16、採用後のcheck_adtsは9/9。新構文のコーパスlockに依存しない振る舞い不変の整理として、追加実装とは別コミットにした。
+
+
+## R21 名前付きfieldのconstructor（2026-09-09）
+
+承認された `type T = Payload { id: Id.T; name: String }` を宣言・生成・パターンに実装した。単一constructorのfield参照、generic、名前による型の選択、抽象型の不透明性とFunctor適用ごとの型の分離を、既存ADTの型・表現へ接続した。生成は記述順に評価して宣言順のpayloadへ格納し、印字も宣言順にする。
+
+仕様は `793b99b`、独立審査済みコーパスは `aec149a` でlockした。判定器のredは `fdf1394`、審査・追加調査で得た反例のredは `10afa08`。仕様/コーパス追審はPASS（`named-record-spec-v2.log`）、判定器追審もPASS（`named-record-tests-v2.log`）。
+
+独立実装審査の初回FAILは、外と実装内の同名constructorが衝突する点だった。局所宣言のscheme・tag・named metadataを検査中の環境で切り替え、退出後は外を復元した。追加調査では、入れ子の未知field E204が先行するfield値のE305に隠れる反例を再現し、型推論に先立つ名前検査で未知fieldを採集した。Cursor追審はPASS（`/tmp/hado-v013/review/named-record-implementation-followup.log`）。外/内の位置/namedの4組合せ、Functor内同名、形式違い、同scope重複、複数fileの段階順を独立CLIで確認した。
+
+ソース固定後の実測は `/tmp/hado-v013/named-record-gates-after-fixes/`。実行環境はR18と同じ。
+
+| コマンド | 結果・出力末尾 |
+|---|---|
+| `cargo test --offline --no-fail-fast` | 合計544 passed / 1 failed、exit101。失敗は `r9_grammar` の `unvisited rules: ["path"]` |
+| `bash scripts/verify-record-constructors.sh` | CLI36件・IR評価順2件通過、`PASSED: 1/1`、exit0 |
+| `bash scripts/verify-r21.sh` | 28件通過、`PASSED: 1/1`、exit0 |
+| `verify-m1-spec.sh` / `verify-m4.sh` / `verify-m5.sh` / `verify-m6.sh` | 6/6、70/70、103/103、34/34、全てexit0 |
+| `verify-r11.sh`〜`r14.sh`、`r16.sh`〜`r20.sh` | 各 `PASSED: 1/1`、exit0 |
+| `sha256sum --strict --status -c tests/corpus.sha256` | exit0。実装中のlock変更なし |
+
+全門番は終了した。赤はm0 4/7、m1-corpus 6/7、m2 7/8、m3 11/12、m7 2/3、r9 4/5。いずれもR22のpath生成未訪問に依存する。21-b/c/dは満たしたが、21-aの全cargo通過は未達である。21-aの残存赤の列挙にはこの文法生成と依存赤が含まれていない。pathはR22の成果物なので、R22で全条件を再判定する。門番は緩めていない。
+
+評価順の判定器は実際のmono IRを記号実行する。emitのLetが値から本体へ命令を生成する経路も審査で確認したが、ネイティブ命令列上の副作用順を直接測った証拠ではない。§53のBool分岐とE517の既知疑義は変更していない。
+
+仮説は「名前付きfieldを既存ADTのpayloadへ対応させれば、型の名義性と実行表現を保てる」。CLI生成・実行と独立追審で確認した。型推論の早期returnだけでは名前段階の診断を集めきれないことを学び、名前の検査を先行させた。less-is-moreの確認で追加のコメント・余剰成果物の削除対象は無かった。

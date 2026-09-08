@@ -264,6 +264,7 @@ struct Lowerer {
     structural_equalities: Vec<(Type, FunctionId)>,
     constructors: std::collections::HashMap<String, crate::types::Scheme>,
     records: std::collections::HashMap<String, (Vec<String>, crate::types::Scheme)>,
+    named_constructors: std::collections::HashMap<String, Vec<String>>,
     definitions: std::collections::BTreeMap<String, crate::parser::Def>,
     functions: Vec<Function>,
     active: Vec<(String, FunctionId, Signature)>,
@@ -312,6 +313,9 @@ impl Lowerer {
             }
             let record = self.expression(record)?;
             return self.record_get(record, &field.name);
+        }
+        if let NodeKind::NamedConstructor(name, fields) = &node.kind {
+            return self.named_constructor(node, &name.name, fields);
         }
         if let NodeKind::Record(fields) = &node.kind {
             let ty = self
@@ -513,6 +517,7 @@ pub fn lower_program(
         constructor_tags: checked.constructor_tags.clone(),
         constructors: checked.constructors.clone(),
         records: checked.records.clone(),
+        named_constructors: checked.named_constructors.clone(),
         schemes: checked.definitions.clone(),
         value_types: checked.value_types.clone(),
         composite_types: checked.composite_types.clone(),
@@ -817,6 +822,7 @@ impl Lowerer {
             .transpose()?;
         let mut lowered: Vec<(String, Expression)> = Vec::new();
         for (pattern, body) in arms.iter().rev() {
+            let pattern = crate::named_patterns::positional(pattern, &self.named_constructors, &|name| self.resolve_constructor(name));
             let (name, patterns) = match &pattern.kind {
                 crate::parser::PatternKind::Name(name)
                     if name.chars().next().is_some_and(char::is_uppercase) =>
@@ -936,6 +942,7 @@ impl Lowerer {
         steps: &mut Vec<MatchStep>,
     ) -> Result<(), String> {
         use crate::parser::PatternKind;
+        let pattern = crate::named_patterns::positional(pattern, &self.named_constructors, &|name| self.resolve_constructor(name));
         match &pattern.kind {
             PatternKind::Name(name) if name.chars().next().is_some_and(char::is_uppercase) => {
                 let name = &self.resolve_constructor(name);
@@ -968,6 +975,7 @@ impl Lowerer {
                 }
                 steps.push(MatchStep::Equal(value, literal));
             }
+            PatternKind::NamedConstructor(_, _) => return Err("missing named constructor metadata".into()),
             PatternKind::Record(fields) => {
                 for (name, nested) in fields {
                     let field = self.record_get(value.clone(), &name.name)?;
@@ -980,7 +988,7 @@ impl Lowerer {
             }
             _ => {
                 let mut bindings = Vec::new();
-                self.bind_pattern(pattern, value, &mut bindings)?;
+                self.bind_pattern(&pattern, value, &mut bindings)?;
                 steps.extend(
                     bindings
                         .into_iter()
@@ -1021,6 +1029,7 @@ impl Lowerer {
         bindings: &mut Vec<(usize, Expression)>,
     ) -> Result<(), String> {
         use crate::parser::PatternKind;
+        let pattern = crate::named_patterns::positional(pattern, &self.named_constructors, &|name| self.resolve_constructor(name));
         let id = self.next;
         self.next += 1;
         let ty = value.ty();
@@ -1056,6 +1065,7 @@ impl Lowerer {
                     self.bind_pattern(pattern, projection, bindings)?;
                 }
             }
+            PatternKind::NamedConstructor(_, _) => return Err("missing named constructor metadata".into()),
             PatternKind::Record(fields) => {
                 for (field, nested) in fields {
                     let value =
@@ -1093,11 +1103,43 @@ impl Lowerer {
             .collect()
     }
 
+    fn named_constructor(
+        &mut self, node: &crate::parser::Node, name: &str,
+        written: &[(crate::parser::DeclaredName, crate::parser::Node)],
+    ) -> Result<Expression, String> {
+        let name = self.resolve_constructor(name);
+        let declared = self.named_constructors.get(&name).ok_or("missing named constructor metadata")?.clone();
+        let ty = self.composite_types.get(&(node.span.line, node.span.col)).ok_or("missing named constructor type")?.clone();
+        let mut bindings = Vec::new();
+        let mut variables = std::collections::HashMap::new();
+        for (field, value) in written {
+            let value = self.expression(value)?;
+            let id = self.next;
+            self.next += 1;
+            variables.insert(field.name.clone(), Expression::Variable { id, ty: value.ty() });
+            bindings.push((id, value));
+        }
+        let fields = declared.iter().map(|name| variables.remove(name).ok_or_else(|| "missing named field".to_owned())).collect::<Result<Vec<_>, _>>()?;
+        let mut body = self.construct(&name, fields, &ty)?;
+        for (id, value) in bindings.into_iter().rev() {
+            body = Expression::Let { id, value: Box::new(value), body: Box::new(body) };
+        }
+        Ok(body)
+    }
+
     fn record_get(&self, record: Expression, field: &str) -> Result<Expression, String> {
         let ty = record.ty();
         let Type::Data(name, _) = &ty else {
             return Err("field access requires a record".into());
         };
+        if !self.records.contains_key(name) {
+            for (constructor, names) in &self.named_constructors {
+                let Ok(fields) = self.constructor_fields(constructor, &ty) else { continue; };
+                let index = names.iter().position(|name| name == field).ok_or("unknown named field")?;
+                return Ok(Expression::Project { value: Box::new(record), constructor: constructor.clone(), index, result: fields[index].clone() });
+            }
+            return Err("unknown record type".into());
+        }
         let (names, scheme) = self.records.get(name).ok_or("unknown record type")?;
         let index = names
             .iter()
@@ -1894,7 +1936,17 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
             for name in names {
                 let Ok(fields) = lowerer.constructor_fields(&name, &ty) else { continue; };
                 let mut content = text(&name);
-                if !fields.is_empty() {
+                if let Some(names) = checked.named_constructors.get(&name) {
+                    content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, text(" { ")])?;
+                    for (index, (field, label)) in fields.iter().zip(names).enumerate() {
+                        let label = if index == 0 { format!("{label} = ") } else { format!("; {label} = ") };
+                        content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, text(&label)])?;
+                        let projected = Expression::Project { value: Box::new(value.clone()), constructor: name.clone(), index, result: field.clone() };
+                        let rendered = context.format(projected)?;
+                        content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, rendered])?;
+                    }
+                    content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, text(" }")])?;
+                } else if !fields.is_empty() {
                     content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, text("(")])?;
                     for (index, field) in fields.iter().enumerate() {
                         if index > 0 { content = Expression::call_runtime(RuntimeFunction::StringConcat, vec![content, text(", ")])?; }

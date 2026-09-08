@@ -54,12 +54,15 @@ pub mod infer;
 mod dependencies;
 mod contract_types;
 mod name_resolution;
+mod named_patterns;
 
 #[derive(Clone)]
 pub struct Checked {
     pub instantiated_modules: Vec<parser::ModuleImpl>,
     pub abstract_representations: std::collections::HashMap<String, types::TypeRealization>,
     pub module_constructors: std::collections::HashMap<String, (u32, types::Scheme)>,
+    pub module_named_constructors: std::collections::HashMap<String, Vec<String>>,
+    pub named_constructors: std::collections::HashMap<String, Vec<String>>,
     pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
     pub module_definitions: std::collections::HashMap<String, types::Scheme>,
     pub modules: std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
@@ -76,6 +79,7 @@ impl Checked {
     pub(crate) fn for_codegen(&self) -> Self {
         let mut checked = self.clone();
         checked.records.extend(self.module_records.clone());
+        checked.named_constructors.extend(self.module_named_constructors.clone());
         for (name, (tag, scheme)) in &self.module_constructors {
             checked.constructors.insert(name.clone(), scheme.clone());
             checked.constructor_tags.insert(name.clone(), *tag);

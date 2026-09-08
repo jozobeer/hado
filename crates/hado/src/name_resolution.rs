@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 struct Scope {
     values: BTreeSet<String>,
     constructors: BTreeSet<String>,
+    named_fields: BTreeMap<String, BTreeSet<String>>,
     signatures: BTreeMap<String, BTreeSet<String>>,
     modules: BTreeMap<String, BTreeSet<String>>,
     functors: BTreeSet<String>,
@@ -14,6 +15,7 @@ impl Scope {
     fn nested(&self, items: &[Item]) -> Self {
         let mut scope = self.clone();
         let mut signatures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut local_constructors = BTreeSet::new();
         for item in items {
             match item {
                 Item::Def(def) => { scope.values.insert(def.name.clone()); }
@@ -21,7 +23,14 @@ impl Scope {
                     if let Some(ty) = &def.ty {
                         if let TypeKind::Adt(variants) = &ty.kind {
                             for variant in variants {
-                                scope.constructors.insert(variant.name.name.clone());
+                                let name = &variant.name.name;
+                                scope.constructors.insert(name.clone());
+                                scope.named_fields.remove(name);
+                                if local_constructors.insert(name.clone()) {
+                                    if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
+                                        scope.named_fields.insert(name.clone(), fields.iter().map(|field| field.name.name.clone()).collect());
+                                    }
+                                }
                             }
                         }
                     }
@@ -140,6 +149,13 @@ impl Resolver<'_> {
                     self.report(node.span, if current == Some(name) { "E201" } else { "E204" }, name);
                 }
             }
+            NodeKind::NamedConstructor(name, fields) => {
+                if !scope.constructors.contains(&name.name) { self.report(name.span, "E204", &name.name); }
+                for (field, value) in fields {
+                    self.named_field(&name.name, field, scope);
+                    self.expression(value, scope, current, false);
+                }
+            }
             NodeKind::Field(base, field) => {
                 if let NodeKind::Name(name) = &base.kind {
                     if scope.functors.contains(name) {
@@ -189,6 +205,12 @@ impl Resolver<'_> {
         }
     }
 
+    fn named_field(&mut self, constructor: &str, field: &crate::parser::DeclaredName, scope: &Scope) {
+        if scope.named_fields.get(constructor).is_some_and(|fields| !fields.contains(&field.name)) {
+            self.report(field.span, "E204", &field.name);
+        }
+    }
+
     fn pattern(&mut self, pattern: &Pattern, scope: &Scope) {
         match &pattern.kind {
             PatternKind::Name(name) if name.starts_with(char::is_uppercase) => {
@@ -197,6 +219,15 @@ impl Resolver<'_> {
             PatternKind::Constructor(name, args) => {
                 if !scope.constructors.contains(name) { self.report(pattern.span, "E204", name); }
                 for arg in args { self.pattern(arg, scope); }
+            }
+            PatternKind::NamedConstructor(name, fields) => {
+                if !scope.constructors.contains(&name.name) { self.report(name.span, "E204", &name.name); }
+                let mut seen = BTreeSet::new();
+                for (field, nested) in fields {
+                    self.named_field(&name.name, field, scope);
+                    if !seen.insert(&field.name) { self.report(field.span, "E205", &field.name); }
+                    if let Some(nested) = nested { self.pattern(nested, scope); }
+                }
             }
             PatternKind::Record(fields) => {
                 for (_, nested) in fields { if let Some(nested) = nested { self.pattern(nested, scope); } }

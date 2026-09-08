@@ -93,6 +93,7 @@ pub enum NodeKind {
     /// Field access `user.name` / qualified name `M.inc`.
     Field(Box<Node>, FieldName),
     Record(Vec<(DeclaredName, Node)>),
+    NamedConstructor(DeclaredName, Vec<(DeclaredName, Node)>),
     List(Vec<Node>, Option<Box<Node>>),
     Let {
         pat: Pattern,
@@ -142,6 +143,7 @@ pub enum PatternKind {
     Name(String),
     Constructor(String, Vec<Pattern>),
     Record(Vec<(DeclaredName, Option<Pattern>)>),
+    NamedConstructor(DeclaredName, Vec<(DeclaredName, Option<Pattern>)>),
     Literal(Box<Node>),
 }
 
@@ -161,7 +163,8 @@ impl fmt::Display for Pattern {
                     .join(", ");
                 write!(f, "{n}({inner})")
             }
-            PatternKind::Record(fields) => {
+            PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => {
+                if let PatternKind::NamedConstructor(name, _) = &self.kind { write!(f, "{} ", name.name)?; }
                 let inner = fields
                     .iter()
                     .map(|(n, p)| match p {
@@ -244,15 +247,26 @@ pub struct ConstructorDecl {
 pub enum ConstructorPayload {
     Nullary,
     Positional(Vec<TypeExpr>),
+    Named(Vec<TypeField>),
 }
 
 impl ConstructorPayload {
-    pub fn types(&self) -> &[TypeExpr] {
-        match self { Self::Nullary => &[], Self::Positional(types) => types }
+    pub fn types(&self) -> impl Iterator<Item = &TypeExpr> {
+        let (positional, named): (&[TypeExpr], &[TypeField]) = match self {
+            Self::Nullary => (&[], &[]),
+            Self::Positional(types) => (types, &[]),
+            Self::Named(fields) => (&[], fields),
+        };
+        positional.iter().chain(named.iter().map(|field| &field.ty))
     }
 
-    pub fn types_mut(&mut self) -> &mut [TypeExpr] {
-        match self { Self::Nullary => &mut [], Self::Positional(types) => types }
+    pub fn types_mut(&mut self) -> impl Iterator<Item = &mut TypeExpr> {
+        let (positional, named): (&mut [TypeExpr], &mut [TypeField]) = match self {
+            Self::Nullary => (&mut [], &mut []),
+            Self::Positional(types) => (types, &mut []),
+            Self::Named(fields) => (&mut [], fields),
+        };
+        positional.iter_mut().chain(named.iter_mut().map(|field| &mut field.ty))
     }
 }
 
@@ -860,6 +874,14 @@ impl Parser<'_> {
                 }
                 Ok(TypeExpr { kind: TypeKind::Adt(constructors), span })
             }
+            TokKind::Name(name) if name.starts_with(char::is_uppercase)
+                && self.toks.get(self.pos + 1).is_some_and(|token| token.kind == TokKind::LBrace) => {
+                let constructor = self.parse_constructor_type()?;
+                if self.kind() == &TokKind::Pipe {
+                    return Err(self.error_at(span, Some("E108"), "constructor alternatives require a leading |"));
+                }
+                Ok(TypeExpr { kind: TypeKind::Adt(vec![constructor]), span })
+            }
             _ if context == TypeContext::Implementation => self.parse_alias_type(),
             _ => {
                 let next = self.toks.get(self.pos + 1).map(|token| &token.kind);
@@ -903,6 +925,10 @@ impl Parser<'_> {
     fn parse_constructor_type(&mut self) -> Result<ConstructorDecl, Diagnostic> {
         let span = self.span();
         let name = self.expect_upper_name("a constructor name")?;
+        if self.kind() == &TokKind::LBrace {
+            let TypeExpr { kind: TypeKind::Record(fields), .. } = self.parse_record_type()? else { unreachable!() };
+            return Ok(ConstructorDecl { name: DeclaredName { name, span }, payload: ConstructorPayload::Named(fields) });
+        }
         if self.kind() != &TokKind::LParen { return Ok(ConstructorDecl { name: DeclaredName { name, span }, payload: ConstructorPayload::Nullary }); }
         self.bump();
         let args = self.parse_type_list(&TokKind::RParen)?;
@@ -1301,6 +1327,10 @@ impl Parser<'_> {
         if !constructor_head(&node) {
             return Ok(node);
         }
+        if self.kind() == &TokKind::LBrace {
+            self.bump();
+            return Ok(Node { kind: NodeKind::NamedConstructor(DeclaredName { name, span }, self.parse_record_fields()?), span });
+        }
         if name == "Ok" && self.kind() == &TokKind::Unit {
             let unit = Node { kind: NodeKind::Unit, span: self.span() };
             self.bump();
@@ -1604,6 +1634,27 @@ impl Parser<'_> {
         self.parse_pattern()
     }
 
+    fn parse_record_pattern_fields(&mut self) -> Result<Vec<(DeclaredName, Option<Pattern>)>, Diagnostic> {
+        self.expect(&TokKind::LBrace)?;
+        if self.kind() == &TokKind::RBrace { return Err(self.error(None, "record pattern requires a field")); }
+        let mut fields = Vec::new();
+        loop {
+            let span = self.span();
+            let name = self.expect_lower_name("a field name")?;
+            let pattern = if self.kind() == &TokKind::Eq {
+                self.bump();
+                self.parse_pattern()?
+            } else {
+                Pattern { kind: PatternKind::Name(name.clone()), span }
+            };
+            fields.push((DeclaredName { name, span }, Some(pattern)));
+            if self.kind() != &TokKind::Semicolon { break; }
+            self.bump();
+        }
+        self.expect(&TokKind::RBrace)?;
+        Ok(fields)
+    }
+
     fn parse_pattern(&mut self) -> Result<Pattern, Diagnostic> {
         let span = self.span();
         let kind = match self.kind() {
@@ -1617,7 +1668,9 @@ impl Parser<'_> {
                     self.written_list_patterns.push(span);
                 }
                 self.bump();
-                if self.kind() == &TokKind::LParen && name.chars().next().is_some_and(char::is_uppercase) {
+                if self.kind() == &TokKind::LBrace && name.starts_with(char::is_uppercase) {
+                    PatternKind::NamedConstructor(DeclaredName { name, span }, self.parse_record_pattern_fields()?)
+                } else if self.kind() == &TokKind::LParen && name.chars().next().is_some_and(char::is_uppercase) {
                     self.bump();
                     let mut args = Vec::new();
                     if self.kind() != &TokKind::RParen {
@@ -1637,31 +1690,7 @@ impl Parser<'_> {
                 }
             }
             TokKind::LBracket => return self.parse_list_pattern(),
-            TokKind::LBrace => {
-                self.bump();
-                if self.kind() == &TokKind::RBrace { return Err(self.error(None, "record pattern requires a field")); }
-                let mut fields = Vec::new();
-                if self.kind() != &TokKind::RBrace {
-                    loop {
-                        let binding_span = self.span();
-                        let fname = self.expect_lower_name("a field name")?;
-                        let pat = if self.kind() == &TokKind::Eq {
-                            self.bump();
-                            Some(self.parse_pattern()?)
-                        } else {
-                            Some(Pattern { kind: PatternKind::Name(fname.clone()), span: binding_span })
-                        };
-                        fields.push((DeclaredName { name: fname, span: binding_span }, pat));
-                        if self.kind() == &TokKind::Semicolon {
-                            self.bump();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                self.expect(&TokKind::RBrace)?;
-                PatternKind::Record(fields)
-            }
+            TokKind::LBrace => PatternKind::Record(self.parse_record_pattern_fields()?),
             TokKind::Minus => {
                 self.bump();
                 let kind = match self.kind() {
@@ -1725,7 +1754,7 @@ fn contains_branch(node: &Node) -> Option<Span> {
         NodeKind::Apply(f, args) => contains_branch(f).or_else(|| args.iter().find_map(contains_branch)),
         NodeKind::Call(_, args) => args.iter().find_map(contains_branch),
         NodeKind::Field(l, _) => contains_branch(l),
-        NodeKind::Record(fields) => fields.iter().find_map(|(_, v)| contains_branch(v)),
+        NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => fields.iter().find_map(|(_, v)| contains_branch(v)),
         NodeKind::List(items, tail) => items.iter().chain(tail.iter().map(Box::as_ref)).find_map(contains_branch),
         NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
             contains_branch(value).or_else(|| contains_branch(body))
@@ -1804,6 +1833,10 @@ pub fn canonical(node: &Node) -> String {
             if matches!(l.kind, NodeKind::Apply(..) | NodeKind::Int(_)) { format!("({}).{}", canonical(l), r.name) }
             else { format!("{}.{}", canonical(l), r.name) }
         },
+        NodeKind::NamedConstructor(name, fields) => {
+            let inner = fields.iter().map(|(field, value)| format!("{} = {}", field.name, canonical(value))).collect::<Vec<_>>().join("; ");
+            format!("{} {{ {inner} }}", name.name)
+        }
         NodeKind::Record(fields) => {
             let inner = fields
                 .iter()

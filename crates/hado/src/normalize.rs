@@ -7,6 +7,7 @@ enum PatternShape {
     Literal(Node),
     Constructor(String, Vec<PatternShape>),
     Record(BTreeMap<String, PatternShape>),
+    NamedConstructor(String, BTreeMap<String, PatternShape>),
 }
 
 pub fn same_pattern(left: &Pattern, right: &Pattern) -> bool {
@@ -24,6 +25,9 @@ fn covers_shape(previous: &PatternShape, next: &PatternShape) -> bool {
             a == b
                 && left.len() == right.len()
                 && left.iter().zip(right).all(|(a, b)| covers_shape(a, b))
+        }
+        (PatternShape::NamedConstructor(a, left), PatternShape::NamedConstructor(b, right)) => {
+            a == b && left.iter().all(|(field, pattern)| right.get(field).is_some_and(|other| covers_shape(pattern, other)))
         }
         (PatternShape::Record(left), PatternShape::Record(right)) => {
             left.iter().all(|(field, pattern)| {
@@ -46,7 +50,7 @@ fn pattern_shape(pattern: &Pattern) -> PatternShape {
         PatternKind::Constructor(name, args) => {
             PatternShape::Constructor(name.clone(), args.iter().map(pattern_shape).collect())
         }
-        PatternKind::Record(fields) => {
+        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => {
             let fields = fields
                 .iter()
                 .filter_map(|(name, pattern)| {
@@ -61,7 +65,9 @@ fn pattern_shape(pattern: &Pattern) -> PatternShape {
                     }
                 })
                 .collect();
-            PatternShape::Record(fields)
+            if let PatternKind::NamedConstructor(name, _) = &pattern.kind {
+                PatternShape::NamedConstructor(name.name.clone(), fields)
+            } else { PatternShape::Record(fields) }
         }
     }
 }
@@ -76,18 +82,10 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
         (_, NodeKind::List(items, tail)) => rebuilds_list(pattern, items, tail.as_deref()),
         (PatternKind::Name(a), NodeKind::Name(b)) => a == b,
         (PatternKind::Literal(a), _) => same_expression(a, node),
-        (PatternKind::Record(patterns), NodeKind::Record(fields)) => {
-            patterns.len() == fields.len()
-                && patterns.iter().all(|(name, pattern)| {
-                    fields
-                        .iter()
-                        .find(|(field, _)| field.name == name.name)
-                        .is_some_and(|(_, value)| match pattern {
-                            Some(pattern) => rebuilds_pattern(pattern, value),
-                            None => matches!(&value.kind, NodeKind::Name(value) if value == &name.name),
-                        })
-                })
+        (PatternKind::NamedConstructor(pattern_name, patterns), NodeKind::NamedConstructor(value_name, fields)) => {
+            pattern_name.name == value_name.name && rebuilds_fields(patterns, fields)
         }
+        (PatternKind::Record(patterns), NodeKind::Record(fields)) => rebuilds_fields(patterns, fields),
         (PatternKind::Constructor(name, patterns), NodeKind::Call(callee, args)) => {
             matches!(&callee.kind, NodeKind::Name(called) if called == name)
                 && patterns.len() == args.len()
@@ -98,6 +96,15 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
         }
         _ => false,
     }
+}
+
+fn rebuilds_fields(patterns: &[(crate::parser::DeclaredName, Option<Pattern>)], fields: &[(crate::parser::DeclaredName, Node)]) -> bool {
+    patterns.len() == fields.len() && patterns.iter().all(|(name, pattern)| {
+        fields.iter().find(|(field, _)| field.name == name.name).is_some_and(|(_, value)| match pattern {
+            Some(pattern) => rebuilds_pattern(pattern, value),
+            None => matches!(&value.kind, crate::parser::NodeKind::Name(value) if value == &name.name),
+        })
+    })
 }
 
 fn rebuilds_list(pattern: &Pattern, items: &[Node], tail: Option<&Node>) -> bool {
@@ -135,7 +142,7 @@ fn bind_pattern(pattern: &mut Pattern, scope: &mut BTreeMap<String, String>, nex
                 bind_pattern(arg, scope, next);
             }
         }
-        PatternKind::Record(fields) => {
+        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => {
             fields.sort_by(|a, b| a.0.name.cmp(&b.0.name));
             for (name, pattern) in fields {
                 let pattern = pattern.get_or_insert_with(|| Pattern {
@@ -207,6 +214,9 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
             for item in items.iter_mut().chain(tail.iter_mut().map(Box::as_mut)) {
                 rename(item, scope, next);
             }
+        }
+        NodeKind::NamedConstructor(_, fields) => {
+            for (_, value) in fields { rename(value, scope, next); }
         }
         NodeKind::Record(fields) => {
             fields.sort_by(|a, b| a.0.name.cmp(&b.0.name));

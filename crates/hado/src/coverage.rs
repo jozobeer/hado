@@ -55,6 +55,7 @@ fn cell(pattern: &Pattern) -> Cell {
             NodeKind::Bool(value) => Cell::Constructor(value.to_string(), vec![]),
             _ => Cell::Unknown,
         },
+        PatternKind::NamedConstructor(..) => Cell::Unknown,
         PatternKind::Record(fields) => Cell::Record(
             fields
                 .iter()

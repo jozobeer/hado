@@ -132,7 +132,7 @@ impl FileScope {
 
     fn aggregate_children(&self, node: &mut Node, bound: &BTreeSet<String>) {
         match &mut node.kind {
-            NodeKind::Record(fields) => {
+            NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
                 for (_, value) in fields { self.expression(value, bound); }
             }
             NodeKind::List(values, tail) => {

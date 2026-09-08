@@ -194,6 +194,7 @@ fn type_source(ty: &TypeExpr) -> String {
                 match &variant.payload {
                     crate::parser::ConstructorPayload::Positional(args) => format!("| {name}({})", type_list(args)),
                     crate::parser::ConstructorPayload::Nullary => format!("| {name}"),
+                    crate::parser::ConstructorPayload::Named(fields) => format!("| {name} {{ {} }}", fields.iter().map(|field| format!("{}: {}", field.name.name, type_source(&field.ty))).collect::<Vec<_>>().join("; ")),
                 }
             })
             .collect::<Vec<_>>()

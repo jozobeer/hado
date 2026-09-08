@@ -248,6 +248,13 @@ impl Collector<'_> {
             NodeKind::Name(name) if !scope.constructors.contains(name) => {
                 if let Some(owner) = self.constructors.get(name) { references.insert(owner.clone()); }
             }
+            NodeKind::NamedConstructor(name, _) if !scope.constructors.contains(&name.name) => {
+                if let Some(owner) = self.constructors.get(&name.name) { references.insert(owner.clone()); }
+            }
+            NodeKind::Let { pat, .. } | NodeKind::LetQ { pat, .. } => self.pattern(pat, scope, references),
+            NodeKind::PatternBranch { arms, .. } => {
+                for (pattern, _) in arms { self.pattern(pattern, scope, references); }
+            }
             NodeKind::Field(base, _) => {
                 if let NodeKind::Name(name) = &base.kind {
                     if name.starts_with(char::is_uppercase) {
@@ -263,6 +270,27 @@ impl Collector<'_> {
         }
         for child in crate::check::children(node) { self.expression(child, scope, references); }
     }
+    fn pattern(&self, pattern: &crate::parser::Pattern, scope: &Scope, references: &mut References) {
+        use crate::parser::PatternKind;
+        let name = match &pattern.kind {
+            PatternKind::Name(name) | PatternKind::Constructor(name, _) => Some(name.as_str()),
+            PatternKind::NamedConstructor(name, _) => Some(name.name.as_str()),
+            _ => None,
+        };
+        if let Some(name) = name.filter(|name| !scope.constructors.contains(*name)) {
+            if let Some(owner) = self.constructors.get(name) { references.insert(owner.clone()); }
+        }
+        match &pattern.kind {
+            PatternKind::Constructor(_, args) => {
+                for arg in args { self.pattern(arg, scope, references); }
+            }
+            PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => {
+                for nested in fields.iter().filter_map(|(_, nested)| nested.as_ref()) { self.pattern(nested, scope, references); }
+            }
+            _ => {}
+        }
+    }
+
 }
 
 fn type_name(name: &str, scope: &Scope, references: &mut References) {

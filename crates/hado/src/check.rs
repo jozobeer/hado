@@ -96,7 +96,7 @@ fn node_type_has_span(node: &Node, span: crate::parser::Span) -> bool {
 fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
     if ty.span == span { return true; }
     match &ty.kind {
-        crate::parser::TypeKind::Adt(variants) => variants.iter().any(|variant| variant.name.span == span || variant.payload.types().iter().any(|ty| type_has_span(ty, span))),
+        crate::parser::TypeKind::Adt(variants) => variants.iter().any(|variant| variant.name.span == span || variant.payload.types().any(|ty| type_has_span(ty, span))),
         crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => args.iter().any(|ty| type_has_span(ty, span)),
         crate::parser::TypeKind::Record(fields) => fields.iter().any(|field| type_has_span(&field.ty, span)),
         _ => false,
@@ -172,7 +172,7 @@ fn references_type_parameter(ty: &TypeExpr, parameter: &str) -> bool {
 }
 
 fn constructor_uses_type_parameter(variant: &crate::parser::ConstructorDecl, parameter: &str) -> bool {
-    variant.payload.types().iter().any(|ty| references_type_parameter(ty, parameter))
+    variant.payload.types().any(|ty| references_type_parameter(ty, parameter))
 }
 
 fn check_unused<'a>(
@@ -494,7 +494,7 @@ fn needs_literal_fallback(pattern: &Pattern) -> bool {
     match &pattern.kind {
         PatternKind::Literal(value) => !matches!(value.kind, NodeKind::Bool(_)),
         PatternKind::Constructor(_, args) => args.iter().any(needs_literal_fallback),
-        PatternKind::Record(fields) => fields
+        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => fields
             .iter()
             .filter_map(|(_, p)| p.as_ref())
             .any(needs_literal_fallback),
@@ -621,7 +621,7 @@ pub(crate) fn children(node: &Node) -> Vec<&Node> {
                 .collect()
         }
         NodeKind::List(items, tail) => items.iter().chain(tail.iter().map(Box::as_ref)).collect(),
-        NodeKind::Record(fields) => fields.iter().map(|(_, value)| value).collect(),
+        NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => fields.iter().map(|(_, value)| value).collect(),
         NodeKind::Let { value, body, .. }
         | NodeKind::LetQ { value, body, .. }
         | NodeKind::DoQ { value, body } => vec![value, body],
