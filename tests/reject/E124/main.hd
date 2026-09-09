@@ -1,0 +1,8 @@
+// spec: §58
+// error: E124
+// item: handler と with
+def main = 1
+effect Ask
+reply ask: String
+handler Ask as Fixed
+reply ask => resume

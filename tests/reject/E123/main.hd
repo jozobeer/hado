@@ -1,0 +1,6 @@
+// spec: §57
+// error: E123
+// item: 効果の宣言
+def main = 1
+effect E
+abort stop: Unit
