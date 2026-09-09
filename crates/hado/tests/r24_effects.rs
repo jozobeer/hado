@@ -234,3 +234,37 @@ fn matching_value_member_rows_are_kept() {
     case.write("main.hd", "def main = Real.value\n");
     assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
 }
+
+#[test]
+fn unannotated_argument_accepts_matching_effect_arguments() {
+    let case = Case::new();
+    case.write("main.hd", "effect Io\nreply tick: Unit\neffect A Yield\ncapture yield(value: A): Unit\ndef tickit (x: Int): Int {Io} => x\ndef g f x: Int {Io, Int Yield} => tickit (f x)\ndef emit (n: Int): Int {Int Yield} => n\ndef main = g emit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Int Yield, Io}\n");
+}
+
+#[test]
+fn unannotated_argument_rejects_mismatched_effect_arguments() {
+    let case = Case::new();
+    case.write("main.hd", "effect Io\nreply tick: Unit\neffect A Yield\ncapture yield(value: A): Unit\ndef tickit (x: Int): Int {Io} => x\ndef g f x: Int {Io, Int Yield} => tickit (f x)\ndef semit (n: Int): Int {String Yield} => n\ndef main = g semit 1\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E305]"), "{diagnostic}");
+}
+
+#[test]
+fn annotated_argument_accepts_matching_effect_arguments() {
+    let case = Case::new();
+    case.write("main.hd", "effect A Yield\ncapture yield(value: A): Unit\ndef emit (n: Int): Int {Int Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g emit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Int Yield}\n");
+}
+
+#[test]
+fn annotated_argument_rejects_mismatched_effect_arguments() {
+    let case = Case::new();
+    case.write("main.hd", "effect A Yield\ncapture yield(value: A): Unit\ndef semit (n: Int): Int {String Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g semit 1\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E305]"), "{diagnostic}");
+}
