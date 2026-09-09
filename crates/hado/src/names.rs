@@ -1,6 +1,16 @@
 use crate::parser::{Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) const BUILTIN_TYPES: &[&str] = &["Int", "Float", "Bool", "Char", "String", "Unit", "Fn"];
+
+pub(crate) fn is_upper_reference(name: &str) -> bool {
+    name.rsplit("::").next().is_some_and(|name| name.starts_with(char::is_uppercase))
+}
+
+pub(crate) fn is_value_reference(name: &str) -> bool {
+    !name.contains("::") && name.starts_with(char::is_lowercase)
+}
+
 pub fn definition_groups(ast: &Ast) -> Vec<Vec<String>> {
     let mut graph = dependency_graph(ast);
     let mut groups = Vec::new();
@@ -56,7 +66,7 @@ pub(crate) fn bound_names(pattern: &Pattern) -> BTreeSet<String> {
 
 pub(crate) fn bindings(pattern: &Pattern) -> Vec<(&str, crate::parser::Span)> {
     match &pattern.kind {
-        PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => vec![(name, pattern.span)],
+        PatternKind::Name(name) if !crate::names::is_upper_reference(name) => vec![(name, pattern.span)],
         PatternKind::Constructor(_, args) => args.iter().flat_map(bindings).collect(),
         PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => fields.iter().flat_map(|(name, nested)| match nested {
             Some(nested) => bindings(nested),
@@ -211,7 +221,7 @@ fn declaration_types(
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     let mut types = inherited.clone();
-    types.extend(["Int", "Float", "Bool", "Char", "String", "Unit", "Fn"].map(str::to_owned));
+    types.extend(BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
     types.extend(items.iter().filter_map(|item| match item {
         Item::TypeDef(def) => Some(def.name.clone()),
         _ => None,
@@ -313,7 +323,7 @@ fn resolve_type_names(
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !types.contains(name) {
                 diagnostics.push(crate::parser::Diagnostic {
-                    path: path.into(), line: ty.span.line, col: ty.span.col,
+                    path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
                     code: Some("E204".into()), message: format!("unknown type {name}"),
                 });
             }
@@ -447,7 +457,7 @@ pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::D
     }
     for item in &ast.items {
         if let Item::ModuleImpl(module) = item {
-            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], written_list_patterns: vec![], long_condition_functions: vec![], equality_anchors: vec![], qualified_type_anchors: vec![] }, path) {
+            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, branches_after_fallback: vec![], branch_anchors: vec![], written_list_patterns: vec![], long_condition_functions: vec![], equality_anchors: vec![], qualified_type_anchors: vec![], name_sites: vec![] }, path) {
                 diagnostics.push(error);
             }
         }

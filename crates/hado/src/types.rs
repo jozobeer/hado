@@ -284,6 +284,15 @@ fn display_arguments(types: &[Ty]) -> String {
 }
 
 impl Scheme {
+    pub(crate) fn resolved(&self, inference: &Inference) -> Self {
+        let resolve = |id| if self.variables.contains(&id) { Ty::Var(id) } else { inference.resolve(&Ty::Var(id)) };
+        Self {
+            variables: self.variables.clone(),
+            ty: self.ty.map_variables(&resolve),
+            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.map_variables(&resolve))).collect(),
+        }
+    }
+
     pub(crate) fn as_thunk(&self) -> Self {
         Self { variables: self.variables.clone(), ty: Ty::Fn(vec![], Box::new(self.ty.clone())), constraints: self.constraints.clone() }
     }

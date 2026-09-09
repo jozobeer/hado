@@ -1,5 +1,6 @@
 mod file_scopes;
 mod functor_instances;
+mod namespaces;
 pub mod build;
 pub mod project;
 pub mod emit;
@@ -102,11 +103,21 @@ struct ParsedSource {
     trusted_start: Option<usize>,
     prelude_items: usize,
     other_entry_roots: Vec<String>,
+    namespace_diagnostics: Vec<parser::Diagnostic>,
+    namespace_anchors: Vec<(parser::Span, parser::Span)>,
 }
 
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
     let ast = parser::parse_source(source, path)?;
-    with_prelude(ast, path, source.lines().count())
+    let mut parsed = with_prelude(ast, path, source.lines().count())?;
+    resolve_namespaces(&mut parsed, &[(0, Vec::new())], &std::collections::BTreeSet::from([Vec::new()]), path);
+    Ok(parsed)
+}
+
+fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)], directories: &std::collections::BTreeSet<Vec<String>>, path: &str) {
+    let resolved = namespaces::resolve(&mut parsed.ast, files, directories, parsed.prelude_items, path);
+    parsed.namespace_diagnostics = resolved.diagnostics;
+    parsed.namespace_anchors = resolved.error_anchors;
 }
 
 fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
@@ -132,6 +143,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
             ast.branch_anchors.extend(parsed.branch_anchors);
             ast.equality_anchors.extend(parsed.equality_anchors);
             ast.qualified_type_anchors.extend(parsed.qualified_type_anchors);
+            ast.name_sites.extend(parsed.name_sites);
             ast.written_list_patterns.extend(parsed.written_list_patterns);
             ast.long_condition_functions.extend(parsed.long_condition_functions);
             ast.branches_after_fallback.extend(parsed.branches_after_fallback);
@@ -142,7 +154,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    Ok(ParsedSource { ast, trusted_start, prelude_items, other_entry_roots: Vec::new() })
+    Ok(ParsedSource { ast, trusted_start, prelude_items, other_entry_roots: Vec::new(), namespace_diagnostics: Vec::new(), namespace_anchors: Vec::new() })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
@@ -150,21 +162,33 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
 }
 
 fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
-    let ParsedSource { ast, trusted_start, prelude_items, other_entry_roots } = parsed;
+    let ParsedSource { ast, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
+    let adjust = |error| namespace_diagnostic(check::arm_diagnostic(ast, error), namespace_anchors);
     let name_error = names::resolve_with_prelude(ast, path, *trusted_start).err();
     let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start) {
         Ok(result) => result,
-        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).map(|error| check::arm_diagnostic(ast, error)).min_by_key(diagnostic_order).unwrap()),
+        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).chain(namespace_diagnostics.iter().cloned()).map(adjust).min_by_key(diagnostic_order).unwrap()),
     };
     diagnostics.extend(name_error);
+    diagnostics.extend(namespace_diagnostics.iter().cloned());
     if let Err(error) = check::check_ast(ast, path) {
         diagnostics.push(error);
     }
     diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, path));
-    match diagnostics.into_iter().map(|error| check::arm_diagnostic(ast, error)).min_by_key(diagnostic_order) {
+    match diagnostics.into_iter().map(adjust).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
     }
+}
+
+fn namespace_diagnostic(mut error: parser::Diagnostic, anchors: &[(parser::Span, parser::Span)]) -> parser::Diagnostic {
+    if error.code.as_deref() == Some("E204") {
+        if let Some((_, target)) = anchors.iter().find(|(source, _)| source.line == error.line && source.col == error.col) {
+            error.line = target.line;
+            error.col = target.col;
+        }
+    }
+    error
 }
 
 pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize) {

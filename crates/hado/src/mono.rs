@@ -353,7 +353,7 @@ impl Lowerer {
             return self.lambda(node, params, body);
         }
         if let NodeKind::Name(name) = &node.kind {
-            if name.chars().next().is_some_and(char::is_uppercase) {
+            if crate::names::is_upper_reference(name) {
                 let ty = self
                     .value_types
                     .get(&(node.span.line, node.span.col))
@@ -825,7 +825,7 @@ impl Lowerer {
             let pattern = crate::named_patterns::positional(pattern, &self.named_constructors, &|name| self.resolve_constructor(name));
             let (name, patterns) = match &pattern.kind {
                 crate::parser::PatternKind::Name(name)
-                    if name.chars().next().is_some_and(char::is_uppercase) =>
+                    if crate::names::is_upper_reference(name) =>
                 {
                     (name, &[][..])
                 }
@@ -944,7 +944,7 @@ impl Lowerer {
         use crate::parser::PatternKind;
         let pattern = crate::named_patterns::positional(pattern, &self.named_constructors, &|name| self.resolve_constructor(name));
         match &pattern.kind {
-            PatternKind::Name(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
                 let name = &self.resolve_constructor(name);
                 if !self.constructor_fields(name, &value.ty())?.is_empty() {
                     return Err("constructor pattern needs fields".into());
@@ -1035,7 +1035,7 @@ impl Lowerer {
         let ty = value.ty();
         bindings.push((id, value));
         match &pattern.kind {
-            PatternKind::Name(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
                 return Err("nested constructor pattern requires a tag check".into());
             }
             PatternKind::Name(name) => {
@@ -1191,7 +1191,7 @@ impl Lowerer {
             }
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
-            if name.chars().next().is_some_and(char::is_uppercase) {
+            if crate::names::is_upper_reference(name) {
                 let ty = self
                     .composite_types
                     .get(&(node.span.line, node.span.col))

@@ -8,6 +8,7 @@ struct Scope {
     named_fields: BTreeMap<String, BTreeSet<String>>,
     signatures: BTreeMap<String, BTreeSet<String>>,
     modules: BTreeMap<String, BTreeSet<String>>,
+    incomplete_modules: BTreeSet<String>,
     functors: BTreeSet<String>,
 }
 
@@ -51,7 +52,9 @@ impl Scope {
                 if matches!(&module.form, ImplementationForm::Functor(_)) {
                     scope.functors.insert(module.name.clone());
                 } else {
-                    let members = scope.signatures.get(&module.sig).cloned().unwrap_or_default();
+                    let signature = scope.signatures.get(&module.sig);
+                    if signature.is_none() { scope.incomplete_modules.insert(module.name.clone()); }
+                    let members = signature.cloned().unwrap_or_default();
                     modules.entry(module.name.clone()).or_default().extend(members);
                 }
             }
@@ -115,6 +118,7 @@ impl Resolver<'_> {
                 for param in params {
                     if let Some(members) = scope.signatures.get(&param.contract) {
                         local.modules.insert(param.name.clone(), members.clone());
+                        local.incomplete_modules.remove(&param.name);
                         local.functors.remove(&param.name);
                     } else {
                         self.report(param.contract_span, "E204", &param.contract);
@@ -163,7 +167,7 @@ impl Resolver<'_> {
                         return;
                     }
                     if let Some(members) = scope.modules.get(name) {
-                        if !members.contains(&field.name) { self.report(field.span, "E204", &field.name); }
+                        if !scope.incomplete_modules.contains(name) && !members.contains(&field.name) { self.report(field.span, "E204", &field.name); }
                         return;
                     }
                 }
@@ -213,7 +217,7 @@ impl Resolver<'_> {
 
     fn pattern(&mut self, pattern: &Pattern, scope: &Scope) {
         match &pattern.kind {
-            PatternKind::Name(name) if name.starts_with(char::is_uppercase) => {
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
                 if !scope.constructors.contains(name) { self.report(pattern.span, "E204", name); }
             }
             PatternKind::Constructor(name, args) => {

@@ -45,7 +45,7 @@ impl FileScope {
     }
 
     fn reference(&self, name: &mut String, bound: &BTreeSet<String>) {
-        if !name.starts_with(char::is_lowercase) || bound.contains(name) {
+        if !crate::names::is_value_reference(name) || bound.contains(name) {
             return;
         }
         if name == "compare" && !self.outer.contains(name) {

@@ -214,7 +214,7 @@ pub(crate) fn boolean_coverage(
         arms.iter().any(|(pattern, _)| {
         matches!(&pattern.kind, PatternKind::Literal(node) if node.kind == NodeKind::Bool(*value))
             || matches!(&pattern.kind, PatternKind::Underscore)
-            || matches!(&pattern.kind, PatternKind::Name(name) if !name.starts_with(char::is_uppercase))
+            || matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name))
     })
     });
     let (code, location, message) = match (exhaustive, fallback) {
@@ -323,7 +323,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
                     message: "use a fallback instead of a catch-all underscore pattern".into(),
                 });
             }
-            if matches!(&pattern.kind, PatternKind::Name(name) if !name.starts_with(char::is_uppercase))
+            if matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name))
             {
                 return Err(Diagnostic {
                     path: path.into(),
@@ -417,7 +417,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
     for (pattern, body) in arms {
         if matches!(&pattern.kind, PatternKind::Constructor(name, args)
             if name == "Error" && args.len() == 1
-                && matches!(&args[0].kind, PatternKind::Name(bound) if !bound.starts_with(char::is_uppercase)))
+                && matches!(&args[0].kind, PatternKind::Name(bound) if !crate::names::is_upper_reference(bound)))
             && crate::normalize::rebuilds_pattern(pattern, body)
         {
             return Err(Diagnostic {
@@ -450,7 +450,7 @@ fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if !arms.is_empty()
         && arms.iter().all(|(pattern, _)| !matches!(&pattern.kind,
             PatternKind::Underscore) && !matches!(&pattern.kind,
-            PatternKind::Name(name) if !name.starts_with(char::is_uppercase)))
+            PatternKind::Name(name) if !crate::names::is_upper_reference(name)))
         && fallback_unchanged
         && arms
             .iter()

@@ -49,6 +49,10 @@ pub(crate) fn max_line(ast: &Ast) -> usize {
         instance.declared(name);
         instance.span(member);
     }
+    for site in &mut ast.name_sites {
+        instance.span(&mut site.start);
+        for part in &mut site.parts { instance.declared(part); }
+    }
     instance.maximum.get()
 }
 
@@ -141,6 +145,7 @@ impl Instance<'_> {
 
     fn ty(&self, ty: &mut TypeExpr) {
         self.span(&mut ty.span);
+        self.span(&mut ty.name_span);
         match &mut ty.kind {
             TypeKind::Name(name) => self.qualified_type(name),
             TypeKind::Apply(name, arguments) => {

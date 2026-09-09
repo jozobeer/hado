@@ -236,7 +236,7 @@ impl Collector<'_> {
         };
         let mut free = BTreeSet::new();
         crate::names::free_names(body, &bound, &mut free);
-        references.extend(free.iter().filter(|name| name.starts_with(char::is_lowercase)).cloned().map(Key::Value));
+        references.extend(free.iter().filter(|name| crate::names::is_value_reference(name)).cloned().map(Key::Value));
         self.expression(body, scope, references);
     }
 
@@ -257,7 +257,7 @@ impl Collector<'_> {
             }
             NodeKind::Field(base, _) => {
                 if let NodeKind::Name(name) = &base.kind {
-                    if name.starts_with(char::is_uppercase) {
+                    if crate::names::is_upper_reference(name) {
                         if !scope.modules.contains(name) { references.insert(Key::Module(name.clone())); }
                         return;
                     }

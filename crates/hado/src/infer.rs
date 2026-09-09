@@ -229,9 +229,10 @@ impl Checker<'_> {
         }
         for name in &ambiguous.declared_constructors {
             self.ambiguous_constructors.remove(name);
-            self.constructors.remove(name);
-            self.constructor_tags.remove(name);
-            self.named_constructors.remove(name);
+            let hidden = format!("{}$outer${name}", self.module_path.join("."));
+            if let Some(scheme) = self.constructors.remove(name) { self.constructors.insert(hidden.clone(), scheme); }
+            if let Some(tag) = self.constructor_tags.remove(name) { self.constructor_tags.insert(hidden.clone(), tag); }
+            if let Some(fields) = self.named_constructors.remove(name) { self.named_constructors.insert(hidden, fields); }
         }
         self.ambiguous_types.extend(ambiguous.types);
         self.ambiguous_constructors.extend(ambiguous.constructors);
@@ -281,7 +282,7 @@ impl Checker<'_> {
             let saved = self.clone();
             self.module_path.push(module.name.clone());
             let ast = Ast { items: module.items.clone(), span: module.span,
-                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new() };
+                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new() };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
             if let Err(error) = result { diagnostics.push(error); }
@@ -329,7 +330,7 @@ impl Checker<'_> {
             }
             for (name, scheme) in &mut self.module_definitions {
                 if name.starts_with(&prefix) {
-                    *scheme = scheme.qualify_data_types(&type_names);
+                    *scheme = scheme.resolved(&self.inference).qualify_data_types(&type_names);
                 }
             }
             for (span, ty) in &mut self.value_types {
@@ -484,7 +485,7 @@ impl Checker<'_> {
             span: module.span,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
-            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(),
+            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();
@@ -502,9 +503,9 @@ impl Checker<'_> {
                 }
                 let qualified = format!("{}.{}", self.module_path.join("."), def.name);
                 let parameters: HashMap<_, _> = def.params.iter().map(|p| (p.name.clone(), self.inference.fresh())).collect();
-                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span }).collect();
+                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span, name_span: p.span }).collect();
                 let kind = if arguments.is_empty() { TypeKind::Name(def.name.clone()) } else { TypeKind::Apply(def.name.clone(), arguments) };
-                let reference = TypeExpr { kind, span: def.name_span };
+                let reference = TypeExpr { kind, span: def.name_span, name_span: def.name_span };
                 let body = self.payload_type(&reference, &parameters, def.name_span)?;
                 let parameters = def.params.iter().map(|p| match parameters[&p.name] { Ty::Var(id) => id, _ => unreachable!() }).collect();
                 self.abstract_representations.insert(qualified.clone(), TypeRealization { parameters, body });
@@ -555,6 +556,7 @@ impl Checker<'_> {
             let public_type = self.signature_type(declaration, &public_parameters, true)?;
             exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints));
         }
+        self.resolve_projections(false)?;
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
             self.deferred.push(self.error(definitions[name].span, Some("E514"), &format!("unused module definition {name}")));
@@ -1110,7 +1112,7 @@ impl Checker<'_> {
     fn pattern(&mut self, pattern: &Pattern, expected: &Ty) -> Result<(), Diagnostic> {
         match &pattern.kind {
             PatternKind::Underscore => Ok(()),
-            PatternKind::Name(name) if name.starts_with(char::is_uppercase) => {
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
                 self.constructor_pattern(name, &[], expected, pattern.span)
             }
             PatternKind::Name(name) => {
@@ -1529,7 +1531,7 @@ impl Checker<'_> {
         match name.as_str() {
             "Int" => Ok(Ty::Int), "Float" => Ok(Ty::Float), "Bool" => Ok(Ty::Bool),
             "Char" => Ok(Ty::Char), "String" => Ok(Ty::String), "Unit" => Ok(Ty::Unit),
-            _ => Err(self.error(annotation.span, Some("E204"), &format!("unknown type {name}"))),
+            _ => Err(self.error(annotation.name_span, Some("E204"), &format!("unknown type {name}"))),
         }
     }
 

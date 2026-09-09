@@ -42,7 +42,7 @@ fn covers_shape(previous: &PatternShape, next: &PatternShape) -> bool {
 
 fn pattern_shape(pattern: &Pattern) -> PatternShape {
     match &pattern.kind {
-        PatternKind::Name(name) if name.starts_with(char::is_uppercase) => {
+        PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
             PatternShape::Constructor(name.clone(), Vec::new())
         }
         PatternKind::Name(_) | PatternKind::Underscore => PatternShape::Any,
@@ -134,7 +134,7 @@ fn bind_name(name: &mut String, scope: &mut BTreeMap<String, String>, next: &mut
 
 fn bind_pattern(pattern: &mut Pattern, scope: &mut BTreeMap<String, String>, next: &mut usize) {
     match &mut pattern.kind {
-        PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => {
+        PatternKind::Name(name) if !crate::names::is_upper_reference(name) => {
             bind_name(name, scope, next)
         }
         PatternKind::Constructor(_, args) => {

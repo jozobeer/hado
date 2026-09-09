@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 use crate::lexer::{Tok, TokKind};
 use crate::parser::{Ast, Diagnostic};
 
 #[derive(Clone)]
 struct SourceFile {
+    physical: PathBuf,
     path: String,
+    directory: Vec<String>,
     offset: usize,
 }
 
@@ -19,13 +22,15 @@ pub struct Project {
 }
 
 impl Project {
-    pub fn load(entry: &Path) -> Result<Self, Diagnostic> {
-        let token_files = read_files(entry)?;
+    pub fn load(entry: &Path) -> Result<Self, LoadError> {
+        let (token_files, directories) = read_files(entry)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (ast, other_entry_roots) = parse_files(&token_files)?;
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
-        let mut parsed = crate::with_prelude(ast, &files[0].path, last_line)?;
+        let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
         parsed.other_entry_roots = other_entry_roots;
+        let namespaces: Vec<_> = files.iter().map(|file| (file.offset, file.directory.clone())).collect();
+        crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &files[0].path);
         Ok(Self { parsed, files })
     }
 
@@ -50,24 +55,58 @@ impl Project {
     }
 }
 
-fn sibling_paths(entry: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
-    let parent = entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let mut siblings = Vec::new();
-    collect_sources(parent, &mut siblings)?;
-    siblings.retain(|path| !(path.parent() == Some(parent) && path.file_name() == entry.file_name()));
-    siblings.sort_by(|a, b| a.as_os_str().as_encoded_bytes().cmp(b.as_os_str().as_encoded_bytes()));
-    let mut paths = vec![entry.to_path_buf()];
-    paths.extend(siblings);
-    Ok(paths)
+#[derive(Debug)]
+pub enum LoadError {
+    Input(String),
+    Diagnostic(Diagnostic),
 }
 
-fn collect_sources(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Diagnostic> {
-    for entry in std::fs::read_dir(directory).map_err(|error| io_error(directory, error))? {
-        let entry = entry.map_err(|error| io_error(directory, error))?;
+impl From<Diagnostic> for LoadError {
+    fn from(error: Diagnostic) -> Self { Self::Diagnostic(error) }
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Input(message) => formatter.write_str(message),
+            Self::Diagnostic(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+
+fn root_directory(entry: &Path) -> &Path {
+    entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."))
+}
+
+fn relative_source(path: &Path, root: &Path) -> PathBuf {
+    path.strip_prefix(root).map(Path::to_path_buf)
+        .unwrap_or_else(|_| PathBuf::from(path.file_name().unwrap()))
+}
+
+fn namespace_parts(relative: &Path) -> Vec<String> {
+    relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect()
+}
+
+fn valid_directory_name(name: &str) -> bool {
+    if !name.starts_with(char::is_lowercase) { return false; }
+    let Ok(tokens) = crate::lexer::lex_full(name) else { return false; };
+    matches!(tokens.as_slice(), [Tok { kind: TokKind::Name(value), .. }, Tok { kind: TokKind::Eof, .. }] if value == name)
+}
+
+fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, directories: &mut BTreeSet<Vec<String>>) -> Result<(), LoadError> {
+    let mut entries = std::fs::read_dir(directory).map_err(|error| io_error(directory, error))?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| io_error(directory, error))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
         let path = entry.path();
         let kind = entry.file_type().map_err(|error| io_error(&path, error))?;
         if kind.is_dir() {
-            collect_sources(&path, paths)?;
+            let name = entry.file_name();
+            if !name.to_str().is_some_and(valid_directory_name) {
+                return Err(LoadError::Input(format!("invalid namespace directory: {}", relative_source(&path, root).display())));
+            }
+            directories.insert(namespace_parts(&relative_source(&path, root)));
+            collect_sources(&path, root, paths, directories)?;
         } else if path.is_file()
             && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
             paths.push(path);
@@ -81,36 +120,44 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
         code: None, message: error.to_string() }
 }
 
-fn read_files(entry: &Path) -> Result<Vec<TokenFile>, Diagnostic> {
+fn read_files(entry: &Path) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
+    let root = root_directory(entry);
+    let mut paths = Vec::new();
+    let mut directories = BTreeSet::from([Vec::new()]);
+    collect_sources(root, root, &mut paths, &mut directories)?;
+    let selected = relative_source(entry, root);
+    paths.retain(|path| relative_source(path, root) != selected);
+    paths.sort_by(|a, b| relative_source(a, root).as_os_str().as_encoded_bytes()
+        .cmp(relative_source(b, root).as_os_str().as_encoded_bytes()));
+    paths.insert(0, entry.to_path_buf());
     let mut files = Vec::new();
     let mut offset = 0;
-    for path in sibling_paths(entry)? {
-        let file = read_file(&path, offset)?;
+    for path in paths {
+        let file = read_file(&path, root, offset)?;
         offset = file.tokens.last().unwrap().span.line + 1;
         files.push(file);
     }
-    Ok(files)
+    Ok((files, directories))
 }
 
-fn read_file(path: &Path, offset: usize) -> Result<TokenFile, Diagnostic> {
-    let text = std::fs::read_to_string(path).map_err(|error| io_error(path, error))?;
+fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagnostic> {
+    let relative = relative_source(path, root);
+    let display = relative.to_string_lossy().into_owned();
+    let text = std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?;
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
-        path: path.to_string_lossy().into_owned(), line: error.line, col: error.col,
+        path: display.clone(), line: error.line, col: error.col,
         code: error.code.map(str::to_owned), message: error.message,
     })?;
     for token in &mut tokens { token.span.line += offset; }
-    Ok(TokenFile { source: SourceFile { path: path.to_string_lossy().into_owned(), offset }, tokens })
+    let directory = namespace_parts(relative.parent().unwrap_or(Path::new("")));
+    Ok(TokenFile { source: SourceFile { physical: path.to_path_buf(), path: display, directory, offset }, tokens })
 }
 
 fn parse_files(files: &[TokenFile]) -> Result<(Ast, Vec<String>), Diagnostic> {
-    let root = Path::new(&files[0].source.path).parent().unwrap_or(Path::new(""));
-    let mut ast = parse_file(&files[0].tokens, Path::new(&files[0].source.path), true)?;
+    let mut ast = parse_file(&files[0])?;
     let mut roots = crate::file_scopes::isolate(&mut ast, 0);
     for (index, file) in files.iter().enumerate().skip(1) {
-        let path = Path::new(&file.source.path);
-        let parent = path.parent().unwrap_or(Path::new(""));
-        let root_file = parent == root || (root.as_os_str().is_empty() && parent == Path::new("."));
-        let mut parsed = parse_file(&file.tokens, path, root_file)
+        let mut parsed = parse_file(file)
             .map_err(|mut error| { error.line -= file.source.offset; error })?;
         roots.extend(crate::file_scopes::isolate(&mut parsed, index));
         ast.append(parsed);
@@ -118,9 +165,10 @@ fn parse_files(files: &[TokenFile]) -> Result<(Ast, Vec<String>), Diagnostic> {
     Ok((ast, roots))
 }
 
-fn parse_file(tokens: &[Tok], path: &Path, root_file: bool) -> Result<Ast, Diagnostic> {
-    let role_error = role_error(tokens, path, root_file);
-    let parsed = crate::parser::parse_tokens(tokens, &path.to_string_lossy());
+fn parse_file(file: &TokenFile) -> Result<Ast, Diagnostic> {
+    let path = Path::new(&file.source.path);
+    let role_error = role_error(&file.tokens, path, file.source.directory.is_empty());
+    let parsed = crate::parser::parse_tokens(&file.tokens, &file.source.path);
     match (parsed, role_error) {
         (Ok(ast), None) => Ok(ast),
         (Ok(_), Some(error)) | (Err(error), None) => Err(error),

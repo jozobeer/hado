@@ -77,7 +77,12 @@ fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), S
 
 fn try_reject(rel: &str, text: &str) -> Result<(), String> {
     let code = header_value(text, "// error:").ok_or("missing error code")?;
-    match hado::project::Project::load(&repo_root().join(rel)).and_then(|project| project.check()) {
+    let checked = match hado::project::Project::load(&repo_root().join(rel)) {
+        Ok(project) => project.check(),
+        Err(hado::project::LoadError::Diagnostic(error)) => Err(error),
+        Err(error) => return Err(error.to_string()),
+    };
+    match checked {
         Err(error) if error.code.as_deref() == Some(code.as_str()) => Ok(()),
         Err(error) => Err(format!("expected {code}, got {error}")),
         Ok(_) => Err(format!("expected {code}, but checking succeeded")),

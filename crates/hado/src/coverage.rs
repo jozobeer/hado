@@ -46,7 +46,7 @@ pub(crate) fn record_patterns(arms: &[(Pattern, Node)], families: &Families) -> 
 fn cell(pattern: &Pattern) -> Cell {
     match &pattern.kind {
         PatternKind::Underscore => Cell::Any,
-        PatternKind::Name(name) if !name.starts_with(char::is_uppercase) => Cell::Any,
+        PatternKind::Name(name) if !crate::names::is_upper_reference(name) => Cell::Any,
         PatternKind::Name(name) => Cell::Constructor(name.clone(), vec![]),
         PatternKind::Constructor(name, args) => {
             Cell::Constructor(name.clone(), args.iter().map(cell).collect())
