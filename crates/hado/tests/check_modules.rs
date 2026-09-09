@@ -120,9 +120,13 @@ fn internal_record_schemas_use_qualified_result_types() {
     let checked = check_source(source, "t").unwrap();
     let mut inference = hado::types::Inference::default();
     let ty = inference.instantiate(&checked.module_records["A.Representation"].1);
-    assert_eq!(ty, Ty::Fn(vec![Ty::Int], Box::new(Ty::Adt("A.Representation".into(), vec![]))));
+    assert_eq!(ty, Ty::fn_of(vec![Ty::Int], Ty::Adt("A.Representation".into(), vec![])));
     let make = inference.instantiate(&checked.module_definitions["A.make"]);
-    assert_eq!(make, ty);
+    let Ty::Fn(args, result, _) = make else {
+        panic!("make is a function");
+    };
+    assert_eq!(args, vec![Ty::Int]);
+    assert_eq!(*result, Ty::Adt("A.Representation".into(), vec![]));
     assert!(checked.composite_types.values().any(|ty| ty == &Ty::Adt("A.Representation".into(), vec![])));
 }
 

@@ -31,7 +31,7 @@ impl TryFrom<&Ty> for Type {
             Ty::Error => return Err(UnresolvedType::Invalid),
             Ty::Adt(name, args) => Self::Data(name.clone(), convert_types(args)?),
             Ty::Abstract(name, args) => Self::Abstract(name.clone(), convert_types(args)?),
-            Ty::Fn(args, result) => Self::Closure(
+            Ty::Fn(args, result, _) => Self::Closure(
                 convert_types(args)?,
                 Box::new(Self::try_from(result.as_ref())?),
             ),
@@ -560,9 +560,10 @@ impl Signature {
         let mut inference = crate::types::Inference::default();
         let function = inference.instantiate(scheme);
         let result = result.map(Ty::from).unwrap_or_else(|| inference.fresh());
-        let expected = Ty::Fn(
+        let expected = Ty::fn_with(
             parameters.iter().map(Ty::from).collect(),
-            Box::new(result.clone()),
+            result.clone(),
+            inference.fresh_row(),
         );
         inference
             .unify(&function, &expected)
@@ -591,9 +592,9 @@ impl From<&Type> for Ty {
             Type::Abstract(name, args) => {
                 Self::Abstract(name.clone(), args.iter().map(Self::from).collect())
             }
-            Type::Closure(args, result) => Self::Fn(
+            Type::Closure(args, result) => Self::fn_of(
                 args.iter().map(Self::from).collect(),
-                Box::new(Self::from(result.as_ref())),
+                Self::from(result.as_ref()),
             ),
         }
     }
@@ -1088,7 +1089,7 @@ impl Lowerer {
         let mut inference = crate::types::Inference::default();
         let instantiated = inference.instantiate(scheme);
         let (fields, result) = match instantiated {
-            Ty::Fn(fields, result) => (fields, *result),
+            Ty::Fn(fields, result, _) => (fields, *result),
             result => (vec![], result),
         };
         inference
@@ -1146,7 +1147,7 @@ impl Lowerer {
             .position(|name| name == field)
             .ok_or("unknown record field")?;
         let mut inference = crate::types::Inference::default();
-        let Ty::Fn(fields, result) = inference.instantiate(scheme) else {
+        let Ty::Fn(fields, result, _) = inference.instantiate(scheme) else {
             return Err("invalid record schema".into());
         };
         inference
@@ -1597,9 +1598,10 @@ impl Lowerer {
             return Err("function arity mismatch".into());
         }
         let mut specialization = crate::types::Inference::default();
-        let concrete = Ty::Fn(
+        let concrete = Ty::fn_with(
             types.iter().map(Ty::from).collect(),
-            Box::new(Ty::from(&signature.result)),
+            Ty::from(&signature.result),
+            specialization.fresh_row(),
         );
         specialization
             .unify(scheme.body(), &concrete)

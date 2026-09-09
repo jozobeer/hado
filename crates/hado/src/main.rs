@@ -50,7 +50,7 @@ fn main() -> ExitCode {
     match project.check() {
         Ok(checked) => {
             if print {
-                println!("{}", checked.main);
+                println!("{}{}", checked.main, checked.effects.suffix());
             }
             ExitCode::SUCCESS
         }

@@ -312,7 +312,7 @@ fn inferred_type(ty: &Ty, scope: &Scope, references: &mut References) {
             type_name(name, scope, references);
             for arg in args { inferred_type(arg, scope, references); }
         }
-        Ty::Fn(args, result) => {
+        Ty::Fn(args, result, _) => {
             for arg in args { inferred_type(arg, scope, references); }
             inferred_type(result, scope, references);
         }

@@ -5,7 +5,7 @@ fn mono_types_reject_variables_at_any_depth() {
     for ty in [
         Ty::Var(7),
         Ty::Adt("List".into(), vec![Ty::Var(7)]),
-        Ty::Fn(vec![Ty::Int], Box::new(Ty::Var(7))),
+        Ty::fn_of(vec![Ty::Int], Ty::Var(7)),
     ] {
         assert!(Type::try_from(&ty).is_err());
     }
@@ -13,9 +13,9 @@ fn mono_types_reject_variables_at_any_depth() {
 
 #[test]
 fn mono_types_preserve_concrete_data_and_closure_signatures() {
-    let ty = Ty::Fn(
+    let ty = Ty::fn_of(
         vec![Ty::Adt("List".into(), vec![Ty::Bool])],
-        Box::new(Ty::Int),
+        Ty::Int,
     );
     assert_eq!(
         Type::try_from(&ty).unwrap(),
@@ -332,11 +332,11 @@ fn checked_program_exposes_polymorphic_definition_signatures() {
     let mut inference = hado::types::Inference::default();
     let signature = inference.instantiate(&checked.definitions["id"]);
     inference
-        .unify(&signature, &Ty::Fn(vec![Ty::Bool], Box::new(Ty::Bool)))
+        .unify(&signature, &Ty::fn_of(vec![Ty::Bool], Ty::Bool))
         .unwrap();
     assert_eq!(
         inference.resolve(&signature),
-        Ty::Fn(vec![Ty::Bool], Box::new(Ty::Bool))
+        Ty::fn_of(vec![Ty::Bool], Ty::Bool)
     );
 }
 
@@ -386,7 +386,7 @@ fn checked_lambdas_retain_types_resolved_by_their_calls() {
     let checked = hado::check_source(source, "t").unwrap();
     assert_eq!(
         checked.value_types[&(1, source.find("fn(").unwrap() + 1)],
-        hado::types::Ty::Fn(vec![hado::types::Ty::Int], Box::new(hado::types::Ty::Int))
+        hado::types::Ty::fn_of(vec![hado::types::Ty::Int], hado::types::Ty::Int)
     );
 }
 

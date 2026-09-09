@@ -20,7 +20,7 @@ impl Checker<'_> {
         if fields.len() != declared.len() {
             return Err(self.error(name.span, Some("E301"), "constructor field count mismatch"));
         }
-        let Ty::Fn(payload, result) = self.inference.instantiate(&scheme) else { return Ok(Ty::Error); };
+        let Ty::Fn(payload, result, _) = self.inference.instantiate(&scheme) else { return Ok(Ty::Error); };
         for (field, value) in fields {
             let index = declared.iter().position(|candidate| candidate == &field.name).unwrap();
             self.branch_result(value, &payload[index])?;
@@ -37,7 +37,7 @@ impl Checker<'_> {
                 return Err(self.error(field.span, Some("E204"), "unknown constructor field"));
             }
         }
-        let Ty::Fn(payload, result) = self.inference.instantiate(&scheme) else { return Ok(()); };
+        let Ty::Fn(payload, result, _) = self.inference.instantiate(&scheme) else { return Ok(()); };
         self.unify(&result, expected, name.span)?;
         for (field, nested) in fields {
             let index = declared.iter().position(|candidate| candidate == &field.name).unwrap();

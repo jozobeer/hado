@@ -173,6 +173,7 @@ struct Namespaces {
     constructors: BTreeSet<String>,
     values: BTreeSet<String>,
     signatures: BTreeSet<String>,
+    effects: BTreeSet<String>,
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
@@ -186,7 +187,7 @@ pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<
     if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
     if let Err(error) = check_cycles(ast, path) { diagnostics.push(error); }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
-    declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), path, &mut diagnostics);
+    declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), &BTreeSet::new(), path, &mut diagnostics);
     match diagnostics.into_iter().map(|error| crate::check::arm_diagnostic(ast, error)).min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
@@ -221,13 +222,19 @@ fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<cr
 }
 
 fn declaration_types(
-    items: &[Item], inherited: &BTreeSet<String>, inherited_signatures: &BTreeMap<String, Vec<String>>, path: &str,
+    items: &[Item], inherited: &BTreeSet<String>, inherited_signatures: &BTreeMap<String, Vec<String>>,
+    inherited_effects: &BTreeSet<String>, path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     let mut types = inherited.clone();
     types.extend(BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
     types.extend(items.iter().filter_map(|item| match item {
         Item::TypeDef(def) => Some(def.name.clone()),
+        _ => None,
+    }));
+    let mut effects = inherited_effects.clone();
+    effects.extend(items.iter().filter_map(|item| match item {
+        Item::Effect(effect) => Some(effect.name.clone()),
         _ => None,
     }));
     let mut signatures = inherited_signatures.clone();
@@ -263,7 +270,7 @@ fn declaration_types(
                 for (contract, members) in &signatures {
                     contract_types.extend(members.iter().map(|member| format!("{contract}.{member}")));
                 }
-                declaration_types(&signature.items, &contract_types, &signatures, path, diagnostics);
+                declaration_types(&signature.items, &contract_types, &signatures, &effects, path, diagnostics);
             }
             Item::ModuleImpl(module) => {
                 let mut local = types.clone();
@@ -276,51 +283,80 @@ fn declaration_types(
                         }
                     }
                 }
-                declaration_types(&module.items, &local, &signatures, path, diagnostics);
+                declaration_types(&module.items, &local, &signatures, &effects, path, diagnostics);
             }
             Item::SigDef(def) => {
                 let mut local = types.clone();
                 local.extend(def.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                 for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
-                    resolve_type_names(ty, &local, path, diagnostics);
+                    resolve_type_names(ty, &local, &effects, path, diagnostics);
                 }
             }
             Item::TypeDef(def) => {
                 let mut local = types.clone();
                 local.extend(def.params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
-                if let Some(ty) = &def.ty { resolve_type_names(ty, &local, path, diagnostics); }
+                if let Some(ty) = &def.ty { resolve_type_names(ty, &local, &effects, path, diagnostics); }
             }
             Item::Def(def) => {
                 let body = match &def.kind {
                     DefKind::Value(body) => body,
                     DefKind::Function { params, ret, body } => {
                         for ty in params.iter().filter_map(|param| param.ty.as_ref()).chain(ret.iter()) {
-                            resolve_type_names(ty, &types, path, diagnostics);
+                            resolve_type_names(ty, &types, &effects, path, diagnostics);
                         }
                         body
                     }
                 };
-                expression_type_names(body, &types, path, diagnostics);
+                expression_type_names(body, &types, &effects, path, diagnostics);
             }
-            Item::Effect(_) | Item::Handler(_) => {}
+            Item::Effect(effect) => {
+                let mut local = types.clone();
+                local.extend(effect.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
+                for op in &effect.ops {
+                    for ty in op.params.iter().filter_map(|param| param.ty.as_ref()).chain(op.ret.iter()) {
+                        resolve_type_names(ty, &local, &effects, path, diagnostics);
+                    }
+                }
+            }
+            Item::Handler(handler) => {
+                let mut local = types.clone();
+                local.extend(handler.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
+                for ty in handler.params.iter().filter_map(|param| param.ty.as_ref()) {
+                    resolve_type_names(ty, &local, &effects, path, diagnostics);
+                }
+                for arm in &handler.arms {
+                    match arm {
+                        crate::parser::HandlerArm::Operation { params, body, .. } => {
+                            for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
+                                resolve_type_names(ty, &local, &effects, path, diagnostics);
+                            }
+                            expression_type_names(body, &local, &effects, path, diagnostics);
+                        }
+                        crate::parser::HandlerArm::Return { param, body, .. } => {
+                            if let Some(ty) = &param.ty { resolve_type_names(ty, &local, &effects, path, diagnostics); }
+                            expression_type_names(body, &local, &effects, path, diagnostics);
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 fn expression_type_names(
-    node: &Node, types: &BTreeSet<String>, path: &str,
+    node: &Node, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     if let NodeKind::Fn { params, .. } = &node.kind {
         for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
-            resolve_type_names(ty, types, path, diagnostics);
+            resolve_type_names(ty, types, effects, path, diagnostics);
         }
     }
-    for child in crate::check::children(node) { expression_type_names(child, types, path, diagnostics); }
+    for child in crate::check::children(node) { expression_type_names(child, types, effects, path, diagnostics); }
 }
 
 fn resolve_type_names(
-    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, path: &str,
+    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     use crate::parser::TypeKind;
@@ -333,23 +369,44 @@ fn resolve_type_names(
                 });
             }
             if let TypeKind::Apply(_, args) = &ty.kind {
-                for arg in args { resolve_type_names(arg, types, path, diagnostics); }
+                for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
             }
         }
         TypeKind::Group(args) => {
-            for arg in args { resolve_type_names(arg, types, path, diagnostics); }
+            for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
         }
         TypeKind::Record(fields) => {
-            for field in fields { resolve_type_names(&field.ty, types, path, diagnostics); }
+            for field in fields { resolve_type_names(&field.ty, types, effects, path, diagnostics); }
         }
         TypeKind::Adt(variants) => {
             for variant in variants {
-                for payload in variant.payload.types() { resolve_type_names(payload, types, path, diagnostics); }
+                for payload in variant.payload.types() { resolve_type_names(payload, types, effects, path, diagnostics); }
             }
         }
     }
-    if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
-        for ty in effects { resolve_type_names(ty, types, path, diagnostics); }
+    if let Some(crate::parser::EffectRow::Row(labels)) = &ty.effects {
+        for label in labels { resolve_effect_label(label, types, effects, path, diagnostics); }
+    }
+}
+
+fn resolve_effect_label(
+    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    use crate::parser::TypeKind;
+    match &ty.kind {
+        TypeKind::Name(name) | TypeKind::Apply(name, _) => {
+            if !effects.contains(name) {
+                diagnostics.push(crate::parser::Diagnostic {
+                    path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
+                    code: Some("E204".into()), message: format!("unknown effect {name}"),
+                });
+            }
+            if let TypeKind::Apply(_, args) = &ty.kind {
+                for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -392,7 +449,17 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
                 register(&mut names.signatures, &signature.name, signature.name_span, path)?;
                 declarations(&signature.items, path)?;
             }
-            Item::Effect(_) | Item::Handler(_) => {}
+            Item::Effect(effect) => {
+                register(&mut names.effects, &effect.name, effect.name_span, path)?;
+                register_parameters(&effect.type_params, path)?;
+                for op in &effect.ops {
+                    register(&mut names.values, &op.name, op.name_span, path)?;
+                }
+            }
+            Item::Handler(handler) => {
+                register(&mut names.modules, &handler.name, handler.name_span, path)?;
+                register_parameters(&handler.type_params, path)?;
+            }
         }
     }
     Ok(())

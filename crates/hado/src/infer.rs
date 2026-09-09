@@ -1,10 +1,10 @@
 mod functors;
 mod named;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
-use crate::parser::{FieldName, Param, Pattern, PatternKind, TypeExpr, TypeKind};
-use crate::types::{ComparisonConstraint, Inference, Scheme, Ty, TypeError, TypeRealization};
+use crate::parser::{EffectRow, FieldName, HandlerArm, OpKind, Param, Pattern, PatternKind, TypeExpr, TypeKind};
+use crate::types::{ComparisonConstraint, Inference, Row, Scheme, Ty, TypeError, TypeRealization};
 use crate::Checked;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
@@ -45,6 +45,11 @@ struct Checker<'a> {
     comparison_constraints: Vec<ComparisonConstraint>,
     equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
+    eval_effects: Row,
+    main_effects: Row,
+    effects: HashMap<String, Vec<(OpKind, String)>>,
+    handlers: HashMap<String, String>,
+    operations: HashMap<String, OpKind>,
 }
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
@@ -101,12 +106,17 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         equality_anchors: ast.equality_anchors.iter().map(|(left, right, operator)|
             ((left.line, left.col, right.line, right.col), *operator)).collect(),
         recursive_calls: HashMap::new(),
+        eval_effects: Row::pure(),
+        main_effects: Row::pure(),
+        effects: HashMap::new(),
+        handlers: HashMap::new(),
+        operations: HashMap::new(),
     };
     checker.deferred.extend(functors::duplicate_applications(ast, path));
     let mut definitions = HashMap::new();
     let inferred = (|| -> Result<Ty, Diagnostic> {
         let comparable = checker.inference.fresh();
-        let compare = Ty::Fn(vec![comparable.clone(), comparable.clone()], Box::new(Ty::Int));
+        let compare = Ty::fn_of(vec![comparable.clone(), comparable.clone()], Ty::Int);
         checker.values.insert(
             "compare".into(),
             checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
@@ -154,6 +164,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
                 _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
             }
         }
+        checker.register_effects(&ast.items)?;
         for group in crate::dependencies::inference_groups(ast) {
             let mut functions = Vec::new();
             for item in group {
@@ -180,13 +191,16 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             .cloned()
             .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
         let main = checker.inference.instantiate(&scheme);
-        if !checker.inference.resolve(&main).is_monomorphic() {
+        checker.inference.close_rows(&main);
+        checker.main_effects = checker.inference.close_row(&checker.main_effects);
+        let main = checker.inference.resolve(&main);
+        if !main.is_monomorphic() {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
         }
-        if checker.contains_function(&checker.inference.resolve(&main), &mut Vec::new()) {
+        if checker.contains_function(&main, &mut Vec::new()) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
         }
-        if checker.contains_abstract(&checker.inference.resolve(&main), &mut Vec::new()) {
+        if checker.contains_abstract(&main, &mut Vec::new()) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E705"), "main cannot return a value containing an abstract type"));
         }
         Ok(main)
@@ -213,6 +227,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         composite_types: checker.composite_types.iter().map(|(span, ty)| (*span, checker.inference.resolve(ty))).collect(),
         value_types: checker.value_types.iter().map(|(span, ty)| (*span, checker.inference.resolve(ty))).collect(),
         main: checker.inference.resolve(&main),
+        effects: checker.inference.resolve_row(&checker.main_effects),
         definitions: definitions.keys().map(|name| (name.clone(), checker.values[name].clone())).collect(),
     }, checker.deferred))
 }
@@ -351,7 +366,7 @@ impl Checker<'_> {
                         }
                     } else {
                         for (name, scheme) in &self.constructors {
-                            let result = match scheme.body() { Ty::Fn(_, result) => result.as_ref(), ty => ty };
+                            let result = match scheme.body() { Ty::Fn(_, result, _) => result.as_ref(), ty => ty };
                             if matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name) {
                                 if let Some(fields) = self.named_constructors.get(name) {
                                     self.module_named_constructors.insert(format!("{}.{}", self.module_path.join("."), name), fields.clone());
@@ -554,6 +569,8 @@ impl Checker<'_> {
                 (name.clone(), Ty::Abstract(public.clone(), vec![]))).collect();
             public_parameters.extend(parameters);
             let public_type = self.signature_type(declaration, &public_parameters, true)?;
+            let resolved = self.inference.resolve(&expected);
+            let _ = self.inference.unify(&public_type, &resolved);
             exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints));
         }
         self.resolve_projections(false)?;
@@ -564,28 +581,26 @@ impl Checker<'_> {
         Ok(exports)
     }
 
-    fn signature_type(&self, declaration: &crate::parser::SigDef, parameters: &HashMap<String, Ty>, public: bool) -> Result<Ty, Diagnostic> {
+    fn signature_type(&mut self, declaration: &crate::parser::SigDef, parameters: &HashMap<String, Ty>, public: bool) -> Result<Ty, Diagnostic> {
         let mut bindings: HashMap<_, _> = self.contract_types.types.iter().map(|(name, implementation)| {
             let ty = implementation.as_ref().map_or(Ty::Error, |name| Ty::Abstract(name.clone(), vec![]));
             (name.clone(), ty)
         }).collect();
         bindings.extend(parameters.clone());
         let parameters = &bindings;
-        let args = declaration
-            .params
-            .iter()
-            .map(|param| {
-                let annotation = param.ty.as_ref().ok_or_else(|| {
-                    self.error(param.span, None, "signature parameter requires a type")
-                })?;
-                self.payload_type(annotation, parameters, param.span)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let result = declaration.ret.as_ref().ok_or_else(|| {
+        let mut args = Vec::new();
+        for param in &declaration.params {
+            let annotation = param.ty.as_ref().ok_or_else(|| {
+                self.error(param.span, None, "signature parameter requires a type")
+            })?;
+            args.push(self.payload_type(annotation, parameters, param.span)?);
+        }
+        let result_ty = declaration.ret.as_ref().ok_or_else(|| {
             self.error(declaration.span, None, "signature requires a return type")
         })?;
-        let result = self.payload_type(result, parameters, declaration.span)?;
-        let ty = if declaration.params.is_empty() { result } else { Ty::Fn(args, Box::new(result)) };
+        let result = self.payload_type(result_ty, parameters, declaration.span)?;
+        let row = self.row_annotation(&result_ty.effects)?;
+        let ty = if declaration.params.is_empty() { result } else { Ty::fn_with(args, result, row) };
         if public { return Ok(ty); }
         let prefix = format!("{}.", self.module_path.join("."));
         let local = self.abstract_representations.iter().filter(|(name, _)| name.starts_with(&prefix))
@@ -628,7 +643,8 @@ impl Checker<'_> {
             let invalid = self.recover_inference_error(result.map(|()| false), true)?;
             invalid_group |= invalid;
             if invalid {
-                self.values.insert(name.clone(), Scheme::monomorphic(self.invalid_definition_type(def)));
+                let ty = self.invalid_definition_type(def);
+                self.values.insert(name.clone(), Scheme::monomorphic(ty));
             }
         }
         self.current_definition = None;
@@ -641,7 +657,8 @@ impl Checker<'_> {
         if invalid_group {
             self.projections.retain(|(_, field, _, _)| inherited_projections.contains(&(field.dot.line, field.dot.col)));
             for name in group {
-                self.values.insert(name.clone(), Scheme::monomorphic(self.invalid_definition_type(definitions[name])));
+                let ty = self.invalid_definition_type(definitions[name]);
+                self.values.insert(name.clone(), Scheme::monomorphic(ty));
             }
             return Ok(());
         }
@@ -663,7 +680,7 @@ impl Checker<'_> {
         self.unify(placeholder, &ty, def.span)
     }
 
-    fn invalid_definition_type(&self, def: &crate::parser::Def) -> Ty {
+    fn invalid_definition_type(&mut self, def: &crate::parser::Def) -> Ty {
         let (params, ret) = match &def.kind {
             DefKind::Function { params, ret, .. } => (params, ret.as_ref()),
             DefKind::Value(Node { kind: NodeKind::Fn { params, .. }, .. }) => (params, None),
@@ -672,7 +689,7 @@ impl Checker<'_> {
         let args = params.iter().map(|param| param.ty.as_ref()
             .and_then(|ty| self.annotation(ty, param.span).ok()).unwrap_or(Ty::Error)).collect();
         let result = ret.and_then(|ty| self.annotation(ty, def.span).ok()).unwrap_or(Ty::Error);
-        Ty::Fn(args, Box::new(result))
+        Ty::fn_of(args, result)
     }
 
     fn check_recursive_arguments(&self, calls: &Ty, definition: &Ty, span: Span) -> Result<(), Diagnostic> {
@@ -680,14 +697,14 @@ impl Checker<'_> {
             Ty::Var(id) => self.recursive_calls.get(id),
             _ => None,
         };
-        if let (Some(calls), Ty::Fn(parameters, _)) = (recursive_calls, self.inference.resolve(definition)) {
+        if let (Some(calls), Ty::Fn(parameters, _, _)) = (recursive_calls, self.inference.resolve(definition)) {
             let first = calls.iter().filter(|(arguments, _)| self.recursive_arguments_occur(arguments, &parameters))
                 .map(|(_, span)| *span).min_by_key(|span| (span.line, span.col));
             if let Some(span) = first {
                 return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
             }
         }
-        if let (Ty::Fn(calls, _), Ty::Fn(parameters, _)) = (self.inference.resolve(calls), self.inference.resolve(definition)) {
+        if let (Ty::Fn(calls, _, _), Ty::Fn(parameters, _, _)) = (self.inference.resolve(calls), self.inference.resolve(definition)) {
             if self.recursive_arguments_occur(&calls, &parameters) {
                 return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
             }
@@ -702,14 +719,23 @@ impl Checker<'_> {
 
     fn definition(&mut self, def: &crate::parser::Def) -> Result<Ty, Diagnostic> {
         match &def.kind {
-            DefKind::Value(body) => self.expression(body),
-            DefKind::Function { params, ret, body } => {
-                let ty = self.function(params, body)?;
-                if let (Some(annotation), Ty::Fn(_, result)) = (ret, &ty) {
-                    let expected = self.annotation(annotation, def.span)?;
-                    self.unify(result, &expected, def.span)?;
+            DefKind::Value(body) => {
+                let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
+                if def.name == "main" || def.name.ends_with("$main") {
+                    self.main_effects = row;
                 }
                 Ok(ty)
+            }
+            DefKind::Function { params, ret, body } => {
+                let ty = self.function(params, body)?;
+                let Some(annotation) = ret else { return Ok(ty); };
+                let Ty::Fn(args, result, inferred) = ty else { return Ok(ty); };
+                let expected = self.annotation(annotation, def.span)?;
+                self.unify(&result, &expected, def.span)?;
+                let expected_row = self.row_annotation(&annotation.effects)?;
+                self.contain_row(&inferred, &expected_row, def.span)?;
+                let row = if annotation.effects.is_some() { expected_row } else { *inferred };
+                Ok(Ty::fn_with(args, *result, row))
             }
         }
     }
@@ -740,7 +766,7 @@ impl Checker<'_> {
                 .collect::<Result<Vec<_>, _>>()?;
             let scheme = self
                 .inference
-                .generalize(&Ty::Fn(payload, Box::new(result)), &[]);
+                .generalize(&Ty::fn_of(payload, result), &[]);
             self.records.insert(
                 def.name.clone(),
                 (
@@ -781,7 +807,7 @@ impl Checker<'_> {
         let ty = if payload.is_empty() {
             result.clone()
         } else {
-            Ty::Fn(payload, Box::new(result.clone()))
+            Ty::fn_of(payload, result.clone())
         };
         if self.ambiguous_constructors.contains(name) { return Ok(()); }
         let scheme = self.inference.generalize(&ty, &[]);
@@ -799,7 +825,7 @@ impl Checker<'_> {
     }
 
     fn payload_type(
-        &self,
+        &mut self,
         expr: &TypeExpr,
         parameters: &HashMap<String, Ty>,
         span: Span,
@@ -808,7 +834,7 @@ impl Checker<'_> {
     }
 
     fn recovering_payload_type(
-        &self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
+        &mut self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
     ) -> Result<Ty, Diagnostic> {
         if rejected.iter().any(|reference| reference.line == expr.span.line && reference.col == expr.span.col) {
             return Ok(Ty::Error);
@@ -902,6 +928,7 @@ impl Checker<'_> {
                         )
                     })?;
                 let (ty, constraints) = self.inference.instantiate_constrained(&scheme);
+                let ty = self.unwrap_operation(name, ty);
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 self.record_comparisons(constraints, node.span);
                 Ok(ty)
@@ -938,9 +965,15 @@ impl Checker<'_> {
                 Ok(self.inference.resolve(&result))
             }
             NodeKind::CondBranch { arms, fallback } => self.conditions(arms, fallback.as_deref()),
-            NodeKind::With { args, body, .. } => {
+            NodeKind::With { handler, args, body } => {
                 for arg in args { self.expression(arg)?; }
-                self.expression(body)
+                let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
+                if let Some(effect) = self.handlers.get(&handler.name).cloned() {
+                    self.add_effects(&row.without_effect(&effect));
+                } else {
+                    return Err(self.error(handler.span, Some("E204"), &format!("unbound name {}", handler.name)));
+                }
+                Ok(ty)
             }
             NodeKind::Resume => Ok(self.inference.fresh()),
         }
@@ -966,7 +999,7 @@ impl Checker<'_> {
             ));
         }
         let (names, scheme) = &candidates[0];
-        let Ty::Fn(payload, result) = self.inference.instantiate(scheme) else {
+        let Ty::Fn(payload, result, _) = self.inference.instantiate(scheme) else {
             unreachable!()
         };
         for (name, ty) in names.iter().zip(&payload) {
@@ -1030,7 +1063,7 @@ impl Checker<'_> {
         if candidates.len() != 1 {
             return Ok(());
         }
-        let Ty::Fn(_, result) = self.inference.instantiate(&candidates[0]) else {
+        let Ty::Fn(_, result, _) = self.inference.instantiate(&candidates[0]) else {
             unreachable!()
         };
         self.unify(ty, &result, span)
@@ -1060,7 +1093,7 @@ impl Checker<'_> {
             .iter()
             .position(|name| name == &field.name)
             .ok_or_else(|| self.error(field.span, Some("E204"), "unknown field"))?;
-        let Ty::Fn(payload, result) = self.inference.instantiate(&scheme) else {
+        let Ty::Fn(payload, result, _) = self.inference.instantiate(&scheme) else {
             unreachable!()
         };
         self.unify(ty, &result, field.dot)?;
@@ -1149,7 +1182,7 @@ impl Checker<'_> {
             let [scheme] = candidates.as_slice() else {
                 return Err(self.error(span, Some("E304"), "record pattern fields must identify one nominal type"));
             };
-            let Ty::Fn(_, result) = self.inference.instantiate(scheme) else { unreachable!() };
+            let Ty::Fn(_, result, _) = self.inference.instantiate(scheme) else { unreachable!() };
             self.unify(expected, &result, span)?;
         }
         for (name, pattern) in fields {
@@ -1186,7 +1219,7 @@ impl Checker<'_> {
             return Ok(());
         }
         match ty {
-            Ty::Fn(payload, result) => {
+            Ty::Fn(payload, result, _) => {
                 self.unify(&result, expected, span)?;
                 self.pattern_arguments(args, &payload, span)
             }
@@ -1211,8 +1244,17 @@ impl Checker<'_> {
     }
 
     fn condition(&mut self, node: &Node) -> Result<(), Diagnostic> {
-        let ty = self.expression(node)?;
-        self.unify(&ty, &Ty::Bool, node.span)
+        let saved = self.eval_effects.clone();
+        self.eval_effects = self.inference.fresh_row();
+        let ty = self.expression(node);
+        let row = self.inference.resolve_row(&self.eval_effects);
+        self.eval_effects = saved;
+        let ty = ty?;
+        self.unify(&ty, &Ty::Bool, node.span)?;
+        if row.has_known_effects() {
+            return Err(self.error(node.span, Some("E308"), "effects are not allowed in branch conditions"));
+        }
+        Ok(())
     }
 
     fn branch_result(&mut self, node: &Node, expected: &Ty) -> Result<(), Diagnostic> {
@@ -1244,6 +1286,8 @@ impl Checker<'_> {
     }
 
     fn function_body(&mut self, params: &[Param], body: &Node) -> Result<Ty, Diagnostic> {
+        let saved_effects = self.eval_effects.clone();
+        self.eval_effects = self.inference.fresh_row();
         let mut args = Vec::new();
         for param in params {
             let ty = match &param.ty {
@@ -1255,8 +1299,10 @@ impl Checker<'_> {
             }
             args.push(ty);
         }
-        let result = self.expression(body)?;
-        Ok(Ty::Fn(args, Box::new(result)))
+        let result = self.expression(body);
+        let row = self.inference.resolve_row(&self.eval_effects);
+        self.eval_effects = saved_effects;
+        Ok(Ty::fn_with(args, result?, row))
     }
 
     fn pipe(&mut self, value: &Node, target: &Node) -> Result<Ty, Diagnostic> {
@@ -1284,7 +1330,7 @@ impl Checker<'_> {
                 let function = crate::runtime_abi::RuntimeFunction::from_intrinsic(name)
                     .ok_or_else(|| self.error(node.span, Some("E204"), "unknown intrinsic"))?;
                 let signature = function.value_signature().ok_or_else(|| self.error(node.span, Some("E204"), "intrinsic has no value signature"))?;
-                return Ok(Ty::Fn(signature.parameters.iter().map(Ty::from).collect(), Box::new(Ty::from(&signature.result))));
+                return Ok(Ty::fn_of(signature.parameters.iter().map(Ty::from).collect(), Ty::from(&signature.result)));
             }
         }
         self.expression(node)
@@ -1306,7 +1352,8 @@ impl Checker<'_> {
         } else { false };
         if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
         let result = self.inference.fresh();
-        self.unify(&function, &Ty::Fn(argument_types.clone(), Box::new(result.clone())), span).map_err(|mut error| {
+        let row = self.inference.fresh_row();
+        self.unify(&function, &Ty::fn_with(argument_types.clone(), result.clone(), row.clone()), span).map_err(|mut error| {
             if recursive && error.code.as_deref() == Some("E306") {
                 error.code = Some("E307".into());
                 error.message = "recursive calls change the argument type".into();
@@ -1317,6 +1364,7 @@ impl Checker<'_> {
             }
             error
         })?;
+        self.add_effects(&row);
         Ok(self.inference.resolve(&result))
     }
 
@@ -1324,7 +1372,8 @@ impl Checker<'_> {
         let mut probe = self.inference.clone();
         let parameters: Vec<_> = types.iter().map(|_| probe.fresh()).collect();
         let result = probe.fresh();
-        if probe.unify(function, &Ty::Fn(parameters.clone(), Box::new(result))).is_err() {
+        let row = probe.fresh_row();
+        if probe.unify(function, &Ty::fn_with(parameters.clone(), result, row)).is_err() {
             return fallback;
         }
         for ((parameter, actual), argument) in parameters.iter().zip(types).zip(args) {
@@ -1345,7 +1394,7 @@ impl Checker<'_> {
         }
         // Constructor schemes describe payloads internally; source expressions yield only data.
         let (payloads, result) = match self.inference.instantiate(&scheme) {
-            Ty::Fn(payloads, result) => (payloads, *result),
+            Ty::Fn(payloads, result, _) => (payloads, *result),
             result => (Vec::new(), result),
         };
         if args.len() != payloads.len() {
@@ -1406,7 +1455,7 @@ impl Checker<'_> {
         let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
         for (name, scheme) in &self.constructors {
             let (result, arity) = match scheme.body() {
-                Ty::Fn(args, result) => (result.as_ref(), args.len()),
+                Ty::Fn(args, result, _) => (result.as_ref(), args.len()),
                 ty => (ty, 0),
             };
             if let Ty::Adt(result, _) = result {
@@ -1475,12 +1524,12 @@ impl Checker<'_> {
         result
     }
 
-    fn annotation(&self, annotation: &TypeExpr, span: Span) -> Result<Ty, Diagnostic> {
+    fn annotation(&mut self, annotation: &TypeExpr, span: Span) -> Result<Ty, Diagnostic> {
         self.annotation_inner(annotation, span, &HashMap::new(), &[], &mut Vec::new())
     }
 
     fn annotation_inner(
-        &self, annotation: &TypeExpr, span: Span, parameters: &HashMap<String, Ty>,
+        &mut self, annotation: &TypeExpr, span: Span, parameters: &HashMap<String, Ty>,
         rejected: &[Span], visiting: &mut Vec<String>,
     ) -> Result<Ty, Diagnostic> {
         if rejected.iter().any(|reference| reference.line == annotation.span.line && reference.col == annotation.span.col) {
@@ -1497,7 +1546,8 @@ impl Checker<'_> {
             let inputs = match &arguments[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => &arguments[..1] };
             let inputs = inputs.iter().map(|input| self.annotation_inner(input, span, parameters, rejected, visiting)).collect::<Result<_, _>>()?;
             let output = self.annotation_inner(&arguments[1], span, parameters, rejected, visiting)?;
-            return Ok(Ty::Fn(inputs, Box::new(output)));
+            let row = self.row_annotation(&arguments[1].effects)?;
+            return Ok(Ty::fn_with(inputs, output, row));
         }
         let args = arguments.iter().map(|arg| self.annotation_inner(arg, span, parameters, rejected, visiting)).collect::<Result<Vec<_>, _>>()?;
         if let Some(ty) = parameters.get(name) {
@@ -1515,16 +1565,16 @@ impl Checker<'_> {
         }
         let prefix = format!("{}.", self.module_path.join("."));
         let alias_name = name.strip_prefix(&prefix).unwrap_or(name);
-        if let Some((formal, target, module)) = self.aliases.get(alias_name) {
+        if let Some((formal, target, module)) = self.aliases.get(alias_name).cloned() {
             if formal.len() != args.len() {
                 return Err(self.error(span, None, "type argument count differs"));
             }
             if visiting.iter().any(|name| name == alias_name) {
-                return Err(self.error(*module, Some("E602"), "cyclic abstract type instantiation"));
+                return Err(self.error(module, Some("E602"), "cyclic abstract type instantiation"));
             }
             let substituted = formal.iter().zip(args).map(|(formal, arg)| (formal.name.clone(), arg)).collect();
             visiting.push(alias_name.to_owned());
-            let result = self.annotation_inner(target, target.span, &substituted, rejected, visiting);
+            let result = self.annotation_inner(&target, target.span, &substituted, rejected, visiting);
             visiting.pop();
             return result;
         }
@@ -1621,7 +1671,7 @@ impl Checker<'_> {
         if visited.contains(ty) { return false; }
         visited.push(ty.clone());
         match ty {
-            Ty::Fn(args, result) => return args.iter().any(|arg| self.contains_abstract(arg, visited)) || self.contains_abstract(result, visited),
+            Ty::Fn(args, result, _) => return args.iter().any(|arg| self.contains_abstract(arg, visited)) || self.contains_abstract(result, visited),
             Ty::Adt(_, args) if args.iter().any(|arg| self.contains_abstract(arg, visited)) => return true,
             _ => {}
         }
@@ -1633,7 +1683,7 @@ impl Checker<'_> {
             .any(|scheme| {
                 let mut inference = self.inference.clone();
                 let instantiated = inference.instantiate(scheme);
-                let Ty::Fn(payload, result) = instantiated else { return false; };
+                let Ty::Fn(payload, result, _) = instantiated else { return false; };
                 if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
                 payload.iter().any(|field| self.contains_abstract(&inference.resolve(field), visited))
             })
@@ -1655,7 +1705,7 @@ impl Checker<'_> {
             .any(|scheme| {
             let mut inference = self.inference.clone();
             let instantiated = inference.instantiate(scheme);
-            let Ty::Fn(payload, result) = instantiated else { return false; };
+            let Ty::Fn(payload, result, _) = instantiated else { return false; };
             if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
             payload.iter().any(|field| self.contains_function(&inference.resolve(field), visited))
         })
@@ -1681,6 +1731,110 @@ impl Checker<'_> {
             _ => Ok(ty.clone()),
         }
     }
+
+    fn register_effects(&mut self, items: &[Item]) -> Result<(), Diagnostic> {
+        for item in items {
+            let Item::Effect(effect) = item else { continue };
+            let parameters: HashMap<_, _> = effect.type_params.iter()
+                .map(|name| (name.name.clone(), self.inference.fresh())).collect();
+            let template = Ty::Adt(effect.name.clone(), effect.type_params.iter().map(|name| parameters[&name.name].clone()).collect());
+            let mut ops = Vec::new();
+            for op in &effect.ops {
+                let mut args = Vec::new();
+                for param in &op.params {
+                    let annotation = param.ty.as_ref().ok_or_else(|| self.error(param.span, None, "operation parameter requires a type"))?;
+                    args.push(self.payload_type(annotation, &parameters, param.span)?);
+                }
+                let result = match &op.ret {
+                    Some(ty) => self.payload_type(ty, &parameters, op.span)?,
+                    None if op.kind == OpKind::Abort => self.inference.fresh(),
+                    None => Ty::Unit,
+                };
+                let op_ty = if args.is_empty() { result } else { Ty::fn_of(args, result) };
+                let scheme = self.inference.generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
+                self.values.insert(op.name.clone(), scheme);
+                self.operations.insert(op.name.clone(), op.kind);
+                ops.push((op.kind, op.name.clone()));
+            }
+            self.effects.insert(effect.name.clone(), ops);
+        }
+        for item in items {
+            let Item::Handler(handler) = item else { continue };
+            let expected = self.effects.get(&handler.effect).cloned().unwrap_or_default();
+            let mut written = Vec::new();
+            for arm in &handler.arms {
+                if let HandlerArm::Operation { kind, name, .. } = arm {
+                    written.push((*kind, name.clone()));
+                }
+            }
+            if written.len() != expected.len() || written.iter().any(|op| !expected.contains(op)) {
+                self.deferred.push(self.error(handler.span, Some("E605"), "handler operations do not match the effect"));
+            }
+            self.handlers.insert(handler.name.clone(), effect_print_name(&handler.effect));
+        }
+        Ok(())
+    }
+
+    fn isolate_effects<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>) -> Result<(T, Row), Diagnostic> {
+        let saved = self.eval_effects.clone();
+        self.eval_effects = self.inference.fresh_row();
+        let result = f(self);
+        let row = self.inference.resolve_row(&self.eval_effects);
+        self.eval_effects = saved;
+        Ok((result?, row))
+    }
+
+    fn add_effects(&mut self, row: &Row) {
+        self.eval_effects = self.inference.union_row(&self.eval_effects, row);
+    }
+
+    fn contain_row(&mut self, inner: &Row, outer: &Row, span: Span) -> Result<(), Diagnostic> {
+        self.inference.row_contained(inner, outer).map_err(|_| {
+            self.error(span, Some("E305"), "effect row mismatch")
+        })
+    }
+
+    fn row_annotation(&mut self, effects: &Option<EffectRow>) -> Result<Row, Diagnostic> {
+        match effects {
+            None => Ok(self.inference.fresh_row()),
+            Some(EffectRow::Pure) => Ok(Row::pure()),
+            Some(EffectRow::Row(labels)) => {
+                let mut set = BTreeSet::new();
+                for ty in labels { set.insert(self.effect_label(ty)?); }
+                Ok(Row::Closed(set))
+            }
+        }
+    }
+
+    fn effect_label(&mut self, ty: &TypeExpr) -> Result<String, Diagnostic> {
+        match &ty.kind {
+            TypeKind::Name(name) => Ok(effect_print_name(name)),
+            TypeKind::Apply(name, args) => {
+                let args = args.iter().map(|arg| self.annotation(arg, arg.span)).collect::<Result<Vec<_>, _>>()?;
+                Ok(Ty::Adt(name.clone(), args).to_string())
+            }
+            _ => Err(self.error(ty.name_span, Some("E204"), "unknown effect")),
+        }
+    }
+
+    fn unwrap_operation(&mut self, name: &str, ty: Ty) -> Ty {
+        if !self.operations.contains_key(name) { return ty; }
+        let Ty::Fn(mut args, effect, _) = ty else { return ty; };
+        let Some(op_ty) = args.pop() else { return Ty::fn_of(vec![], *effect); };
+        let label = self.inference.resolve(&effect).to_string();
+        let row = Row::Closed(BTreeSet::from([label]));
+        match op_ty {
+            Ty::Fn(params, result, _) => Ty::fn_with(params, *result, row),
+            result => {
+                self.add_effects(&row);
+                result
+            }
+        }
+    }
+}
+
+fn effect_print_name(name: &str) -> String {
+    name.rsplit_once('$').map_or(name, |(_, name)| name).to_string()
 }
 
 fn realization_reaches(

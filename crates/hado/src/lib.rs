@@ -73,6 +73,7 @@ pub struct Checked {
     pub composite_types: std::collections::HashMap<(usize, usize), types::Ty>,
     pub value_types: std::collections::HashMap<(usize, usize), types::Ty>,
     pub main: types::Ty,
+    pub effects: types::Row,
     pub definitions: std::collections::HashMap<String, types::Scheme>,
 }
 

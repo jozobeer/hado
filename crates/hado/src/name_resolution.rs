@@ -20,6 +20,9 @@ impl Scope {
         for item in items {
             match item {
                 Item::Def(def) => { scope.values.insert(def.name.clone()); }
+                Item::Effect(effect) => {
+                    for op in &effect.ops { scope.values.insert(op.name.clone()); }
+                }
                 Item::TypeDef(def) => {
                     if let Some(ty) = &def.ty {
                         if let TypeKind::Adt(variants) = &ty.kind {

@@ -114,8 +114,25 @@ fn check_items(
         check_type_parameters(item, path, diagnostics);
         match item {
             Item::Def(def) => check_definition(def, is_contract_member(members, &def.name), path, diagnostics),
+            Item::SigDef(def) => {
+                for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
+                    check_effect_rows(ty, path, diagnostics);
+                }
+            }
             Item::ModuleImpl(module) => check_items(&module.items, contracts, contract_members(contracts, &module.sig), path, diagnostics),
             Item::ModuleSig(signature) => check_items(&signature.items, contracts, None, path, diagnostics),
+            Item::Effect(effect) => {
+                for op in &effect.ops {
+                    for ty in op.params.iter().filter_map(|param| param.ty.as_ref()).chain(op.ret.iter()) {
+                        check_effect_rows(ty, path, diagnostics);
+                    }
+                }
+            }
+            Item::Handler(handler) => {
+                for ty in handler.params.iter().filter_map(|param| param.ty.as_ref()) {
+                    check_effect_rows(ty, path, diagnostics);
+                }
+            }
             _ => {}
         }
     }
@@ -142,12 +159,58 @@ fn check_definition(def: &crate::parser::Def, contract_member: bool, path: &str,
                         code: Some("E519".into()), message: "underscore parameters require a contract member or anonymous function".into() });
                 }
             }
+            for ty in params.iter().filter_map(|param| param.ty.as_ref()).chain(ret.iter()) {
+                check_effect_rows(ty, path, diagnostics);
+            }
             check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
             if let Err(error) = check_sole_parameter_branch(params, ret.as_ref(), body, def.span, path) {
                 diagnostics.push(error);
             }
             check_node(body, path, diagnostics, body.span == def.span);
         }
+    }
+}
+
+fn check_effect_rows(ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
+        let mut seen = std::collections::BTreeSet::new();
+        for effect in effects {
+            let key = effect_key(effect);
+            if !seen.insert(key) {
+                diagnostics.push(Diagnostic {
+                    path: path.into(), line: effect.name_span.line, col: effect.name_span.col,
+                    code: Some("E522".into()), message: "duplicate effect in row".into(),
+                });
+            }
+            check_effect_rows(effect, path, diagnostics);
+        }
+    }
+    match &ty.kind {
+        TypeKind::Apply(_, args) | TypeKind::Group(args) => {
+            for ty in args { check_effect_rows(ty, path, diagnostics); }
+        }
+        TypeKind::Record(fields) => {
+            for field in fields { check_effect_rows(&field.ty, path, diagnostics); }
+        }
+        TypeKind::Adt(variants) => {
+            for variant in variants {
+                for payload in variant.payload.types() { check_effect_rows(payload, path, diagnostics); }
+            }
+        }
+        TypeKind::Name(_) => {}
+    }
+}
+
+fn effect_key(ty: &TypeExpr) -> String {
+    match &ty.kind {
+        TypeKind::Name(name) => name.clone(),
+        TypeKind::Apply(name, args) => match args.as_slice() {
+            [] => name.clone(),
+            [argument] => format!("{} {name}", effect_key(argument)),
+            _ => format!("({}) {name}", args.iter().map(effect_key).collect::<Vec<_>>().join(", ")),
+        },
+        TypeKind::Group(args) => format!("({})", args.iter().map(effect_key).collect::<Vec<_>>().join(", ")),
+        _ => String::new(),
     }
 }
 
@@ -263,6 +326,9 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
         check_unused(params.iter().map(|param| (param.name.as_str(), param.span)), body, path, diagnostics);
         if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
             diagnostics.push(error);
+        }
+        for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
+            check_effect_rows(ty, path, diagnostics);
         }
     }
     match &node.kind {

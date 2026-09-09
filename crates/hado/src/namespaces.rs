@@ -25,6 +25,7 @@ struct Resolver<'a> {
     directories: &'a BTreeSet<Directory>,
     sites: BTreeMap<(usize, usize), Vec<DeclaredName>>,
     renamed: BTreeMap<(usize, usize), String>,
+    operations: BTreeMap<Directory, BTreeSet<String>>,
     path: &'a str,
     result: Resolution,
 }
@@ -56,8 +57,20 @@ fn declarations(item: &Item) -> Vec<(Space, &str, Span)> {
         }
         Item::ModuleSig(module) => vec![(Space::Contract, &module.name, module.name_span)],
         Item::ModuleImpl(module) => vec![(Space::Implementation, &module.name, module.name_span)],
+        Item::Effect(effect) => vec![(Space::Contract, &effect.name, effect.name_span)],
+        Item::Handler(handler) => vec![(Space::Implementation, &handler.name, handler.name_span)],
         _ => Vec::new(),
     }
+}
+
+fn operation_key(directory: &[String], name: &str) -> String {
+    if directory.is_empty() { name.into() } else { format!("{}${name}", directory.join("$")) }
+}
+
+fn file_value(name: &str) -> Option<&str> {
+    name.split_once('$').and_then(|(prefix, rest)| prefix.strip_prefix("file").and_then(|index| {
+        index.chars().all(|ch| ch.is_ascii_digit()).then_some(rest)
+    }))
 }
 
 pub(crate) fn resolve(
@@ -72,7 +85,7 @@ pub(crate) fn resolve(
     let mut resolver = Resolver {
         symbols: BTreeMap::new(), directories,
         sites: ast.name_sites.iter().map(|site| ((site.start.line, site.start.col), site.parts.clone())).collect(),
-        renamed: BTreeMap::new(), path,
+        renamed: BTreeMap::new(), operations: BTreeMap::new(), path,
         result: Resolution { diagnostics: Vec::new(), error_anchors: Vec::new() },
     };
     resolver.symbols.entry((Vec::new(), Space::Type)).or_default()
@@ -80,6 +93,10 @@ pub(crate) fn resolve(
     for (item, directory) in ast.items.iter().zip(&locations) {
         for (space, name, _) in declarations(item) {
             resolver.symbols.entry((directory.clone(), space)).or_default().insert(name.into());
+        }
+        if let Item::Effect(effect) = item {
+            resolver.operations.entry(directory.clone()).or_default()
+                .extend(effect.ops.iter().map(|op| op.name.clone()));
         }
     }
     for (item, directory) in ast.items.iter_mut().zip(&locations) {
@@ -213,7 +230,37 @@ impl Resolver<'_> {
                     self.node(body, directory, local);
                 }
             },
-            Item::Effect(_) | Item::Handler(_) => {}
+            Item::Effect(effect) => {
+                let mut scope = local.clone();
+                scope.types.extend(effect.type_params.iter().map(|param| param.name.clone()));
+                for op in &mut effect.ops {
+                    for ty in op.params.iter_mut().filter_map(|param| param.ty.as_mut()).chain(op.ret.iter_mut()) {
+                        self.ty(ty, directory, &scope);
+                    }
+                    op.name = operation_key(directory, &op.name);
+                }
+                if outer { effect.name = qualify(directory, &effect.name); }
+            }
+            Item::Handler(handler) => {
+                let mut scope = local.clone();
+                scope.types.extend(handler.type_params.iter().map(|param| param.name.clone()));
+                self.reference(&mut handler.effect, handler.effect_span, Space::Contract, directory, local);
+                self.annotations(&mut handler.params, &mut None, directory, &scope);
+                for arm in &mut handler.arms {
+                    match arm {
+                        HandlerArm::Operation { name, params, body, .. } => {
+                            *name = operation_key(directory, name);
+                            for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) { self.ty(ty, directory, &scope); }
+                            self.node(body, directory, local);
+                        }
+                        HandlerArm::Return { param, body, .. } => {
+                            if let Some(ty) = &mut param.ty { self.ty(ty, directory, &scope); }
+                            self.node(body, directory, local);
+                        }
+                    }
+                }
+                if outer { handler.name = qualify(directory, &handler.name); }
+            }
         }
     }
 
@@ -246,7 +293,22 @@ impl Resolver<'_> {
             TypeKind::Name(_) => {}
         }
         if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
-            for ty in effects { self.ty(ty, directory, local); }
+            for ty in effects { self.effect_label(ty, directory, local); }
+        }
+    }
+
+    fn effect_label(&mut self, ty: &mut TypeExpr, directory: &[String], local: &Local) {
+        match &mut ty.kind {
+            TypeKind::Name(name) | TypeKind::Apply(name, _) => {
+                self.reference(name, ty.name_span, Space::Contract, directory, local);
+            }
+            _ => {}
+        }
+        match &mut ty.kind {
+            TypeKind::Apply(_, arguments) | TypeKind::Group(arguments) => {
+                for ty in arguments { self.ty(ty, directory, local); }
+            }
+            _ => {}
         }
     }
 
@@ -269,9 +331,17 @@ impl Resolver<'_> {
         }
     }
 
+    fn operation(&mut self, name: &mut String, directory: &[String]) {
+        let bare = file_value(name).unwrap_or(name.as_str());
+        if self.operations.get(directory).is_some_and(|names| names.contains(bare)) {
+            *name = operation_key(directory, bare);
+        }
+    }
+
     fn node(&mut self, node: &mut Node, directory: &[String], local: &Local) {
         match &mut node.kind {
             NodeKind::Name(name) if crate::names::is_upper_reference(name) => self.reference(name, node.span, Space::Constructor, directory, local),
+            NodeKind::Name(name) => self.operation(name, directory),
             NodeKind::Field(base, _) => {
                 if let NodeKind::Name(name) = &mut base.kind {
                     if crate::names::is_upper_reference(name) {
@@ -316,7 +386,8 @@ impl Resolver<'_> {
                 for (pattern, body) in arms { self.pattern(pattern, directory, local); self.node(body, directory, local); }
                 if let Some(body) = fallback { self.node(body, directory, local); }
             }
-            NodeKind::With { args, body, .. } => {
+            NodeKind::With { handler, args, body } => {
+                self.reference(&mut handler.name, handler.span, Space::Implementation, directory, local);
                 for arg in args { self.node(arg, directory, local); }
                 self.node(body, directory, local);
             }

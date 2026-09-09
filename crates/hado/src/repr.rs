@@ -23,7 +23,7 @@ pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String>
             let mut has_payload = false;
             for scheme in checked.constructors.values() {
                 let (result, payload) = match scheme.body() {
-                    Ty::Fn(fields, result) => (result.as_ref(), !fields.is_empty()),
+                    Ty::Fn(fields, result, _) => (result.as_ref(), !fields.is_empty()),
                     result => (result, false),
                 };
                 if matches!(result, Ty::Adt(constructor_type, _) if constructor_type == name) {
@@ -96,7 +96,7 @@ pub fn record_layout(
     };
     let (_, scheme) = checked.records.get(name).ok_or("unknown record type")?;
     let mut inference = crate::types::Inference::default();
-    let Ty::Fn(fields, result) = inference.instantiate(scheme) else {
+    let Ty::Fn(fields, result, _) = inference.instantiate(scheme) else {
         return Err("invalid record schema".into());
     };
     inference
@@ -125,7 +125,7 @@ pub fn constructor_layout(
         .ok_or("unknown constructor")?;
     let mut inference = crate::types::Inference::default();
     let (fields, result) = match inference.instantiate(scheme) {
-        Ty::Fn(fields, result) => (fields, *result),
+        Ty::Fn(fields, result, _) => (fields, *result),
         result => (vec![], result),
     };
     inference
@@ -184,7 +184,7 @@ pub fn constructor_tag(constructor: &str, ty: &Type, checked: &Checked) -> Resul
     let mut inference = crate::types::Inference::default();
     let instantiated = inference.instantiate(scheme);
     let result = match &instantiated {
-        Ty::Fn(_, result) => result.as_ref(),
+        Ty::Fn(_, result, _) => result.as_ref(),
         ty => ty,
     };
     inference.unify(result, &Ty::from(ty)).map_err(|error| format!("constructor type mismatch: {error:?}"))?;
