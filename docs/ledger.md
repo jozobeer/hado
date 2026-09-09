@@ -980,3 +980,53 @@ constructor宣言の構造整理は `b4c02a7`。型参照から名前とpayload�
 評価順の判定器は実際のmono IRを記号実行する。emitのLetが値から本体へ命令を生成する経路も審査で確認したが、ネイティブ命令列上の副作用順を直接測った証拠ではない。§53のBool分岐とE517の既知疑義は変更していない。
 
 仮説は「名前付きfieldを既存ADTのpayloadへ対応させれば、型の名義性と実行表現を保てる」。CLI生成・実行と独立追審で確認した。型推論の早期returnだけでは名前段階の診断を集めきれないことを学び、名前の検査を先行させた。less-is-moreの確認で追加のコメント・余剰成果物の削除対象は無かった。
+
+## R22 名前空間とv0.1.3の最終検証（2026-09-09）
+
+入口の親を根として再帰探索し、型・契約・実装・constructorの4空間をディレクトリごとに解決する。無修飾参照は現在のディレクトリと根を探し、絶対パスは根から辿る。局所束縛とファイルごとの値の可視性は保持した。全ファイルの字句検査を構文検査より先に行い、診断は根からの相対パスと元の行・列で返す。
+
+独立審査済みコーパスを0970610でlock、元の判定器17件を2a802c6で全件失敗の状態から固定した。位置プローブ追加と既存判定器の相対パス・再帰探索への移行は50f67dc。移行初回審査のFAILは、旧診断prefix、拒否ケースのhelper欠落、入れ子パスの暗記検出漏れだった。ケース全体の複製と元診断の比較、実際の欠陥ファイルへの摂動、入れ子相対パスの検出を加え、追審PASS。既存の段階・位置・lock条件は維持した。
+
+R22初回統合で未知契約より先に公開memberの派生E204を返した。未解決契約の実装だけ派生member診断を抑え、既知契約の非公開member拒否は維持した。名前空間実装のCursor独立審査はPASS（r22-implementation.log）。4空間、親・兄弟可視性、自己絶対パス、根との衝突位置、named/generic/Functor、不透明性、字句先行、入口変更、空ディレクトリと不正名を独立CLIで確認した。
+
+親の追加探索で、局所同名constructorを登録すると外側の型のfield情報と網羅性が失われる反例を得た。追加3件を36 passed / 3 failedで固定（c232089）。名前を隠しても型のmetadataを保持し、契約の制約を反映したprojectionを局所環境の退出前に解決する。コード生成へ渡すschemeは量化変数を保持してfree変数を解決する。
+
+最終実測環境はR18と同じ（Rust1.98.0、offline、CARGO_TARGET_DIR=/tmp/hado-v013/target）。ログは `/tmp/hado-v013/r22-final-gates/`。全Rustテストは569 passed / 0 failed。名前空間の判定器19件、名前付きconstructor39件、IR評価順2件を含む。R21で残っていたR22 path文法未訪問も解消した。
+
+仕様への疑義: §53のBool分岐とE517の既知矛盾は今回変更していない。型適用そのものの引数不足のコード無し診断も、計画13.4の現行維持に従う。
+
+constructor追加修正のCursor追審はPASS（constructor-shadow-final.log）。修正前と後を別バイナリで比較し、独立20入力で異なるfield型、String/Intの多相実体化、Functor、比較、入れ子実装、不透明性、内外の網羅性を確認した。hidden keyがdump-monoへ漏れないことも実測した。
+
+
+最終バッチのM3だけが11/12だった原因は、内部M2の180秒打ち切り。単独M2は8/8で、隔離計測の `m3-investigation.log` は `timed out after 180 seconds` を記録した。複合門番だけ完走を待ち、個別コマンドの180秒とexit0・PASSED全件の条件は保つ修正を87d0964へ保存した。Cursor審査PASS（m3-timeout.log）。修正後の実走は `/tmp/hado-v013/r22-final-m3/verify-m3.sh.log`、末尾 `PASSED: 12/12`、exit0。
+
+最終判定（M3は上記の修正後ログ、他は最終バッチ）:
+
+| コマンド（bash scripts/ 以下） | 出力末尾 | exit |
+|---|---|---|
+| `verify-m0.sh` | PASSED: 7/7 | 0 |
+| `verify-m1-corpus.sh` | PASSED: 7/7 | 0 |
+| `verify-m1-spec.sh` | PASSED: 6/6 | 0 |
+| `verify-m2.sh` | PASSED: 8/8 | 0 |
+| `verify-m3.sh` | PASSED: 12/12 | 0 |
+| `verify-m4.sh` | PASSED: 71/71 | 0 |
+| `verify-m5.sh` | PASSED: 104/104 | 0 |
+| `verify-m6.sh` | PASSED: 35/35 | 0 |
+| `verify-m7.sh` | PASSED: 3/3 | 0 |
+| `verify-r11.sh` | PASSED: 1/1 | 0 |
+| `verify-r12.sh` | PASSED: 1/1 | 0 |
+| `verify-r13.sh` | PASSED: 1/1 | 0 |
+| `verify-r14.sh` | PASSED: 1/1 | 0 |
+| `verify-r16.sh` | PASSED: 1/1 | 0 |
+| `verify-r17.sh` | PASSED: 1/1 | 0 |
+| `verify-r18.sh` | PASSED: 1/1 | 0 |
+| `verify-r19.sh` | PASSED: 1/1 | 0 |
+| `verify-r20.sh` | PASSED: 1/1 | 0 |
+| `verify-r21.sh` | PASSED: 1/1 | 0 |
+| `verify-r22.sh` | PASSED: 1/1 | 0 |
+| `verify-r9.sh` | PASSED: 5/5 | 0 |
+| `verify-record-constructors.sh` | PASSED: 1/1 | 0 |
+
+22-a: 全Rustテスト569/0と全22門番exit0。22-b/d: 名前空間判定器19件は生成実行・4空間・位置摂動を含め通過。22-c: lock 135行とディスク上の対象135ファイルが集合として一致し、`sha256sum --strict --status -c tests/corpus.sha256` はexit0。実装中のlock変更なし。残る赤の門番は無い。R18〜R22の後続依存で保留していた判定もこれで満たした。
+
+実装コミットは1ead80e、追加の失敗固定はc232089、門番修正は87d0964。記録追加直前の `git status --short` と `git diff --check` は出力なし。v0.1.3のタグ対象はこの記録を含む最終コミットとする。コード・コメントの最終削りでは追加の削除対象は無く、生成されたPythonキャッシュだけを作業ツリーから除いた。
