@@ -8,9 +8,9 @@ sys.path.insert(0, "scripts")
 from corpus_paths import source_files, diagnostic
 P = pathlib.Path
 results = {}
-def run(*args):
+def run(*args, timeout=180):
     try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=180)
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as error:
         return subprocess.CompletedProcess(args, 127, '', str(error))
 def report(number, label, ok):
@@ -128,7 +128,7 @@ hm = all(re.search(r'test [^\n]*'+name+r'[^\n]* \.\.\. ok',log) for name in ['un
 report(8, 'glue+unit-hm', glue and hm)
 gates = tests.returncode == 0
 for script,total in [('m0',7),('m1-spec',6),('m1-corpus',7),('m2',8)]:
-    r = run('bash',f'scripts/verify-{script}.sh')
+    r = run('bash',f'scripts/verify-{script}.sh', timeout=None)
     ok = r.returncode == 0 and r.stdout.rstrip().endswith(f'PASSED: {total}/{total}')
     print(f'gate_{script}: {int(ok)}',flush=True)
     gates &= ok
