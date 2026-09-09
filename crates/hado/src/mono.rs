@@ -1591,7 +1591,13 @@ impl Lowerer {
         let scheme = self.schemes.get(name).ok_or_else(|| format!("missing inferred signature for {name}"))?.clone();
         let (params, body, scheme) = match definition.kind {
             crate::parser::DefKind::Function { params, body, .. } => (params, body, scheme),
-            crate::parser::DefKind::Value(body) => (vec![], body, scheme.as_thunk()),
+            crate::parser::DefKind::Value(body) => {
+                let scheme = match scheme.body() {
+                    Ty::Fn(args, _, _) if args.is_empty() => scheme,
+                    _ => scheme.as_thunk(),
+                };
+                (vec![], body, scheme)
+            }
         };
         let signature = Signature::specialize_result(&scheme, &types, expected_result)?;
         if params.len() != types.len() {

@@ -2,9 +2,9 @@ mod functors;
 mod named;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
 use crate::parser::{EffectRow, FieldName, HandlerArm, OpKind, Param, Pattern, PatternKind, TypeExpr, TypeKind};
-use crate::types::{ComparisonConstraint, Inference, Row, Scheme, Ty, TypeError, TypeRealization};
+use crate::types::{ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError, TypeRealization};
 use crate::Checked;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct Checker<'a> {
@@ -43,6 +43,7 @@ struct Checker<'a> {
     abstract_types: HashMap<String, (usize, String)>,
     projections: Vec<(Ty, FieldName, Ty, Span)>,
     comparison_constraints: Vec<ComparisonConstraint>,
+    row_constraints: Vec<RowConstraint>,
     equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
     eval_effects: Row,
@@ -103,6 +104,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         abstract_types: HashMap::new(),
         projections: Vec::new(),
         comparison_constraints: Vec::new(),
+        row_constraints: Vec::new(),
         equality_anchors: ast.equality_anchors.iter().map(|(left, right, operator)|
             ((left.line, left.col, right.line, right.col), *operator)).collect(),
         recursive_calls: HashMap::new(),
@@ -119,7 +121,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         let compare = Ty::fn_of(vec![comparable.clone(), comparable.clone()], Ty::Int);
         checker.values.insert(
             "compare".into(),
-            checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }]),
+            checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }], &[]),
         );
         let ambiguous_values = checker.prepare_ambiguous_declarations(&ast.items);
         for item in &ast.items {
@@ -183,6 +185,11 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         for constraint in &checker.comparison_constraints {
             if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
                 checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
+            }
+        }
+        for constraint in &checker.row_constraints {
+            if checker.inference.resolve_row(&constraint.row).has_known_effects() {
+                checker.deferred.push(checker.error(constraint.span.expect("condition has an origin"), Some(constraint.code), "effects are not allowed in branch conditions"));
             }
         }
         let scheme = checker
@@ -546,12 +553,16 @@ impl Checker<'_> {
                 return Err(self.error(module.span, Some("E602"), "signature member requires the declared definition form"));
             }
             let scheme = self.values[&declaration.name].clone();
-            let (mut actual, constraints) = self.inference.instantiate_constrained(&scheme);
+            let (mut actual, constraints, rows) = self.inference.instantiate_constrained(&scheme);
             if !ambiguous_values.contains(&declaration.name) && self.inference.resolve(&actual).has_error() {
                 let known = self.invalid_definition_type(definitions[&declaration.name]);
                 actual = self.inference.freshen_errors(&known);
             }
             self.record_comparisons(constraints, declaration.span);
+            self.record_row_constraints(rows, declaration.span);
+            if declaration.params.is_empty() {
+                actual = result_of_thunk(actual);
+            }
             let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
             let expected = self.signature_type(declaration, &parameters, false)?;
             self.inference
@@ -571,7 +582,7 @@ impl Checker<'_> {
             let public_type = self.signature_type(declaration, &public_parameters, true)?;
             let resolved = self.inference.resolve(&expected);
             let _ = self.inference.unify(&public_type, &resolved);
-            exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints));
+            exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints, &self.row_constraints));
         }
         self.resolve_projections(false)?;
         let roots = exports.keys().cloned().collect::<Vec<_>>();
@@ -669,7 +680,7 @@ impl Checker<'_> {
             .collect();
         for (name, ty) in placeholders {
             self.values
-                .insert(name, self.inference.generalize_constrained(&ty, &environment, &self.comparison_constraints));
+                .insert(name, self.inference.generalize_constrained(&ty, &environment, &self.comparison_constraints, &self.row_constraints));
         }
         Ok(())
     }
@@ -723,8 +734,10 @@ impl Checker<'_> {
                 let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
                 if def.name == "main" || def.name.ends_with("$main") {
                     self.main_effects = row;
+                    Ok(ty)
+                } else {
+                    Ok(Ty::fn_with(vec![], ty, row))
                 }
-                Ok(ty)
             }
             DefKind::Function { params, ret, body } => {
                 let ty = self.function(params, body)?;
@@ -927,10 +940,12 @@ impl Checker<'_> {
                             &format!("unbound name {name}"),
                         )
                     })?;
-                let (ty, constraints) = self.inference.instantiate_constrained(&scheme);
+                let (ty, constraints, rows) = self.inference.instantiate_constrained(&scheme);
                 let ty = self.unwrap_operation(name, ty);
+                let ty = self.unwrap_thunk(ty);
                 self.value_types.insert((node.span.line, node.span.col), ty.clone());
                 self.record_comparisons(constraints, node.span);
+                self.record_row_constraints(rows, node.span);
                 Ok(ty)
             }
             NodeKind::Fn { params, body } => {
@@ -1016,9 +1031,10 @@ impl Checker<'_> {
                 let scheme = exports.get(&field.name).cloned().ok_or_else(|| {
                     self.error(field.span, Some("E204"), "module member is not exported")
                 })?;
-                let (ty, constraints) = self.inference.instantiate_constrained(&scheme);
+                let (ty, constraints, rows) = self.inference.instantiate_constrained(&scheme);
                 self.record_comparisons(constraints, field.span);
-                return Ok(ty);
+                self.record_row_constraints(rows, field.span);
+                return Ok(self.unwrap_thunk(ty));
             }
         }
         let ty = self.expression(value)?;
@@ -1254,6 +1270,7 @@ impl Checker<'_> {
         if row.has_known_effects() {
             return Err(self.error(node.span, Some("E308"), "effects are not allowed in branch conditions"));
         }
+        self.row_constraints.push(RowConstraint { row, code: "E308", span: Some(node.span) });
         Ok(())
     }
 
@@ -1649,6 +1666,11 @@ impl Checker<'_> {
         self.comparison_constraints.extend(constraints);
     }
 
+    fn record_row_constraints(&mut self, mut constraints: Vec<RowConstraint>, span: Span) {
+        for constraint in &mut constraints { constraint.span.get_or_insert(span); }
+        self.row_constraints.extend(constraints);
+    }
+
     fn check_realization_cycles(&mut self, items: &[Item]) {
         let graph: HashMap<_, _> = self.abstract_representations.iter().map(|(name, representation)| {
             let mut references = std::collections::BTreeSet::new();
@@ -1799,21 +1821,31 @@ impl Checker<'_> {
             None => Ok(self.inference.fresh_row()),
             Some(EffectRow::Pure) => Ok(Row::pure()),
             Some(EffectRow::Row(labels)) => {
-                let mut set = BTreeSet::new();
-                for ty in labels { set.insert(self.effect_label(ty)?); }
-                Ok(Row::Closed(set))
+                let mut row = Vec::new();
+                for ty in labels { row.push(self.effect_label(ty)?); }
+                Ok(Row::Closed(row))
             }
         }
     }
 
-    fn effect_label(&mut self, ty: &TypeExpr) -> Result<String, Diagnostic> {
+    fn effect_label(&mut self, ty: &TypeExpr) -> Result<Ty, Diagnostic> {
         match &ty.kind {
-            TypeKind::Name(name) => Ok(effect_print_name(name)),
+            TypeKind::Name(name) => Ok(Ty::Adt(effect_print_name(name), vec![])),
             TypeKind::Apply(name, args) => {
                 let args = args.iter().map(|arg| self.annotation(arg, arg.span)).collect::<Result<Vec<_>, _>>()?;
-                Ok(Ty::Adt(name.clone(), args).to_string())
+                Ok(Ty::Adt(name.clone(), args))
             }
             _ => Err(self.error(ty.name_span, Some("E204"), "unknown effect")),
+        }
+    }
+
+    fn unwrap_thunk(&mut self, ty: Ty) -> Ty {
+        match ty {
+            Ty::Fn(args, result, row) if args.is_empty() => {
+                self.add_effects(&row);
+                *result
+            }
+            ty => ty,
         }
     }
 
@@ -1821,8 +1853,7 @@ impl Checker<'_> {
         if !self.operations.contains_key(name) { return ty; }
         let Ty::Fn(mut args, effect, _) = ty else { return ty; };
         let Some(op_ty) = args.pop() else { return Ty::fn_of(vec![], *effect); };
-        let label = self.inference.resolve(&effect).to_string();
-        let row = Row::Closed(BTreeSet::from([label]));
+        let row = Row::Closed(vec![*effect]);
         match op_ty {
             Ty::Fn(params, result, _) => Ty::fn_with(params, *result, row),
             result => {
@@ -1830,6 +1861,13 @@ impl Checker<'_> {
                 result
             }
         }
+    }
+}
+
+fn result_of_thunk(ty: Ty) -> Ty {
+    match ty {
+        Ty::Fn(args, result, _) if args.is_empty() => *result,
+        ty => ty,
     }
 }
 

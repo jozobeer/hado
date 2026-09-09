@@ -15,52 +15,75 @@ pub enum Ty {
     Abstract(String, Vec<Ty>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Row {
     Var(u32),
-    Closed(BTreeSet<String>),
+    Closed(Vec<Ty>),
+    Open(u32, Vec<Ty>),
 }
 
 impl Row {
     pub fn pure() -> Self {
-        Self::Closed(BTreeSet::new())
-    }
-
-    pub fn is_pure(&self) -> bool {
-        matches!(self, Self::Closed(labels) if labels.is_empty())
+        Self::Closed(Vec::new())
     }
 
     pub fn suffix(&self) -> String {
-        match self {
-            Self::Closed(labels) if !labels.is_empty() => format!(" {{{}}}", labels.iter().cloned().collect::<Vec<_>>().join(", ")),
-            _ => String::new(),
+        let labels = match self {
+            Self::Closed(labels) | Self::Open(_, labels) => labels,
+            Self::Var(_) => return String::new(),
+        };
+        let names: BTreeSet<_> = labels.iter().map(ToString::to_string).collect();
+        if names.is_empty() {
+            String::new()
+        } else {
+            format!(" {{{}}}", names.into_iter().collect::<Vec<_>>().join(", "))
         }
     }
 
     pub fn without_effect(&self, effect: &str) -> Self {
+        let drop = |labels: &[Ty]| labels.iter().filter(|ty| !label_matches_effect(&ty.to_string(), effect)).cloned().collect();
         match self {
-            Self::Closed(labels) => Self::Closed(labels.iter().filter(|label| !label_matches_effect(label, effect)).cloned().collect()),
+            Self::Closed(labels) => Self::Closed(drop(labels)),
+            Self::Open(id, labels) => Self::Open(*id, drop(labels)),
             row => row.clone(),
         }
     }
 
     pub fn has_known_effects(&self) -> bool {
-        matches!(self, Self::Closed(labels) if !labels.is_empty())
+        match self {
+            Self::Closed(labels) | Self::Open(_, labels) => !labels.is_empty(),
+            Self::Var(_) => false,
+        }
+    }
+
+    fn labels(&self) -> &[Ty] {
+        match self {
+            Self::Closed(labels) | Self::Open(_, labels) => labels,
+            Self::Var(_) => &[],
+        }
     }
 
     fn free_variables(&self, result: &mut BTreeSet<u32>) {
-        if let Self::Var(id) = self {
-            result.insert(*id);
+        match self {
+            Self::Var(id) | Self::Open(id, _) => {
+                result.insert(*id);
+            }
+            Self::Closed(_) => {}
         }
     }
 
     fn map_variables(&self, f: &impl Fn(u32) -> Ty) -> Self {
+        let labels = self.labels().iter().map(|ty| ty.map_variables(f)).collect();
         match self {
             Self::Var(id) => match f(*id) {
                 Ty::Var(id) => Self::Var(id),
                 _ => self.clone(),
             },
-            Self::Closed(labels) => Self::Closed(labels.clone()),
+            Self::Closed(_) => Self::Closed(labels),
+            Self::Open(id, _) => match f(*id) {
+                Ty::Var(id) => Self::Open(id, labels),
+                _ => Self::Closed(labels),
+            },
         }
     }
 }
@@ -109,6 +132,7 @@ pub struct Scheme {
     variables: BTreeSet<u32>,
     ty: Ty,
     constraints: Vec<ComparisonConstraint>,
+    row_constraints: Vec<RowConstraint>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,9 +142,22 @@ pub struct ComparisonConstraint {
     pub span: Option<crate::lexer::Span>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowConstraint {
+    pub row: Row,
+    pub code: &'static str,
+    pub span: Option<crate::lexer::Span>,
+}
+
 impl ComparisonConstraint {
     fn with_type(&self, ty: Ty) -> Self {
         Self { ty, code: self.code, span: self.span }
+    }
+}
+
+impl RowConstraint {
+    fn with_row(&self, row: Row) -> Self {
+        Self { row, code: self.code, span: self.span }
     }
 }
 
@@ -178,6 +215,9 @@ impl Ty {
                 }
                 ret.free_variables(result);
                 row.free_variables(result);
+                for ty in row.labels() {
+                    ty.free_variables(result);
+                }
             }
             Ty::Adt(_, args) | Ty::Abstract(_, args) => {
                 for arg in args {
@@ -233,7 +273,16 @@ impl Inference {
                 Some(value) => self.resolve_row(value),
                 None => Row::Var(*id),
             },
-            Row::Closed(labels) => Row::Closed(labels.clone()),
+            Row::Closed(labels) => Row::Closed(labels.iter().map(|ty| self.resolve(ty)).collect()),
+            Row::Open(id, labels) => {
+                let labels: Vec<_> = labels.iter().map(|ty| self.resolve(ty)).collect();
+                match self.resolve_row(&Row::Var(*id)) {
+                    Row::Var(id) if labels.is_empty() => Row::Var(id),
+                    Row::Var(id) => Row::Open(id, labels),
+                    Row::Closed(more) => Row::Closed(self.merge_labels(&labels, &more)),
+                    Row::Open(id, more) => Row::Open(id, self.merge_labels(&labels, &more)),
+                }
+            }
         }
     }
 
@@ -281,7 +330,12 @@ impl Inference {
         let inner = self.resolve_row(inner);
         let outer = self.resolve_row(outer);
         match (&inner, &outer) {
-            (Row::Closed(a), Row::Closed(b)) if a.is_subset(b) => Ok(()),
+            (Row::Closed(a), Row::Closed(b)) if self.label_names(a).is_subset(&self.label_names(b)) => {
+                self.unify_matching_labels(a, b)
+            }
+            (Row::Open(id, required), Row::Closed(actual)) if self.label_names(required).is_subset(&self.label_names(actual)) => {
+                self.unify_open_closed(*id, required, actual)
+            }
             _ => self.unify_row(&inner, &outer),
         }
     }
@@ -294,7 +348,20 @@ impl Inference {
         }
         match (&left, &right) {
             (Row::Var(id), row) | (row, Row::Var(id)) => self.bind_row(*id, row),
-            (Row::Closed(_), Row::Closed(_)) => Err(TypeError::Mismatch),
+            (Row::Closed(a), Row::Closed(b)) => self.unify_closed_labels(a, b),
+            (Row::Open(id, required), Row::Closed(actual)) | (Row::Closed(actual), Row::Open(id, required)) => {
+                self.unify_open_closed(*id, required, actual)
+            }
+            (Row::Open(a, left_labels), Row::Open(b, right_labels)) => {
+                let labels = self.merge_labels(left_labels, right_labels);
+                let tail = self.next;
+                self.next += 1;
+                self.bind_row(*a, &Row::Open(tail, labels.clone()))?;
+                if a != b {
+                    self.bind_row(*b, &Row::Open(tail, labels))?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -312,18 +379,23 @@ impl Inference {
         let left = self.resolve_row(left);
         let right = self.resolve_row(right);
         match (&left, &right) {
-            (Row::Closed(a), Row::Closed(b)) => {
-                let mut labels = a.clone();
-                labels.extend(b.iter().cloned());
-                Row::Closed(labels)
-            }
+            (Row::Closed(a), Row::Closed(b)) => Row::Closed(self.merge_labels(a, b)),
             (Row::Var(id), Row::Closed(labels)) | (Row::Closed(labels), Row::Var(id)) if labels.is_empty() => {
                 Row::Var(*id)
             }
             (Row::Var(id), Row::Closed(labels)) | (Row::Closed(labels), Row::Var(id)) => {
-                let labels = labels.clone();
-                let _ = self.bind_row(*id, &Row::Closed(labels.clone()));
-                Row::Closed(labels)
+                Row::Open(*id, labels.clone())
+            }
+            (Row::Open(id, labels), Row::Closed(more)) | (Row::Closed(more), Row::Open(id, labels)) => {
+                Row::Open(*id, self.merge_labels(labels, more))
+            }
+            (Row::Var(id), Row::Open(tail, labels)) | (Row::Open(tail, labels), Row::Var(id)) => {
+                let _ = self.unify_row_inner(&Row::Var(*id), &Row::Var(*tail));
+                Row::Open(*id, labels.clone())
+            }
+            (Row::Open(a, left_labels), Row::Open(b, right_labels)) => {
+                let _ = self.unify_row_inner(&Row::Var(*a), &Row::Var(*b));
+                Row::Open(*a, self.merge_labels(left_labels, right_labels))
             }
             (Row::Var(a), Row::Var(b)) => {
                 let _ = self.unify_row_inner(&Row::Var(*a), &Row::Var(*b));
@@ -339,8 +411,60 @@ impl Inference {
                 self.rows.entry(id).or_insert_with(Row::pure);
                 Row::pure()
             }
+            Row::Open(id, labels) => {
+                self.rows.entry(id).or_insert_with(Row::pure);
+                Row::Closed(labels)
+            }
             closed => closed,
         }
+    }
+
+    fn merge_labels(&self, left: &[Ty], right: &[Ty]) -> Vec<Ty> {
+        let mut labels = left.to_vec();
+        labels.extend(right.iter().cloned());
+        labels
+    }
+
+    fn label_names(&self, labels: &[Ty]) -> BTreeSet<String> {
+        labels.iter().map(|ty| effect_ctor(&self.resolve(ty))).collect()
+    }
+
+    fn unify_closed_labels(&mut self, left: &[Ty], right: &[Ty]) -> Result<(), TypeError> {
+        if self.label_names(left) != self.label_names(right) {
+            return Err(TypeError::Mismatch);
+        }
+        self.unify_matching_labels(left, right)
+    }
+
+    fn unify_matching_labels(&mut self, left: &[Ty], right: &[Ty]) -> Result<(), TypeError> {
+        let right = self.labels_by_ctor(right);
+        for ty in left {
+            let ty = self.resolve(ty);
+            if let Some(other) = right.get(&effect_ctor(&ty)) {
+                self.unify_inner(&ty, other)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn unify_open_closed(&mut self, tail: u32, required: &[Ty], actual: &[Ty]) -> Result<(), TypeError> {
+        let required_names = self.label_names(required);
+        let actual_names = self.label_names(actual);
+        if !required_names.is_subset(&actual_names) {
+            return Err(TypeError::Mismatch);
+        }
+        self.unify_matching_labels(required, actual)?;
+        let rest: Vec<_> = actual.iter().cloned().filter(|ty| !required_names.contains(&effect_ctor(&self.resolve(ty)))).collect();
+        self.bind_row(tail, &if rest.is_empty() { Row::pure() } else { Row::Closed(rest) })
+    }
+
+    fn labels_by_ctor(&self, labels: &[Ty]) -> HashMap<String, Ty> {
+        let mut map = HashMap::new();
+        for ty in labels {
+            let ty = self.resolve(ty);
+            map.insert(effect_ctor(&ty), ty);
+        }
+        map
     }
 
     pub fn close_rows(&mut self, ty: &Ty) {
@@ -398,6 +522,7 @@ impl Inference {
             variables,
             ty,
             constraints: vec![],
+            row_constraints: vec![],
         }
     }
 
@@ -406,6 +531,7 @@ impl Inference {
         ty: &Ty,
         environment: &[Ty],
         constraints: &[ComparisonConstraint],
+        row_constraints: &[RowConstraint],
     ) -> Scheme {
         let mut scheme = self.generalize(ty, environment);
         scheme.constraints = constraints
@@ -417,6 +543,15 @@ impl Inference {
                 (!variables.is_disjoint(&scheme.variables)).then_some(constraint.with_type(ty))
             })
             .collect();
+        scheme.row_constraints = row_constraints
+            .iter()
+            .filter_map(|constraint| {
+                let row = self.resolve_row(&constraint.row);
+                let mut variables = BTreeSet::new();
+                row.free_variables(&mut variables);
+                (!variables.is_disjoint(&scheme.variables)).then_some(constraint.with_row(row))
+            })
+            .collect();
         scheme
     }
 
@@ -424,7 +559,7 @@ impl Inference {
         self.instantiate_constrained(scheme).0
     }
 
-    pub fn instantiate_constrained(&mut self, scheme: &Scheme) -> (Ty, Vec<ComparisonConstraint>) {
+    pub fn instantiate_constrained(&mut self, scheme: &Scheme) -> (Ty, Vec<ComparisonConstraint>, Vec<RowConstraint>) {
         let replacements: HashMap<_, _> = scheme
             .variables
             .iter()
@@ -437,6 +572,11 @@ impl Inference {
                 .constraints
                 .iter()
                 .map(|constraint| constraint.with_type(constraint.ty.map_variables(&replace)))
+                .collect(),
+            scheme
+                .row_constraints
+                .iter()
+                .map(|constraint| constraint.with_row(constraint.row.map_variables(&replace)))
                 .collect(),
         )
     }
@@ -474,6 +614,13 @@ fn label_matches_effect(label: &str, effect: &str) -> bool {
     label == effect || label.ends_with(&format!(" {effect}")) || label.ends_with(&format!(") {effect}"))
 }
 
+fn effect_ctor(ty: &Ty) -> String {
+    match ty {
+        Ty::Adt(name, _) => name.rsplit_once('$').map_or(name.as_str(), |(_, name)| name).into(),
+        ty => ty.to_string(),
+    }
+}
+
 fn collect_row_vars(ty: &Ty, result: &mut BTreeSet<u32>) {
     match ty {
         Ty::Fn(args, ret, row) => {
@@ -495,11 +642,12 @@ impl Scheme {
             variables: self.variables.clone(),
             ty: self.ty.map_variables(&resolve),
             constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.map_variables(&resolve))).collect(),
+            row_constraints: self.row_constraints.iter().map(|constraint| constraint.with_row(constraint.row.map_variables(&resolve))).collect(),
         }
     }
 
     pub(crate) fn as_thunk(&self) -> Self {
-        Self { variables: self.variables.clone(), ty: Ty::fn_of(vec![], self.ty.clone()), constraints: self.constraints.clone() }
+        Self { variables: self.variables.clone(), ty: Ty::fn_of(vec![], self.ty.clone()), constraints: self.constraints.clone(), row_constraints: self.row_constraints.clone() }
     }
 
     pub(crate) fn body(&self) -> &Ty { &self.ty }
@@ -509,6 +657,7 @@ impl Scheme {
             variables: BTreeSet::new(),
             ty,
             constraints: vec![],
+            row_constraints: vec![],
         }
     }
 }
@@ -578,12 +727,14 @@ impl Scheme {
             variables: self.variables.clone(),
             ty: self.ty.reveal(names),
             constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.reveal(names))).collect(),
+            row_constraints: self.row_constraints.clone(),
         }
     }
 
     pub(crate) fn rename_modules(&self, names: &HashMap<String, String>) -> Self {
         Self { variables: self.variables.clone(), ty: self.ty.rename_modules(names),
-            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.rename_modules(names))).collect() }
+            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.rename_modules(names))).collect(),
+            row_constraints: self.row_constraints.clone() }
     }
 
     pub(crate) fn qualify_data_types(&self, names: &HashMap<String, String>) -> Self {
@@ -591,6 +742,7 @@ impl Scheme {
             variables: self.variables.clone(),
             ty: self.ty.qualify_data_types(names),
             constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.qualify_data_types(names))).collect(),
+            row_constraints: self.row_constraints.clone(),
         }
     }
 }

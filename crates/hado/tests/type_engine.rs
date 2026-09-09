@@ -68,13 +68,13 @@ fn constrained_scheme_instantiates_predicate_with_function_type() {
     let variable = inference.fresh();
     let function = hado::types::Ty::fn_of(vec![variable.clone()], hado::types::Ty::Bool);
     let origin = Some(hado::lexer::Span { line: 7, col: 13 });
-    let scheme = inference.generalize_constrained(&function, &[], &[hado::types::ComparisonConstraint { ty: variable, code: "E704", span: origin }]);
-    let (first, constraints) = inference.instantiate_constrained(&scheme);
+    let scheme = inference.generalize_constrained(&function, &[], &[hado::types::ComparisonConstraint { ty: variable, code: "E704", span: origin }], &[]);
+    let (first, constraints, _) = inference.instantiate_constrained(&scheme);
     let hado::types::Ty::Fn(args, _, _) = first else {
         panic!("expected function")
     };
     assert_eq!(constraints, vec![hado::types::ComparisonConstraint { ty: args[0].clone(), code: "E704", span: origin }]);
-    let (second, _) = inference.instantiate_constrained(&scheme);
+    let (second, _, _) = inference.instantiate_constrained(&scheme);
     assert_ne!(
         second,
         hado::types::Ty::fn_of(args, hado::types::Ty::Bool)
