@@ -274,3 +274,19 @@ fn local_constructor_names_shadow_outer_payload_forms_and_restore_them() {
         }
     }
 }
+
+#[test]
+fn shadowing_a_constructor_keeps_outer_named_type_projections() {
+    for parameter in ["x", "(x: Root)"] {
+        source_case(&format!("type Root = Payload {{ x: Int }}\ndef main = M.read_root (Payload {{ x = 5 }}) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload {{ y: Int }}\ndef make x => Payload {{ y = x }}\ndef read x => x.y\ndef read_root {parameter} => x.x")).run("7");
+    }
+}
+#[test]
+fn shadowing_a_constructor_keeps_outer_type_coverage_requirements() {
+    rejection("type Root = | Payload { x: Int } | Other(Int)\ndef main = M.read_root (Other(5)) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload { y: Int }\ndef make x => Payload { y = x }\ndef read x => x.y\ndef read_root\n| Other(x) => x", "E402", "def read_root\n");
+}
+
+#[test]
+fn contract_constraints_resolve_shadowed_types_with_identical_field_names() {
+    source_case("type Root = Payload { x: Int }\ndef main = M.read_root (Payload { x = 5 }) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload { x: Int }\ndef make x => Payload { x = x }\ndef read x => x.x\ndef read_root x => x.x").run("7");
+}
