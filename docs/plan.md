@@ -1438,7 +1438,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | handler と with | §58 | `handler` 節、`return` の腕、`resume`、`with H -> rest`、引数付き handler |
 | 効果行 | §37, §41 | 波括弧の行、`Pure`、省略と推論、アルファベット順の正準形 |
 | 失敗の効果 | §21, §49 | `Error` と `Exception`、Option との境界、`Option.ok_or` |
-| 効果の位置 | §24 | `let` と `do` の右辺、末尾位置、`|>` の連鎖に限る |
+| 効果の位置 | §24, §44 | 効果を持つ式を書けないのは分岐の条件だけ。scrutinee・引数・被演算子・record field は許し、評価順を §44 が定める |
 | 末尾呼び出しの限定 | §48 | `capture` を経由しない呼び出しだけを保証する |
 
 ### 18.5 新しいエラーコード
@@ -1476,7 +1476,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | 工程 | 成果物 | 判定 |
 |---|---|---|
 | R23 構文 | `crates/hado/src/{lexer,parser}.rs`、`tests/reject`、`scripts/`、lock | 23-a〜23-d |
-| R24 型 | `crates/hado/src/{infer,types,check}.rs`、`tests/accept` `tests/reject`、`scripts/`、lock | 24-a〜24-e |
+| R24 型 | `crates/hado/src/{infer,types,check}.rs`、`crates/hado/src/{names,namespaces}.rs`、`tests/accept` `tests/reject`、`scripts/`、lock | 24-a〜24-f |
 | R25 失敗の効果 | `stdlib/`、`tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、lock | 25-a〜25-e |
 | R26 種別ごとのコード生成 | `crates/hado/src/{mono,emit}.rs`、`runtime/`、`tests/accept` `tests/reject`、`scripts/`、lock | 26-a〜26-f |
 | R27 仕上げ | `tests/`、`scripts/`、`docs/`、`README.md`、lock、tag | 27-a〜27-c |
@@ -1509,7 +1509,8 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 判定 24-b: 省略・`Pure`・具体行の 3 状態が区別される。省略した関数が効果を持てること、`Pure` と書いた関数が効果を持てば E305 になることを確かめる。E305 は既存コードなので拒否コーパスを増やさず、`verify-r24.sh` の判定に置く。
 判定 24-c: 効果多相が通る。`List.map` に効果を持つ関数を渡し、呼び出し側の行に伝わることを確かめる。
 判定 24-d: E308 E522 E605 のアンカーを位置摂動プローブで確かめる。
-判定 24-e: `verify-r24.sh` を新設する。
+判定 24-e: 効果の操作を宣言したディレクトリの外から書くと E204 になり、handler を効果と別のディレクトリに置いても E204 になる（§57、§58）。
+判定 24-f: `verify-r24.sh` を新設する。
 
 ### R25 失敗の効果
 
@@ -1517,7 +1518,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 - `stdlib/option.hd` の `ok_or` を `A {Error}` にし、純粋な 9 本に `Pure` を書く
 - `mono.rs` の `propagation`（660 行目）を Option 限定にする
 - `/` と `%` を `Int {Error}` にする
-- 受理コーパス 54 本を新しい綴りへ移す。`Ok(` と `Error(` は 0 件になる
+- 受理コーパス 54 本を新しい綴りへ移す。`Ok(` と `Error(` は 0 件になる。移行先は 2 つに限る。値の不在は `Option` と `?` へ、理由のある失敗は `raise` を `main` まで通す形へ移す。**handler を使う形へは移さない。** handler の `abort` と `return` のコード生成は R26 の成果物なので、R25 で使うと前方依存になる。handler を使う受理コーパスは R26 が新設する
 - 拒否コーパスから `E509/` を削除し、`E508/` を Option の再伝播に書き直す。現在の `tests/reject/E508/main.hd` は `(Int, String) Result` を使っており、Result が消えると型名が解決できず E204 で落ちて E508 として機能しない。`E303/` の Option 限定への狭めもこのラウンドで入れる。R24 で狭めると `stdlib/result.hd:7` の `let x? = value`（右辺が Result）が落ちて prelude が検査不能になる
 - §51 の印字（`main` の値は stdout、届いた `raise` の `message` は stderr で終了コード 1）
 - `verify-m1-spec.sh` の検査 3（`DivisionError` の存在確認）を落とす
@@ -1534,7 +1535,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 - `abort` は tag 検査と分岐に落とす。0.1.3 の Result のコード生成と同形になる。最小の経路は R25 が置くので、このラウンドは handler 経由の中断と `return` の腕を足す
 - `capture` は evidence passing と short-cut resumption で実装する。継続はヒープのフレーム列
 - E706（`main` にユーザー定義効果）を実装し、拒否コーパスに `E706/` を新設する
-- 受理コーパスに 3 種別それぞれの実行例を置く
+- 受理コーパスに 3 種別それぞれの実行例と、handler を使う例（`with` で `abort` を受けて値に変える形）を新設する。R25 は handler を使わない形までを担うので、handler の実行はこのラウンドで初めて確かめる
 
 判定 26-a: `reply` を含む末尾再帰が 1000 万反復で定数メモリに収まる（17.8 の対照 2 と同じ形）。
 判定 26-b: `abort` を含むプログラムが 0.1.3 の Result 版と同じ出力と終了コードを出す。
