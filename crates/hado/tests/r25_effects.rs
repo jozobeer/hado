@@ -81,6 +81,24 @@ fn do_requires_an_effect_or_option() {
 }
 
 #[test]
+fn do_effect_row_is_checked_after_number_defaulting() {
+    let mut state = 0x25_09;
+    for _ in 0..8 {
+        let n = random(&mut state, 1000);
+        let arg = random(&mut state, 50) + 1;
+        let discarded = random(&mut state, 1000) + 1000;
+        let case = Case::new();
+        case.write("main.hd", &format!("def f x => do (x / x) -> {n}\ndef main = f {arg}\n"));
+        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
+        case.write("main.hd", &format!("def f (x: Int): Int => do (x / x) -> {n}\ndef main = f {arg}\n"));
+        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
+        perturb_rejection(&case, "main.hd", &format!("def f x => do {discarded} -> x\ndef main = f {arg}\n"), "E303", &discarded.to_string());
+        case.write("main.hd", &format!("effect Ask\nreply ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"));
+        assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
+    }
+}
+
+#[test]
 fn integer_division_is_int_with_error() {
     let mut state = 0x25_05;
     for _ in 0..8 {
