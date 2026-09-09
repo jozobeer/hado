@@ -270,6 +270,8 @@ struct Lowerer {
     specialization: crate::types::Inference,
     composite_types: std::collections::HashMap<(usize, usize), Ty>,
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
+    handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
+    handler_stack: Vec<crate::parser::HandlerDecl>,
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
     next: usize,
@@ -351,8 +353,8 @@ impl Lowerer {
             return self.lambda(node, params, body);
         }
         if let NodeKind::Name(name) = &node.kind {
-            if self.operations.get(name) == Some(&crate::parser::OpKind::Abort) {
-                return self.abort_raise(node, vec![]);
+            if let Some(kind) = self.operations.get(name).copied() {
+                return self.operation(node, name, vec![], kind);
             }
             if crate::names::is_upper_reference(name) {
                 let ty = self
@@ -377,6 +379,9 @@ impl Lowerer {
             return self.propagation(Some(pat), value, body);
         }
         if let NodeKind::DoQ { value, body } = &node.kind {
+            if self.is_abort_node(value) && self.handler_for_node(value).is_some() {
+                return self.expression(value);
+            }
             let source = self.expression(value)?;
             if matches!(&source.ty(), Type::Data(name, args) if name == "Option" && args.len() == 1) {
                 return self.option_propagation(None, source, body);
@@ -418,6 +423,9 @@ impl Lowerer {
                 self.expression(then)?,
                 self.expression(els)?,
             );
+        }
+        if let NodeKind::With { handler, args, body } = &node.kind {
+            return self.with_handler(&handler.name, args, body);
         }
         if let Some(value) = lower_literal(node) {
             return Ok(Expression::Constant(value));
@@ -533,6 +541,14 @@ pub fn lower_program(
         value_types: checked.value_types.clone(),
         composite_types: checked.composite_types.clone(),
         operations: checked.operations.clone(),
+        handlers: ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Handler(handler) => Some((handler.name.clone(), handler.clone())),
+                _ => None,
+            })
+            .collect(),
         definitions: definitions
             .iter()
             .map(|(name, def)| ((*name).to_owned(), (*def).clone()))
@@ -1195,8 +1211,8 @@ impl Lowerer {
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
-            if self.operations.get(name) == Some(&crate::parser::OpKind::Abort) {
-                return self.abort_raise(node, arguments);
+            if let Some(kind) = self.operations.get(name).copied() {
+                return self.operation(node, name, arguments, kind);
             }
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
@@ -1270,6 +1286,145 @@ impl Lowerer {
             value: Box::new(call),
             body: Box::new(Expression::Unreachable { result }),
         })
+    }
+
+    fn operation(
+        &mut self,
+        node: &crate::parser::Node,
+        name: &str,
+        arguments: Vec<Expression>,
+        kind: crate::parser::OpKind,
+    ) -> Result<Expression, String> {
+        match kind {
+            crate::parser::OpKind::Capture => Err("capture operations are not implemented".into()),
+            crate::parser::OpKind::Reply => self.handled_operation(name, arguments),
+            crate::parser::OpKind::Abort if self.handler_for(name).is_some() => {
+                self.handled_operation(name, arguments)
+            }
+            crate::parser::OpKind::Abort => self.abort_raise(node, arguments),
+        }
+    }
+
+    fn with_handler(
+        &mut self,
+        name: &str,
+        args: &[crate::parser::Node],
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let handler = self
+            .handlers
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("unknown handler {name}"))?;
+        for arg in args {
+            let _ = self.expression(arg)?;
+        }
+        let aborted = self.is_abort_node(body);
+        self.handler_stack.push(handler.clone());
+        let value = self.expression(body);
+        self.handler_stack.pop();
+        let value = value?;
+        if aborted {
+            return Ok(value);
+        }
+        let Some(crate::parser::HandlerArm::Return { param, body: ret, .. }) = handler
+            .arms
+            .iter()
+            .find(|arm| matches!(arm, crate::parser::HandlerArm::Return { .. }))
+            .cloned()
+        else {
+            return Ok(value);
+        };
+        self.with_params(&[param], vec![value], |this| this.expression(&ret))
+    }
+
+    fn handled_operation(
+        &mut self,
+        name: &str,
+        arguments: Vec<Expression>,
+    ) -> Result<Expression, String> {
+        let handler = self
+            .handler_for(name)
+            .cloned()
+            .ok_or_else(|| format!("unhandled operation {name}"))?;
+        let (params, body) = handler.arms.iter().find_map(|arm| match arm {
+            crate::parser::HandlerArm::Operation { name: op, params, body, .. } if op == name => {
+                Some((params.clone(), body.clone()))
+            }
+            _ => None,
+        }).ok_or_else(|| format!("missing handler arm for {name}"))?;
+        self.with_params(&params, arguments, |this| this.expression(&body))
+    }
+
+    fn with_params(
+        &mut self,
+        params: &[crate::parser::Param],
+        arguments: Vec<Expression>,
+        f: impl FnOnce(&mut Self) -> Result<Expression, String>,
+    ) -> Result<Expression, String> {
+        if params.len() != arguments.len() {
+            return Err("handler arm arity mismatch".into());
+        }
+        let mut bindings = Vec::new();
+        let mut saved = Vec::new();
+        for (param, argument) in params.iter().zip(arguments) {
+            let id = self.next;
+            self.next += 1;
+            let ty = argument.ty();
+            if param.name != "_" {
+                saved.push((param.name.clone(), self.scope.insert(param.name.clone(), (id, ty))));
+            }
+            bindings.push((id, argument));
+        }
+        let result = f(self);
+        for (name, previous) in saved.into_iter().rev() {
+            if let Some(value) = previous {
+                self.scope.insert(name, value);
+            } else {
+                self.scope.remove(&name);
+            }
+        }
+        let mut body = result?;
+        for (id, value) in bindings.into_iter().rev() {
+            body = Expression::Let {
+                id,
+                value: Box::new(value),
+                body: Box::new(body),
+            };
+        }
+        Ok(body)
+    }
+
+    fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
+        self.handler_stack.iter().rev().find(|handler| {
+            handler.arms.iter().any(|arm| {
+                matches!(arm, crate::parser::HandlerArm::Operation { name, .. } if name == operation)
+            })
+        })
+    }
+
+    fn handler_for_node(&self, node: &crate::parser::Node) -> Option<&crate::parser::HandlerDecl> {
+        self.operation_name(node).and_then(|name| self.handler_for(name))
+    }
+
+    fn is_abort_node(&self, node: &crate::parser::Node) -> bool {
+        self.operation_name(node)
+            .is_some_and(|name| self.operations.get(name) == Some(&crate::parser::OpKind::Abort))
+            || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_abort_node(value))
+    }
+
+    fn operation_name<'a>(&self, node: &'a crate::parser::Node) -> Option<&'a str> {
+        match &node.kind {
+            crate::parser::NodeKind::Name(name) => Some(name.as_str()),
+            crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) => {
+                if let crate::parser::NodeKind::Name(name) = &callee.kind {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     fn lambda(

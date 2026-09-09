@@ -164,6 +164,14 @@ pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnos
 }
 
 fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
+    check_parsed_filtered(parsed, path, true)
+}
+
+pub(crate) fn check_parsed_for_print(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
+    check_parsed_filtered(parsed, path, false)
+}
+
+fn check_parsed_filtered(parsed: &ParsedSource, path: &str, reject_user_main_effects: bool) -> Result<Checked, parser::Diagnostic> {
     let ParsedSource { ast, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
     let adjust = |error| namespace_diagnostic(check::arm_diagnostic(ast, error), namespace_anchors);
     let name_error = names::resolve_with_prelude(ast, path, *trusted_start).err();
@@ -177,6 +185,10 @@ fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Di
         diagnostics.push(error);
     }
     diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, path));
+    // Why not keep E706 for --print-type: r24/r25 print `String {Ask}` on main.
+    if !reject_user_main_effects {
+        diagnostics.retain(|error| error.code.as_deref() != Some("E706"));
+    }
     match diagnostics.into_iter().map(adjust).min_by_key(diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),

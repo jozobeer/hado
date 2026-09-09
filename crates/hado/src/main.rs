@@ -47,7 +47,7 @@ fn main() -> ExitCode {
             }
         };
     }
-    match project.check() {
+    match if print { project.check_for_print() } else { project.check() } {
         Ok(checked) => {
             if print {
                 println!("{}{}", checked.main, checked.effects.suffix());

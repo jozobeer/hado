@@ -223,6 +223,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         if checker.contains_abstract(&main, &mut Vec::new()) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E705"), "main cannot return a value containing an abstract type"));
         }
+        if checker.main_effects.has_user_effect() {
+            checker.deferred.push(checker.error(definitions["main"].span, Some("E706"), "main cannot have a user-defined effect"));
+        }
         Ok(main)
     })();
     let main = match inferred {

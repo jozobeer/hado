@@ -56,6 +56,10 @@ impl Row {
         }
     }
 
+    pub fn has_user_effect(&self) -> bool {
+        self.labels().iter().any(|ty| effect_ctor(ty) != "Error")
+    }
+
     fn labels(&self) -> &[Ty] {
         match self {
             Self::Closed(labels) | Self::Open(_, labels) => labels,

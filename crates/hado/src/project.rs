@@ -39,6 +39,11 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    pub fn check_for_print(&self) -> Result<crate::Checked, Diagnostic> {
+        crate::check_parsed_for_print(&self.parsed, &self.files[0].path)
+            .map_err(|error| source_diagnostic(&self.files, error))
+    }
+
     pub fn dump_mono(&self) -> Result<String, Diagnostic> {
         crate::dump_parsed(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
