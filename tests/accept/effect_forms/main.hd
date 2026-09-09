@@ -12,7 +12,7 @@ reply ask => ""
 handler Stop as HStop
 abort stop => 0
 handler A Yield as HYield
-capture yield _ => ()
+capture yield _ => resume ()
 def id (x: Int): Int {Ask, Stop, Int Yield} => x
 def main =
   with HAsk ->
