@@ -1434,3 +1434,102 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | 単相化 | `main` にユーザー定義効果が残った | 17 節 Q10 |
 
 既存コードの変更は 17.4 の 3 件に加えて、E513 を effect と handler に広げる 1 件である。
+
+## 19. R23〜R27 の手順書（2026-09-10）
+
+この節を実行するエージェント向けの手順書。17 節と 18 節の決定を実行する。R23 から R27 まで表の順に進める。
+
+**読む順:** 本節 → `docs/corpus.md` → `docs/spec.md`（§21 §22 §23 §24 §37 §41 §48 §50 §57 §58 を先に）→ 17 節 → 18 節。表と仕様本文が食い違えば仕様本文が正で、食い違いは報告に書く。
+**判定者:** 各工程の成果物は、作成した本人以外が判定基準に沿って審査する。別モデルのエージェントを呼べる環境ならそれに、呼べなければ人に出す。
+**門番:** `scripts/verify-*.sh` の全て。「全門番が通過」は、その時点の全本が終了コード 0 で、`cargo test --offline --no-fail-fast` が 0 failed の意味である。
+**仕様は確定済み:** 17 節と 18 節の決定は仕様に反映済みで、各ラウンドは コーパス → lock → 実装 の順に進む。
+**仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
+**コミット:** 工程ごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
+**報告:** 完了時と、依存する作業で止まったときに返す。(1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
+
+**着手時点で赤の門番:** 7 本。内訳と理由は `docs/ledger.md` の「0.2 の仕様改訂」にある。R27 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。ただし `verify-m1-spec.sh` の検査 3 は `DivisionError` の存在を要求する v0.1 期の改名確認で、その型を廃止した以上もう緑にならない。これは緩和ではなく役目を終えた検査の削除として R25 で落とす。
+
+**17 節 Q17 の訂正:** 決定の第 2 句「各ラウンドで門番を green に保つ」は成り立たない。判定器が仕様から期待値を導出するため、仕様を全面改訂した時点で全ラウンドが赤から始まる。0.1.2 と 0.1.3 と同じ形である。決定の第 1 句（プロトタイプを先に、Result の撤去を後に）は保つ。
+
+| 工程 | 成果物 | 判定 |
+|---|---|---|
+| R23 構文 | `crates/hado/src/{lexer,parser}.rs`、`tests/reject`、`scripts/`、lock | 23-a〜23-d |
+| R24 型 | `crates/hado/src/{infer,types,check}.rs`、`tests/reject`、`scripts/`、lock | 24-a〜24-d |
+| R25 失敗の効果 | `stdlib/`、`tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、lock | 25-a〜25-e |
+| R26 種別ごとのコード生成 | `crates/hado/src/{mono,emit}.rs`、`runtime/`、`tests/accept`、`scripts/`、lock | 26-a〜26-d |
+| R27 仕上げ | `tests/`、`scripts/`、`docs/`、`README.md`、lock、tag | 27-a〜27-c |
+
+### R23 構文
+
+仕様は §40 §41 §57 §58 に反映済み。このラウンドは字句と構文だけで、型は見ない。
+
+- 9 個のキーワード（`effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure`）を字句に足す
+- `effect_section` `handler_section` `with_form` を節と式の文法に足す
+- `resume` を primary に足す
+- `result := type_expr effect_row?` と `effect_row := "{" ... "}" | "Pure"` を型式に足す
+- 拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E209/`（`capture` の外の `resume`）を新設する
+
+判定 23-a: `verify-r9.sh` が緑に戻る。§41 の EBNF から生成したプログラムが往復する。
+判定 23-b: E1xx の本数が §50 の表の行数と一致する（`verify-m2.sh` の検査 2）。
+判定 23-c: §57 と §58 の例が全て parse できる。診断の位置を摂動で確かめる。
+判定 23-d: `verify-r23.sh` を新設し、上記を判定する。
+
+### R24 型
+
+- 効果行の推論と単一化を `infer.rs` に足す。行は集合として扱い、順序を持たない
+- 効果変数は宣言せず、一般化のときに暗黙に量化する
+- `Pure` を空の行として扱う。書いた行はその通りに閉じる
+- E305 を効果の不一致にも当てる
+- E308（効果を持つ式の位置）、E522（行の重複）、E605（handler の過不足）を実装する
+- 拒否コーパスに `E308/` `E522/` `E605/` を新設し、`E303/` を Option 限定に書き直す
+
+判定 24-a: `--print-type` が効果行をアルファベット順で印字し、書き戻せる。
+判定 24-b: 省略・`Pure`・具体行の 3 状態が区別される。省略した関数が効果を持てること、`Pure` と書いた関数が効果を持てば E305 になることを確かめる。
+判定 24-c: 効果多相が通る。`List.map` に効果を持つ関数を渡し、呼び出し側の行に伝わることを確かめる。
+判定 24-d: `verify-r24.sh` を新設する。
+
+### R25 失敗の効果
+
+- `stdlib/error.hd` を新設し、`stdlib/result.hd` と `stdlib/division_error.hd` を削除する
+- `stdlib/option.hd` の `ok_or` を `A {Error}` にし、純粋な 9 本に `Pure` を書く
+- `mono.rs` の `propagation`（660 行目）を Option 限定にする
+- `/` と `%` を `Int {Error}` にする
+- 受理コーパス 54 本を新しい綴りへ移す。`Ok(` と `Error(` は 0 件になる
+- 拒否コーパスから `E509/` を削除する
+- §51 の印字（`main` の値は stdout、届いた `raise` の `message` は stderr で終了コード 1）
+- `verify-m1-spec.sh` の検査 3（`DivisionError` の存在確認）を落とす
+
+判定 25-a: 受理コーパス全件が `check` を通る。
+判定 25-b: 拒否コーパスの本数が §50 の表の行数と一致する（`parse_corpus.rs` の `corpus_counts`）。
+判定 25-c: `main` の観測される振る舞いが 0.1.3 と同じである。成功は stdout と終了コード 0、失敗は stderr と 1。受理コーパスの `expect:` タグを変えずに通ることで確かめる。
+判定 25-d: `verify-m1-spec.sh` が緑に戻る。
+判定 25-e: `verify-r25.sh` を新設する。
+
+### R26 種別ごとのコード生成
+
+- `reply` はその場で評価し、yield しない
+- `abort` は tag 検査と分岐に落とす。0.1.3 の Result のコード生成と同形になる
+- `capture` は evidence passing と short-cut resumption で実装する。継続はヒープのフレーム列
+- E706（`main` にユーザー定義効果）を実装する
+- 受理コーパスに 3 種別それぞれの実行例を置く
+
+判定 26-a: `reply` を含む末尾再帰が 1000 万反復で定数メモリに収まる（17.8 の対照 2 と同じ形）。
+判定 26-b: `abort` を含むプログラムが 0.1.3 の Result 版と同じ出力と終了コードを出す。
+判定 26-c: `capture` の生成器が正しい値を返す。17.8 のとおりスタックを消費するので、反復数は 1 万で測る。
+判定 26-d: `verify-r26.sh` を新設する。
+
+### R27 仕上げ
+
+- lock を更新する
+- `docs/corpus.md`、`docs/spec-coverage.md`、`docs/spec-trace.md`、`README.md`、§39 の典型コードを追随させる
+- 全門番と `cargo test` を実走する
+
+判定 27-a: 全門番が終了コード 0 で、`cargo test --offline --no-fail-fast` が 0 failed。
+判定 27-b: `docs/` の対応表が仕様の節と一致する（`verify-m1-spec.sh` の検査 5）。
+判定 27-c: `v0.2` を tag する。
+
+### スコープ外
+
+- 17.6 の未確認 2（`under` フレームの復元）。実装方式の問題で、R26 で必要になれば扱う
+- segmented stacks。`capture` のスタック消費は 6 節のリスクとして受け入れる
+- 効果の推論の最適化。まず正しく動くことを優先する

@@ -1751,7 +1751,7 @@ literal_pattern := ["-"] int | ["-"] float | char | string | bool
 
 > **暗黙より型**
 
-> **例外より値**
+> **例外より効果**
 
 > **分岐より伝播**
 
