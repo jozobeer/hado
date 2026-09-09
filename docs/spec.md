@@ -1680,8 +1680,7 @@ primary         := int | float | char | string | bool | unit
                  | lambda                                                 `fn(` で始まり `)` で閉じる
                  | "resume"                                               capture の腕の中に限る（第58節）
                  | "(" expression ")"
-constructor_expr := "Ok" "(" ")"                                          Unit payload の正準形（第21節）
-                 | path? upper_name ["(" expression ("," expression)* ")" | record_expr]
+constructor_expr := path? upper_name ["(" expression ("," expression)* ")" | record_expr]
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"
 list_expr       := "[" "]"
                  | "[" expression ("," expression)* ["," "..." expression] "]"
