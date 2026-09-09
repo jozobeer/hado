@@ -1440,7 +1440,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | 段階 | 検査 | 由来 |
 |---|---|---|
 | 構文 | `abort` の操作に戻り型を書いた | Q13 |
-| 名前解決 | `resume` を `capture` 以外の腕で書いた | Q18 |
+| 構文 | `resume` を `capture` 以外の腕で書いた。書ける場所は構文的な入れ子だけで決まる | Q18 |
 | 型 | 効果を持つ式を条件位置・引数位置・record field 式に置いた | 17 節 Q20 |
 | 型（契約） | handler が効果の操作を実装していない、または効果に無い操作を書いた | 17 節 Q9 |
 | 冗長 | 効果行に同じ効果を 2 回書いた | Q4 |
@@ -1456,6 +1456,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 **判定者:** 各工程の成果物は、作成した本人以外が判定基準に沿って審査する。別モデルのエージェントを呼べる環境ならそれに、呼べなければ人に出す。
 **門番:** `scripts/verify-*.sh` の全て。「全門番が通過」は、その時点の全本が終了コード 0 で、`cargo test --offline --no-fail-fast` が 0 failed の意味である。
 **仕様は確定済み:** 17 節と 18 節の決定は仕様に反映済みで、各ラウンドは コーパス → lock → 実装 の順に進む。
+**ラウンド名は主題である:** 検査段階とは一致しない。R24「型」が冗長段階の E522 を実装するように、1 つのラウンドが複数の段階の検査を持つことがある。段階順は §50 が定め、ラウンドの分割はそれと独立である。
 **仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
 **コミット:** 工程ごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
 **報告:** 完了時と、依存する作業で止まったときに返す。(1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
@@ -1471,7 +1472,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | R23 構文 | `crates/hado/src/{lexer,parser}.rs`、`tests/reject`、`scripts/`、lock | 23-a〜23-d |
 | R24 型 | `crates/hado/src/{infer,types,check}.rs`、`tests/reject`、`scripts/`、lock | 24-a〜24-d |
 | R25 失敗の効果 | `stdlib/`、`tests/accept` `tests/reject`、`crates/hado/**`、`scripts/`、lock | 25-a〜25-e |
-| R26 種別ごとのコード生成 | `crates/hado/src/{mono,emit}.rs`、`runtime/`、`tests/accept`、`scripts/`、lock | 26-a〜26-d |
+| R26 種別ごとのコード生成 | `crates/hado/src/{mono,emit}.rs`、`runtime/`、`tests/accept` `tests/reject`、`scripts/`、lock | 26-a〜26-e |
 | R27 仕上げ | `tests/`、`scripts/`、`docs/`、`README.md`、lock、tag | 27-a〜27-c |
 
 ### R23 構文
@@ -1482,7 +1483,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 - `effect_section` `handler_section` `with_form` を節と式の文法に足す
 - `resume` を primary に足す
 - `result := type_expr effect_row?` と `effect_row := "{" ... "}" | "Pure"` を型式に足す
-- 拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E209/`（`capture` の外の `resume`）を新設する
+- 拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E124/`（`capture` の外の `resume`）を新設する。どちらも構文段階なので、このラウンドで完結する
 
 判定 23-a: `verify-r9.sh` が緑に戻る。§41 の EBNF から生成したプログラムが往復する。
 判定 23-b: E1xx の本数が §50 の表の行数と一致する（`verify-m2.sh` の検査 2）。
@@ -1515,7 +1516,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 - `verify-m1-spec.sh` の検査 3（`DivisionError` の存在確認）を落とす
 
 判定 25-a: 受理コーパス全件が `check` を通る。
-判定 25-b: 拒否コーパスの本数が §50 の表の行数と一致する（`parse_corpus.rs` の `corpus_counts`）。
+判定 25-b: 拒否コーパスから `E509/` が消え、残りが §50 の表と 1 対 1 で対応する。本数が表の行数に揃うのは E706 を足す R26 なので、`parse_corpus.rs` の `corpus_counts` はこのラウンドでは赤のままでよい。
 判定 25-c: `main` の観測される振る舞いが 0.1.3 と同じである。成功は stdout と終了コード 0、失敗は stderr と 1。受理コーパスの `expect:` タグを変えずに通ることで確かめる。
 判定 25-d: `verify-m1-spec.sh` が緑に戻る。
 判定 25-e: `verify-r25.sh` を新設する。
@@ -1525,13 +1526,14 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 - `reply` はその場で評価し、yield しない
 - `abort` は tag 検査と分岐に落とす。0.1.3 の Result のコード生成と同形になる
 - `capture` は evidence passing と short-cut resumption で実装する。継続はヒープのフレーム列
-- E706（`main` にユーザー定義効果）を実装する
+- E706（`main` にユーザー定義効果）を実装し、拒否コーパスに `E706/` を新設する
 - 受理コーパスに 3 種別それぞれの実行例を置く
 
 判定 26-a: `reply` を含む末尾再帰が 1000 万反復で定数メモリに収まる（17.8 の対照 2 と同じ形）。
 判定 26-b: `abort` を含むプログラムが 0.1.3 の Result 版と同じ出力と終了コードを出す。
 判定 26-c: `capture` の生成器が正しい値を返す。17.8 のとおりスタックを消費するので、反復数は 1 万で測る。
-判定 26-d: `verify-r26.sh` を新設する。
+判定 26-d: 拒否コーパスの本数が §50 の表の行数（69）と一致する。R23 が 2 本、R24 が 3 本、R26 が 1 本を足し、R25 が `E509/` を 1 本消すので、64 − 1 + 6 = 69 になる。
+判定 26-e: `verify-r26.sh` を新設する。
 
 ### R27 仕上げ
 
