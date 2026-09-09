@@ -1274,3 +1274,36 @@ A の残る重大は、契約 member の戻り型が `type_expr` のままで `d
 **B の軽微。** ディレクトリ限定の規則（操作は宣言ディレクトリの中だけ、handler は効果と同じディレクトリ）を検証する判定がどのラウンドにも無かったので、判定 24-e に足し、R24 の成果物に `names.rs` と `namespaces.rs` を加えた。
 
 **次の一手:** R23 に着手する。仕様は審査を 4 巡した。
+
+## R23 構文（2026-09-10）
+
+代数エフェクトの字句と構文を入れた。キーワード 9 個（`effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure`）、`effect_section` `handler_section` `with_form`、primary の `resume`、`result := type_expr effect_row?` を足した。拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E124/`（`capture` の外の `resume`）を新設し、66 本になった。
+
+指揮は claude（opus-5）、実装は cursor（cursor-grok-4.6-high）、審査は codex（gpt-6-astra low）を herdr 経由で回した。工程順（コーパス → lock → 実装）はコミット 3 本に分かれている。
+
+**計画の内部矛盾を 2 件、指揮者が裁定した。**
+
+19 節の成果物表は R23 に `tests/accept` を許さないのに、18.4 の割り当て表は受理側 `effect_forms/` `handler_forms/` を R23 に置く。R23 は型を見ないので受理コーパスは `check` を通らない。受理側を R24（`tests/accept` を成果物に持つ）へ送った。
+
+判定 23-a は `verify-r9.sh` の緑を求めるが、その検査 R9-1 は `parse_corpus::corpus_counts` を同梱しており、判定 25-b と「各ラウンドで許容される赤」の R26 行は corpus_counts を R26 まで赤と定める。**門番は分割せず 4/5 のまま残した。** 23-a の本文が要求するのは「§41 の EBNF から生成したプログラムが往復する」ことなので、`verify-r23.sh` が `r9_grammar` を直接判定する形にした。
+
+**審査は 2 件を指摘し、1 件が妥当、1 件が誤検出だった。**
+
+妥当: `verify-r23.sh` が `r23_syntax` だけを走らせ、判定 23-d の「上記を判定する」に対して 23-a と 23-b を判定していなかった。3 検査の形に直した（`cbec92a`）。E1xx の集合は §50 の表から `sed` で導出し、ディスクの実数と照合する。件数は直書きしていない。
+
+誤検出: 「`effect E reply ask: String def main = 1` が 1 行で受理されるのは §57 の節境界の違反」。`docs/spec.md:1754` が「パーサは改行を見ない。」と定め、§41 が空白は意味を持たないとする。改行で分けた形と 1 行に詰めた形の両方を実測し、どちらも受理されることを確かめて棄却した。`parser.rs` は変更していない。既存の `module` 節が後続の `def` を飲んで E100 になるのは、契約 member も `def` で始まり区別できないという別の理由である。
+
+**着手前に §50 の表から期待値を独立に導出した。** E コード 69 個、うち E1xx が 15 個。ディスクの拒否コーパスは 64 本で、不足が E123 E124 E308 E522 E605 E706 の 6 件、余剰が E509 の 1 件。64 − 1 + 6 = 69 が計画の 26-d と一致する。
+
+**実測（R23 終了時）。** 赤は着手時点と同じ 7 本（m0、m1-corpus、m1-spec、m2、m3、m7、r9）で、新しい赤は無い。`cargo test --offline --no-fail-fast` の失敗は `parse_corpus` の 1 ターゲットだけになった（着手時は `parse_corpus` と `r9_grammar` の 2 本）。
+
+| 判定 | 実測 |
+|---|---|
+| 23-a | `cargo test --test r9_grammar` 緑。`verify-r9.sh` は 4/5 で、NG は R9-1 が同梱する `corpus_counts` のみ |
+| 23-b | `verify-m2.sh` の検査 2 `OK: 2 e1xx-15+swap` |
+| 23-c | `r23_syntax` 9 tests ok。§57/§58 の例が全て parse、E123 は `:`、E124 は `resume` にアンカー |
+| 23-d | `verify-r23.sh` `PASSED: 3/3`、exit 0 |
+
+仕様への疑義（builder が挙げ、指揮者が本文優先で処理）: 計画 18.3 の handler は `functor_param`・引数なしの `with`・型引数なしだが、§41 本文は `typed_param`・`with_args`・`type_vars` を持つ。本文に従った。
+
+**次の一手:** R24 型。効果行の推論と単一化、E308 E522 E605、受理側 `effect_forms/` `handler_forms/` `effect_row/` `effect_position/`。
