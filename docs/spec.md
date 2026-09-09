@@ -861,19 +861,11 @@ handler = 失敗を別の値へ変える
 
 ただし、`if` によるOption分岐が常に禁止されるわけではない。`if` は、成功と失敗を異なるドメイン値へ変換するなど、意味のある分岐に使用できる。単に同じ `None` を再伝播するだけのbranchは冗長として拒否する（E508）。
 
-効果を持つ式を書けない位置がある。分岐の条件と scrutinee、適用の引数、演算子の被演算子、record 式の field である。ここに置くと E308 とする。
+効果を持つ式を書けない位置は 2 つある。分岐の条件（第14節、第15節）と、pattern branch の scrutinee（第16節）である。ここに置くと E308 とする。
 
 ```ocaml
-if is_ready () => x | y        // E308。条件は効果を持てない
-if fetch () | Some(x) => x | 0 // E308。scrutinee も同じ
-List.length (fetch_all ())     // E308。引数は効果を持てない
-read_a () + read_b ()          // E308。被演算子も同じ
-```
-
-それ以外の位置には書ける。`let` と `do` の右辺、末尾位置、`|>` の連鎖に加えて、**分岐の腕は末尾位置なので書ける**。
-
-```ocaml
-def choose flag => if flag => fetch_a () | fetch_b ()
+if is_ready () => x | y        // E308
+if fetch () | Some(x) => x | 0 // E308
 ```
 
 canonical formは、
@@ -883,7 +875,17 @@ let ready = is_ready () ->
 if ready => x | y
 ```
 
-この制限が第30節・第31節・第32節の前提を守る。両方の腕が同じなら条件ごと落とす（E502）、到達不能な腕を落とす（E403）、同じ条件の重複を拒む（E406）という規則は、条件が副作用を持たないことに依存している。効果を持つ呼び出しは必ず行頭に現れるので、どこで何が起きるかも位置から追える。
+それ以外の位置には書ける。分岐の腕、適用の引数、演算子の被演算子、record 式の field はいずれも許す。
+
+```ocaml
+def choose flag => if flag => fetch_a () | fetch_b ()
+def f x y => x / y + 1
+def n => List.length (fetch_all ())
+```
+
+この制限は第30節・第31節・第32節の前提を守るためにある。両方の腕が同じなら条件ごと落とす（E502）、到達不能な腕を落とす（E403）、同じ条件の重複を拒む（E406）という規則は、条件が副作用を持たないことに依存している。効果を持つ条件が書けると、これらの規則が効果の削除を要求してしまう。
+
+引数と被演算子を禁じないのは、そこでの問題が評価順だけだからである。順序は第44節が定めるので、禁じる必要がない。`/` と `%` が効果を持つ（第36節）以上、被演算子を禁じると `x / y + 1` が書けなくなる。
 
 効果を別の値へ変えるには handler を使う（第58節）。
 
@@ -1259,7 +1261,7 @@ Char
 String
 ```
 
-Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `Int {Error}` を返す。除数 0 は `raise` する（第21節）。
+Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `Int {Error}` を返す。除数 0 は `raise` し、`Exception` の `message` を `"DivisionByZero"` とする（第21節、第51節）。
 
 効果を持つのは Int の `/` と `%` に限る。
 
@@ -1585,7 +1587,7 @@ definition      := "def" name "=" expression
 parameters      := param+
                  | "(" typed_param ("," typed_param)* ")"
 param           := name
-                 | "_"                                                    第27節の条件を満たす def と fn に限る（E519）
+                 | "_"                                                    第27節の条件を満たす def と fn と handler の腕に限る（E519）
 typed_param     := param ":" type_expr
 return_type     := ":" result
 ```
@@ -1628,8 +1630,8 @@ module:
 ```text
 module_section  := "module" upper_name module_item*
 module_item     := "type" type_vars? upper_name                                          抽象型
-                 | "def" type_vars? name ":" type_expr                                   値 member
-                 | "def" type_vars? name "(" contract_param ("," contract_param)* ")" ":" type_expr
+                 | "def" type_vars? name ":" result                                      値 member
+                 | "def" type_vars? name "(" contract_param ("," contract_param)* ")" ":" result
 contract_param  := name ":" type_expr
 implement_section := "implement" contract_ref "as" upper_name implement_item*
 functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item*
@@ -1812,6 +1814,8 @@ Unit は `()` とする。
 
 `&&` と `||` は短絡評価する。左辺が結果を決めるとき、右辺を評価しない。
 
+二項演算子の被演算子は左から右に評価する。適用の引数も、パイプの左辺を第1引数として、書かれた順に評価する。効果を持つ式を並べたときの順序はこれで定まる。
+
 ---
 
 # 45. 構造比較の対象型
@@ -1847,7 +1851,7 @@ def rec map values f =>
 
 # 47. 名前空間
 
-名前空間は型・契約・実装・constructor・値の 5 つとする。効果は契約の空間、handler は実装の空間、効果の操作は値の空間に入る（第57節、第58節）。型・契約・実装・constructor の 4 つはディレクトリごとに持ち、値の空間はファイルごとに持つ（第54節、第55節）。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
+名前空間は型・契約・実装・constructor・値の 5 つとする。効果は契約の空間、handler は実装の空間、効果の操作は値の空間に入る（第57節、第58節）。型・契約・実装・constructor の 4 つはディレクトリごとに持ち、値の空間はファイルごとに持つ（第54節、第55節）。効果の操作は例外で、値の空間に入るがディレクトリ全体から見える（第57節）。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
 
 型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record とその constructor は、その実装だけの局所的な空間にあり、実装同士の同名は E205 にならない。外の型と同名なら E205 とし、実装の中の宣言を指す。契約の抽象型と同名のconstructor付き型定義は実体化であり、constructorを持たないrecord型定義は E205 である（第35節）。修飾した参照 `A.B` と `a::B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
@@ -1858,6 +1862,8 @@ prelude の constructor `Some` `None` `Ok` `Error` は修飾なしで参照で�
 ---
 
 # 48. 末尾呼び出しの保証
+
+末尾位置は、関数の本体そのものと、そこから次の規則で辿れる位置とする。`let` と `do` と `with` の継続、分岐（第14節から第17節）の腕、条件列の腕と fallback である。`fn` の本体はその `fn` にとっての末尾位置であり、囲む関数のものではない。適用の引数、演算子の被演算子、record 式の field、分岐の条件と scrutinee は末尾位置ではない。
 
 `capture` 操作（第57節）を経由しない末尾位置の関数呼び出しは、スタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
 
