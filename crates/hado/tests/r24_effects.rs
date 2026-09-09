@@ -182,3 +182,55 @@ fn handler_for_a_root_effect_in_another_directory_is_e204() {
     case.write("sub/fixed.hd", "handler Ask as Fixed\nreply ask => \"there\"\nreturn value => value\n");
     case.reject("check", "main.hd", "sub/fixed.hd", "E204", "handler ".len());
 }
+
+#[test]
+fn unannotated_union_keeps_argument_and_body_rows() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: Bool\neffect Io\nreply tick: Unit\ndef tickit (x: Int): Int {Io} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Ask, Io}\n");
+}
+
+#[test]
+fn annotated_row_is_an_upper_bound_for_argument_rows() {
+    let case = Case::new();
+    case.write("main.hd", "effect Io\nreply tick: Unit\ndef tickit (x: Int): Int {Io} => x\ndef apply2 f x: Int {Io} => tickit (f x)\ndef main = apply2 tickit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Io}\n");
+}
+
+#[test]
+fn annotated_row_rejects_argument_effects_outside_the_bound() {
+    let case = Case::new();
+    case.write("main.hd", "effect Io\nreply tick: Unit\neffect Ask\nreply ask: Bool\ndef tickit (x: Int): Int {Io} => x\ndef apply2 f x: Int {Io} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = apply2 peek 1\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E305]"), "{diagnostic}");
+}
+
+#[test]
+fn argument_rows_are_generalized_per_call() {
+    let case = Case::new();
+    case.write("main.hd", "effect Io\nreply tick: Unit\neffect Ask\nreply ask: Bool\ndef tickit (x: Int): Int {Io} => x\ndef g f x: Int {Ask, Io} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = g peek 1 + g tickit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Ask, Io}\n");
+}
+
+#[test]
+fn pure_signature_rejects_effectful_value_members() {
+    let case = Case::new();
+    case.write("store.hdi", "module Store\ndef value: Int Pure\n");
+    case.write("impl.hd", "effect Ask\nreply ask: Int\nimplement Store as Real\ndef value = ask\n");
+    case.write("main.hd", "def main = Real.value\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E602]") || diagnostic.contains("error[E305]"), "{diagnostic}");
+}
+
+#[test]
+fn matching_value_member_rows_are_kept() {
+    let case = Case::new();
+    case.write("store.hdi", "module Store\ndef value: Int {Ask}\n");
+    case.write("impl.hd", "effect Ask\nreply ask: Int\nimplement Store as Real\ndef value = ask\n");
+    case.write("main.hd", "def main = Real.value\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
+}
