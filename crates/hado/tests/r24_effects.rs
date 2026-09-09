@@ -1,0 +1,142 @@
+use std::path::PathBuf;
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct Case(PathBuf);
+impl Case {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("hado-r24-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&dir).unwrap();
+        Self(dir)
+    }
+    fn write(&self, file: &str, source: &str) {
+        std::fs::create_dir_all(self.0.join(file).parent().unwrap()).unwrap();
+        std::fs::write(self.0.join(file), source).unwrap();
+    }
+    fn command(&self, command: &str, entry: &str) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_hado")).arg(command).arg(self.0.join(entry)).output().unwrap()
+    }
+    fn print_type(&self, entry: &str) -> String {
+        let output = Command::new(env!("CARGO_BIN_EXE_hado")).args(["check", "--print-type"]).arg(self.0.join(entry)).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stderr.is_empty());
+        String::from_utf8(output.stdout).unwrap()
+    }
+    fn reject(&self, command: &str, entry: &str, file: &str, code: &str, offset: usize) {
+        let source = std::fs::read_to_string(self.0.join(file)).unwrap();
+        let before = &source[..offset];
+        let output = self.command(command, entry);
+        assert_eq!(output.status.code(), Some(1), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let diagnostic = String::from_utf8(output.stderr).unwrap();
+        let relative = std::path::Path::new(file).strip_prefix(std::path::Path::new(entry).parent().unwrap()).unwrap();
+        let prefix = format!("{}:{}:{}: error[{code}]: ", relative.display(), before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1);
+        assert!(diagnostic.starts_with(&prefix), "expected {prefix}\n{diagnostic}\n{source}");
+        assert_eq!(diagnostic.lines().count(), 1);
+    }
+}
+impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+
+fn random(state: &mut u64, limit: usize) -> usize {
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    ((*state >> 32) as usize) % limit
+}
+
+fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
+    let offset = source.find(anchor).unwrap();
+    let lead = format!("// position {padding}\n{}", "\n".repeat(padding % 3));
+    (format!("{lead}{}{}{}", &source[..offset], " ".repeat(padding), &source[offset..]), lead.len() + offset + padding)
+}
+
+fn perturb_rejection(case: &Case, file: &str, source: &str, code: &str, anchor: &str) {
+    for padding in 0..5 {
+        let (source, offset) = shifted(source, anchor, padding);
+        case.write(file, &source);
+        for command in ["check", "build", "dump-mono"] { case.reject(command, "main.hd", file, code, offset); }
+    }
+}
+
+fn letters(state: &mut u64, count: usize) -> Vec<String> {
+    let mut names = Vec::new();
+    while names.len() < count {
+        let name = format!("E{}", char::from(b'a' + random(state, 26) as u8));
+        if !names.contains(&name) { names.push(name); }
+    }
+    names
+}
+
+#[test]
+fn print_type_orders_effect_rows_and_writes_them_back() {
+    let mut state = 0x24_01;
+    for _ in 0..8 {
+        let mut names = letters(&mut state, 3);
+        let mut written = names.clone();
+        for index in (1..written.len()).rev() {
+            written.swap(index, random(&mut state, index + 1));
+        }
+        names.sort();
+        let case = Case::new();
+        let mut source = String::new();
+        for name in &names {
+            source.push_str(&format!("effect {name}\nreply {}op: Unit\n", name.to_lowercase()));
+        }
+        source.push_str(&format!("def f (x: Int): Int {{{}}} => x\ndef main = f 1\n", written.join(", ")));
+        case.write("main.hd", &source);
+        let printed = case.print_type("main.hd");
+        let expected = format!("Int {{{}}}\n", names.join(", "));
+        assert_eq!(printed, expected, "{source}");
+        let mut restored = String::new();
+        for name in &names {
+            restored.push_str(&format!("effect {name}\nreply {}op: Unit\n", name.to_lowercase()));
+        }
+        restored.push_str(&format!("def g (x: Int): {} => x\ndef main = g 1\n", printed.trim()));
+        case.write("main.hd", &restored);
+        assert_eq!(case.print_type("main.hd"), expected, "{restored}");
+    }
+}
+
+#[test]
+fn omitted_pure_and_written_rows_are_distinct() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: String\ndef f x => if true => ask | x\ndef main = f \"a\"\n");
+    assert_eq!(case.print_type("main.hd"), "String {Ask}\n");
+    case.write("main.hd", "effect Ask\nreply ask: String\ndef f (x: String): String Pure => ask\ndef main = 1\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E305]"), "{diagnostic}");
+    case.write("main.hd", "effect Ask\nreply ask: String\neffect Io\nreply tick: String\ndef f (x: String): String {Ask} => tick\ndef main = 1\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E305]"), "{diagnostic}");
+}
+
+#[test]
+fn list_map_propagates_argument_effects() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: Bool\ndef fetch (b: Bool): Bool {Ask} => b\ndef main = List.length (List.map [true] fetch)\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
+}
+
+#[test]
+fn effect_diagnostics_follow_source_positions() {
+    let case = Case::new();
+    perturb_rejection(&case, "main.hd", "effect Ask\nreply ask: Bool\ndef fetch (b: Bool): Bool {Ask} => b\ndef main = if fetch true => 1 | 0\n", "E308", "fetch true");
+    perturb_rejection(&case, "main.hd", "effect Ask\nreply ask: String\ndef f (x: Int): Int {Ask, Ask} => x\ndef main = f 1\n", "E522", "Ask} =>");
+    perturb_rejection(&case, "main.hd", "effect Ask\nreply ask: String\nreply extra: Int\nhandler Ask as H\nreply ask => \"x\"\ndef main = 1\n", "E605", "handler");
+}
+
+#[test]
+fn operations_and_handlers_stay_in_their_directory() {
+    let case = Case::new();
+    case.write("fx/ask.hd", "effect Ask\nreply ask: String\n");
+    case.write("main.hd", "def main = ask\n");
+    case.reject("check", "main.hd", "main.hd", "E204", "def main = ".len());
+    let case = Case::new();
+    case.write("fx/ask.hd", "effect Ask\nreply ask: String\n");
+    case.write("other/h.hd", "handler Ask as H\nreply ask => \"x\"\n");
+    case.write("main.hd", "def main = 1\n");
+    case.reject("check", "main.hd", "other/h.hd", "E204", "handler ".len());
+}
