@@ -1,4 +1,4 @@
-# 開発計画 v0.1 → v0.1.2
+# 開発計画 v0.1 → v0.2
 
 対象は `docs/spec.md`（以下「仕様」）。仕様の節番号は、M1 で改訂する前の現行版を指す。
 
@@ -1199,3 +1199,88 @@ optimizer を入れるとき、型から純粋性を仮定してはならない�
 - `tests/accept/tail_closure/main.hd:3` — `|` の直後で `=` と `=>` が 1 文字違いで別の意味になる
 - `tests/accept/named_record/main.hd:5` — `Payload { id = n }` は分解にも構築にも妥当
 - `tests/accept/rail_forms/main.hd:8` — 行が `{` で開き、record リテラルとして読み始める
+
+## 17. v0.2 の範囲と決定（代数エフェクト、2026-09-09）
+
+`Result` 型を廃止し、Koka 系の代数エフェクトを入れる。grilling（20 問）で確定した。経緯は `docs/ledger.md` の「0.2 の計画」にある。
+
+§38「入れないもの」の `effect system`、§1 の思想の「Explicit failure with `Option` / `Result`」と「Railway Oriented Programming by default」、および 16 節全体は、本節が優先する。判断基準は 7 節・9 節・11 節・13 節と同じで、拒否か許容かで迷ったら拒否し、新機能は最小形で入れる。
+
+仕様への反映と手順書は本節に含まない。R23 以降で書く。
+
+### 17.1 決定
+
+| ID | 論点 | 決定 | 仕様の節 |
+|---|---|---|---|
+| Q1 | 動機 | 純粋性を型に載せる。(a) 効果を持つ式が冗長規則で消えないこと、(b) 最適化が型から純粋性を読めること。16.2 の「E502 が条件の評価ごと落とすので効果が消える」経路は、今は「I/O が Result を返し §14 が条件を Bool に限る」という間接的な経路でしか塞がれていない。順序は動機に入らない（`->` が構文で並びを決め、正格評価で並べ替えが起きない） | §1, §42 |
+| Q2 | 廃止の範囲 | 失敗は効果にする。`Option` はデータ型として残し、`Result` は廃止する | §21, §38 |
+| Q3 | 効果の深さ | 一般 `ctl`（1 回再開）まで。multi-shot は入れない | 新節 |
+| Q4 | `resume` の形 | handler 節内限定のキーワード。値化・保存・返却は禁止し、節内なら位置は問わない。全ての再開が scoped になり、静的 evidence（EPT）が使える | 新節 |
+| Q5 | 種別の位置 | 操作の種別は効果宣言で固定する。「この呼び出しが yield しうるか」が呼び出し位置ごとに静的に決まる | 新節 |
+| Q6 | 種別と §48 | 種別は `fun` / `final ctl` / `ctl` の 3 つ。§48 は「`ctl` を経由しない末尾呼び出しはスタックを消費しない」に限定し、`ctl` の下では消費先がヒープへ移ることを書く | §48, 新節 |
+| Q7 | Option の境界 | 理由の有無で分ける。Option は値の不在、効果は理由のある失敗。今の Option / Result の区別をそのまま使う | §21 |
+| Q8 | `?` と `do` | 効果的な呼び出しの束縛に印を付けない。`?` は Option 専用の見分け札として存続し、`do` は「効果を持つ式の値を捨てて継続する」に意味を移して存続する | §22, §23, §24 |
+| Q9 | handler の形 | §34 / §35 と同じ節構文。`effect E` が契約側、`handler E as H` が実装側で、使用は `with H -> rest`。宣言なので §20 の branch のネスト禁止に触れず、handler 節の中で `if` が書ける | 新節, §34, §35 |
+| Q10 | `main` と印字 | `main` に残せるのは組み込み効果だけ。raise された値は stderr で終了コード 1、正常値は stdout で 0 とし、観測される振る舞いを現行のまま保つ。ユーザー定義効果が残れば新しい E コード | §5, §51 |
+| Q11 | 効果多相 | 入れる。`Fn` の型に効果行を持たせ、単相化で実体化する | §37, §10 |
+| Q12 | 効果行の綴り | 後置・記号なしの `Int [Raise]`。`Fn(A => B [E])` | §37, §41 |
+| Q13 | 省略 | 効果行だけ結果型と独立に省略できる | §8, §9 |
+| Q14 | 省略の意味 | 省略は暗黙の効果変数（効果多相）。契約でも外の `def` でも同じ意味とし、純粋の主張には `Pure` を書く | §34, §9 |
+| Q15 | `ctl` を含むループ | short-cut resumption を実装義務として引き受ける。継続はヒープ上のフレーム列として持ち、末尾から 1 つずつ畳む | §48, 新節 |
+| Q16 | 操作の名前空間 | 値空間に無修飾で入れる（`raise error`）。`compare` と同じ扱いで、名前空間は 5 つのまま増やさない | §47 |
+| Q17 | 進め方 | 未確認をプロトタイプで潰してから、効果を足し `Result` を最後に撤去する。各ラウンドで門番を green に保つ | 手順書 |
+| Q18 | 版 | v0.2 | — |
+| Q19 | prelude の `Pure` | 純粋な 9 本に `Pure` を書く。高階の 5 本（`List.map` `filter` `fold` `sort`、`Option.map`）は省略のまま効果多相にする | §49 |
+| Q20 | 効果を書ける位置 | 効果を持つ式は `let` / `do` の右辺、末尾位置、`\|>` の連鎖にだけ書ける。条件位置・引数位置・record field 式は禁止する | §12, §14, §15, §25, §30, §31, §32 |
+
+### 17.2 種別ごとの保証
+
+| 種別 | `resume` | §48 の保証 | コード生成 |
+|---|---|---|---|
+| `fun` | 呼び出し位置で即時 | あり | その場で評価し、yield しない |
+| `final ctl` | 不可（中断のみ） | あり | tag 検査と分岐。現行の Result と同形 |
+| `ctl` | 節内のどこでも 1 回 | なし | short-cut resumption |
+
+`raise` は `final ctl` なので、最も頻出する効果が最も安いパスを通る。
+
+### 17.3 Q20 の根拠
+
+効果を入れると `is_ready ()` が `Bool [Io]` を返せるようになり、条件位置に書けてしまう。§30 は「Boolean branch の両方の結果が同一なら、条件自体が意味を持たないため、branch 全体を削除する」（E502）と定めるので、`if is_ready () => x | x` に対して効果を持つ呼び出しの削除を要求することになる。条件列では E403 と E406 も条件を見るため、`if | read_flag () => a | read_flag () => b` という別々の 2 つの呼び出しが重複条件として拒否される。
+
+Q20 はこれを構文で塞ぐ。同時に、引数位置の評価順を仕様で定める必要が消え、効果を持つ呼び出しが必ず行頭に現れるので、Q8 で印を外したことによる可読性の損失も補う。
+
+### 17.4 機械的に決まること
+
+- `/` の戻り型は `(Int, DivisionError) Result` から `Int [DivisionError Raise]` へ
+- E509（ok-unit-parens）は Result と共に消滅する
+- E504 / E507 / E508 は Option 限定に縮小して存続する
+- E303 は `?` 側のみ存続する（右辺は Option）。`do` の右辺は「空でない効果行を持つ式」を要求する新しい規則になり、純粋な式を置いたら §28 の値の破棄と同じ扱いになる
+- `main` の効果行は一般化せず、本体の効果で閉じる。Q10 の検査に必要で、Q14 の唯一の例外
+- `Option.ok_or` は `(A, E) Result` から `A [E Raise]` へ。値の不在を理由のある失敗へ持ち上げる、Q7 の境界をまたぐ唯一の prelude 関数になる
+- `Result.map` `map_error` `is_ok` は消滅し、契約内の `def` は 18 本から 15 本になる
+- Q20 の違反には新しい E コードが要る。効果は型の一部なので型段階（E3xx）に置き、handler の契約不一致は §35 の E602 と同類なので E6xx に置く
+
+### 17.5 やらないこと
+
+- multi-shot resumption（非決定性）
+- 第一級の resumption。shallow handler と、継続を別の handler の下へ運ぶ使い方
+- 効果のための 6 つ目の名前空間
+- 効果行の `<...>` 綴り（13.2 が `<T>` を E100 に予約済み）と `{}` 単独（R21 の record constructor と衝突する）
+- `Result` 型の存続
+
+### 17.6 未確認
+
+R23 のプロトタイプで潰す。
+
+1. 生成器ループで yield-resume を N 回繰り返したとき、ヒープ消費が N に比例しないか
+2. short-cut resumption の prompt / under フレーム復元が、hado の設定（scoped、1 回限り、値化禁止）でも必要か
+
+### 17.7 一次資料
+
+Ningning Xie and Daan Leijen. *Generalized Evidence Passing for Effect Handlers: Efficient Compilation of Effect Handlers to C.* Proc. ACM Program. Lang. 5, ICFP, Article 71 (2021). <https://doi.org/10.1145/3473576>
+
+- p.71:2 項 4 — monadic 翻訳は特別なランタイムを要求せず、C / LLVM / WASM 等に直接コンパイルできる
+- p.71:11 §2.10 — 「any direct tail-recursive calls are no longer directly tail-recursive as they occur under a lambda now!」。bind-inlining と join-point sharing による Pure 分岐の fast path で末尾再帰が保たれる
+- p.71:12 §2.11 — 「all effectful functions return a monadic result, either Pure or Yield」
+- p.71:12 §2.12 — EPT は scoped resumption に限られ、範囲外は実行時エラーになる
+- p.71:10 §2.8 — short-cut resumptions。継続をフレーム列として持ち、末尾から 1 つずつ畳む。Koka が採用している
