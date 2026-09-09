@@ -1399,7 +1399,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 キーワードは `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure` の 9 個を足し、14 個から 23 個になる。
 
-0 引数の操作は §34 の値 member（`def name: 型`）と同じ形で書く。`abort` は戻り型を書けない。
+`abort` は戻り型を書けない。文法では表せないので本文で定める。
 
 ### 18.4 新しいエラーコード
 
@@ -1412,8 +1412,4 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | 冗長 | 効果行に同じ効果を 2 回書いた | Q4 |
 | 単相化 | `main` にユーザー定義効果が残った | 17 節 Q10 |
 
-既存コードの変更は 4 件。E509 を削除し、E303 を `?` 側だけに縮小し、E504 と E507 と E508 を Option 限定に縮小し、E513 を effect と handler に広げる。
-
-### 18.5 波及する節
-
-§5、§21〜24、§36、§38、§40、§41、§44、§47、§48、§49、§50、§51 を改訂し、`effect` 宣言・handler・`with`・`resume` の節を新設する。
+既存コードの変更は 17.4 の 3 件に加えて、E513 を effect と handler に広げる 1 件である。
