@@ -4,11 +4,12 @@
 // needs: prelude
 effect Ask
 reply ask: Bool
-def fetch (b: Bool): Bool {Ask} => b
+type Flag = | Yes | No
+def fetch (b: Bool): Flag {Ask} => if b => Yes | No
 def get (n: Int): Int {Ask} => n
 type Pair = { a: Int; b: Int }
 def main =
-  let scrutinee = if fetch true | true => 1 | 0 ->
+  let scrutinee = if fetch true | Yes => 1 | 0 ->
   let argument = List.length (List.map [true] fetch) ->
   let operand = get 1 + 1 ->
   let recd = { a = get 2; b = 0 } ->
