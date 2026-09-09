@@ -467,14 +467,14 @@ impl Inference {
     pub fn row_within(&self, inner: &Row, outer: &Row) -> bool {
         let inner = self.resolve_row(inner);
         let outer = self.resolve_row(outer);
-        let permitted = match &outer {
-            Row::Closed(labels) | Row::Open(_, labels) => self.label_names(labels),
-            Row::Var(_) => return true,
-        };
-        match &inner {
-            Row::Var(_) => true,
-            Row::Closed(labels) | Row::Open(_, labels) => self.label_names(labels).is_subset(&permitted),
+        if matches!(inner, Row::Var(_)) || matches!(outer, Row::Var(_)) {
+            return true;
         }
+        if !self.label_names(inner.labels()).is_subset(&self.label_names(outer.labels())) {
+            return false;
+        }
+        let mut probe = self.clone();
+        probe.unify_matching_labels(inner.labels(), outer.labels()).is_ok()
     }
 
     fn labels_by_ctor(&self, labels: &[Ty]) -> HashMap<String, Ty> {
