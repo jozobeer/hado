@@ -34,6 +34,13 @@ fn qualify(directory: &[String], name: &str) -> String {
     if directory.is_empty() { name.into() } else { format!("{}::{name}", directory.join("::")) }
 }
 
+fn declared_directory(name: &str) -> Directory {
+    match name.rsplit_once("::") {
+        Some((prefix, _)) => prefix.split("::").map(String::from).collect(),
+        None => Vec::new(),
+    }
+}
+
 fn item_span(item: &Item) -> Span {
     match item {
         Item::Def(item) => item.span,
@@ -245,6 +252,9 @@ impl Resolver<'_> {
                 let mut scope = local.clone();
                 scope.types.extend(handler.type_params.iter().map(|param| param.name.clone()));
                 self.reference(&mut handler.effect, handler.effect_span, Space::Contract, directory, local);
+                if declared_directory(&handler.effect) != directory {
+                    self.unknown(handler.effect_span, handler.effect_span);
+                }
                 self.annotations(&mut handler.params, &mut None, directory, &scope);
                 for arm in &mut handler.arms {
                     match arm {
