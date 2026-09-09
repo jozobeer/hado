@@ -1,6 +1,6 @@
 module String
-def length(value: String): Int
-def concat(left: String, right: String): String
+def length(value: String): Int Pure
+def concat(left: String, right: String): String Pure
 implement String as String
 def length value => __string_length value
 def concat left right => __string_concat left right

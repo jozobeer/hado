@@ -1,5 +1,5 @@
 // spec: §21
 // expect:
 // item: Unit payload
-def done (x: Int): (Unit, String) Result => if x == 1 => Ok() | Error("unexpected")
+def done (x: Int): Unit {Error} => if x == 1 => () | raise { message = "unexpected" }
 def main = done 1

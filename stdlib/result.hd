@@ -1,9 +1,0 @@
-type (T, E) Result = | Ok(T) | Error(E)
-module Result
-def (A, B, E) map(value: (A, E) Result, f: Fn(A => B)): (B, E) Result
-def (A, E, F) map_error(value: (A, E) Result, f: Fn(E => F)): (A, F) Result
-def (A, E) is_ok(value: (A, E) Result): Bool
-implement Result as Result
-def map value f => let x? = value -> Ok(f x)
-def map_error value f => if value | Ok(x) => Ok(x) | Error(error) => Error(f error)
-def is_ok | Ok(_) => true | Error(_) => false

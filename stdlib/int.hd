@@ -1,4 +1,4 @@
 module Int
-def to_string(value: Int): String
+def to_string(value: Int): String Pure
 implement Int as Int
 def to_string value => __int_to_string value

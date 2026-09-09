@@ -1,0 +1,3 @@
+type Exception = { message: String }
+effect Error
+abort raise(error: Exception)
