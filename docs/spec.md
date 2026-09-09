@@ -1,4 +1,4 @@
-# 言語仕様案 v0.1.3
+# 言語仕様案 v0.2
 
 ## 1. 設計思想
 
@@ -1010,14 +1010,14 @@ let _ = calculate ->
 next
 ```
 
-成功値の破棄が意味を持つROPの場合は、
+効果を持つ式と Option の破棄には意味があるので、
 
 ```ocaml
 do validate input ->
 next
 ```
 
-という専用のcanonical formを使う。
+という専用のcanonical formを使う（第23節）。
 
 ---
 
@@ -1636,8 +1636,8 @@ effect_section  := "effect" type_vars? upper_name effect_item*
 effect_item     := op_kind name "(" contract_param ("," contract_param)* ")" [":" result]
                  | op_kind name [":" result]                              引数を取らない操作
 op_kind         := "reply" | "abort" | "capture"
-handler_section := "handler" contract_ref "as" upper_name handler_item*
-                 | "handler" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" handler_item*
+handler_section := "handler" type_vars? contract_ref "as" upper_name handler_params? handler_item*
+handler_params  := "(" typed_param ("," typed_param)* ")"
 handler_item    := op_kind name param* "=>" expression
                  | "return" param "=>" expression
 ```
@@ -1684,7 +1684,8 @@ constructor名に続く `()` または `{}` は空白によらずconstructorのp
 継続と匿名関数:
 
 ```text
-with_form       := "with" impl_ref "->" expression                               第58節
+with_form       := "with" impl_ref with_args? "->" expression                    第58節
+with_args       := "(" expression ("," expression)* ")"
 binding         := "let" pattern "=" expression "->" expression
 rail_binding    := "let" pattern "?" "=" expression "->" expression
 rail_discard    := "do" expression "->" expression
@@ -2199,17 +2200,25 @@ capture yield value =>
 return _ => Nil
 ```
 
-handler は引数を取れる。形は functor（第56節）と同じである。
+効果が型引数を持つなら、handler も名前の前で型変数を宣言する（`handler A Yield as Collect`。位置は第10節と同じ）。
+
+handler は値の引数を取れる。状態を持つ handler はこれで初期値を受ける。引数の形は `def` の型付き引数（第3節）と同じで、契約を取る functor の引数（第56節）とは別である。
 
 ```ocaml
 handler A Yield as Take(limit: Int)
 ```
 
-handler を使うには `with` を書く。
+handler を使うには `with` を書く。引数があれば呼び出しの形で渡す。
 
 ```ocaml
 def main =>
   with Collect ->
+  each [1, 2, 3]
+```
+
+```ocaml
+def main =>
+  with Take(2) ->
   each [1, 2, 3]
 ```
 

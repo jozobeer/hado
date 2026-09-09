@@ -1422,7 +1422,20 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 `abort` は戻り型を書けない。文法では表せないので本文で定める。
 
-### 18.4 新しいエラーコード
+### 18.4 仕様の項目
+
+コーパスの `item:` タグに使う項目名。2.2、9.2、11.2、13.2 の項目に加える。
+
+| 項目 | 仕様の節 | 内容 |
+|---|---|---|
+| 効果の宣言 | §57 | `effect` 節、`reply` / `abort` / `capture`、型引数、0 引数の操作 |
+| handler と with | §58 | `handler` 節、`return` の腕、`resume`、`with H -> rest`、引数付き handler |
+| 効果行 | §37, §41 | 波括弧の行、`Pure`、省略と推論、アルファベット順の正準形 |
+| 失敗の効果 | §21, §49 | `Error` と `Exception`、Option との境界、`Option.ok_or` |
+| 効果の位置 | §24 | `let` と `do` の右辺、末尾位置、`|>` の連鎖に限る |
+| 末尾呼び出しの限定 | §48 | `capture` を経由しない呼び出しだけを保証する |
+
+### 18.5 新しいエラーコード
 
 | 段階 | 検査 | 由来 |
 |---|---|---|
@@ -1446,6 +1459,8 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 **仕様に疑義が出たら:** 仕様を変えず、解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める。
 **コミット:** 工程ごとに既存の形式（`test:` `feat:` と日本語の命令形）で。push しない。
 **報告:** 完了時と、依存する作業で止まったときに返す。(1) 判定条件ごとの実測（コマンドと出力の末尾）、(2) 赤の門番の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
+
+**過渡状態:** 本節を書いた時点で `docs/spec.md` は 0.2 の語彙、コードとコーパスと `stdlib/` と `README.md` と `docs/spec-coverage.md` `docs/spec-trace.md` `docs/corpus.md` は 0.1.3 の語彙である。R23〜R27 が解消する。README の実行例（`--print-type` が `(String, String) Result` を出す）は現行の実装を正しく記述しており、R25 で移す。
 
 **着手時点で赤の門番:** 7 本。内訳と理由は `docs/ledger.md` の「0.2 の仕様改訂」にある。R27 の終了時点で全て green に戻す。門番を緩めて green にすることは禁止。ただし `verify-m1-spec.sh` の検査 3 は `DivisionError` の存在を要求する v0.1 期の改名確認で、その型を廃止した以上もう緑にならない。これは緩和ではなく役目を終えた検査の削除として R25 で落とす。
 
@@ -1522,6 +1537,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 - lock を更新する
 - `docs/corpus.md`、`docs/spec-coverage.md`、`docs/spec-trace.md`、`README.md`、§39 の典型コードを追随させる
+- `verify-m1-spec.sh` の検査 5 が項目を導出する表に 18.4 を足す。今は 2.2 2.3 9.2 11.2 13.2 だけを読んでいる
 - 全門番と `cargo test` を実走する
 
 判定 27-a: 全門番が終了コード 0 で、`cargo test --offline --no-fail-fast` が 0 failed。
