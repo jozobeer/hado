@@ -188,14 +188,18 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             }
         }
         for constraint in &checker.row_constraints {
-            if !checker.inference.row_within(&constraint.row, &constraint.bound) {
-                let message = if constraint.code == "E308" {
-                    "effects are not allowed in branch conditions"
-                } else {
-                    "effect row mismatch"
-                };
-                checker.deferred.push(checker.error(constraint.span.expect("row constraint has an origin"), Some(constraint.code), message));
-            }
+            let violated = if constraint.code == "E303" {
+                !checker.inference.resolve_row(&constraint.row).has_known_effects()
+            } else {
+                !checker.inference.row_within(&constraint.row, &constraint.bound)
+            };
+            if !violated { continue; }
+            let message = match constraint.code {
+                "E308" => "effects are not allowed in branch conditions",
+                "E303" => "do requires an effect or Option",
+                _ => "effect row mismatch",
+            };
+            checker.deferred.push(checker.error(constraint.span.expect("row constraint has an origin"), Some(constraint.code), message));
         }
         let scheme = checker
             .values
@@ -1465,10 +1469,15 @@ impl Checker<'_> {
         if pattern.is_some() {
             return Err(self.error(value.span, Some("E303"), "let p? = requires Option"));
         }
-        if rhs_row.has_known_effects() {
-            return self.expression(body);
+        if !rhs_row.has_known_effects() {
+            self.row_constraints.push(RowConstraint {
+                row: rhs_row,
+                bound: Row::pure(),
+                code: "E303",
+                span: Some(value.span),
+            });
         }
-        Err(self.error(value.span, Some("E303"), "do requires an effect or Option"))
+        self.expression(body)
     }
 
     fn option_container(&self, ty: &Ty) -> bool {
