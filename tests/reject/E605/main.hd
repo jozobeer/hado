@@ -1,0 +1,9 @@
+// spec: §58
+// error: E605
+// item: 失敗の効果
+effect Ask
+reply ask: String
+reply extra: Int
+handler Ask as H
+reply ask => "x"
+def main = 1

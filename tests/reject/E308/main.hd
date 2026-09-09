@@ -1,0 +1,7 @@
+// spec: §24
+// error: E308
+// item: 効果の位置
+effect Ask
+reply ask: Bool
+def fetch (b: Bool): Bool {Ask} => b
+def main = if fetch true => 1 | 0

@@ -1,0 +1,11 @@
+// spec: §58
+// expect: 1
+// item: handler と with
+effect Ask
+reply ask: String
+handler Ask as Fixed
+reply ask =>
+  with Fixed ->
+  "there"
+return value => value
+def main = 1

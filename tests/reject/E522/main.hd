@@ -1,0 +1,7 @@
+// spec: §37
+// error: E522
+// item: 効果行
+effect Ask
+reply ask: String
+def f (x: Int): Int {Ask, Ask} => x
+def main = f 1

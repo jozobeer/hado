@@ -1,0 +1,11 @@
+// spec: §37
+// expect: 1
+// item: 効果行
+effect Ask
+reply ask: String
+effect Io
+reply tick: Unit
+def ordered (x: Int): Int {Io, Ask} => x
+def omitted x => x
+def claimed (x: Int): Int Pure => x
+def main = ordered (omitted (claimed 1))

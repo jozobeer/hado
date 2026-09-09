@@ -1,0 +1,11 @@
+// spec: §57
+// expect: 1
+// item: 効果の宣言
+effect Ask
+reply ask: String
+effect Stop
+abort stop
+effect A Yield
+capture yield(value: A): Unit
+def id (x: Int): Int {Ask, Stop, Int Yield} => x
+def main = id 1

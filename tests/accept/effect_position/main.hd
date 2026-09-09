@@ -1,0 +1,15 @@
+// spec: §24
+// expect: 6
+// item: 効果の位置
+// needs: prelude
+effect Ask
+reply ask: Bool
+def fetch (b: Bool): Bool {Ask} => b
+def get (n: Int): Int {Ask} => n
+type Pair = { a: Int; b: Int }
+def main =
+  let scrutinee = if fetch true | true => 1 | 0 ->
+  let argument = List.length (List.map [true] fetch) ->
+  let operand = get 1 + 1 ->
+  let recd = { a = get 2; b = 0 } ->
+  scrutinee + argument + operand + recd.a
