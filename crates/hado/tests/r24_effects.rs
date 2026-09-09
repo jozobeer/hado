@@ -140,3 +140,45 @@ fn operations_and_handlers_stay_in_their_directory() {
     case.write("main.hd", "def main = 1\n");
     case.reject("check", "main.hd", "other/h.hd", "E204", "handler ".len());
 }
+
+#[test]
+fn value_definitions_keep_evaluation_effects() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: String\ndef cached = ask\ndef main = cached\n");
+    assert_eq!(case.print_type("main.hd"), "String {Ask}\n");
+}
+
+#[test]
+fn instantiated_condition_effects_are_e308() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: Bool\ndef peek (b: Bool): Bool {Ask} => b\ndef choose f => if f true => 1 | 0\ndef main = choose peek\n");
+    let output = case.command("check", "main.hd");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("error[E308]"), "{diagnostic}");
+}
+
+#[test]
+fn higher_order_union_keeps_argument_row_open() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: Bool\neffect Io\nreply tick: Unit\ndef tickit (x: Int): Int {Io} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
+    assert_eq!(case.print_type("main.hd"), "Int {Ask, Io}\n");
+}
+
+#[test]
+fn operation_labels_use_unified_arguments() {
+    let case = Case::new();
+    case.write("main.hd", "effect A Yield\ncapture yield(value: A): Unit\ndef emit x => yield x\ndef main = emit 1\n");
+    let printed = case.print_type("main.hd");
+    assert_eq!(printed, "Unit {Int Yield}\n");
+    case.write("main.hd", "effect A Yield\ncapture yield(value: A): Unit\ndef emit (x: Int): Unit {Int Yield} => yield x\ndef main = emit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Unit {Int Yield}\n");
+}
+
+#[test]
+fn handler_for_a_root_effect_in_another_directory_is_e204() {
+    let case = Case::new();
+    case.write("main.hd", "effect Ask\nreply ask: String\ndef caller (x: Int): String {Ask} => ask\ndef main =\n  with sub::Fixed ->\n  caller 1\n");
+    case.write("sub/fixed.hd", "handler Ask as Fixed\nreply ask => \"there\"\nreturn value => value\n");
+    case.reject("check", "main.hd", "sub/fixed.hd", "E204", "handler ".len());
+}
