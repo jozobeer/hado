@@ -4,11 +4,14 @@
 // needs: prelude
 effect Ask
 reply ask: Bool
+handler Ask as HAsk
+reply ask => false
 type Flag = | Yes | No
 def fetch (b: Bool): Flag {Ask} => if b => Yes | No
 def get (n: Int): Int {Ask} => n
 type Pair = { a: Int; b: Int }
 def main =
+  with HAsk ->
   let scrutinee = if fetch true | Yes => 1 | 0 ->
   let argument = List.length (List.map [true] fetch) ->
   let operand = get 1 + 1 ->

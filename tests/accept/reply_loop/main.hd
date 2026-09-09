@@ -1,0 +1,12 @@
+// spec: §48
+// expect: 0
+effect Tick
+reply tick: Unit
+handler Tick as Nop
+reply tick => ()
+def rec loop n =>
+  if n <= 0 => 0
+  | do tick -> loop (n - 1)
+def main =
+  with Nop ->
+  loop 10000000

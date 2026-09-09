@@ -7,5 +7,15 @@ effect Stop
 abort stop
 effect A Yield
 capture yield(value: A): Unit
+handler Ask as HAsk
+reply ask => ""
+handler Stop as HStop
+abort stop => 0
+handler A Yield as HYield
+capture yield _ => ()
 def id (x: Int): Int {Ask, Stop, Int Yield} => x
-def main = id 1
+def main =
+  with HAsk ->
+  with HStop ->
+  with HYield ->
+  id 1
