@@ -1122,3 +1122,41 @@ with final ctl raise(s) Nothing
 草案を説明する過程で、例に置いた `effect Parse` がどこからも使われず E513 になることが分かり、`Ask` を使う例に差し替えた。
 
 **次の一手:** `docs/spec.md` の改訂。§5、§21〜24、§36、§38、§40、§41、§44、§47〜51 の改訂と、`effect`・handler・`with`・`resume` の新節。17 節の未確認 2 件はプロトタイプで潰す（R23 の前）。
+
+## 0.2 のプロトタイプ — `capture` のスタック消費（2026-09-09）
+
+17.6 の未確認 1 を実測した。仕様の §48 の文言がこれに依存するので、仕様改訂の前に置いた。結果は `docs/plan.md` 17.8。
+
+**環境。** Koka は未インストールで、docker hub の `kokalang/koka` は 2021 年の v2.0.16 しかない（論文と同時期で、short-cut resumption の最終実装を含むか不明）。ubuntu 22.04 のコンテナに公式インストーラで Koka 3.2.3 を入れて測った。ユーザーの環境は変えていない。インストーラは `-b` が引数を取るので `-f` だけを渡す。成功しても非ゼロで終わるため、Dockerfile の検証は `koka --version` に置き換えた。
+
+**測ったプログラム。**
+
+```koka
+effect yielder
+  ctl emit( i : int ) : ()
+
+fun walk( i : int ) : <div,yielder> ()
+  if i > 0 then
+    emit(i)
+    walk(i - 1)          // 末尾位置
+
+fun modea( n : int ) : div int
+  with handler
+    return(_x) 0
+    ctl emit(_i) resume(())
+  walk(n)
+```
+
+handler は 3 形（末尾 resume・resume の後ろに仕事・生成器）、対照は 2 つ（効果なし、`fun tell` による tail-resumptive）。
+
+**結果。** 対照はどちらも 1000 万反復で RSS 4.6 MB の定数。`ctl` を含むループは 3 万反復で完走し 5 万反復で SIGSEGV する。`--ulimit stack=-1:-1` を付けると全て完走し、N=1,000,000 で RSS 333 MB まで線形に伸びる。約 330 バイト / 反復。
+
+**分かったこと。** 消費先はヒープではなく C スタックだった。スタック上限を外した瞬間に完走するので束縛条件が確定する。`resume` を末尾位置に置いた形（modea）も落ちるので、原因は handler 側ではなく操作を起こす側にある。論文 p.71:11 の「any direct tail-recursive calls are no longer directly tail-recursive as they occur under a lambda now!」がそのまま観測された。`ctl` 操作は定義上必ず yield するので、bind-inlining が作る Pure 分岐の fast path を決して通らない。
+
+**17 節の 3 箇所が誤っていた。** 17.2 の表が `capture` のコード生成を「ヒープのフレーム列」とし、Q6 が §48 の書き換えを「消費先がヒープへ移る」とし、Q15 が short-cut resumption を「実装義務として引き受ける」としていた。いずれも私が論文の前半だけから推測した内容で、Koka は short-cut resumption を実装済み（p.71:3）でありながらこの結果である。3 箇所を実測に合わせて直し、6 節のリスクに約 3 万反復の上限を足した。
+
+**ユーザーの判断。** 受け入れる案を選んだ。§48 は「`capture` を経由しない末尾呼び出しはスタックを消費しない」に限定し、上限をリスクとして文書化する。退けた案は、一般 `ctl` を諦める、`capture` を含むループを静的に拒否する、segmented stacks を実装する、の 3 つ。
+
+**副産物。** `reply` に相当する tail-resumptive 操作が効果なしと完全に同じ挙動（1000 万反復で 4.6 MB）だと確かめられた。17 節 Q6 で種別を 3 つに分けた判断が実測で裏付けられた。
+
+**次の一手:** `docs/spec.md` の改訂。17.6 の未確認 2（`under` フレームの復元が hado の設定でも要るか）は残るが、これは実装方式の問題で仕様の文言には効かないので、仕様改訂を止めない。
