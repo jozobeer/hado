@@ -23,8 +23,7 @@ reject_codes_match() {
     [ -n "$spec" ] && [ "$spec" = "$disk" ]
 }
 
-# Why not 26-c: capture の evidence passing はこのラウンドでは未実装。
-check '26-a/b/e reply abort E706 probes' cargo test --offline --test r26_effects
+check '26-a/b/c/e reply abort capture E706 probes' cargo test --offline --test r26_effects
 check '26-d reject codes match §50' reject_codes_match
 
 echo "PASSED: $passed/$total"

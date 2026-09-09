@@ -1,7 +1,7 @@
 mod functors;
 mod named;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
-use crate::parser::{EffectRow, FieldName, HandlerArm, OpKind, Param, Pattern, PatternKind, TypeExpr, TypeKind};
+use crate::parser::{DeclaredName, EffectRow, FieldName, HandlerArm, HandlerDecl, OpKind, Param, Pattern, PatternKind, TypeExpr, TypeKind};
 use crate::types::{ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError, TypeRealization};
 use crate::Checked;
 use std::collections::{HashMap, HashSet};
@@ -50,7 +50,9 @@ struct Checker<'a> {
     main_effects: Row,
     effects: HashMap<String, Vec<(OpKind, String)>>,
     handlers: HashMap<String, String>,
+    handler_decls: HashMap<String, HandlerDecl>,
     operations: HashMap<String, OpKind>,
+    resume_type: Option<Ty>,
 }
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
@@ -112,7 +114,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         main_effects: Row::pure(),
         effects: HashMap::new(),
         handlers: HashMap::new(),
+        handler_decls: HashMap::new(),
         operations: HashMap::new(),
+        resume_type: None,
     };
     checker.deferred.extend(functors::duplicate_applications(ast, path));
     let mut definitions = HashMap::new();
@@ -903,7 +907,7 @@ impl Checker<'_> {
     fn expression(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
         let result = self.expression_inner(node);
         let ty = self.recover_inference_error(result, Ty::Error)?;
-        if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..) | NodeKind::NamedConstructor(..)) {
+        if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..) | NodeKind::NamedConstructor(..) | NodeKind::With { .. }) {
             self.composite_types.insert((node.span.line, node.span.col), ty.clone());
         }
         Ok(ty)
@@ -994,17 +998,8 @@ impl Checker<'_> {
                 Ok(self.inference.resolve(&result))
             }
             NodeKind::CondBranch { arms, fallback } => self.conditions(arms, fallback.as_deref()),
-            NodeKind::With { handler, args, body } => {
-                for arg in args { self.expression(arg)?; }
-                let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
-                if let Some(effect) = self.handlers.get(&handler.name).cloned() {
-                    self.add_effects(&row.without_effect(&effect));
-                } else {
-                    return Err(self.error(handler.span, Some("E204"), &format!("unbound name {}", handler.name)));
-                }
-                Ok(ty)
-            }
-            NodeKind::Resume => Ok(self.inference.fresh()),
+            NodeKind::With { handler, args, body } => self.with_handler(handler, args, body),
+            NodeKind::Resume => Ok(self.resume_type.clone().unwrap_or_else(|| self.inference.fresh())),
         }
     }
 
@@ -1848,6 +1843,7 @@ impl Checker<'_> {
                 self.deferred.push(self.error(handler.span, Some("E605"), "handler operations do not match the effect"));
             }
             self.handlers.insert(handler.name.clone(), effect_print_name(&handler.effect));
+            self.handler_decls.insert(handler.name.clone(), handler.clone());
         }
         Ok(())
     }
@@ -1913,6 +1909,81 @@ impl Checker<'_> {
             }
             ty => ty,
         }
+    }
+
+    fn with_handler(&mut self, handler: &DeclaredName, args: &[Node], body: &Node) -> Result<Ty, Diagnostic> {
+        for arg in args { self.expression(arg)?; }
+        let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
+        let Some(effect) = self.handlers.get(&handler.name).cloned() else {
+            return Err(self.error(handler.span, Some("E204"), &format!("unbound name {}", handler.name)));
+        };
+        self.add_effects(&row.without_effect(&effect));
+        let Some(decl) = self.handler_decls.get(&handler.name).cloned() else { return Ok(ty); };
+        if !decl.arms.iter().any(|arm| matches!(arm, HandlerArm::Operation { kind: OpKind::Capture, .. })) {
+            return Ok(ty);
+        }
+        self.capture_answer(&decl, &ty, &row, handler.span)
+    }
+
+    fn capture_answer(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, span: Span) -> Result<Ty, Diagnostic> {
+        let answer = self.inference.fresh();
+        let saved = self.values.clone();
+        let result = self.infer_capture_arms(handler, body, row, &answer, span);
+        self.values = saved;
+        result?;
+        Ok(self.inference.resolve(&answer))
+    }
+
+    fn infer_capture_arms(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, answer: &Ty, span: Span) -> Result<(), Diagnostic> {
+        let mut saw_return = false;
+        for arm in &handler.arms {
+            match arm {
+                HandlerArm::Return { param, body: ret, span: arm_span } => {
+                    saw_return = true;
+                    self.bind_param(param, body);
+                    let ty = self.expression(ret)?;
+                    self.unify(&ty, answer, *arm_span)?;
+                }
+                HandlerArm::Operation { kind: OpKind::Capture, name, params, body: ret, span: arm_span, .. } => {
+                    let (types, result) = self.operation_payload(name, row)?;
+                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                    let resume = Ty::fn_with(vec![result], answer.clone(), Row::pure());
+                    let previous = self.resume_type.replace(resume);
+                    let ty = self.expression(ret);
+                    self.resume_type = previous;
+                    self.unify(&ty?, answer, *arm_span)?;
+                }
+                HandlerArm::Operation { name, params, body: ret, .. } => {
+                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Unit));
+                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                    let _ = self.expression(ret)?;
+                }
+            }
+        }
+        if !saw_return {
+            self.unify(body, answer, span)?;
+        }
+        Ok(())
+    }
+
+    fn bind_param(&mut self, param: &Param, ty: &Ty) {
+        if param.name != "_" {
+            self.values.insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
+        }
+    }
+
+    fn operation_payload(&mut self, name: &str, row: &Row) -> Result<(Vec<Ty>, Ty), Diagnostic> {
+        let scheme = self.values.get(name).cloned().ok_or_else(|| self.error(Span { line: 1, col: 1 }, Some("E204"), &format!("unbound name {name}")))?;
+        let (ty, _, _) = self.inference.instantiate_constrained(&scheme);
+        let Ty::Fn(mut args, effect, _) = ty else {
+            return Ok((Vec::new(), ty));
+        };
+        let op_ty = args.pop().unwrap_or(*effect.clone());
+        let _ = self.inference.row_contained(&Row::Closed(vec![*effect]), row);
+        Ok(match op_ty {
+            Ty::Fn(params, result, _) => (params, *result),
+            result => (Vec::new(), result),
+        })
     }
 
     fn unwrap_operation(&mut self, name: &str, ty: Ty) -> Ty {

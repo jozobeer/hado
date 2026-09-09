@@ -170,3 +170,68 @@ fn reply_tail_recursion_completes_ten_million_iterations() {
     assert_eq!(output.stdout, b"10000000\n");
     assert!(output.stderr.is_empty());
 }
+
+fn collect_handler() -> &'static str {
+    "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as Collect\ncapture yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
+}
+
+fn list_literal(values: &[i64]) -> String {
+    if values.is_empty() { "[]".into() } else {
+        format!("[{}]", values.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", "))
+    }
+}
+
+#[test]
+fn generator_collects_yielded_values() {
+    let mut state = 0x26_06;
+    for _ in 0..8 {
+        let len = random(&mut state, 6);
+        let values: Vec<i64> = (0..len).map(|_| random(&mut state, 50) as i64).collect();
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\ndef rec each (values: Int List): Unit {{Int Yield}} =>\n  if values | [] => () | [head, ...tail] =>\n    do yield head ->\n    each tail\ndef main = with Collect -> each {}\n",
+            collect_handler(),
+            list_literal(&values),
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{}\n", list_literal(&values)).as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn capture_loop_counts_each_yield() {
+    let mut state = 0x26_07;
+    for _ in 0..4 {
+        let n = random(&mut state, 30) + 5;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop {n})\n",
+            collect_handler(),
+        ));
+        let dump = case.command("dump-mono", "main.hd");
+        assert_eq!(dump.status.code(), Some(0), "{}", String::from_utf8_lossy(&dump.stderr));
+        let ir = String::from_utf8_lossy(&dump.stdout);
+        assert!(ir.contains("MakeClosure"), "{ir}");
+        assert!(ir.contains("CallClosure"), "{ir}");
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
+    }
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}\ndef rec loop (n: Int): Unit {{Int Yield}} =>\n  if n <= 0 => ()\n  | do yield n -> loop (n - 1)\ndef main = List.length (with Collect -> loop 10000)\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"10000\n");
+    assert!(output.stderr.is_empty());
+}
