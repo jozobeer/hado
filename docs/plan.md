@@ -1223,7 +1223,7 @@ optimizer を入れるとき、型から純粋性を仮定してはならない�
 | Q9 | handler の形 | §34 / §35 と同じ節構文。`effect E` が契約側、`handler E as H` が実装側で、使用は `with H -> rest`。宣言なので §20 の branch のネスト禁止に触れず、handler 節の中で `if` が書ける | 新節, §34, §35 |
 | Q10 | `main` と印字 | `main` に残せるのは組み込み効果だけ。raise された値は stderr で終了コード 1、正常値は stdout で 0 とし、観測される振る舞いを現行のまま保つ。ユーザー定義効果が残れば新しい E コード | §5, §51 |
 | Q11 | 効果多相 | 入れる。`Fn` の型に効果行を持たせ、単相化で実体化する | §37, §10 |
-| Q12 | 効果行の綴り | 後置・記号なしの `Int [Raise]`。`Fn(A => B [E])` | §37, §41 |
+| Q12 | 効果行の綴り | 後置の行。区切りと効果名は 18 節が定める（`Int {Error}`、`Fn(A => B {E})`） | §37, §41 |
 | Q13 | 省略 | 効果行だけ結果型と独立に省略できる | §8, §9 |
 | Q14 | 省略の意味 | 省略は暗黙の効果変数（効果多相）。契約でも外の `def` でも同じ意味とし、純粋の主張には `Pure` を書く | §34, §9 |
 | Q15 | `ctl` を含むループ | short-cut resumption を実装義務として引き受ける。継続はヒープ上のフレーム列として持ち、末尾から 1 つずつ畳む | §48, 新節 |
@@ -1251,12 +1251,12 @@ Q20 はこれを構文で塞ぐ。同時に、引数位置の評価順を仕様�
 
 ### 17.4 機械的に決まること
 
-- `/` の戻り型は `(Int, DivisionError) Result` から `Int [DivisionError Raise]` へ
+- `/` の戻り型は `(Int, DivisionError) Result` から `Int {Error}` へ（18 節 Q16 で `DivisionError` を廃止した）
 - E509（ok-unit-parens）は Result と共に消滅する
 - E504 / E507 / E508 は Option 限定に縮小して存続する
 - E303 は `?` 側のみ存続する（右辺は Option）。`do` の右辺は「空でない効果行を持つ式」を要求する新しい規則になり、純粋な式を置いたら §28 の値の破棄と同じ扱いになる
 - `main` の効果行は一般化せず、本体の効果で閉じる。Q10 の検査に必要で、Q14 の唯一の例外
-- `Option.ok_or` は `(A, E) Result` から `A [E Raise]` へ。値の不在を理由のある失敗へ持ち上げる、Q7 の境界をまたぐ唯一の prelude 関数になる
+- `Option.ok_or` は `(A, E) Result` から `A {Error}` へ。値の不在を理由のある失敗へ持ち上げる、Q7 の境界をまたぐ唯一の prelude 関数になる
 - `Result.map` `map_error` `is_ok` は消滅し、契約内の `def` は 18 本から 15 本になる
 - Q20 の違反には新しい E コードが要る。効果は型の一部なので型段階（E3xx）に置き、handler の契約不一致は §35 の E602 と同類なので E6xx に置く
 
@@ -1284,3 +1284,136 @@ Ningning Xie and Daan Leijen. *Generalized Evidence Passing for Effect Handlers:
 - p.71:12 §2.11 — 「all effectful functions return a monadic result, either Pure or Yield」
 - p.71:12 §2.12 — EPT は scoped resumption に限られ、範囲外は実行時エラーになる
 - p.71:10 §2.8 — short-cut resumptions。継続をフレーム列として持ち、末尾から 1 つずつ畳む。Koka が採用している
+
+## 18. v0.2 の構文（2026-09-09）
+
+17 節の決定を仕様本文に落とすため、未決だった構文を grilling（19 問）で確定した。経緯は `docs/ledger.md` の「0.2 の構文」にある。17 節と食い違う箇所は本節が優先する。
+
+### 18.1 決定
+
+| ID | 論点 | 決定 | 仕様の節 |
+|---|---|---|---|
+| Q1 | 失敗の効果の置き場 | stdlib に置く。`module` ではなく `effect` として宣言する | §49, 新節 |
+| Q2 | 効果名 | `Error` | §49 |
+| Q3 | 行の順序 | 意味を持たない | §37 |
+| Q4 | 行の重複 | 拒否する。ただし効果変数の実体化で生じた重複は診断せず潰す | §37, §50 |
+| Q5 | 純粋の主張 | 後置の `Int Pure` | §37 |
+| Q6 | 効果変数 | 宣言しない。常に推論する | §9, §34 |
+| Q7 | 書く義務 | 無い。`Pure` も具体行も任意で、書けば「ちょうどそれだけ」を意味する | §8, §9 |
+| Q8 | 行の出現位置 | 矢印の結果位置だけ（`return_type` と `Fn` の結果）。`type X = ...` の右辺には現れない | §37, §41 |
+| Q9 | 区切り記号 | 波括弧。`Config {Io, Error}` | §37, §41 |
+| Q10 | `return` 節 | 持たせる。handler が本体の型を変えられる | 新節 |
+| Q11 | `Error` の型引数 | 持たない。payload は `type Exception = { message: String }`。他の効果は型引数を取れる | §49, 新節 |
+| Q12 | 操作の種別の綴り | `reply` / `abort` / `capture`。継続に何が起きるかを名指しする | 新節 |
+| Q13 | `abort` の戻り型 | 書かせない。再開しないので戻り値が存在しない | 新節, §50 |
+| Q14 | handler の未使用引数 | `_` を許す（13.1 Q4 の範囲を handler 節へ広げる） | §27 |
+| Q15 | `Error` の印字 | payload の `message` field だけを stderr へ出す | §51 |
+| Q16 | `DivisionError` | 廃止する。`/` と `%` は `Error` を raise する | §36, §44, §49 |
+| Q17 | `with` の位置 | `prefix_form`。`let` `do` と同じ継続の形 | §41 |
+| Q18 | `resume` | `capture` の腕の中でだけ書ける primary | §41, 新節 |
+| Q19 | 行の正準順 | アルファベット順。`{Error, Io}` | §37, §41 |
+
+### 18.2 構文の確定案
+
+```ocaml
+// stdlib/error.hd
+type Exception = { message: String }
+effect Error
+abort raise(error: Exception)
+```
+
+失敗を Option に落とす:
+
+```ocaml
+handler Error as ToOption
+abort raise _ => None
+return value => Some(value)
+
+def main =>
+  with ToOption ->
+  Int.parse "42"
+```
+
+`main` の型は `Int Option`、出力は `Some(42)`。
+
+生成器:
+
+```ocaml
+effect A Yield
+capture yield(value: A): Unit
+
+handler A Yield as Collect
+capture yield value =>
+  let rest = resume () ->
+  Cons(value, rest)
+return _ => Nil
+
+def rec each(values: Int List): Unit {Int Yield}
+| [] => ()
+| [head, ...tail] =>
+    do yield head ->
+    each tail
+
+def main =>
+  with Collect ->
+  each [1, 2, 3]
+```
+
+`main` の型は `Int List`、出力は `[1, 2, 3]`。`resume ()` の後ろに `Cons(value, rest)` があるので `capture` が要る。§48 の保証を失うのはこの種別だけで、`{Int Yield}` という行から呼び出し側が静的に判別できる。
+
+即答:
+
+```ocaml
+effect Ask
+reply ask: String
+
+handler Ask as Fixed
+reply ask => "there"
+```
+
+### 18.3 文法の差分（§41）
+
+```text
+section         := module_section | implement_section | functor_section | apply_section
+                 | effect_section | handler_section
+
+effect_section  := "effect" type_vars? upper_name effect_item*
+effect_item     := op_kind name "(" contract_param ("," contract_param)* ")" [":" type_expr]
+                 | op_kind name [":" type_expr]
+op_kind         := "reply" | "abort" | "capture"
+
+handler_section := "handler" contract_ref "as" upper_name handler_item*
+                 | "handler" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" handler_item*
+handler_item    := op_kind name param* "=>" expression
+                 | "return" param "=>" expression
+
+prefix_form     := binding | rail_binding | rail_discard | branch | with_form
+with_form       := "with" impl_ref "->" expression
+primary         := ... | "resume"
+
+return_type     := ":" type_expr effect_row?
+type_atom       := ... | "Fn" "(" type_expr ("," type_expr)* "=>" type_expr effect_row? ")"
+effect_row      := "{" type_expr ("," type_expr)* "}"
+                 | "Pure"
+```
+
+キーワードは `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure` の 9 個を足し、14 個から 23 個になる。
+
+0 引数の操作は §34 の値 member（`def name: 型`）と同じ形で書く。`abort` は戻り型を書けない。
+
+### 18.4 新しいエラーコード
+
+| 段階 | 検査 | 由来 |
+|---|---|---|
+| 構文 | `abort` の操作に戻り型を書いた | Q13 |
+| 名前解決 | `resume` を `capture` 以外の腕で書いた | Q18 |
+| 型 | 効果を持つ式を条件位置・引数位置・record field 式に置いた | 17 節 Q20 |
+| 型（契約） | handler が効果の操作を実装していない、または効果に無い操作を書いた | 17 節 Q9 |
+| 冗長 | 効果行に同じ効果を 2 回書いた | Q4 |
+| 単相化 | `main` にユーザー定義効果が残った | 17 節 Q10 |
+
+既存コードの変更は 4 件。E509 を削除し、E303 を `?` 側だけに縮小し、E504 と E507 と E508 を Option 限定に縮小し、E513 を effect と handler に広げる。
+
+### 18.5 波及する節
+
+§5、§21〜24、§36、§38、§40、§41、§44、§47、§48、§49、§50、§51 を改訂し、`effect` 宣言・handler・`with`・`resume` の節を新設する。
