@@ -158,6 +158,10 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
                 free_names(body, bound, result);
             }
         }
+        NodeKind::With { args, body, .. } => {
+            for arg in args { free_names(arg, bound, result); }
+            free_names(body, bound, result);
+        }
         _ => {}
     }
 }
@@ -298,6 +302,7 @@ fn declaration_types(
                 };
                 expression_type_names(body, &types, path, diagnostics);
             }
+            Item::Effect(_) | Item::Handler(_) => {}
         }
     }
 }
@@ -343,6 +348,9 @@ fn resolve_type_names(
             }
         }
     }
+    if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
+        for ty in effects { resolve_type_names(ty, types, path, diagnostics); }
+    }
 }
 
 fn entry_form(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
@@ -384,6 +392,7 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
                 register(&mut names.signatures, &signature.name, signature.name_span, path)?;
                 declarations(&signature.items, path)?;
             }
+            Item::Effect(_) | Item::Handler(_) => {}
         }
     }
     Ok(())

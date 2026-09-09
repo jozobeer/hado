@@ -14,7 +14,7 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
         Item::TypeDef(d) => (Key::Type(d.name.clone()), d.span),
         Item::ModuleSig(d) => (Key::Signature(d.name.clone()), d.span),
         Item::ModuleImpl(d) => (Key::Module(d.name.clone()), d.span),
-        Item::SigDef(_) => return None,
+        Item::SigDef(_) | Item::Effect(_) | Item::Handler(_) => return None,
     })
 }
 
@@ -143,7 +143,7 @@ impl Scope {
                 Item::TypeDef(d) => { scope.types.insert(d.name.clone()); }
                 Item::ModuleSig(d) => { scope.signatures.insert(d.name.clone()); }
                 Item::ModuleImpl(d) => { scope.modules.insert(d.name.clone()); }
-                Item::SigDef(_) => {}
+                Item::SigDef(_) | Item::Effect(_) | Item::Handler(_) => {}
             }
         }
         scope.constructors.extend(constructor_owners(items).into_keys());
@@ -213,6 +213,7 @@ impl Collector<'_> {
                 }
                 self.items(&def.items, &body_scope, references);
             }
+            Item::Effect(_) | Item::Handler(_) => {}
         }
     }
 
@@ -333,5 +334,8 @@ fn type_expression(ty: &TypeExpr, scope: &Scope, references: &mut References) {
                 for arg in variant.payload.types() { type_expression(arg, scope, references); }
             }
         }
+    }
+    if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
+        for ty in effects { type_expression(ty, scope, references); }
     }
 }

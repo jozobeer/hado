@@ -105,6 +105,7 @@ impl Instance<'_> {
                 for item in &mut module.items { self.item(item); }
             }
             Item::ModuleImpl(module) => self.module(module),
+            Item::Effect(_) | Item::Handler(_) => {}
         }
     }
 
@@ -170,6 +171,9 @@ impl Instance<'_> {
                     self.ty(&mut field.ty);
                 }
             }
+        }
+        if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
+            for ty in effects { self.ty(ty); }
         }
     }
 
@@ -280,7 +284,11 @@ impl Instance<'_> {
                 }
                 self.optional_node(fallback);
             }
-            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Unit | NodeKind::Name(_) => {}
+            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Unit | NodeKind::Name(_) | NodeKind::Resume => {}
+            NodeKind::With { args, body, .. } => {
+                for arg in args { self.node(arg); }
+                self.node(body);
+            }
             _ => unreachable!("binding and scalar children are handled first"),
         }
     }

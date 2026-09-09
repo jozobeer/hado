@@ -8,6 +8,7 @@ struct Generator {
     serial: usize,
     choices: BTreeMap<&'static str, Vec<bool>>,
     declarations: usize,
+    allow_resume: bool,
 }
 
 impl Generator {
@@ -57,11 +58,13 @@ impl Generator {
     }
 
     fn section(&mut self) -> String {
-        match self.choose("section", 4) {
+        match self.choose("section", 6) {
             0 => self.module_section(false).0,
             1 => self.implement_section(),
             2 => self.functor_section().0,
-            _ => self.apply_section(),
+            3 => self.apply_section(),
+            4 => self.effect_section(),
+            _ => self.handler_section(),
         }
     }
 
@@ -97,7 +100,7 @@ impl Generator {
     fn return_type(&mut self) -> String {
         if self.choose("return_type?", 2) == 0 { return String::new(); }
         self.mark("return_type", 1, 0);
-        format!(": {}", self.type_expr(2))
+        format!(": {}", self.result(2))
     }
 
     fn type_params(&mut self) -> String {
@@ -152,7 +155,7 @@ impl Generator {
                 let count = self.random(3) + 2;
                 format!("( {} ) {}", self.list(count, |g| g.type_expr(depth - 1), " , "), self.type_ref())
             }
-            _ => format!("Fn ( {} => {} )", self.fn_params(depth - 1), self.type_expr(depth - 1)),
+            _ => format!("Fn ( {} => {} )", self.fn_params(depth - 1), self.result(depth.saturating_sub(1))),
         };
         let count = self.choose("type_ref*", 3);
         for _ in 0..count { source.push_str(&format!(" {}", self.type_ref())); }
@@ -200,7 +203,7 @@ impl Generator {
         let name = self.name(false);
         let params = self.type_params();
         let count = self.random(3) + 1;
-        format!("def {params} {name} ( {} ) : {}", self.list(count, |g| { g.mark("contract_param", 1, 0); g.typed_param() }, " , "), self.type_expr(2))
+        format!("def {params} {name} ( {} ) : {}", self.list(count, |g| { g.mark("contract_param", 1, 0); g.typed_param() }, " , "), self.result(2))
     }
 
     fn implement_section(&mut self) -> String {
@@ -260,12 +263,12 @@ impl Generator {
     }
 
     fn prefix(&mut self, depth: usize, in_arm: bool) -> String {
-        let choice = self.random(if in_arm { 3 } else { 4 });
+        let choice = self.random(if in_arm { 3 } else { 5 });
         self.prefix_variant(depth, in_arm, choice)
     }
 
     fn prefix_variant(&mut self, depth: usize, in_arm: bool, choice: usize) -> String {
-        self.mark("prefix_form", 4, choice);
+        self.mark("prefix_form", 5, choice);
         match choice {
             0 | 1 => {
                 self.mark(if choice == 0 { "binding" } else { "rail_binding" }, 1, 0);
@@ -275,7 +278,116 @@ impl Generator {
                 self.mark("rail_discard", 1, 0);
                 format!("do ( {} ) -> {}", self.expression(depth, in_arm), self.expression(depth, in_arm))
             }
+            3 => self.with_form(depth, in_arm),
             _ => self.branch(depth),
+        }
+    }
+
+    fn with_form(&mut self, depth: usize, in_arm: bool) -> String {
+        self.mark("with_form", 1, 0);
+        self.mark("impl_ref", 1, 0);
+        let handler = self.upper_reference();
+        let args = if self.choose("with_args?", 2) == 0 {
+            String::new()
+        } else {
+            self.mark("with_args", 1, 0);
+            let count = self.random(3) + 1;
+            format!("( {} )", self.list(count, |g| g.expression(depth, in_arm), " , "))
+        };
+        format!("with {handler}{args} -> {}", self.expression(depth, in_arm))
+    }
+
+    fn result(&mut self, depth: usize) -> String {
+        self.mark("result", 1, 0);
+        format!("{}{}", self.type_expr(depth), self.effect_row_suffix())
+    }
+
+    fn effect_row_suffix(&mut self) -> String {
+        if self.choose("effect_row?", 2) == 0 { return String::new(); }
+        match self.choose("effect_row", 2) {
+            0 => {
+                let count = self.random(3) + 1;
+                format!(" {{ {} }}", self.list(count, |g| g.type_expr(1), " , "))
+            }
+            _ => " Pure".into(),
+        }
+    }
+
+    fn effect_section(&mut self) -> String {
+        self.mark("effect_section", 1, 0);
+        self.declarations += 1;
+        let params = self.type_params();
+        let name = self.name(true);
+        let count = self.choose("effect_item*", 3);
+        let ops = self.list(count, |g| g.effect_item(), " ");
+        format!("effect {params} {name} {ops}")
+    }
+
+    fn effect_item(&mut self) -> String {
+        let kind = self.op_kind();
+        let name = self.name(false);
+        let params = if self.choose("effect_item", 2) == 0 {
+            let count = self.random(3) + 1;
+            format!("( {} )", self.list(count, |g| {
+                g.mark("contract_param", 1, 0);
+                g.typed_param()
+            }, " , "))
+        } else {
+            String::new()
+        };
+        let ret = if kind == "abort" || self.random(2) == 0 {
+            String::new()
+        } else {
+            format!(" : {}", self.result(1))
+        };
+        format!("{kind} {name}{params}{ret}")
+    }
+
+    fn op_kind(&mut self) -> &'static str {
+        ["reply", "abort", "capture"][self.choose("op_kind", 3)]
+    }
+
+    fn handler_section(&mut self) -> String {
+        self.mark("handler_section", 1, 0);
+        self.declarations += 1;
+        let params = self.type_params();
+        self.mark("contract_ref", 1, 0);
+        let effect = self.upper_reference();
+        let name = self.name(true);
+        let handler_params = if self.choose("handler_params?", 2) == 0 {
+            String::new()
+        } else {
+            self.mark("handler_params", 1, 0);
+            let count = self.random(3) + 1;
+            format!("( {} )", self.list(count, |g| g.typed_param(), " , "))
+        };
+        let count = self.choose("handler_item*", 3);
+        let items = self.list(count, |g| g.handler_item(), " ");
+        format!("handler {params} {effect} as {name}{handler_params} {items}")
+    }
+
+    fn handler_item(&mut self) -> String {
+        if self.choose("handler_item", 2) == 0 {
+            let kind = self.op_kind();
+            let name = self.name(false);
+            let count = self.random(3);
+            let params = self.list(count, |g| {
+                g.mark("param", 1, 0);
+                format!(" {}", if g.random(2) == 0 { "_".into() } else { g.name(false) })
+            }, "");
+            let saved = self.allow_resume;
+            self.allow_resume = kind == "capture";
+            let body = self.expression(2, false);
+            self.allow_resume = saved;
+            format!("{kind} {name}{params} => {body}")
+        } else {
+            self.mark("param", 1, 0);
+            let param = if self.random(2) == 0 { "_".into() } else { self.name(false) };
+            let saved = self.allow_resume;
+            self.allow_resume = false;
+            let body = self.expression(2, false);
+            self.allow_resume = saved;
+            format!("return {param} => {body}")
         }
     }
 
@@ -356,7 +468,7 @@ impl Generator {
             0 => self.name(false),
             1 => {
                 self.mark("dunder_name", 1, 0);
-                self.mark("primary", 14, 7);
+                self.mark("primary", 15, 7);
                 format!("__{}", self.name(false))
             }
             2 => format!("{} . {}", self.upper_reference(), self.name(false)),
@@ -373,10 +485,14 @@ impl Generator {
     }
 
     fn primary(&mut self, depth: usize, in_arm: bool) -> String {
+        if self.allow_resume && self.random(3) == 0 {
+            self.mark("primary", 15, 14);
+            return "resume".into();
+        }
         let alternatives = if depth == 0 { &[0, 1, 2, 3, 4, 5, 6, 8, 9][..] }
             else { &[0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13][..] };
         let choice = alternatives[self.random(alternatives.len())];
-        self.mark("primary", 14, choice);
+        self.mark("primary", 15, choice);
         match choice {
             0..=5 => self.literal(choice),
             6 => self.name(false),
@@ -576,6 +692,14 @@ enum Shape {
     Type(String, Vec<String>, Option<TypeExpr>),
     Signature(String, Vec<Shape>),
     Module(String, String, ImplementationShape, Vec<Shape>),
+    Effect(String, Vec<String>, Vec<(String, String, Vec<Param>, Option<TypeExpr>)>),
+    Handler(Vec<String>, String, String, Vec<Param>, Vec<HandlerShape>),
+}
+
+#[derive(Debug, PartialEq)]
+enum HandlerShape {
+    Operation(String, String, Vec<String>, Node),
+    Return(String, Node),
 }
 
 #[derive(Debug, PartialEq)]
@@ -603,6 +727,23 @@ fn shapes(items: &[Item]) -> Vec<Shape> {
         Item::TypeDef(def) => Shape::Type(def.name.clone(), def.params.iter().map(|name| name.name.clone()).collect(), def.ty.clone()),
         Item::ModuleSig(sig) => Shape::Signature(sig.name.clone(), shapes(&sig.items)),
         Item::ModuleImpl(module) => Shape::Module(module.name.clone(), module.sig.clone(), implementation_shape(&module.form), shapes(&module.items)),
+        Item::Effect(effect) => Shape::Effect(
+            effect.name.clone(),
+            effect.type_params.iter().map(|name| name.name.clone()).collect(),
+            effect.ops.iter().map(|op| (op.kind.as_str().into(), op.name.clone(), op.params.clone(), op.ret.clone())).collect(),
+        ),
+        Item::Handler(handler) => Shape::Handler(
+            handler.type_params.iter().map(|name| name.name.clone()).collect(),
+            handler.effect.clone(),
+            handler.name.clone(),
+            handler.params.clone(),
+            handler.arms.iter().map(|arm| match arm {
+                parser::HandlerArm::Operation { kind, name, params, body, .. } => {
+                    HandlerShape::Operation(kind.as_str().into(), name.clone(), params.iter().map(|param| param.name.clone()).collect(), body.clone())
+                }
+                parser::HandlerArm::Return { param, body, .. } => HandlerShape::Return(param.name.clone(), body.clone()),
+            }).collect(),
+        ),
     }).collect()
 }
 

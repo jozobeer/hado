@@ -61,6 +61,49 @@ fn item(value: &Item) -> String {
             items(&module.items)
         ),
         Item::ModuleImpl(module) => implementation(module),
+        Item::Effect(effect) => {
+            let ops = effect.ops.iter().map(effect_op).collect::<Vec<_>>().join("\n");
+            format!("effect {}{}{}", type_parameters(&effect.type_params), effect.name, if ops.is_empty() { String::new() } else { format!("\n{ops}") })
+        }
+        Item::Handler(handler) => {
+            let params = if handler.params.is_empty() {
+                String::new()
+            } else {
+                format!("({})", handler.params.iter().map(|param| {
+                    format!("{}: {}", param.name, type_source(param.ty.as_ref().expect("handler parameter")))
+                }).collect::<Vec<_>>().join(", "))
+            };
+            let arms = handler.arms.iter().map(handler_arm).collect::<Vec<_>>().join("\n");
+            format!(
+                "handler {}{} as {}{}{}",
+                type_parameters(&handler.type_params),
+                handler.effect,
+                handler.name,
+                params,
+                if arms.is_empty() { String::new() } else { format!("\n{arms}") }
+            )
+        }
+    }
+}
+
+fn effect_op(op: &EffectOp) -> String {
+    let params = if op.params.is_empty() {
+        String::new()
+    } else {
+        format!("({})", op.params.iter().map(|param| {
+            format!("{}: {}", param.name, type_source(param.ty.as_ref().expect("effect parameter")))
+        }).collect::<Vec<_>>().join(", "))
+    };
+    format!("{} {}{}{}", op.kind.as_str(), op.name, params, return_type(op.ret.as_ref()))
+}
+
+fn handler_arm(arm: &HandlerArm) -> String {
+    match arm {
+        HandlerArm::Operation { kind, name, params, body, .. } => {
+            let params = params.iter().map(|param| format!(" {}", param.name)).collect::<Vec<_>>().join("");
+            format!("{} {}{} => {}", kind.as_str(), name, params, canonical(body))
+        }
+        HandlerArm::Return { param, body, .. } => format!("return {} => {}", param.name, canonical(body)),
     }
 }
 
@@ -167,7 +210,7 @@ fn return_type(ty: Option<&TypeExpr>) -> String {
 }
 
 fn type_source(ty: &TypeExpr) -> String {
-    match &ty.kind {
+    let core = match &ty.kind {
         TypeKind::Name(name) => name.clone(),
         TypeKind::Apply(name, args) if name == "Fn" => {
             let inputs = match &args[0].kind {
@@ -199,6 +242,11 @@ fn type_source(ty: &TypeExpr) -> String {
             })
             .collect::<Vec<_>>()
             .join(" "),
+    };
+    match &ty.effects {
+        None => core,
+        Some(EffectRow::Pure) => format!("{core} Pure"),
+        Some(EffectRow::Row(effects)) => format!("{core} {{{}}}", type_list(effects)),
     }
 }
 

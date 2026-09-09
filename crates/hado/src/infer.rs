@@ -150,7 +150,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
                 Item::Def(def) => {
                     definitions.entry(def.name.clone()).or_insert(def);
                 }
-                Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) => {}
+                Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) | Item::Effect(_) | Item::Handler(_) => {}
                 _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
             }
         }
@@ -452,7 +452,7 @@ impl Checker<'_> {
                 Item::Def(def) => {
                     definitions.entry(def.name.clone()).or_insert(def);
                 }
-                Item::ModuleImpl(_) | Item::ModuleSig(_) => {}
+                Item::ModuleImpl(_) | Item::ModuleSig(_) | Item::Effect(_) | Item::Handler(_) => {}
                 _ => {
                     return Err(self.error(
                         ast.span,
@@ -503,9 +503,9 @@ impl Checker<'_> {
                 }
                 let qualified = format!("{}.{}", self.module_path.join("."), def.name);
                 let parameters: HashMap<_, _> = def.params.iter().map(|p| (p.name.clone(), self.inference.fresh())).collect();
-                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span, name_span: p.span }).collect();
+                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span, name_span: p.span, effects: None }).collect();
                 let kind = if arguments.is_empty() { TypeKind::Name(def.name.clone()) } else { TypeKind::Apply(def.name.clone(), arguments) };
-                let reference = TypeExpr { kind, span: def.name_span, name_span: def.name_span };
+                let reference = TypeExpr { kind, span: def.name_span, name_span: def.name_span, effects: None };
                 let body = self.payload_type(&reference, &parameters, def.name_span)?;
                 let parameters = def.params.iter().map(|p| match parameters[&p.name] { Ty::Var(id) => id, _ => unreachable!() }).collect();
                 self.abstract_representations.insert(qualified.clone(), TypeRealization { parameters, body });
@@ -938,6 +938,11 @@ impl Checker<'_> {
                 Ok(self.inference.resolve(&result))
             }
             NodeKind::CondBranch { arms, fallback } => self.conditions(arms, fallback.as_deref()),
+            NodeKind::With { args, body, .. } => {
+                for arg in args { self.expression(arg)?; }
+                self.expression(body)
+            }
+            NodeKind::Resume => Ok(self.inference.fresh()),
         }
     }
 

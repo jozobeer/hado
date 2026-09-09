@@ -187,7 +187,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
                 col: token.span.col, code: Some("E100".into()),
                 message: "declaration is not allowed in this file".into() });
         }
-        if matches!(token.kind, TokKind::KwModule | TokKind::KwImplement) { outer = false; }
+        if matches!(token.kind, TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) { outer = false; }
     }
     None
 }

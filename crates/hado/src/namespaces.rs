@@ -40,6 +40,8 @@ fn item_span(item: &Item) -> Span {
         Item::TypeDef(item) => item.span,
         Item::ModuleSig(item) => item.span,
         Item::ModuleImpl(item) => item.span,
+        Item::Effect(item) => item.span,
+        Item::Handler(item) => item.span,
     }
 }
 
@@ -211,6 +213,7 @@ impl Resolver<'_> {
                     self.node(body, directory, local);
                 }
             },
+            Item::Effect(_) | Item::Handler(_) => {}
         }
     }
 
@@ -241,6 +244,9 @@ impl Resolver<'_> {
                 for constructor in constructors { for ty in constructor.payload.types_mut() { self.ty(ty, directory, local); } }
             }
             TypeKind::Name(_) => {}
+        }
+        if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
+            for ty in effects { self.ty(ty, directory, local); }
         }
     }
 
@@ -309,6 +315,10 @@ impl Resolver<'_> {
                 self.node(scrutinee, directory, local);
                 for (pattern, body) in arms { self.pattern(pattern, directory, local); self.node(body, directory, local); }
                 if let Some(body) = fallback { self.node(body, directory, local); }
+            }
+            NodeKind::With { args, body, .. } => {
+                for arg in args { self.node(arg, directory, local); }
+                self.node(body, directory, local);
             }
             _ => {}
         }

@@ -305,7 +305,7 @@ fn m0_parse_entry() {
 }
 
 fn type_expr(kind: TypeKind) -> TypeExpr {
-    TypeExpr { kind, span: Span { line: 1, col: 1 }, name_span: Span { line: 1, col: 1 } }
+    TypeExpr { kind, span: Span { line: 1, col: 1 }, name_span: Span { line: 1, col: 1 }, effects: None }
 }
 
 fn named_type(name: &str) -> TypeExpr { type_expr(TypeKind::Name(name.into())) }

@@ -128,6 +128,12 @@ pub enum NodeKind {
         fallback: Option<Box<Node>>,
     },
     Pipe(Box<Node>, Box<Node>),
+    With {
+        handler: DeclaredName,
+        args: Vec<Node>,
+        body: Box<Node>,
+    },
+    Resume,
 }
 
 /// A pattern (`pattern :=` in §41).
@@ -222,10 +228,23 @@ pub struct TypeExpr {
     pub kind: TypeKind,
     pub span: Span,
     pub name_span: Span,
+    pub effects: Option<EffectRow>,
+}
+
+impl TypeExpr {
+    fn of(kind: TypeKind, span: Span) -> Self {
+        Self { kind, span, name_span: span, effects: None }
+    }
 }
 
 impl PartialEq for TypeExpr {
-    fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
+    fn eq(&self, other: &Self) -> bool { self.kind == other.kind && self.effects == other.effects }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectRow {
+    Pure,
+    Row(Vec<TypeExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,6 +342,8 @@ pub enum Item {
     TypeDef(TypeDef),
     ModuleSig(ModuleSig),
     ModuleImpl(ModuleImpl),
+    Effect(EffectDecl),
+    Handler(HandlerDecl),
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +418,71 @@ pub struct ModuleImpl {
     pub sig: String,
     pub sig_span: Span,
     pub items: Vec<Item>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpKind {
+    Reply,
+    Abort,
+    Capture,
+}
+
+impl OpKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reply => "reply",
+            Self::Abort => "abort",
+            Self::Capture => "capture",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectOp {
+    pub kind: OpKind,
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<Param>,
+    pub ret: Option<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub type_params: Vec<DeclaredName>,
+    pub ops: Vec<EffectOp>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum HandlerArm {
+    Operation {
+        kind: OpKind,
+        name: String,
+        name_span: Span,
+        params: Vec<Param>,
+        body: Node,
+        span: Span,
+    },
+    Return {
+        param: Param,
+        body: Node,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct HandlerDecl {
+    pub type_params: Vec<DeclaredName>,
+    pub effect: String,
+    pub effect_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<Param>,
+    pub arms: Vec<HandlerArm>,
     pub span: Span,
 }
 
@@ -484,6 +570,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         written_list_patterns: Vec::new(),
         long_condition_functions: Vec::new(),
         diagnostics: Vec::new(),
+        in_resume_scope: false,
     };
     let ast = parser.parse_program();
     PartialParse { ast, diagnostics: parser.diagnostics }
@@ -504,6 +591,7 @@ struct Parser<'a> {
     written_list_patterns: Vec<Span>,
     long_condition_functions: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
+    in_resume_scope: bool,
 }
 
 impl Parser<'_> {
@@ -564,7 +652,7 @@ impl Parser<'_> {
     }
 
     fn section_boundary(&self) -> bool {
-        matches!(self.kind(), TokKind::KwModule | TokKind::KwImplement | TokKind::Eof)
+        matches!(self.kind(), TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler | TokKind::Eof)
     }
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
@@ -578,6 +666,8 @@ impl Parser<'_> {
                 TokKind::KwType => self.parse_type_def(context),
                 TokKind::KwModule => self.parse_module(),
                 TokKind::KwImplement => self.parse_implementation(),
+                TokKind::KwEffect => self.parse_effect(),
+                TokKind::KwHandler => self.parse_handler(),
                 other => Err(self.error(None, format!("expected a declaration, found {other}"))),
             };
             match item {
@@ -596,7 +686,7 @@ impl Parser<'_> {
         self.pos = start;
         while self.kind() != &TokKind::Eof {
             if self.pos > start && self.pos >= failed_at
-                && matches!(self.kind(), TokKind::Def | TokKind::KwType | TokKind::KwModule | TokKind::KwImplement) {
+                && matches!(self.kind(), TokKind::Def | TokKind::KwType | TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) {
                 break;
             }
             self.bump();
@@ -654,7 +744,7 @@ impl Parser<'_> {
             }
             let ret = if self.kind() == &TokKind::Colon {
                 self.bump();
-                Some(self.parse_type()?)
+                Some(self.parse_result()?)
             } else {
                 None
             };
@@ -681,7 +771,7 @@ impl Parser<'_> {
             _ => return Err(self.error(None, "expected a value type or annotated contract parameters")),
         };
         self.expect(&TokKind::Colon)?;
-        let ret = Some(self.parse_type()?);
+        let ret = Some(self.parse_result()?);
         Ok(Item::SigDef(SigDef {
             name,
                 name_span,
@@ -695,13 +785,7 @@ impl Parser<'_> {
     fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
-        let mut params = Vec::new();
-        if self.kind() == &TokKind::LParen {
-            params = self.parse_type_parameters()?;
-        } else if self.toks.get(self.pos + 1).is_some_and(|token| matches!(&token.kind, TokKind::Name(name) if name.starts_with(char::is_uppercase))) {
-            let span = self.span();
-            params.push(DeclaredName { name: self.expect_upper_name("a type parameter")?, span });
-        }
+        let params = self.parse_optional_type_params()?;
         let name_span = self.span();
         let name = self.expect_upper_name("a declaration name")?;
         let ty = if context == TypeContext::Signature {
@@ -745,6 +829,147 @@ impl Parser<'_> {
             module.items = self.parse_items(TypeContext::Implementation);
         }
         Ok(Item::ModuleImpl(module))
+    }
+
+    fn parse_optional_type_params(&mut self) -> Result<Vec<DeclaredName>, Diagnostic> {
+        if self.kind() == &TokKind::LParen {
+            return self.parse_type_parameters();
+        }
+        if self.single_type_var() {
+            let span = self.span();
+            return Ok(vec![DeclaredName { name: self.expect_upper_name("a type parameter")?, span }]);
+        }
+        Ok(Vec::new())
+    }
+
+    fn single_type_var(&self) -> bool {
+        let TokKind::Name(name) = self.kind() else { return false };
+        if !name.starts_with(char::is_uppercase) { return false; }
+        match self.toks.get(self.pos + 1).map(|token| &token.kind) {
+            Some(TokKind::Name(next)) if next.starts_with(char::is_uppercase) => true,
+            Some(TokKind::Name(_)) => self.toks.get(self.pos + 2).is_some_and(|token| token.kind == TokKind::DoubleColon),
+            _ => false,
+        }
+    }
+
+    fn parse_op_kind(&mut self) -> Option<OpKind> {
+        let kind = match self.kind() {
+            TokKind::KwReply => OpKind::Reply,
+            TokKind::KwAbort => OpKind::Abort,
+            TokKind::KwCapture => OpKind::Capture,
+            _ => return None,
+        };
+        self.bump();
+        Some(kind)
+    }
+
+    fn parse_effect(&mut self) -> Result<Item, Diagnostic> {
+        let span = self.span();
+        self.expect(&TokKind::KwEffect)?;
+        let type_params = self.parse_optional_type_params()?;
+        let name_span = self.span();
+        let name = self.expect_upper_name("an effect name")?;
+        let mut ops = Vec::new();
+        while let Some(kind) = self.parse_op_kind() {
+            ops.push(self.parse_effect_op(kind)?);
+        }
+        Ok(Item::Effect(EffectDecl { name, name_span, type_params, ops, span }))
+    }
+
+    fn parse_effect_op(&mut self, kind: OpKind) -> Result<EffectOp, Diagnostic> {
+        let span = self.span();
+        let name_span = self.span();
+        let name = self.expect_lower_name("an operation name")?;
+        let params = if self.kind() == &TokKind::LParen {
+            self.parse_typed_params(true)?
+        } else {
+            Vec::new()
+        };
+        let ret = if self.kind() == &TokKind::Colon {
+            if kind == OpKind::Abort {
+                return Err(self.error(Some("E123"), "abort operations cannot have a return type"));
+            }
+            self.bump();
+            Some(self.parse_result()?)
+        } else {
+            None
+        };
+        Ok(EffectOp { kind, name, name_span, params, ret, span })
+    }
+
+    fn parse_typed_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
+        self.expect(&TokKind::LParen)?;
+        let mut params = vec![self.parse_typed_param(contract)?];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            params.push(self.parse_typed_param(contract)?);
+        }
+        self.expect(&TokKind::RParen)?;
+        Ok(params)
+    }
+
+    fn parse_typed_param(&mut self, contract: bool) -> Result<Param, Diagnostic> {
+        let span = self.span();
+        let name = self.expect_parameter_name(contract)?;
+        self.expect(&TokKind::Colon)?;
+        Ok(Param { name, ty: Some(self.parse_type()?), span })
+    }
+
+    fn parse_handler(&mut self) -> Result<Item, Diagnostic> {
+        let span = self.span();
+        self.expect(&TokKind::KwHandler)?;
+        let type_params = self.parse_optional_type_params()?;
+        let effect_span = self.span();
+        let effect = self.parse_upper_reference("an effect name")?;
+        self.expect(&TokKind::KwAs)?;
+        let name_span = self.span();
+        let name = self.expect_upper_name("a handler name")?;
+        let params = if self.kind() == &TokKind::LParen {
+            self.parse_typed_params(false)?
+        } else {
+            Vec::new()
+        };
+        let mut arms = Vec::new();
+        loop {
+            if self.kind() == &TokKind::KwReturn {
+                arms.push(self.parse_return_arm()?);
+                continue;
+            }
+            let Some(kind) = self.parse_op_kind() else { break };
+            arms.push(self.parse_handler_op(kind)?);
+        }
+        Ok(Item::Handler(HandlerDecl { type_params, effect, effect_span, name, name_span, params, arms, span }))
+    }
+
+    fn parse_handler_op(&mut self, kind: OpKind) -> Result<HandlerArm, Diagnostic> {
+        let span = self.span();
+        let name_span = self.span();
+        let name = self.expect_lower_name("an operation name")?;
+        let mut params = Vec::new();
+        while matches!(self.kind(), TokKind::Name(_)) {
+            let span = self.span();
+            let name = self.expect_parameter_name(false)?;
+            params.push(Param { name, ty: None, span });
+        }
+        self.expect(&TokKind::Arrow)?;
+        let saved = self.in_resume_scope;
+        self.in_resume_scope = kind == OpKind::Capture;
+        let body = self.parse_expr()?;
+        self.in_resume_scope = saved;
+        Ok(HandlerArm::Operation { kind, name, name_span, params, body, span })
+    }
+
+    fn parse_return_arm(&mut self) -> Result<HandlerArm, Diagnostic> {
+        let span = self.span();
+        self.expect(&TokKind::KwReturn)?;
+        let param_span = self.span();
+        let name = self.expect_parameter_name(false)?;
+        self.expect(&TokKind::Arrow)?;
+        let saved = self.in_resume_scope;
+        self.in_resume_scope = false;
+        let body = self.parse_expr()?;
+        self.in_resume_scope = saved;
+        Ok(HandlerArm::Return { param: Param { name, ty: None, span: param_span }, body, span })
     }
 
     fn parse_implementation_form(&mut self) -> Result<ImplementationForm, Diagnostic> {
@@ -909,7 +1134,7 @@ impl Parser<'_> {
                     self.bump();
                     constructors.push(self.parse_constructor_type()?);
                 }
-                Ok(TypeExpr { kind: TypeKind::Adt(constructors), span, name_span: span })
+                Ok(TypeExpr::of(TypeKind::Adt(constructors), span))
             }
             TokKind::Name(name) if name.starts_with(char::is_uppercase)
                 && self.toks.get(self.pos + 1).is_some_and(|token| token.kind == TokKind::LBrace) => {
@@ -917,7 +1142,7 @@ impl Parser<'_> {
                 if self.kind() == &TokKind::Pipe {
                     return Err(self.error_at(span, Some("E108"), "constructor alternatives require a leading |"));
                 }
-                Ok(TypeExpr { kind: TypeKind::Adt(vec![constructor]), span, name_span: span })
+                Ok(TypeExpr::of(TypeKind::Adt(vec![constructor]), span))
             }
             _ if context == TypeContext::Implementation => self.parse_alias_type(),
             _ => {
@@ -930,7 +1155,7 @@ impl Parser<'_> {
 
     fn parse_alias_type(&mut self) -> Result<TypeExpr, Diagnostic> {
         let prefix = match self.kind() {
-            TokKind::Name(name) => Some(TypeExpr { kind: TypeKind::Name(name.clone()), span: self.span(), name_span: self.span() }),
+            TokKind::Name(name) => Some(TypeExpr::of(TypeKind::Name(name.clone()), self.span())),
             _ => None,
         };
         match (self.parse_type(), prefix) {
@@ -956,7 +1181,7 @@ impl Parser<'_> {
             self.bump();
         }
         self.expect(&TokKind::RBrace)?;
-        Ok(TypeExpr { kind: TypeKind::Record(fields), span, name_span: span })
+        Ok(TypeExpr::of(TypeKind::Record(fields), span))
     }
 
     fn parse_constructor_type(&mut self) -> Result<ConstructorDecl, Diagnostic> {
@@ -1014,7 +1239,7 @@ impl Parser<'_> {
             name.push('.');
             name.push_str(&self.expect_upper_name("a qualified type name")?);
         }
-        Ok(TypeExpr { kind: TypeKind::Name(name), span, name_span: span })
+        Ok(TypeExpr { kind: TypeKind::Name(name), span, name_span: span, effects: None })
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
@@ -1024,7 +1249,7 @@ impl Parser<'_> {
             let TypeKind::Name(name) = reference.kind else { unreachable!() };
             let span = if name.contains('.') { reference.span } else { ty.span };
             let args = match ty.kind { TypeKind::Group(args) => args, _ => vec![ty] };
-            ty = TypeExpr { kind: TypeKind::Apply(name, args), span, name_span: reference.name_span };
+            ty = TypeExpr { kind: TypeKind::Apply(name, args), span, name_span: reference.name_span, effects: None };
         }
         Ok(ty)
     }
@@ -1040,7 +1265,7 @@ impl Parser<'_> {
                 self.bump();
                 let args = self.parse_type_list(&TokKind::RParen)?;
                 if args.len() < 2 { return Err(self.error_at(span, Some("E100"), "type argument groups require at least two types")); }
-                Ok(TypeExpr { kind: TypeKind::Group(args), span, name_span: span })
+                Ok(TypeExpr::of(TypeKind::Group(args), span))
             }
             _ => self.parse_type_ref(),
         }
@@ -1054,10 +1279,36 @@ impl Parser<'_> {
             args.push(self.parse_type()?);
         }
         self.expect(&TokKind::Arrow)?;
-        let result = self.parse_type()?;
+        let result = self.parse_result()?;
         self.expect(&TokKind::RParen)?;
-        let params = if args.len() == 1 { args.remove(0) } else { TypeExpr { kind: TypeKind::Group(args), span, name_span: span } };
-        Ok(TypeExpr { kind: TypeKind::Apply("Fn".into(), vec![params, result]), span, name_span: span })
+        let params = if args.len() == 1 { args.remove(0) } else { TypeExpr::of(TypeKind::Group(args), span) };
+        Ok(TypeExpr::of(TypeKind::Apply("Fn".into(), vec![params, result]), span))
+    }
+
+    fn parse_result(&mut self) -> Result<TypeExpr, Diagnostic> {
+        let mut ty = self.parse_type()?;
+        ty.effects = self.parse_effect_row()?;
+        Ok(ty)
+    }
+
+    fn parse_effect_row(&mut self) -> Result<Option<EffectRow>, Diagnostic> {
+        match self.kind() {
+            TokKind::KwPure => {
+                self.bump();
+                Ok(Some(EffectRow::Pure))
+            }
+            TokKind::LBrace => {
+                self.bump();
+                let mut effects = vec![self.parse_type()?];
+                while self.kind() == &TokKind::Comma {
+                    self.bump();
+                    effects.push(self.parse_type()?);
+                }
+                self.expect(&TokKind::RBrace)?;
+                Ok(Some(EffectRow::Row(effects)))
+            }
+            _ => Ok(None),
+        }
     }
 
     // --- expressions ---
@@ -1067,6 +1318,7 @@ impl Parser<'_> {
             TokKind::KwIf => self.parse_branch(),
             TokKind::KwLet => self.parse_let(),
             TokKind::KwDo => self.parse_do(),
+            TokKind::KwWith => self.parse_with(),
             _ => self.parse_pipe(),
         }
     }
@@ -1076,6 +1328,9 @@ impl Parser<'_> {
     fn parse_branch_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::KwIf {
             return Err(self.error(Some("E101"), "branches cannot be nested inside another branch"));
+        }
+        if self.kind() == &TokKind::KwWith {
+            return Err(self.error(None, "with cannot be a branch arm"));
         }
         let node = self.parse_expr()?;
         if let Some(sp) = contains_branch(&node) {
@@ -1255,6 +1510,7 @@ impl Parser<'_> {
                 | TokKind::LBrace
                 | TokKind::LBracket
                 | TokKind::KwFn
+                | TokKind::KwResume
         )
     }
 
@@ -1307,6 +1563,13 @@ impl Parser<'_> {
                 NodeKind::Unit
             }
             TokKind::KwFn => return self.parse_fun(),
+            TokKind::KwResume => {
+                if !self.in_resume_scope {
+                    return Err(self.error(Some("E124"), "resume is only allowed in a capture arm"));
+                }
+                self.bump();
+                NodeKind::Resume
+            }
             TokKind::Name(_) => return self.parse_name_or_call(),
             TokKind::LParen => {
                 let lp = self.span();
@@ -1638,6 +1901,28 @@ impl Parser<'_> {
         })
     }
 
+    fn parse_with(&mut self) -> Result<Node, Diagnostic> {
+        let span = self.span();
+        self.bump();
+        let handler_span = self.span();
+        let handler = DeclaredName { name: self.parse_upper_reference("a handler name")?, span: handler_span };
+        let args = if self.kind() == &TokKind::LParen {
+            self.bump();
+            let mut args = vec![self.parse_expr()?];
+            while self.kind() == &TokKind::Comma {
+                self.bump();
+                args.push(self.parse_expr()?);
+            }
+            self.expect(&TokKind::RParen)?;
+            args
+        } else {
+            Vec::new()
+        };
+        self.expect(&TokKind::DashArrow)?;
+        let body = self.parse_expr()?;
+        Ok(Node { kind: NodeKind::With { handler, args, body: Box::new(body) }, span })
+    }
+
     // --- patterns ---
 
     fn parse_list_pattern(&mut self) -> Result<Pattern, Diagnostic> {
@@ -1800,6 +2085,7 @@ fn contains_branch(node: &Node) -> Option<Span> {
         NodeKind::DoQ { value, body } => {
             contains_branch(value).or_else(|| contains_branch(body))
         }
+        NodeKind::With { args, body, .. } => args.iter().find_map(contains_branch).or_else(|| contains_branch(body)),
         NodeKind::Fn { body, .. } => contains_branch(body),
         NodeKind::Pipe(l, r) => contains_branch(l).or_else(|| contains_branch(r)),
         _ => None,
@@ -1935,6 +2221,15 @@ pub fn canonical(node: &Node) -> String {
             s.push(')');
             s
         }
+        NodeKind::With { handler, args, body } => {
+            let args = if args.is_empty() {
+                String::new()
+            } else {
+                format!("({})", args.iter().map(canonical).collect::<Vec<_>>().join(", "))
+            };
+            format!("(with {}{} -> {})", handler.name, args, canonical(body))
+        }
+        NodeKind::Resume => "resume".into(),
     }
 }
 

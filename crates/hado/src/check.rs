@@ -95,6 +95,9 @@ fn node_type_has_span(node: &Node, span: crate::parser::Span) -> bool {
 
 fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
     if ty.span == span { return true; }
+    if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
+        if effects.iter().any(|ty| type_has_span(ty, span)) { return true; }
+    }
     match &ty.kind {
         crate::parser::TypeKind::Adt(variants) => variants.iter().any(|variant| variant.name.span == span || variant.payload.types().any(|ty| type_has_span(ty, span))),
         crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => args.iter().any(|ty| type_has_span(ty, span)),
@@ -162,13 +165,14 @@ fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnost
 }
 
 fn references_type_parameter(ty: &TypeExpr, parameter: &str) -> bool {
-    match &ty.kind {
+    let in_kind = match &ty.kind {
         TypeKind::Name(name) => name == parameter,
         TypeKind::Apply(name, arguments) => name == parameter || arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
         TypeKind::Group(arguments) => arguments.iter().any(|ty| references_type_parameter(ty, parameter)),
         TypeKind::Record(fields) => fields.iter().any(|field| references_type_parameter(&field.ty, parameter)),
         TypeKind::Adt(variants) => variants.iter().any(|variant| constructor_uses_type_parameter(variant, parameter)),
-    }
+    };
+    in_kind || matches!(&ty.effects, Some(crate::parser::EffectRow::Row(effects)) if effects.iter().any(|ty| references_type_parameter(ty, parameter)))
 }
 
 fn constructor_uses_type_parameter(variant: &crate::parser::ConstructorDecl, parameter: &str) -> bool {
@@ -639,6 +643,7 @@ pub(crate) fn children(node: &Node) -> Vec<&Node> {
             .chain(arms.iter().map(|(_, body)| body))
             .chain(fallback.iter().map(Box::as_ref))
             .collect(),
+        NodeKind::With { args, body, .. } => args.iter().chain(std::iter::once(body.as_ref())).collect(),
         _ => vec![],
     }
 }

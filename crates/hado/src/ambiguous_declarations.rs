@@ -42,6 +42,7 @@ impl AmbiguousDeclarations {
                         record(name, span, &mut constructors, &mut result.constructors, &mut result.diagnostics, path);
                     }
                 }
+                Item::Effect(_) | Item::Handler(_) => {}
             }
         }
         for item in items {
