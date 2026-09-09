@@ -188,8 +188,13 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             }
         }
         for constraint in &checker.row_constraints {
-            if checker.inference.resolve_row(&constraint.row).has_known_effects() {
-                checker.deferred.push(checker.error(constraint.span.expect("condition has an origin"), Some(constraint.code), "effects are not allowed in branch conditions"));
+            if !checker.inference.row_within(&constraint.row, &constraint.bound) {
+                let message = if constraint.code == "E308" {
+                    "effects are not allowed in branch conditions"
+                } else {
+                    "effect row mismatch"
+                };
+                checker.deferred.push(checker.error(constraint.span.expect("row constraint has an origin"), Some(constraint.code), message));
             }
         }
         let scheme = checker
@@ -560,9 +565,6 @@ impl Checker<'_> {
             }
             self.record_comparisons(constraints, declaration.span);
             self.record_row_constraints(rows, declaration.span);
-            if declaration.params.is_empty() {
-                actual = result_of_thunk(actual);
-            }
             let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
             let expected = self.signature_type(declaration, &parameters, false)?;
             self.inference
@@ -611,7 +613,7 @@ impl Checker<'_> {
         })?;
         let result = self.payload_type(result_ty, parameters, declaration.span)?;
         let row = self.row_annotation(&result_ty.effects)?;
-        let ty = if declaration.params.is_empty() { result } else { Ty::fn_with(args, result, row) };
+        let ty = Ty::fn_with(args, result, row);
         if public { return Ok(ty); }
         let prefix = format!("{}.", self.module_path.join("."));
         let local = self.abstract_representations.iter().filter(|(name, _)| name.starts_with(&prefix))
@@ -1270,7 +1272,7 @@ impl Checker<'_> {
         if row.has_known_effects() {
             return Err(self.error(node.span, Some("E308"), "effects are not allowed in branch conditions"));
         }
-        self.row_constraints.push(RowConstraint { row, code: "E308", span: Some(node.span) });
+        self.row_constraints.push(RowConstraint { row, bound: Row::pure(), code: "E308", span: Some(node.span) });
         Ok(())
     }
 
@@ -1811,9 +1813,20 @@ impl Checker<'_> {
     }
 
     fn contain_row(&mut self, inner: &Row, outer: &Row, span: Span) -> Result<(), Diagnostic> {
-        self.inference.row_contained(inner, outer).map_err(|_| {
+        let inner = self.inference.resolve_row(inner);
+        let outer = self.inference.resolve_row(outer);
+        self.inference.row_contained(&inner, &outer).map_err(|_| {
             self.error(span, Some("E305"), "effect row mismatch")
-        })
+        })?;
+        if let (Row::Open(id, _), Row::Closed(_)) = (&inner, &outer) {
+            self.row_constraints.push(RowConstraint {
+                row: Row::Var(*id),
+                bound: outer,
+                code: "E305",
+                span: Some(span),
+            });
+        }
+        Ok(())
     }
 
     fn row_annotation(&mut self, effects: &Option<EffectRow>) -> Result<Row, Diagnostic> {
@@ -1861,13 +1874,6 @@ impl Checker<'_> {
                 result
             }
         }
-    }
-}
-
-fn result_of_thunk(ty: Ty) -> Ty {
-    match ty {
-        Ty::Fn(args, result, _) if args.is_empty() => *result,
-        ty => ty,
     }
 }
 

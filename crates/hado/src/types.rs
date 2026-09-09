@@ -145,6 +145,7 @@ pub struct ComparisonConstraint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowConstraint {
     pub row: Row,
+    pub bound: Row,
     pub code: &'static str,
     pub span: Option<crate::lexer::Span>,
 }
@@ -156,8 +157,13 @@ impl ComparisonConstraint {
 }
 
 impl RowConstraint {
-    fn with_row(&self, row: Row) -> Self {
-        Self { row, code: self.code, span: self.span }
+    fn map_variables(&self, f: &impl Fn(u32) -> Ty) -> Self {
+        Self {
+            row: self.row.map_variables(f),
+            bound: self.bound.map_variables(f),
+            code: self.code,
+            span: self.span,
+        }
     }
 }
 
@@ -333,8 +339,8 @@ impl Inference {
             (Row::Closed(a), Row::Closed(b)) if self.label_names(a).is_subset(&self.label_names(b)) => {
                 self.unify_matching_labels(a, b)
             }
-            (Row::Open(id, required), Row::Closed(actual)) if self.label_names(required).is_subset(&self.label_names(actual)) => {
-                self.unify_open_closed(*id, required, actual)
+            (Row::Open(_, required), Row::Closed(actual)) if self.label_names(required).is_subset(&self.label_names(actual)) => {
+                self.unify_matching_labels(required, actual)
             }
             _ => self.unify_row(&inner, &outer),
         }
@@ -458,6 +464,19 @@ impl Inference {
         self.bind_row(tail, &if rest.is_empty() { Row::pure() } else { Row::Closed(rest) })
     }
 
+    pub fn row_within(&self, inner: &Row, outer: &Row) -> bool {
+        let inner = self.resolve_row(inner);
+        let outer = self.resolve_row(outer);
+        let permitted = match &outer {
+            Row::Closed(labels) | Row::Open(_, labels) => self.label_names(labels),
+            Row::Var(_) => return true,
+        };
+        match &inner {
+            Row::Var(_) => true,
+            Row::Closed(labels) | Row::Open(_, labels) => self.label_names(labels).is_subset(&permitted),
+        }
+    }
+
     fn labels_by_ctor(&self, labels: &[Ty]) -> HashMap<String, Ty> {
         let mut map = HashMap::new();
         for ty in labels {
@@ -547,9 +566,10 @@ impl Inference {
             .iter()
             .filter_map(|constraint| {
                 let row = self.resolve_row(&constraint.row);
+                let bound = self.resolve_row(&constraint.bound);
                 let mut variables = BTreeSet::new();
                 row.free_variables(&mut variables);
-                (!variables.is_disjoint(&scheme.variables)).then_some(constraint.with_row(row))
+                (!variables.is_disjoint(&scheme.variables)).then_some(RowConstraint { row, bound, code: constraint.code, span: constraint.span })
             })
             .collect();
         scheme
@@ -576,7 +596,7 @@ impl Inference {
             scheme
                 .row_constraints
                 .iter()
-                .map(|constraint| constraint.with_row(constraint.row.map_variables(&replace)))
+                .map(|constraint| constraint.map_variables(&replace))
                 .collect(),
         )
     }
@@ -642,7 +662,7 @@ impl Scheme {
             variables: self.variables.clone(),
             ty: self.ty.map_variables(&resolve),
             constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.map_variables(&resolve))).collect(),
-            row_constraints: self.row_constraints.iter().map(|constraint| constraint.with_row(constraint.row.map_variables(&resolve))).collect(),
+            row_constraints: self.row_constraints.iter().map(|constraint| constraint.map_variables(&resolve)).collect(),
         }
     }
 
