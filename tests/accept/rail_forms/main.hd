@@ -1,13 +1,16 @@
 // spec: §22
 // expect: 42
 // item: let p? =
+// needs: prelude
 type Box = | Box(Int)
 type Entry = { value: Box }
 def pass (n: Int): Unit {Error} => if n > 0 => () | raise { message = "negative" }
 def read (entry: Entry Option): Int {Error} =>
-  let { value = Box(n) }? = entry ->
-  do pass n ->
-  do pass (n + 1) ->
-  let Box(m)? = Some(Box(n + 2)) ->
-  m
+  Option.ok_or (
+    let { value = Box(n) }? = entry ->
+    do pass n ->
+    do pass (n + 1) ->
+    let Box(m)? = Some(Box(n + 2)) ->
+    Some(m)
+  ) { message = "missing" }
 def main = read (Some({ value = Box(40) }))
