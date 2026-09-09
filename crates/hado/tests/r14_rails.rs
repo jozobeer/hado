@@ -61,7 +61,6 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
             (format!("let _? = {n} -> Some(1)"), "E303", n.to_string()),
             (format!("do {n} -> Some(1)"), "E303", n.to_string()),
             (format!("let _? = Some({n}) -> Some(1)"), "E504", "_".to_string()),
-            (format!("let _? = Ok({n}) -> Ok(1)"), "E504", "_".to_string()),
             (format!("let Some(x)? = Some(Some({n})) -> Some(x + 1)"), "E402", "Some(x)".to_string()),
         ] {
             let padding = format!("{}{}", "\n".repeat(random(&mut state, 4) as usize),
@@ -72,6 +71,13 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
 }
 
 fn execute(source: &str, expected: &str, serial: usize) {
+    let (status, stdout, stderr) = run(source, serial);
+    assert_eq!(status, Some(0), "{source}");
+    assert_eq!(stdout, format!("{expected}\n"));
+    assert!(stderr.is_empty(), "{source}: {stderr}");
+}
+
+fn run(source: &str, serial: usize) -> (Option<i32>, String, String) {
     let dir = std::env::temp_dir().join(format!("hado-r14-{}-{serial}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
@@ -80,10 +86,11 @@ fn execute(source: &str, expected: &str, serial: usize) {
         .arg("build").arg(&path).output().unwrap();
     assert!(build.status.success(), "{source}\n{}", String::from_utf8_lossy(&build.stderr));
     let result = std::process::Command::new(path.with_extension("")).output().unwrap();
-    assert!(result.status.success());
-    assert_eq!(String::from_utf8(result.stdout).unwrap(), format!("{expected}\n"));
-    assert!(result.stderr.is_empty());
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    let status = result.status.code();
     std::fs::remove_dir_all(dir).unwrap();
+    (status, stdout, stderr)
 }
 
 #[test]
@@ -94,14 +101,29 @@ fn generated_chains_execute_success_and_each_failure_path() {
         for fail in 0..4 {
             let source = format!(
                 "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
-                 def first (flag: Int): (Entry, Int) Result => if flag == 1 => Error({n}) | Ok({{ field = Box({n}) }})\n\
-                 def step (flag: Int, stage: Int): (Unit, Int) Result => if flag == stage => Error({n} + stage) | Ok()\n\
-                 def run flag => let {{ field = Box(x) }}? = first flag -> do step flag 2 -> do step flag 3 -> let Box(y)? = Ok(Box(x + 4)) -> Ok(y + 1)\n\
-                 def unwrap | Ok(x) => x | Error(e) => 0 - e\n\
-                 def main = unwrap (run {fail})"
+                 def first (flag: Int): Entry {{Error}} => if flag == 1 => raise {{ message = \"f{n}\" }} | {{ field = Box({n}) }}\n\
+                 def step (flag: Int, stage: Int): Unit {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
+                 def run flag => let {{ field = Box(x) }} = first flag -> do step flag 2 -> do step flag 3 -> x + 5\n\
+                 def main = run {fail}"
             );
-            let expected = match fail { 0 => n as i64 + 5, 1 => -(n as i64), _ => -(n as i64 + fail as i64) };
-            execute(&source, &expected.to_string(), serial * 4 + fail);
+            let (status, stdout, stderr) = run(&source, serial * 4 + fail);
+            match fail {
+                0 => {
+                    assert_eq!(status, Some(0), "{source}");
+                    assert_eq!(stdout, format!("{}\n", n + 5));
+                    assert!(stderr.is_empty(), "{stderr}");
+                }
+                1 => {
+                    assert_eq!(status, Some(1), "{source}");
+                    assert!(stdout.is_empty(), "{stdout}");
+                    assert_eq!(stderr, format!("f{n}\n"));
+                }
+                _ => {
+                    assert_eq!(status, Some(1), "{source}");
+                    assert!(stdout.is_empty(), "{stdout}");
+                    assert_eq!(stderr, format!("s{n}-{fail}\n"));
+                }
+            }
         }
     }
 }

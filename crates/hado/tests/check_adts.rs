@@ -77,12 +77,7 @@ fn recursive_type_cycles_preserve_parameters() {
 }
 
 #[test]
-fn only_ok_has_the_empty_unit_payload_form() {
-    let source = "def main = if true => Ok() | Error(false)";
-    assert_eq!(
-        check_source(source, "t").unwrap().main,
-        Ty::Adt("Result".into(), vec![Ty::Unit, Ty::Bool])
-    );
+fn empty_unit_payload_form_is_reserved_for_ok() {
     let invalid = "type Event = | Done(Unit) | Failed\ndef main = Done()";
     assert_eq!(check_source(invalid, "t").err().unwrap().code.as_deref(), Some("E106"));
     let source = "type Event = | Done(Unit) | Failed\ndef main = Done(())";

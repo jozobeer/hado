@@ -13,6 +13,7 @@ pub enum RuntimeFunction {
     PrintInt,
     PrintString,
     PrintErrorString,
+    AbortError,
     PrintChar,
     PrintFloat,
     IntToString,
@@ -42,7 +43,7 @@ impl RuntimeFunction {
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
-            Self::CanonicalFloat | Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::PrintChar | Self::PrintFloat => None,
+            Self::CanonicalFloat | Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::AbortError | Self::PrintChar | Self::PrintFloat => None,
         }
     }
 
@@ -59,7 +60,7 @@ impl RuntimeFunction {
             Self::FloatToString | Self::CanonicalFloat => (vec![Type::Float], Type::String),
             Self::IntToString => (vec![Type::Int], Type::String),
             Self::PrintInt => (vec![Type::Int], Type::Unit),
-            Self::PrintString | Self::PrintErrorString => (vec![Type::String], Type::Unit),
+            Self::PrintString | Self::PrintErrorString | Self::AbortError => (vec![Type::String], Type::Unit),
             Self::PrintChar => (vec![Type::Char], Type::Unit),
             Self::PrintFloat => (vec![Type::Float], Type::Unit),
             Self::StringLength => (vec![Type::String], Type::Int),
@@ -69,7 +70,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -108,6 +109,7 @@ impl RuntimeFunction {
                 may_allocate: false,
             },
             Self::PrintErrorString => &Declaration { symbol: "hado_print_error_string", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
+            Self::AbortError => &Declaration { symbol: "hado_abort_error", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
             Self::PrintString => &Declaration { symbol: "hado_print_string", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
             Self::Alloc => &Declaration {
                 symbol: "hado_alloc",

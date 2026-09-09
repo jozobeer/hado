@@ -42,9 +42,8 @@ fn generic_prelude_operations_execute() {
         ("[3, 1, 2, 1] |> List.sort compare", "[1, 1, 2, 3]\n"),
         ("Option.unwrap_or (Option.map (Some(41)) fn(x => x + 1)) 0", "42\n"),
         ("Option.is_some (Some(true))", "true\n"),
-        ("Option.ok_or (Some(42)) \"missing\"", "42\n"),
-        ("Result.map (7 / 2) fn(x => x + 1)", "4\n"),
-        ("Result.is_ok (Result.map_error (7 / 0) fn(| DivisionByZero => \"division failed\"))", "false\n"),
+        ("Option.ok_or (Some(42)) { message = \"missing\" }", "42\n"),
+        ("7 / 2", "3\n"),
     ];
     for (index, (expression, expected)) in cases.iter().enumerate() {
         let path = std::env::temp_dir().join(format!("hado-generic-prelude-{}-{index}", std::process::id()));

@@ -287,8 +287,8 @@ fn generated_field_oracles_match_concrete_runtime_controls() {
 
 #[test]
 fn parameterized_contract_references_keep_qualified_name_anchors() {
-    for annotation in ["Int X.T", "Fn(Int X.T => Int)", "(Int X.T, Bool) Result"] {
-        let source = format!("def main = C.answer\nmodule X\ntype A T\nmodule Consumer\ndef answer: Int\ndef use(value: {annotation}): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1");
+    for annotation in ["Int X.T", "Fn(Int X.T => Int)", "(Int X.T, Bool) Pair"] {
+        let source = format!("type (A, B) Pair = | Hold(A, B)\ndef main = C.answer\nmodule X\ntype A T\nmodule Consumer\ndef answer: Int\ndef use(value: {annotation}): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1");
         perturbed(&source, "E603", "X.T");
         rejected(&source.replace("X.T", "X.Missing"), "E204", "Missing");
     }

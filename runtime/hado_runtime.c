@@ -134,3 +134,8 @@ void hado_print_error_string(const HadoString *string) {
   fputc('\n', stderr);
   fflush(stderr);
 }
+
+void hado_abort_error(const HadoString *string) {
+  hado_print_error_string(string);
+  exit(1);
+}

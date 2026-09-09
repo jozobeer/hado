@@ -368,20 +368,6 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
             });
         }
     }
-    if let NodeKind::Call(callee, args) = &node.kind {
-        if matches!(&callee.kind, NodeKind::Name(name) if name == "Ok")
-            && args.len() == 1
-            && matches!(args[0].kind, NodeKind::Unit)
-        {
-            return Err(Diagnostic {
-                path: path.into(),
-                line: node.span.line,
-                col: node.span.col,
-                code: Some("E509".into()),
-                message: "use Ok() for a Unit success value".into(),
-            });
-        }
-    }
     if let NodeKind::PatternBranch { arms, .. } = &node.kind {
         for (pattern, _) in arms {
             if matches!(pattern.kind, PatternKind::Underscore) {
@@ -485,9 +471,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     };
     for (pattern, body) in arms {
-        if matches!(&pattern.kind, PatternKind::Constructor(name, args)
-            if name == "Error" && args.len() == 1
-                && matches!(&args[0].kind, PatternKind::Name(bound) if !crate::names::is_upper_reference(bound)))
+        if matches!(&pattern.kind, PatternKind::Name(name) if name == "None")
             && crate::normalize::rebuilds_pattern(pattern, body)
         {
             return Err(Diagnostic {
@@ -496,7 +480,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 col: body.span.col,
                 code: Some("E508".into()),
                 message: format!(
-                    "failure bound at {}:{} is propagated unchanged; use let p? = or do",
+                    "absence bound at {}:{} is propagated unchanged; use let p? = or do",
                     pattern.span.line, pattern.span.col
                 ),
             });

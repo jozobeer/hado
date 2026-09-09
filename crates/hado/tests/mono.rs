@@ -199,10 +199,7 @@ fn division_lowering_preserves_integer_failure_type() {
             hado::mono::lower_expression(ast.main().unwrap())
                 .unwrap()
                 .ty(),
-            Type::Data(
-                "Result".into(),
-                vec![Type::Int, Type::Data("DivisionError".into(), vec![])]
-            )
+            Type::Int
         );
     }
     let ast = hado::parser::parse_source("def main = 4.0 / 2.0", "t").unwrap();
@@ -701,47 +698,16 @@ fn option_propagation_branches_before_the_continuation() {
 }
 
 #[test]
-fn result_propagation_preserves_error_when_success_type_changes() {
+fn effect_do_evaluates_the_rhs_then_the_continuation() {
     use hado::mono::Expression;
-    let source = "def main = do (1 / 2) -> Ok(true)";
+    let source = "def main = do (1 / 2) -> true";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
-    let Expression::Let { id, body, .. } = program.entry else {
-        panic!("single evaluation")
+    let Expression::Let { body, .. } = program.entry else {
+        panic!("discarded effect")
     };
-    let Expression::Switch { arms, result, .. } = *body else {
-        panic!("result switch")
-    };
-    let error_type = Type::Data("DivisionError".into(), vec![]);
-    assert_eq!(
-        result,
-        Type::Data("Result".into(), vec![Type::Bool, error_type.clone()])
-    );
-    assert_eq!(arms[0].0, "Ok");
-    assert!(matches!(arms[0].1, Expression::Construct { .. }));
-    let Expression::Construct {
-        constructor,
-        fields,
-        result: failure_type,
-    } = &arms[1].1
-    else {
-        panic!("propagated error")
-    };
-    assert_eq!(constructor, "Error");
-    assert_eq!(*failure_type, result);
-    assert_eq!(
-        fields,
-        &vec![Expression::Project {
-            value: Box::new(Expression::Variable {
-                id,
-                ty: Type::Data("Result".into(), vec![Type::Int, error_type.clone()])
-            }),
-            constructor: "Error".into(),
-            index: 0,
-            result: error_type,
-        }]
-    );
+    assert!(matches!(*body, Expression::Constant(hado::mono::Constant::Bool(true))));
 }
 
 #[test]

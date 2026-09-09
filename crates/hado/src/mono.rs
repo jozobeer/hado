@@ -237,10 +237,7 @@ impl Expression {
                 if matches!(op, crate::parser::BinOp::Div | crate::parser::BinOp::Mod)
                     && left.ty() == Type::Int =>
             {
-                Type::Data(
-                    "Result".into(),
-                    vec![Type::Int, Type::Data("DivisionError".into(), vec![])],
-                )
+                Type::Int
             }
             Self::Binary { left, .. } => left.ty(),
             Self::Unary {
@@ -272,6 +269,7 @@ struct Lowerer {
     value_types: std::collections::HashMap<(usize, usize), Ty>,
     specialization: crate::types::Inference,
     composite_types: std::collections::HashMap<(usize, usize), Ty>,
+    operations: std::collections::HashMap<String, crate::parser::OpKind>,
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
     next: usize,
@@ -353,6 +351,9 @@ impl Lowerer {
             return self.lambda(node, params, body);
         }
         if let NodeKind::Name(name) = &node.kind {
+            if self.operations.get(name) == Some(&crate::parser::OpKind::Abort) {
+                return self.abort_raise(node, vec![]);
+            }
             if crate::names::is_upper_reference(name) {
                 let ty = self
                     .value_types
@@ -376,7 +377,17 @@ impl Lowerer {
             return self.propagation(Some(pat), value, body);
         }
         if let NodeKind::DoQ { value, body } = &node.kind {
-            return self.propagation(None, value, body);
+            let source = self.expression(value)?;
+            if matches!(&source.ty(), Type::Data(name, args) if name == "Option" && args.len() == 1) {
+                return self.option_propagation(None, source, body);
+            }
+            let id = self.next;
+            self.next += 1;
+            return Ok(Expression::Let {
+                id,
+                value: Box::new(source),
+                body: Box::new(self.expression(body)?),
+            });
         }
         if let NodeKind::Let { pat, value, body } = &node.kind {
             let value = self.expression(value)?;
@@ -521,6 +532,7 @@ pub fn lower_program(
         schemes: checked.definitions.clone(),
         value_types: checked.value_types.clone(),
         composite_types: checked.composite_types.clone(),
+        operations: checked.operations.clone(),
         definitions: definitions
             .iter()
             .map(|(name, def)| ((*name).to_owned(), (*def).clone()))
@@ -665,15 +677,22 @@ impl Lowerer {
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
         let value = self.expression(source)?;
+        self.option_propagation(pattern, value, body)
+    }
+
+    fn option_propagation(
+        &mut self,
+        pattern: Option<&crate::parser::Pattern>,
+        value: Expression,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
         let ty = value.ty();
         let Type::Data(container, args) = &ty else {
-            return Err("propagation requires a container".into());
+            return Err("propagation requires Option".into());
         };
-        let (success, failure) = match container.as_str() {
-            "Option" => ("Some", "None"),
-            "Result" => ("Ok", "Error"),
-            _ => return Err("propagation requires Option or Result".into()),
-        };
+        if container != "Option" {
+            return Err("propagation requires Option".into());
+        }
         let payload = args
             .first()
             .ok_or("missing propagation payload type")?
@@ -683,7 +702,7 @@ impl Lowerer {
         let variable = Expression::Variable { id, ty };
         let projected = Expression::Project {
             value: Box::new(variable.clone()),
-            constructor: success.into(),
+            constructor: "Some".into(),
             index: 0,
             result: payload,
         };
@@ -692,21 +711,10 @@ impl Lowerer {
             None => self.expression(body)?,
         };
         let result = then.ty();
-        let fields = self
-            .constructor_fields(failure, &variable.ty())?
-            .into_iter()
-            .enumerate()
-            .map(|(index, result)| Expression::Project {
-                value: Box::new(variable.clone()),
-                constructor: failure.into(),
-                index,
-                result,
-            })
-            .collect();
-        let otherwise = self.construct(failure, fields, &Ty::from(&result))?;
+        let otherwise = self.construct("None", vec![], &Ty::from(&result))?;
         let switch = Expression::Switch {
             value: Box::new(variable),
-            arms: vec![(success.into(), then), (failure.into(), otherwise)],
+            arms: vec![("Some".into(), then), ("None".into(), otherwise)],
             fallback: None,
             result,
         };
@@ -1187,6 +1195,11 @@ impl Lowerer {
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
+            if self.operations.get(name) == Some(&crate::parser::OpKind::Abort) {
+                return self.abort_raise(node, arguments);
+            }
+        }
+        if let crate::parser::NodeKind::Name(name) = &callee.kind {
             if let Some(function) = crate::runtime_abi::RuntimeFunction::from_intrinsic(name) {
                 return Expression::call_runtime(function, arguments);
             }
@@ -1220,6 +1233,43 @@ impl Lowerer {
             }
         }
         self.call(callee, arguments)
+    }
+
+    fn abort_raise(
+        &mut self,
+        node: &crate::parser::Node,
+        arguments: Vec<Expression>,
+    ) -> Result<Expression, String> {
+        let message = match arguments.len() {
+            1 => Expression::RecordGet {
+                record: Box::new(arguments.into_iter().next().unwrap()),
+                field: "message".into(),
+                result: Type::String,
+            },
+            0 => Expression::Constant(Constant::String(String::new())),
+            _ => return Err("abort operation has too many arguments".into()),
+        };
+        let ty = self
+            .composite_types
+            .get(&(node.span.line, node.span.col))
+            .or_else(|| self.value_types.get(&(node.span.line, node.span.col)))
+            .ok_or("missing abort result type")?;
+        let result = match Type::try_from(&self.specialization.resolve(ty)) {
+            Ok(ty) => ty,
+            Err(UnresolvedType::Variable(_)) => Type::Unit,
+            Err(_) => return Err("abort result type is not concrete".into()),
+        };
+        let call = Expression::call_runtime(
+            crate::runtime_abi::RuntimeFunction::AbortError,
+            vec![message],
+        )?;
+        let id = self.next;
+        self.next += 1;
+        Ok(Expression::Let {
+            id,
+            value: Box::new(call),
+            body: Box::new(Expression::Unreachable { result }),
+        })
     }
 
     fn lambda(
@@ -1824,26 +1874,6 @@ pub fn derive_printers(id: FunctionId, ty: Type, checked: &crate::Checked) -> Re
 }
 
 fn derive_printer(id: FunctionId, ty: Type, context: &mut DisplayContext<'_>) -> Result<Function, String> {
-    if let Type::Data(name, parameters) = &ty {
-        if name == "Result" && parameters.len() == 2 {
-            let mut arms = Vec::new();
-            for (index, constructor, runtime) in [(0, "Ok", crate::runtime_abi::RuntimeFunction::PrintString), (1, "Error", crate::runtime_abi::RuntimeFunction::PrintErrorString)] {
-                let payload = Expression::Project { value: Box::new(Expression::Variable { id: 0, ty: ty.clone() }), constructor: constructor.into(), index: 0, result: parameters[index].clone() };
-                let effect = if parameters[index] == Type::Unit {
-                    Expression::Constant(Constant::Unit)
-                } else {
-                    let text = match parameters[index] {
-                        Type::String => payload,
-                        Type::Char => Expression::call_runtime(crate::runtime_abi::RuntimeFunction::CharToString, vec![payload])?,
-                        _ => context.format(payload)?,
-                    };
-                    Expression::call_runtime(runtime, vec![text])?
-                };
-                arms.push((constructor.into(), Expression::Let { id: 1, value: Box::new(effect), body: Box::new(Expression::Constant(Constant::Int(index as i64))) }));
-            }
-            return Ok(Function { id, name: format!("print_{ty:?}"), signature: Signature { parameters: vec![ty.clone()], result: Type::Int }, parameters: vec![0], captures: vec![], body: Expression::Switch { value: Box::new(Expression::Variable { id: 0, ty }), arms, fallback: None, result: Type::Int } });
-        }
-    }
     if !matches!(ty, Type::Data(..)) {
         return derive_scalar_printer(id, ty);
     }

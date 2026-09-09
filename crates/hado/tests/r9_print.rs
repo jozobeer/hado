@@ -51,7 +51,7 @@ fn nested_text_is_quoted_but_outer_result_payload_is_raw() {
     let dir = std::env::temp_dir().join(format!("hado-r9-text-print-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for (index, ch) in ['\n', '\t', '\\', '\'', '"', 'あ', '😀'].into_iter().enumerate() {
-        for (kind, ty, value, encoded) in [
+        for (kind, _ty, value, encoded) in [
             ("char", "Char", ch.to_string(), literal(&ch.to_string(), '\'')),
             ("string", "String", format!("item{index}{ch}\"\\\n\t'"), literal(&format!("item{index}{ch}\"\\\n\t'"), '"')),
         ] {
@@ -59,8 +59,7 @@ fn nested_text_is_quoted_but_outer_result_payload_is_raw() {
                 ("top", format!("def main = {encoded}"), value.clone(), 0),
                 ("nested", format!("def main = Some({encoded})"), format!("Some({encoded})"), 0),
                 ("list", format!("def main = [{encoded}]"), format!("[{encoded}]"), 0),
-                ("ok", format!("def identity (x: ({ty}, Int) Result) => x\ndef main = identity (Ok({encoded}))"), value.clone(), 0),
-                ("error", format!("def identity (x: (Int, {ty}) Result) => x\ndef main = identity (Error({encoded}))"), value, 1),
+                ("raise", format!("def main = raise {{ message = {} }}", literal(&value, '"')), value.clone(), 1),
             ] {
                 let path = dir.join(format!("{index}-{kind}-{case}"));
                 hado::build::executable(&source, "text-print.hd", &path).unwrap();

@@ -34,7 +34,7 @@ struct Checker<'a> {
     inference: Inference,
     values: HashMap<String, Scheme>,
     numeric_constraints: Vec<(Ty, Span)>,
-    divisions: Vec<(BinOp, Ty, Ty, Span)>,
+    divisions: Vec<(BinOp, Ty, Ty, Span, Row)>,
     type_arities: HashMap<String, usize>,
     constructor_tags: HashMap<String, u32>,
     constructors: HashMap<String, Scheme>,
@@ -203,6 +203,10 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             .cloned()
             .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
         let main = checker.inference.instantiate(&scheme);
+        if let Ty::Var(_) = checker.inference.resolve(&main) {
+            // raise's result is polymorphic; leaving it open makes main E701.
+            let _ = checker.inference.unify(&main, &Ty::Unit);
+        }
         checker.inference.close_rows(&main);
         checker.main_effects = checker.inference.close_row(&checker.main_effects);
         let main = checker.inference.resolve(&main);
@@ -241,6 +245,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         main: checker.inference.resolve(&main),
         effects: checker.inference.resolve_row(&checker.main_effects),
         definitions: definitions.keys().map(|name| (name.clone(), checker.values[name].clone())).collect(),
+        operations: checker.operations.clone(),
     }, checker.deferred))
 }
 
@@ -1440,7 +1445,13 @@ impl Checker<'_> {
         value: &Node,
         body: &Node,
     ) -> Result<Ty, Diagnostic> {
-        let container = self.expression(value)?;
+        let saved_effects = self.eval_effects.clone();
+        self.eval_effects = self.inference.fresh_row();
+        let container = self.expression(value);
+        let rhs_row = self.inference.resolve_row(&self.eval_effects);
+        self.eval_effects = saved_effects;
+        let container = container?;
+        self.add_effects(&rhs_row);
         if self.inference.resolve(&container) == Ty::Error {
             let saved = self.values.clone();
             let checked = self.propagation_body(pattern, &Ty::Error, body);
@@ -1448,7 +1459,30 @@ impl Checker<'_> {
             checked?;
             return Ok(Ty::Error);
         }
-        if matches!(self.inference.resolve(&container), Ty::Var(_)) {
+        if self.option_container(&container) || (pattern.is_some() && matches!(self.inference.resolve(&container), Ty::Var(_))) {
+            return self.option_propagation(pattern, &container, value, body);
+        }
+        if pattern.is_some() {
+            return Err(self.error(value.span, Some("E303"), "let p? = requires Option"));
+        }
+        if rhs_row.has_known_effects() {
+            return self.expression(body);
+        }
+        Err(self.error(value.span, Some("E303"), "do requires an effect or Option"))
+    }
+
+    fn option_container(&self, ty: &Ty) -> bool {
+        matches!(self.inference.resolve(ty), Ty::Adt(name, args) if name == "Option" && args.len() == 1)
+    }
+
+    fn option_propagation(
+        &mut self,
+        pattern: Option<&Pattern>,
+        container: &Ty,
+        value: &Node,
+        body: &Node,
+    ) -> Result<Ty, Diagnostic> {
+        if matches!(self.inference.resolve(container), Ty::Var(_)) {
             let payload = self.inference.fresh();
             let saved = self.values.clone();
             let checked = self.propagation_body(pattern, &payload, body);
@@ -1457,11 +1491,10 @@ impl Checker<'_> {
             let (_, input) = self.propagation_types(&result, value.span)?;
             let Ty::Adt(name, mut args) = input else { unreachable!() };
             args[0] = payload;
-            self.unify(&container, &Ty::Adt(name, args), value.span)?;
+            self.unify(container, &Ty::Adt(name, args), value.span)?;
             return Ok(self.inference.resolve(&result));
         }
-        let (payload, result) =
-            self.propagation_types(&container, value.span)?;
+        let (payload, result) = self.propagation_types(container, value.span)?;
         let saved = self.values.clone();
         let checked = self.propagation_body(pattern, &payload, body);
         self.values = saved;
@@ -1517,18 +1550,7 @@ impl Checker<'_> {
                 let output = self.inference.fresh();
                 Ok((args[0].clone(), Ty::Adt(name, vec![output])))
             }
-            Ty::Adt(name, args) if name == "Result" && args.len() == 2 => {
-                let output = self.inference.fresh();
-                Ok((
-                    args[0].clone(),
-                    Ty::Adt(name, vec![output, args[1].clone()]),
-                ))
-            }
-            _ => Err(self.error(
-                span,
-                Some("E303"),
-                "propagation requires Option or Result",
-            )),
+            _ => Err(self.error(span, Some("E303"), "let p? = requires Option")),
         }
     }
 
@@ -1610,8 +1632,8 @@ impl Checker<'_> {
     }
 
     fn default_numbers(&mut self) -> Result<(), Diagnostic> {
-        for (op, operand, result, span) in std::mem::take(&mut self.divisions) {
-            let checked = self.default_division(op, &operand, &result, span);
+        for (op, operand, result, span, site) in std::mem::take(&mut self.divisions) {
+            let checked = self.default_division(op, &operand, &result, span, &site);
             self.recover_inference_error(checked, ())?;
         }
         for (ty, span) in std::mem::take(&mut self.numeric_constraints) {
@@ -1625,13 +1647,29 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn default_division(&mut self, op: BinOp, operand: &Ty, result: &Ty, span: Span) -> Result<(), Diagnostic> {
+    fn default_division(&mut self, op: BinOp, operand: &Ty, result: &Ty, span: Span, site: &Row) -> Result<(), Diagnostic> {
         if matches!(self.inference.resolve(operand), Ty::Var(_)) {
             self.unify(operand, &Ty::Int, span)?;
         }
         let operand = self.inference.resolve(operand);
+        if matches!(op, BinOp::Div | BinOp::Mod) && operand == Ty::Int {
+            self.add_error_effect(site);
+        }
         let expected = self.numeric_binary(op, &operand, span)?;
         self.unify(result, &expected, span)
+    }
+
+    fn error_row() -> Row {
+        Row::Closed(vec![Ty::Adt("Error".into(), vec![])])
+    }
+
+    fn add_error_effect(&mut self, site: &Row) {
+        match self.inference.resolve_row(site) {
+            Row::Var(id) | Row::Open(id, _) => {
+                let _ = self.inference.unify_row(&Row::Var(id), &Self::error_row());
+            }
+            Row::Closed(_) => {}
+        }
     }
 
     fn numeric(&mut self, ty: &Ty, span: Span) -> Result<(), Diagnostic> {
@@ -1659,7 +1697,13 @@ impl Checker<'_> {
                 self.unify(&left, &Ty::Bool, a.span)?;
                 Ok(Ty::Bool)
             }
-            _ => self.numeric_binary(op, &left, a.span),
+            _ => {
+                let result = self.numeric_binary(op, &left, a.span)?;
+                if matches!(op, BinOp::Div | BinOp::Mod) && self.inference.resolve(&left) == Ty::Int {
+                    self.add_effects(&Self::error_row());
+                }
+                Ok(result)
+            }
         }
     }
 
@@ -1740,7 +1784,7 @@ impl Checker<'_> {
         let ty = self.inference.resolve(ty);
         if matches!(op, BinOp::Div | BinOp::Mod) && matches!(ty, Ty::Var(_)) {
             let result = self.inference.fresh();
-            self.divisions.push((op, ty, result.clone(), span));
+            self.divisions.push((op, ty, result.clone(), span, self.eval_effects.clone()));
             return Ok(result);
         }
         match op {
@@ -1748,10 +1792,7 @@ impl Checker<'_> {
             BinOp::Mod if ty == Ty::Float => {
                 Err(self.error(span, Some("E305"), "Float has no remainder operator"))
             }
-            BinOp::Div | BinOp::Mod if ty == Ty::Int => Ok(Ty::Adt(
-                "Result".into(),
-                vec![Ty::Int, Ty::Adt("DivisionError".into(), vec![])],
-            )),
+            BinOp::Div | BinOp::Mod if ty == Ty::Int => Ok(Ty::Int),
             _ => Ok(ty.clone()),
         }
     }

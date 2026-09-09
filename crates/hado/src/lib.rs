@@ -75,6 +75,7 @@ pub struct Checked {
     pub main: types::Ty,
     pub effects: types::Row,
     pub definitions: std::collections::HashMap<String, types::Scheme>,
+    pub operations: std::collections::HashMap<String, parser::OpKind>,
 }
 
 impl Checked {
@@ -124,10 +125,9 @@ fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)],
 fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
     let mut prelude = Vec::new();
     for (name, source) in [
-        ("stdlib/division_error.hd", include_str!("../../../stdlib/division_error.hd")),
         ("stdlib/list.hd", include_str!("../../../stdlib/list.hd")),
         ("stdlib/option.hd", include_str!("../../../stdlib/option.hd")),
-        ("stdlib/result.hd", include_str!("../../../stdlib/result.hd")),
+        ("stdlib/error.hd", include_str!("../../../stdlib/error.hd")),
     ] {
         prelude.extend(parser::parse_source(source, name)?.items.into_iter().filter(|item| matches!(item, parser::Item::TypeDef(_))));
     }
@@ -136,9 +136,10 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
         let mut line = source_lines + 2;
         trusted_start = Some(line + 1);
         for module in [
+            include_str!("../../../stdlib/error.hd"),
             include_str!("../../../stdlib/list.hd"),
             include_str!("../../../stdlib/option.hd"),
-            include_str!("../../../stdlib/result.hd"),include_str!("../../../stdlib/string.hd"), include_str!("../../../stdlib/int.hd"), include_str!("../../../stdlib/float.hd")] {
+            include_str!("../../../stdlib/string.hd"), include_str!("../../../stdlib/int.hd"), include_str!("../../../stdlib/float.hd")] {
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);

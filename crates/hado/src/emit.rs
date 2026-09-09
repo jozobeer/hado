@@ -667,24 +667,30 @@ fn emit_integer_division(
     checked: &crate::Checked,
 ) -> Result<cranelift_codegen::ir::Value, String> {
     use cranelift_codegen::ir::condcodes::IntCC;
-    use crate::mono::Type;
     let pointer = builder.func.signature.params[0].value_type;
-    let result_type = Type::Data("Result".into(), vec![Type::Int, Type::Data("DivisionError".into(), vec![])]);
     let error = builder.create_block();
     let nonzero = builder.create_block();
     let wrap = builder.create_block();
     let divide = builder.create_block();
-    let success = builder.create_block();
     let merge = builder.create_block();
-    builder.append_block_param(success, clif_types::I64);
-    builder.append_block_param(merge, pointer);
+    builder.append_block_param(merge, clif_types::I64);
     let zero = builder.ins().icmp_imm_u(IntCC::Equal, right, 0);
     builder.ins().brif(zero, error, &[], nonzero, &[]);
     builder.switch_to_block(error);
-    let error_tag = crate::repr::constructor_tag("DivisionByZero", &Type::Data("DivisionError".into(), vec![]), checked)?;
-    let payload = builder.ins().iconst(clif_types::I64, i64::from(error_tag));
-    let object = box_division_result(builder, "Error", &result_type, payload, checked)?;
-    builder.ins().jump(merge, &[object.into()]);
+    let message = build_mono_expr(
+        builder,
+        &crate::mono::Expression::Constant(crate::mono::Constant::String("DivisionByZero".into())),
+        &mut std::collections::HashMap::new(),
+        checked,
+    )?;
+    let abort = import_function(
+        builder,
+        1,
+        crate::runtime_abi::RuntimeFunction::AbortError.id(),
+        runtime_signature(crate::runtime_abi::RuntimeFunction::AbortError, pointer),
+    );
+    builder.ins().call(abort, &[message]);
+    builder.ins().trap(cranelift_codegen::ir::TrapCode::user(1).unwrap());
     builder.switch_to_block(nonzero);
     let minimum = builder.ins().icmp_imm_u(IntCC::Equal, left, i64::MIN);
     let negative_one = builder.ins().icmp_imm_u(IntCC::Equal, right, -1);
@@ -692,34 +698,12 @@ fn emit_integer_division(
     builder.ins().brif(overflow, wrap, &[], divide, &[]);
     builder.switch_to_block(wrap);
     let value = builder.ins().iconst(clif_types::I64, if remainder { 0 } else { i64::MIN });
-    builder.ins().jump(success, &[value.into()]);
+    builder.ins().jump(merge, &[value.into()]);
     builder.switch_to_block(divide);
     let value = if remainder { builder.ins().srem(left, right) } else { builder.ins().sdiv(left, right) };
-    builder.ins().jump(success, &[value.into()]);
-    builder.switch_to_block(success);
-    let payload = builder.block_params(success)[0];
-    let object = box_division_result(builder, "Ok", &result_type, payload, checked)?;
-    builder.ins().jump(merge, &[object.into()]);
+    builder.ins().jump(merge, &[value.into()]);
     builder.switch_to_block(merge);
     Ok(builder.block_params(merge)[0])
-}
-
-fn box_division_result(
-    builder: &mut FunctionBuilder<'_>,
-    constructor: &str,
-    result: &crate::mono::Type,
-    payload: cranelift_codegen::ir::Value,
-    checked: &crate::Checked,
-) -> Result<cranelift_codegen::ir::Value, String> {
-    let pointer = builder.func.signature.params[0].value_type;
-    let layout = crate::repr::constructor_layout(constructor, result, checked, pointer.bytes())?.ok_or("Result must be boxed")?;
-    let tag = crate::repr::constructor_tag(constructor, result, checked)?;
-    let object = allocate(builder, layout.size)?;
-    let tag = builder.ins().iconst(clif_types::I64, i64::from(tag));
-    builder.ins().store(cranelift_codegen::ir::MemFlagsData::new(), tag, object, 0);
-    let offset = i32::try_from(layout.offsets[0]).map_err(|_| "Result payload offset overflow")?;
-    builder.ins().store(cranelift_codegen::ir::MemFlagsData::new(), payload, object, offset);
-    Ok(object)
 }
 
 fn emit_string_comparison(

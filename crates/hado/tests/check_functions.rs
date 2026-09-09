@@ -87,10 +87,7 @@ fn division_result_follows_resolved_operand_type() {
         check_source("def main = fn(x => x / x) 2", "t")
             .unwrap()
             .main,
-        Ty::Adt(
-            "Result".into(),
-            vec![Ty::Int, Ty::Adt("DivisionError".into(), vec![])]
-        )
+        Ty::Int,
     );
     assert_eq!(
         check_source("def main = fn(x => x / x) 2.0", "t")
@@ -135,10 +132,7 @@ fn deferred_division_results_flow_into_numeric_operators() {
     let source = "def main = -(fn(x => x / x) 2.0)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Float);
     let source = "def main = -(fn(x => x / x) 2)";
-    assert_eq!(
-        check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E305")
-    );
+    assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 
 #[test]

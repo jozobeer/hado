@@ -96,10 +96,9 @@ fn printable_value(state: &mut u64, depth: usize) -> (Type, String) {
         };
     }
     let (inner, value) = printable_value(state, depth - 1);
-    match random(state, 3) {
+    match random(state, 2) {
         0 => (Type::Apply("List", vec![inner]), format!("[{value}]")),
-        1 => (Type::Apply("Option", vec![inner]), format!("Some({value})")),
-        _ => (Type::Apply("Result", vec![inner, printable_value(state, depth - 1).0]), format!("Ok({value})")),
+        _ => (Type::Apply("Option", vec![inner]), format!("Some({value})")),
     }
 }
 

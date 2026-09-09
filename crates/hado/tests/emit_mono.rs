@@ -177,19 +177,20 @@ fn constructor_switch_values_flow_into_following_arithmetic() {
 
 #[test]
 fn integer_division_handles_zero_and_wrapping_boundary() {
-    for (index, expression, expected) in [
-        (0, "7 / 2", "3\n"), (1, "7 % 2", "1\n"),
-        (2, "7 / 0", "99\n"), (3, "7 % 0", "99\n"),
-        (4, "(-9223372036854775807 - 1) / -1", "-9223372036854775808\n"),
-        (5, "(-9223372036854775807 - 1) % -1", "0\n"),
-        (6, "-7 / 2", "-3\n"), (7, "-7 % 2", "-1\n"),
+    for (index, expression, stdout, stderr, status) in [
+        (0, "7 / 2", "3\n", "", 0), (1, "7 % 2", "1\n", "", 0),
+        (2, "7 / 0", "", "DivisionByZero\n", 1), (3, "7 % 0", "", "DivisionByZero\n", 1),
+        (4, "(-9223372036854775807 - 1) / -1", "-9223372036854775808\n", "", 0),
+        (5, "(-9223372036854775807 - 1) % -1", "0\n", "", 0),
+        (6, "-7 / 2", "-3\n", "", 0), (7, "-7 % 2", "-1\n", "", 0),
     ] {
-        let source = format!("def main = if {expression} | Ok(n) => n | Error(DivisionByZero) => 99");
+        let source = format!("def main = {expression}");
         let path = std::env::temp_dir().join(format!("hado-division-{}-{index}", std::process::id()));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
-        assert!(output.status.success(), "{expression}: {output:?}");
-        assert_eq!(output.stdout, expected.as_bytes());
+        assert_eq!(output.status.code(), Some(status), "{expression}: {output:?}");
+        assert_eq!(output.stdout, stdout.as_bytes(), "{expression}");
+        assert_eq!(output.stderr, stderr.as_bytes(), "{expression}");
         std::fs::remove_file(path).unwrap();
     }
 }
@@ -538,20 +539,17 @@ fn polymorphic_global_function_values_specialize_the_thunk_result() {
 }
 
 #[test]
-fn unit_output_preserves_result_status_and_nested_payloads() {
-    for (index, (expression, ty, status, stdout, stderr)) in [
-        ("Ok()", "(Unit, Int) Result", 0, "", ""),
-        ("Error(())", "(Int, Unit) Result", 1, "", ""),
-        ("Some(())", "Unit Option", 0, "Some(())\n", ""),
-        ("Ok(Error(()))", "((Int, Unit) Result, Int) Result", 0, "Error(())\n", ""),
-        ("Error(Ok())", "(Int, (Unit, Int) Result) Result", 1, "", "Ok(())\n"),
+fn unit_output_prints_option_payloads_without_a_status_channel() {
+    for (index, (expression, ty, stdout)) in [
+        ("Some(())", "Unit Option", "Some(())\n"),
+        ("None", "Unit Option", "None\n"),
     ].into_iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-unit-result-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("hado-unit-option-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
-        assert_eq!(output.status.code(), Some(status));
+        assert_eq!(output.status.code(), Some(0));
         assert_eq!(output.stdout, stdout.as_bytes());
-        assert_eq!(output.stderr, stderr.as_bytes());
+        assert!(output.stderr.is_empty());
         std::fs::remove_file(path).unwrap();
     }
 }

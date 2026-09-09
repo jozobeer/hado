@@ -1,11 +1,11 @@
 #!/bin/bash
-# M1 spec acceptance checks 1..6 (see docs/plan.md, M1). Run from the repository root.
+# M1 spec acceptance checks 1..5 (see docs/plan.md, M1). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=6
+total=5
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -66,16 +66,7 @@ else
     fail 2 "new-sections:$ns_reasons"
 fi
 
-# --- check 3: DivisionError ---
-arith=$(grep -cF 'ArithmeticError' "$SPEC" || true)
-div=$(grep -cF 'DivisionError' "$SPEC" || true)
-if [ "$arith" -eq 0 ] && [ "$div" -ge 1 ]; then
-    pass 3 "DivisionError"
-else
-    fail 3 "ArithmeticError=$arith DivisionError=$div"
-fi
-
-# --- check 4: error code table ---
+# --- check 3: error code table ---
 awk '
     /^# 50\./ { on=1 }
     on { print }
@@ -137,12 +128,12 @@ else
     done
 fi
 if [ -z "$ec_reasons" ]; then
-    pass 4 "error-codes"
+    pass 3 "error-codes"
 else
-    fail 4 "error-codes:$ec_reasons"
+    fail 3 "error-codes:$ec_reasons"
 fi
 
-# --- check 5: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2) ---
+# --- check 4: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2) ---
 cov_reasons=""
 if [ ! -f "$COV" ]; then
     cov_reasons="$cov_reasons missing-file"
@@ -259,20 +250,20 @@ else
     done <"$TMPD/cov.tsv"
 fi
 if [ -z "$cov_reasons" ]; then
-    pass 5 "coverage"
+    pass 4 "coverage"
 else
-    fail 5 "coverage:$cov_reasons"
+    fail 4 "coverage:$cov_reasons"
 fi
 
-# --- check 6: condition-column newline requirement gone ---
+# --- check 5: condition-column newline requirement gone ---
 # (a) lines containing 条件列 AND 改行 == 0
 # (b) lines containing パーサは改行を見ない verbatim >= 1
 a=$(awk 'index($0, "条件列") && index($0, "改行") { n++ } END { print n+0 }' "$SPEC")
 b=$(awk 'index($0, "パーサは改行を見ない") { n++ } END { print n+0 }' "$SPEC")
 if [ "$a" -eq 0 ] && [ "$b" -ge 1 ]; then
-    pass 6 "condition-column"
+    pass 5 "condition-column"
 else
-    fail 6 "cooccur-条件列-改行=$a verbatim-パーサは改行を見ない=$b"
+    fail 5 "cooccur-条件列-改行=$a verbatim-パーサは改行を見ない=$b"
 fi
 
 echo "PASSED: $ok/$total"

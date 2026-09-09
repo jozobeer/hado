@@ -44,22 +44,6 @@ fn top_level_variable_patterns_are_rejected_but_nested_bindings_are_allowed() {
 }
 
 #[test]
-fn explicit_unit_ok_payload_is_noncanonical() {
-    let ast = parse_source("def main = Ok(())", "t").unwrap();
-    assert_eq!(
-        check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-        Some("E509")
-    );
-    for source in [
-        "def main = Ok()",
-        "def main = Ok(1)",
-        "def main = Other(())",
-    ] {
-        check::check_ast(&parse_source(source, "t").unwrap(), "t").unwrap();
-    }
-}
-
-#[test]
 fn written_list_constructors_require_list_syntax() {
     for source in [
         "def main = Cons(1, Nil)",
@@ -345,7 +329,7 @@ fn rebuilding_every_constructor_is_redundant() {
         Some("E507")
     );
     for source in [
-        "def f | Some(v) => Some(v + 1) | None => None\ndef main = f (Some(1))",
+        "def f | Some(v) => Some(v + 1) | None => Some(0)\ndef main = f (Some(1))",
         "type Pair = | Pair(Int, Int)\ndef f | Pair(a, b) => Pair(b, a)\ndef main = f (Pair(1, 2))",
     ] {
         hado::check_source(source, "t").unwrap();
@@ -374,9 +358,9 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
 }
 
 #[test]
-fn unchanged_error_branch_requires_railway_syntax() {
+fn unchanged_none_branch_requires_railway_syntax() {
     let source =
-        "def f | Ok(x) => Ok(x + 1) | Error(e) => Error(e)\ndef main = f (Ok(1))";
+        "def f | Some(x) => Some(x + 1) | None => None\ndef main = f (Some(1))";
     assert_eq!(
         hado::check_source(source, "t")
             .err()
@@ -386,13 +370,13 @@ fn unchanged_error_branch_requires_railway_syntax() {
         Some("E508")
     );
     let source =
-        "def f | Ok(x) => Ok(x + 1) | Error(e) => Error(e + 1)\ndef main = f (Error(1))";
+        "def f | Some(x) => Some(x + 1) | None => Some(0)\ndef main = f (None)";
     hado::check_source(source, "t").unwrap();
 }
 
 #[test]
-fn selective_error_handling_is_not_plain_repropagation() {
-    let source = "def f | Error(1) => Error(1) | Ok(0)\ndef main = f (Error(2))";
+fn selective_none_handling_is_not_plain_repropagation() {
+    let source = "def f | Some(1) => Some(1) | Some(0)\ndef main = f (Some(2))";
     hado::check_source(source, "t").unwrap();
 }
 
