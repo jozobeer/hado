@@ -38,3 +38,70 @@ $ echo $?
 **関連する決定。** `docs/plan.md` 16 節 Q1 で「プログラムの外の環境に依存する操作は Option か Result を返す」と決め、17 節が Result を廃して効果に移した。印字は runtime の側にあって言語の関数ではないが、外の環境に依存する点は同じである。B1 を直すときは §51 に失敗時の規範を足す必要がある。
 
 **未確認。** 失敗時に何を返すべきかは決めていない。終了コードだけを変える案と、stderr に理由を出す案がある。後者は stderr も閉じている場合の扱いが要る。
+
+---
+
+## B4. 入れ子の handler が正しく下がらない（2026-09-10 検出、未修正）
+
+**症状。** `with` を入れ子にすると 3 通りの誤りが出る。1 つ目は合法なプログラムに誤った値を返す。
+
+**再現 1: 別の効果の handler が外側の `abort` を捕まえる。**
+
+```ocaml
+effect A
+abort a
+effect B
+abort b
+handler A as Outer
+abort a => 7
+return x => x + 10
+handler B as Inner
+abort b => 2
+return x => x + 100
+def f (n: Int): Int {A} => if n > 0 => n | a
+def main = with Outer -> with Inner -> f 0
+```
+
+出力は `12`。`Inner` は `B` の handler なので `a` は素通りして `Outer` の `abort a => 7` に当たるべきで、`7` が正しい。`Inner` の `abort b => 2` が走り、その結果に `Outer` の `return x => x + 10` が当たっている。`mono.rs` の `$Fail` の tag が対象の効果を区別していない。
+
+**再現 2: handler の腕の中の `with` の `return` が飛ばされる。**
+
+```ocaml
+effect A
+abort a
+effect B
+reply b: Int
+handler A as Outer
+abort a => with Inner -> b
+return x => x * 10
+handler B as Inner
+reply b => 3
+return x => x + 2
+def f (n: Int): Int {A} => if n > 0 => n | a
+def main = with Outer -> f 0
+```
+
+出力は `3`。`Inner` の `return x => x + 2` が当たって `5` になるべきである。腕の評価中は `return` の書き換えを抑制する仕組みが、腕の中の別の `with` にまで及んでいる。
+
+**再現 3: `abort` の腕から効果付き関数を呼ぶとビルドできない。**
+
+```ocaml
+effect A
+abort a
+handler A as G
+abort a => 99
+return x => x + 100
+handler A as H
+abort a => f 1
+return x => x + 10
+def f (n: Int): Int {A} => if n > 0 => n | a
+def main = with G -> with H -> f 0
+```
+
+`check` は `Int` を返して通るが、`build` が `handler arms disagree on the answer type` で失敗する。腕が受け取った tagged 値を処理せずそのまま腕の結果にしている。
+
+**仕様の状態。** §58 はこれらの形を禁じていない。17.5「やらないこと」は「継続を別の handler の下へ運ぶ使い方」を範囲外とするが、これは `capture` 固有で、再現 1 と 3 は継続を伴わない素の `abort` である。**`abort` の入れ子について計画も仕様も沈黙している。**
+
+**範囲。** 19 節の R26 の箇条書きに無い。判定 26-a〜26-f は入れ子を要求せず、全て満たされている。
+
+**直すには。** `$Fail` の tag が効果の同一性を運ぶ必要がある。tag の表現と evidence の受け渡しに関わる設計変更で、葉の修正では届かない。R26 の審査 3 巡で `mono.rs` の handler 下げに毎回新しい欠陥が出たため、指揮者が打ち切りを判断した（`docs/ledger.md` の R26 の節）。
