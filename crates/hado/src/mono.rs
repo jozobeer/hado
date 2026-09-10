@@ -55,10 +55,7 @@ pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
     if constructor == YIELD {
         return Some(2);
     }
-    if is_fail(constructor) {
-        return Some(fail_tag(constructor));
-    }
-    None
+    constructor.strip_prefix("$Fail#")?.parse().ok()
 }
 
 pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> {
@@ -79,20 +76,6 @@ pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> 
 
 fn is_fail(constructor: &str) -> bool {
     constructor.starts_with("$Fail#")
-}
-
-fn fail_constructor(effect: &str) -> String {
-    format!("{FAIL}#{effect}")
-}
-
-fn fail_tag(constructor: &str) -> u32 {
-    let effect = constructor.strip_prefix("$Fail#").unwrap_or("");
-    let mut hash: u32 = 2166136261;
-    for byte in effect.as_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(16777619);
-    }
-    hash | 1
 }
 
 fn is_outcome(ty: &Type) -> bool {
@@ -331,6 +314,8 @@ struct Lowerer {
     capture_answers: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
+    fail_ids: std::collections::HashMap<String, u32>,
+    next_fail_tag: u32,
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
     next: usize,
@@ -1482,6 +1467,26 @@ impl Lowerer {
         Ok(body)
     }
 
+    fn fail_constructor(&mut self, effect: &str) -> String {
+        format!("{FAIL}#{}", self.fail_tag_for(effect))
+    }
+
+    fn fail_tag_for(&mut self, effect: &str) -> u32 {
+        if let Some(&tag) = self.fail_ids.get(effect) {
+            return tag;
+        }
+        if self.next_fail_tag < 1 {
+            self.next_fail_tag = 1;
+        }
+        if self.next_fail_tag == 2 {
+            self.next_fail_tag = 3;
+        }
+        let tag = self.next_fail_tag;
+        self.next_fail_tag += 1;
+        self.fail_ids.insert(effect.to_string(), tag);
+        tag
+    }
+
     fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
         self.handler_stack.iter().rev().find(|handler| {
             handler.arms.iter().any(|arm| {
@@ -1722,7 +1727,7 @@ impl Lowerer {
         if handler.arms.iter().any(|arm| {
             matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Abort, .. })
         }) {
-            let fail = fail_constructor(&handler.effect);
+            let fail = self.fail_constructor(&handler.effect);
             let fail_value = Expression::Project {
                 value: Box::new(variable.clone()),
                 constructor: fail.clone(),
@@ -1849,7 +1854,7 @@ impl Lowerer {
         let payload = payload_value.ty();
         let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
         Ok(Expression::Construct {
-            constructor: fail_constructor(effect),
+            constructor: self.fail_constructor(effect),
             fields: vec![payload_value],
             result: outcome,
         })
@@ -2584,14 +2589,20 @@ mod tests {
     }
 
     #[test]
-    fn fail_tags_carry_effect_identity() {
+    fn fail_tags_are_dense_and_injective() {
+        let mut lowerer = Lowerer::default();
         let mut tags = std::collections::BTreeSet::new();
         for index in 0..32u32 {
-            let tag = fail_tag(&fail_constructor(&format!("Eff{index}")));
+            let effect = format!("Eff{index}");
+            let constructor = lowerer.fail_constructor(&effect);
+            let tag = outcome_tag(&constructor).unwrap();
+            assert_eq!(constructor, format!("$Fail#{tag}"));
             assert_ne!(tag, 0);
             assert_ne!(tag, 2);
-            assert!(tags.insert(tag), "effect tag collided at {index}");
+            assert_eq!(lowerer.fail_tag_for(&effect), tag);
+            assert!(tags.insert(tag), "assigned tag collided at {index}");
         }
+        assert_eq!(tags.len(), 32);
     }
 
     #[test]
