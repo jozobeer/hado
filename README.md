@@ -28,12 +28,12 @@ hado build <file.hd>              # 入力の隣に実行ファイルを置く
 
 ```
 $ hado check --print-type hello.hd
-(String, String) Result
+String {Error}
 $ hado build hello.hd && ./hello
 ok
 ```
 
-`main` の値が stdout に出て終了コード 0。`Error(e)` なら stderr に出て終了コード 1。
+`main` の値が stdout に出て終了コード 0。`raise` が `main` まで届いたら stderr に `message` が出て終了コード 1。
 
 拒否の例:
 

@@ -1,8 +1,8 @@
-# 規範文の追跡表 v0.1.3
+# 規範文の追跡表 v0.2
 
 `docs/spec.md` の規範文（「〜とする」「〜でなければならない」「〜は E xxx」）が、どの検査段階で判定され、何が固定するか。エラーコードを持つ規範文は §50 の表と拒否コーパスが 1 対 1 で固定するので、ここにはコードを持たない規範文と、コードだけでは範囲が読めない規範文を置く。
 
-「固定するもの」の列は R9、R11〜R14、R16〜R22 で作る判定器を指す。`verify-r9.sh` の項目名は `docs/plan.md` 8 節の R9 に対応する。
+「固定するもの」の列は R9、R11〜R14、R16〜R26 で作る判定器を指す。`verify-r9.sh` の項目名は `docs/plan.md` 8 節の R9 に対応する。
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@
 | §16 | 負のリテラルパターン | 構文 | 受理 | EBNF 生成器、E405 の判定器 |
 | §19 | `()` はパターンではない | 構文 | E100 | EBNF 生成器 |
 | §22 | `let` のパターンは `?` の有無によらず網羅的 | 網羅性 | E402 | R9-4 の判定器（refutable な `let`）、R14 の判定器（14-b(5)、`let p? =`） |
-| §23 | `do` は Option / Result にしか使えない。`?` の印は無い | 型 / 構文 | E303 / E100 | R9-2 の ill-typed 生成器、EBNF 生成器（`do?` `let?` は E100、R14） |
+| §23 | `do` の右辺は効果を持つ式か Option。純粋な値の破棄は E303。`?` の印は無い | 型 / 構文 | E303 / E100 | R9-2 の ill-typed 生成器、EBNF 生成器（`do?` `let?` は E100、R14） |
 | §25 | パイプの右辺に constructor は置けない | 構文 | E106 | R9-1 の判定器 |
 | §27 | E505 は pattern 束縛と引数に及ぶ | 冗長 | E505 | R9-4 の判定器 |
 | §27 | E513 は `type` `module` `implement` に及ぶ。prelude は免除 | 冗長 | E513 | R9-3 の判定器、R17 の判定器（未参照の契約と実装） |
@@ -37,7 +37,7 @@
 | §50 | 段階順で最初の 1 件を報告する | 全段階 | — | R9-2 の判定器（同居させた欠陥） |
 | §50 | 同一段階内はアンカー位置順 | 全段階 | — | R9-2 の判定器（位置の入れ替え） |
 | §50 | アンカーは表の列どおり | 全段階 | — | 位置の摂動プローブ（`-- error:` 行の直後に空行）を全コードに広げる |
-| §51 | Result の外側だけ剥がす | 実行 | 受理 | `tests/accept/create_user/main.hd` `division_error.hd` |
+| §51 | `raise` は `message` を stderr に出して終了コード 1。Option は剥がさない | 実行 | 受理 | `tests/accept/create_user/main.hd` `division_error.hd` |
 | §51 | List は `[1, 2]`、入れ子の String は literal 形 | 実行 | 受理 | R9-5 の印字プローブ |
 | §51 | 最上位の String は生、Unit は無印字 | 実行 | 受理 | `tests/accept/display/main.hd` `unit.hd` |
 | §51 | Float は指数なしの最短往復 | 実行 | 受理 | R9-5 の印字プローブ（`3.0` `0.1` `-0.0` と極端な値） |
@@ -72,3 +72,9 @@
 | §56 | 同じ引数列の再適用 | 型 | E604 | `tests/reject/E604/main.hd`、R21 の判定器（21-b(3)） |
 | §56 | 未適用の functor と未参照の引数 | 冗長 | E513 / E521 | `tests/reject/E521/main.hd`、R21 の判定器（21-b(4)） |
 | §5 | `main` の型に抽象型を含めない | 単相化 | E705 | `tests/reject/E705/main.hd`、R19 の判定器（19-b(4)） |
+| §5 | `main` に残ってよい効果は prelude の `Error` だけ | 単相化 | E706 | `tests/reject/E706/main.hd`、R26 の判定器 |
+| §24 | 効果を持てるのは分岐の条件以外。scrutinee・引数・被演算子・record field は許す | 型 | E308 / 受理 | `tests/reject/E308/main.hd`、`tests/accept/effect_position/` |
+| §37 | 効果行の省略は推論、`Pure` は空、書いた行はちょうどそれだけ | 型 | E305 / 受理 | `tests/accept/effect_row/`、R24 の判定器 |
+| §48 | `capture` を経由しない呼び出しだけスタックを消費しない | 実行 | 受理 | `tests/accept/capture_loop/main.hd`、R26 の判定器 |
+| §57 | 操作は値の名前空間に無修飾で入り、書けるのはそのディレクトリだけ | 名前解決 | 受理 / E204 / E205 | `tests/accept/effect_forms/`、R23 の判定器 |
+| §58 | `return` の腕を書かなければ恒等。`with H -> rest` は継続の形 | 型 / 実行 | 受理 | `tests/accept/handler_forms/` `to_option/`、R26 の判定器 |
