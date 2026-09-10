@@ -1,0 +1,7 @@
+// spec: §39
+// expect: Some(5)
+handler Error as ToOption
+abort raise _ => None
+return value => Some(value)
+def go (n: Int): Int {Error} => if n > 0 => n | raise { message = "neg" }
+def main = with ToOption -> go 5
