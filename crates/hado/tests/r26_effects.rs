@@ -161,14 +161,42 @@ fn reply_tail_recursion_completes_ten_million_iterations() {
         assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
         assert_eq!(output.stdout, format!("{n}\n").as_bytes());
     }
+    let small_n = 1_000_000u64;
+    let large_n = 10_000_000u64;
+    let small = build_reply_loop(small_n);
+    let large = build_reply_loop(large_n);
+    assert_eq!(small.run.stdout, format!("{small_n}\n").as_bytes());
+    assert_eq!(large.run.stdout, format!("{large_n}\n").as_bytes());
+    assert!(large.rss_kb * small_n < small.rss_kb * large_n,
+        "reply loop RSS scaled with iterations: {} KB at {small_n}, {} KB at {large_n}",
+        small.rss_kb, large.rss_kb);
+}
+
+struct Built {
+    run: Output,
+    rss_kb: u64,
+}
+
+fn build_reply_loop(n: u64) -> Built {
     let case = Case::new();
-    case.write("main.hd", "effect Tick\nreply tick: Unit\nhandler Tick as Nop\nreply tick => ()\ndef rec loop (n: Int, acc: Int): Int {Tick} =>\n  if n <= 0 => acc\n  | do tick -> loop (n - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop 10000000 0\n");
+    case.write("main.hd", &format!(
+        "effect Tick\nreply tick: Unit\nhandler Tick as Nop\nreply tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+    ));
     let built = case.build("main.hd");
     assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
-    let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(output.stdout, b"10000000\n");
-    assert!(output.stderr.is_empty());
+    let bin = case.0.join("main");
+    let run = Command::new(&bin).output().unwrap();
+    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(run.stderr.is_empty());
+    Built { run, rss_kb: max_rss_kb(&bin) }
+}
+
+fn max_rss_kb(bin: &std::path::Path) -> u64 {
+    let output = Command::new("/usr/bin/time").arg("-v").arg(bin).output().unwrap();
+    String::from_utf8_lossy(&output.stderr).lines().find_map(|line| {
+        let (label, value) = line.rsplit_once(':')?;
+        label.contains("Maximum resident set size").then(|| value.trim().parse().unwrap())
+    }).unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(&output.stderr)))
 }
 
 fn collect_handler() -> &'static str {
@@ -234,4 +262,97 @@ fn capture_loop_counts_each_yield() {
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(output.stdout, b"10000\n");
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn distinct_handlers_specialize_the_same_function_apart() {
+    let mut state = 0x26_11;
+    for _ in 0..8 {
+        let one = random(&mut state, 20) + 1;
+        let two = random(&mut state, 20) + 1;
+        let left = random(&mut state, 20);
+        let right = random(&mut state, 20);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Ask\nreply ask: Int\nhandler Ask as One\nreply ask => {one}\nreturn value => value\nhandler Ask as Two\nreply ask => {two}\nreturn value => value\ndef use (x: Int): Int {{Ask}} => ask + x\ndef main = (with One -> use {left}) + (with Two -> use {right})\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{}\n", (one + left) + (two + right)).as_bytes());
+    }
+}
+
+#[test]
+fn abort_in_a_branch_skips_the_return_arm() {
+    let mut state = 0x26_12;
+    for _ in 0..8 {
+        let n = random(&mut state, 11);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Fail\nabort bail\nhandler Fail as ToZero\nabort bail => 0\nreturn value => value + 1\ndef f (k: Int): Int {{Fail}} => if k > 0 => bail | k\ndef main = with ToZero -> f {n}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if n > 0 { 0 } else { n + 1 };
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+    }
+}
+
+#[test]
+fn abort_handler_return_arm_changes_the_with_type() {
+    let mut state = 0x26_13;
+    for _ in 0..8 {
+        let n = random(&mut state, 11);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Fail\nabort bail\nhandler Fail as ToOpt\nabort bail => None\nreturn value => Some(value)\ndef f (k: Int): Int {{Fail}} => if k > 0 => k | bail\ndef main = with ToOpt -> f {n}\n"
+        ));
+        assert_eq!(case.print_type("main.hd"), "Int Option\n");
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if n > 0 { format!("Some({n})\n") } else { "None\n".into() };
+        assert_eq!(output.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn handler_arm_can_call_a_top_level_function() {
+    let mut state = 0x26_14;
+    for _ in 0..8 {
+        let k = random(&mut state, 20) + 1;
+        let x = random(&mut state, 20);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Ask\nreply ask: Int\ndef double (n: Int): Int => n * 2\nhandler Ask as Fixed\nreply ask => double {k}\nreturn value => value\ndef use (y: Int): Int {{Ask}} => ask + y\ndef main = with Fixed -> use {x}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{}\n", k * 2 + x).as_bytes());
+    }
+}
+
+#[test]
+fn capture_arm_keeps_pure_helpers_at_their_result_type() {
+    let mut state = 0x26_15;
+    for _ in 0..8 {
+        let n = random(&mut state, 6) + 1;
+        let doubled: Vec<i64> = (1..=n as i64).rev().map(|k| k * 2).collect();
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect A Yield\ncapture yield(value: A): Unit\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\ncapture yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{}\n", list_literal(&doubled)).as_bytes());
+    }
 }

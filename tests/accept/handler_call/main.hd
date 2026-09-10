@@ -1,0 +1,11 @@
+// spec: §58
+// item: handler と with
+// expect: 7
+effect Ask
+reply ask: Int
+def double (n: Int): Int => n * 2
+handler Ask as Fixed
+reply ask => double 3
+return value => value
+def use (x: Int): Int {Ask} => ask + x
+def main = with Fixed -> use 1
