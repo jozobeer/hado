@@ -1878,9 +1878,16 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 **判定 30-a〜30-b は under フレームの復元を直接固定する。**
 内側の handler を捨てて `capture` handler で継続を閉じるだけの不完全な修正は、ここで落ちる。
 
-判定 30-a: **再開した継続の中で内側の handler の操作を呼ぶ。**
-  `Collect` ⊃ `Inner(B)` で `do y 1 -> do y b -> ()`。実行して `[1, 2]`。
-  `resume` した先で `Inner` の `reply b` が効いていないとこの値にならない
+判定 30-a: **再開した継続の中で内側の handler の操作を呼ぶ。2 つを別に判定する。**
+
+  - (1) 内側が `reply`: `Collect` ⊃ `Inner(B)` で `do y 1 -> do y b -> ()`。実行して `[1, 2]`
+  - (2) 内側が `capture`: `Collect`（`return x => x`）⊃ `Inner`（`capture w value => [value + 100, ...resume ()]`）
+    で `do y 1 -> do w 2 -> ()`。実行して `[1, 102]`
+
+  **包み直しを固定するのは (2) だけである。** `reply` は tail-resumptive で、単相化の時点で
+  腕がその場に展開され `$Yield` を作らない。したがって継続の包み直しを外しても (1) は通る
+  （実測: 包み直しを外すと (1) は通り、判定 30-b だけが落ちた）。**`$Yield` を実際に作る操作、
+  つまり内側の `capture` でしか固定できない。**
 判定 30-b: **内側の handler の `return` の変換が最終結果に残る。**
   `Collect`（`return x => [x]`）⊃ `Inner`（`return _ => 42`）で `do y 1 -> ()`。実行して `[1, 42]`。
   `resume` の後に `Inner` の `return` が当たっていないと `42` が現れない
