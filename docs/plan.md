@@ -1277,9 +1277,9 @@ Q20 はこれを構文で塞ぐ。
 
 ### 17.6 未確認
 
-1 は 17.8 で解決した。2 は残る。
+1 は 17.8 で、2 は 17.9 で解決した。
 
-2. short-cut resumption の prompt / under フレーム復元が、hado の設定（scoped、1 回限り、値化禁止）でも必要か
+2. short-cut resumption の prompt / under フレーム復元が、hado の設定（scoped、1 回限り、値化禁止）でも必要か。**必要である**（17.9）
 
 ### 17.7 一次資料
 
@@ -1311,6 +1311,109 @@ Koka 3.2.3 で、`capture` に相当する `ctl` 操作を含む末尾再帰ル�
 - short-cut resumption はこの問題を解かない。Koka は実装済みで（17.7 の p.71:3）この結果である。論文の「minimal stack space」は定数の意味ではない。
 
 `reply` に相当する tail-resumptive 操作は効果を持たないループと同じ挙動で、§48 の保証はこの種別で完全に成り立つ。
+
+### 17.9 実測（17.6 の 2、2026-09-10）
+
+17.6 の未確認 2（short-cut resumption の prompt / under フレーム復元が、hado の設定でも必要か）を、
+本体の実測・現物の読み・最小モデルの 3 つで確かめた。
+
+**本体の実測。** `capture` handler を他の handler と組み合わせた 15 形を `hado build` にかけた。
+**15 形すべて `hado check` は通る。破れるのは単相化だけである。**
+
+| 形 | 実測 |
+|---|---|
+| `Collect` 単独 | ok。`[3]` |
+| `Collect` 単独・yield 2 回 | ok。`[1, 2]` |
+| `Outer(A)` ⊃ `Collect` | NG `done payload mismatch` |
+| `Outer(A、return 腕あり)` ⊃ `Collect` | NG `done payload mismatch` |
+| `CollectY` ⊃ `CollectZ`（capture 同士） | NG `done payload mismatch` |
+| 同じ効果 `Y` の handler の入れ子 | NG `done payload mismatch` |
+| `Collect` ⊃ `Trap`（abort の handler） | NG `done payload mismatch` |
+| `resume` の中から外側の `capture` を起こす | NG `done payload mismatch` |
+| `resume` の中から外側の `reply` を起こす | NG `done payload mismatch` |
+| 内側 handler の `return` が最終結果に残る形 | NG `done payload mismatch` |
+| `Collect` ⊃ `Inner(B)` | NG `continuation result type mismatch` |
+| `Collect` ⊃ `Inner(A)` | NG `continuation result type mismatch` |
+| `Collect` ⊃ `Inner(B)`・yield 2 回 | NG `continuation result type mismatch` |
+| 再開した継続の中で内側の `reply` を呼ぶ形 | NG `continuation result type mismatch` |
+| `Outer(A)` ⊃ `Collect` ⊃ `Inner(B)`（B5） | NG `continuation result type mismatch` |
+
+**B5 は 3 段固有ではない。2 段で既に壊れ、`capture` handler が内側か外側かで症状が変わる。**
+内側なら forwarding が handler の答えを外側の Outcome の `$Done` に包み、外側なら継続が
+最内 handler で閉じる。`docs/bug.md` の B5 は 3 段の例だけを記録しており、範囲を過小に書いていた。
+**測った 15 形のうち、通ったのは `capture` handler が単独の 2 形だけである**
+（15 形は網羅ではないので、これ以外に通る合成があるかは未確認）。
+`hado check` が 15 形すべてを通すことから、仕様も型システムもこの形を認めており、
+追いついていないのは単相化の畳み方だけだと分かる。
+
+**現物の読み。** `done payload mismatch` の経路は `crates/hado/src/mono.rs` で追える。
+`interpret_outcome` は `forwarding = handler_stack.len() > 1`（`:1756`）のとき
+`align_switch_arms` に**元の Outcome をそのまま fallback として渡す**（`:1758`）。
+`align_switch_arms` は fallback の型を基準に、Outcome でない腕を `done()` で包む（`:1915-1917`）。
+`done()` は `value.ty() != success` で拒否する（`:1935-1937`）。元の Outcome の success 欄は
+中の計算の成功型（`Unit`）のままで、handler の答えは `List Int` なので、ここで必ず落ちる。
+**forwarding が Outcome を変換していないことが原因で、包み方の細部ではない。**
+
+`continuation result type mismatch` の側は `make_continuation` の `body.ty() != *answer`
+（`:1613`）で、`answer` は `capture_answers.last()`、すなわち**最内の答えを要する handler**であって
+その操作を扱う handler ではない。単独 handler では両者が一致するので通る。
+
+**最小モデル。** mono.rs から切り離し、生成器で表した計算とフレーム列だけの解釈器を書いた
+（プログラムは `docs/ledger.md` の「B5 の最小モデル」に置いた形）。生成器の中断点がそのまま
+one-shot 継続になり、§58 の「`resume` は捕まえた継続を 1 回だけ再開する」と構造が一致する。
+畳み方を 2 つ用意した。
+
+- `hado`: 継続を最内 handler で閉じ、その handler より下に handler が残っていれば
+  答えを外側の Outcome の `$Done` に包む
+- `under`: prompt 自身とその上の内側 prompt を継続に含めて再設置し、答えを包まずに prompt の下へ渡す
+
+| 形 | モデル `under` | モデル `hado` |
+|---|---|---|
+| `Collect` 単独 | `[3]` | `[3]` |
+| `Collect` 単独・yield 2 回 | `[1, 2]` | `[1, 2]` |
+| `Outer(A)` ⊃ `Collect` | `[1]` | done payload mismatch |
+| `CollectY` ⊃ `CollectZ` | `[3]` | `[3]` |
+| 同じ効果の入れ子 | `[103]`（内側が捕まえる） | done payload mismatch |
+| `Collect` ⊃ `Trap` | `[7]` | `[7]` |
+| `Collect` ⊃ `Inner(B)` | `[2]` | continuation result type mismatch |
+| 同上・yield 2 回 | `[2, 5]` | unhandled operation |
+| 再開後に内側の `reply` を呼ぶ | `[1, 2]` | unhandled operation |
+| 内側の `return` が結果に残る | `[1, 42]` | continuation result type mismatch |
+| B5（3 段） | `[3]` | continuation result type mismatch |
+| `resume` の中から外側の `capture` | NG unhandled operation | NG unhandled operation |
+
+**モデルが確かめたこと。** `under` の切り方なら、11 形が**畳み切れて**、handler に設定した
+型ラベルが最後まで矛盾なく繋がる。**モデルは型検査を持たない**ので、これは「型が正しい」の
+証明ではなく「型ラベルの流れに切れ目が無い」の確認である。`$Outcome` の型付けそのものは
+確かめていない。移植では型の設計を別に立てる必要がある。
+
+再開した継続の中で内側の `reply` を呼ぶ形（`[1, 2]`）と、内側の `return` が最終結果に残る形
+（`[1, 42]`）は、**under フレームの復元が実際に効いていないと出ない値**である。前者のトレースは
+`Collect.capture y(1) を 2 段で捕捉（復元する内側 handler 1 段）` の後に
+`Inner.reply b() = 2` が続く。
+
+**モデルが確かめていないこと。** `hado` の側は 15 形のうち 5 形しか症状を再現しない。
+モデルは forwarding を実行時に決め、本体は単相化の時点で型を決めるためである。
+**負の側の根拠は本体の実測と現物の読みであって、モデルではない。**
+
+**`resume` の中から `H` より外側の handler が扱う効果を起こす形は、`under` でも畳めない。**
+モデルは外側のフレームを再開時の探索対象から外しているのでこの結果になるが、
+これはモデル固有の制限ではなく、本体の表現からも同じ結論が出る。
+`interpret_outcome` は継続を `Closure([Unit], answer)`（`:1747-1753`）として射影する。
+つまり `resume : Unit -> A_H` で、**答えの型そのものを返す**。
+
+境界は「内側か外側か」で決まる。**`H` 自身への yield は閉じる** — `H` の解釈が再帰的に
+処理して `A_H` を作る（単独 handler の yield 2 回がこれで、実測でも通っている）。
+**`H` より内側の handler への yield も閉じる** — 内側の解釈を合成すれば `A_H` に届く。
+**`H` より外側へ yield したときだけ、`A_H` の値が存在しない。** 一般化するには継続が
+Outcome を返す形（`Unit -> Outcome<A_H, ...>`）が要り、腕の本体が Outcome を扱う形を
+要求する。R30 のスコープ外とし、22 節に記す。
+
+**その他。** 継続は one-shot なので、フレーム列を複製する必要はない。中断した生成器を
+そのまま 1 回だけ再開する形で足りた。ICFP'21 の multi-shot 前提のコストは hado には掛からない。
+
+**17.6 の未確認 2 は「必要」で決着する。** scoped・1 回限り・値化禁止という hado の設定でも、
+prompt / under フレームの復元は省けない。
 
 ## 18. v0.2 の構文（2026-09-09）
 
@@ -1696,3 +1799,141 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 - 実行中の印字（print 効果）。v0.2 の言語に存在しない
 - B5（`capture` を挟む 3 段の入れ子）。プロトタイプ実測を経て R30 で扱う
   （`docs/ledger.md` の「バグ修正方針」の節）
+
+## 22. R30 `capture` handler の合成の手順書（2026-09-10）
+
+`docs/bug.md` の B5 を直す。**`v0.2.2` の tag は R30 の完了後に打つ。**
+
+17.9 の実測で範囲が広がった。B5 は 3 段固有ではなく、**`capture` handler を他の handler と
+組み合わせると内外どちらでも build に失敗する**。測った 15 形のうち通ったのは単独の 2 形だけである。
+17.6 の未確認 2（prompt / under フレームの復元）は「必要」で決着した。本節はその移植を扱う。
+
+**読む順:** 本節 → 17.9 → `docs/bug.md` の B5 → `docs/spec.md` の §58 → 17.7 の p.71:10 §2.8。
+
+**着手時点で赤の門番:** 無し。R29 の終了時点で全 28 本が満点・終了コード 0、
+`cargo test --offline --no-fail-fast` が 0 failed。**R30 の終了時も同じでなければならない。**
+
+### 版を `v0.2.2` とする理由
+
+仕様本文は変わらない。`hado check` は 15 形すべてを通しており（17.9）、§58 が既に許している形が
+ビルドできるようになるだけである。構文も意味論も足さない。変わるのは `$Outcome` の内部表現と
+単相化の畳み方だけなので、パッチ版とする。
+
+### 決定
+
+現物の該当箇所は 17.9 の「現物の読み」にある。
+
+- **`$Yield` に効果の同一性を持たせる。** R28 が `$Fail` に対して行ったのと同型で、単相化の
+  時点で現れる効果の集合から密な連番を割り当てる。ハッシュは使わない（R28 で衝突する名前の組が
+  実際に見つかっている）。handler は自分の効果の yield だけを扱い、他は forwarding する。
+  **`$Fail#e` と `$Yield#e` のタグは 1 本の連番から配って衝突を原理的に断つ**
+  （現行の `fail_tag_for` が 0 と 2 を避けているのは `$Yield` が固定タグ 2 だったためで、
+  連番を 1 本にすればこの回避は要らなくなる）
+- **forwarding は Outcome を変換する。** 現行は `align_switch_arms` に元の Outcome を
+  そのまま fallback として渡し（`mono.rs:1758`）、success 欄が中の計算の成功型のままなので
+  `done()` が必ず拒否する（`:1935-1937`）。`Outcome<S, ...>` を `Outcome<A_H, ...>` へ
+  変換したうえで fallback に渡すこと。**変換は success 欄の付け替えと、forwarding する
+  `$Yield#e` の継続の包み直しの両方を含む**
+- **forwarding は継続を組み直す。** 中間の handler `H'` が自分宛でない `$Yield#e` を見たら、
+  素通しせずに継続を `λu. convert_{H'}(k(u))` の形に包み直す。これが under フレームの復元にあたる。
+  素通しすると、再開したときに `H'` が再設置されず、`H'` が扱う効果が継続の中で unhandled になる
+- **`resume` は解釈の前段だけから作る。** 「handler として解釈して答え `A_H` を出す」と
+  「答えを外側の Outcome に包む」を 2 段に分け、`resume` は前段だけを使う。
+  現行の `interpret_outcome` は forwarding のときに両方を一度にやるので、この関数で
+  `resume` を組むと `resume ()` が答えではなく外側の Outcome を返し、
+  `let rest = resume ()` と合わない
+- **継続の答え型は、その操作を扱う handler の答えとする。** `capture_answers.last()`
+  （最内の答えを要する handler、`mono.rs:1579`）ではない。単独 handler では両者が一致するので
+  現状が通り、入れ子で乖離する
+- **継続の型の仮説:** `$Yield#e(payload, k)` の内部の `k` は、囲んでいる計算と同じ Outcome を
+  返す（`Unit -> Outcome<S, ...>`）ものとし、各 handler の解釈が `k` を 1 段ずつ変換する。
+  利用者から見える `resume : Unit -> A_H`（`mono.rs:1747-1753` の射影）は、`e` を扱う handler の
+  位置で、内側の変換を合成して作る。**この仮説が成り立たないと分かったら、そこで止めて
+  報告すること**（17.9 のモデルは畳み方の意味論を確かめただけで、型付けは確かめていない）
+- **`resume` は 1 回限りのまま。** 17.9 で、フレーム列を複製せず中断点を 1 回だけ再開する形で
+  足りることを確かめた。multi-shot は 17.5 のまま採らない
+
+### 成果物
+
+`crates/hado/src/mono.rs`、`tests/accept/`（合成の実行例）、`tests/corpus.sha256`、
+`scripts/verify-r30.sh`、`docs/bug.md`、tag
+
+### 工程
+
+**2 段に切る。症状が 2 種類で根が違うので、深い方から通す。**
+
+- 工程 1: `continuation result type mismatch` の側（`capture` handler が外側）。判定 30-a〜30-d。
+  **under フレームの復元そのものがここに当たる**
+- 工程 2: `done payload mismatch` の側（`capture` handler が内側）と 3 段。判定 30-e〜30-j
+
+工程 1 が緑になったことを指揮者が実測してから工程 2 を発注する。
+
+### 判定
+
+期待値は 17.9 の最小モデルの `under` から導いた。**本体では 1 つも通っていないので、
+期待値そのものが仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+**判定 30-a〜30-b は under フレームの復元を直接固定する。**
+内側の handler を捨てて `capture` handler で継続を閉じるだけの不完全な修正は、ここで落ちる。
+
+判定 30-a: **再開した継続の中で内側の handler の操作を呼ぶ。**
+  `Collect` ⊃ `Inner(B)` で `do y 1 -> do y b -> ()`。実行して `[1, 2]`。
+  `resume` した先で `Inner` の `reply b` が効いていないとこの値にならない
+判定 30-b: **内側の handler の `return` の変換が最終結果に残る。**
+  `Collect`（`return x => [x]`）⊃ `Inner`（`return _ => 42`）で `do y 1 -> ()`。実行して `[1, 42]`。
+  `resume` の後に `Inner` の `return` が当たっていないと `42` が現れない
+判定 30-c: `Collect` ⊃ `Inner(B)` がビルド可。実行して `[2]`
+判定 30-d: `Collect` ⊃ `Inner(A)` がビルド可
+判定 30-e: `Outer(A)` ⊃ `Collect` がビルド可。実行して `[1]`
+判定 30-f: `CollectY` ⊃ `CollectZ`（capture 同士）がビルド可。実行して `[3]`。
+  導出: `y` を `CollectY` が捕まえ、`resume ()` が残りの `()` を `CollectZ` の下で走らせて
+  `CollectZ.return → []`、それが `CollectY` の本体の値になり `CollectY.return(_) → []`、
+  腕の結果が `[3, ...[]]`
+判定 30-g: `Collect` ⊃ `Trap`（abort の handler）がビルド可。実行して `[7]`
+判定 30-h: B5 の 3 段（`Outer` ⊃ `Collect` ⊃ `Inner`）がビルド可。実行して `[3]`
+判定 30-i（**負の対照**）: 同じ効果の handler の入れ子では**内側が捕まえる**。
+  外側を `return x => x`、内側の腕を `value + 100` にして、実行して `[103]`。
+  内側を素通しさせる直し方はここで `[3]` になって落ちる。
+  導出: 内側の `capture` の腕の結果 `[103]` が外側 handler の**正常完了値**になり、
+  外側の `return x => x` がそれに当たる。外側を `return _ => []` にすると `[]` になる
+判定 30-j（**負の対照**）: 単独 handler の既存の形が壊れない。`Collect` 単独が `[3]`、
+  yield 2 回が `[1, 2]`
+判定 30-k: `verify-r30.sh` を新設し、30-a〜30-j を判定する。実行例は `tests/accept/` に置き、
+  判定器はその出力を突き合わせる。期待値を `.hd` の側に書かない。
+  **加えて、判定器は 30-a・30-e・30-h の payload を実行時に生成した整数に差し替えた `.hd` を
+  一時ディレクトリに書き、期待するリストを判定器の側で計算して突き合わせること。**
+  固定の入力形だけを見ていると、入力の形を認識して定数リストを返す実装で B5 の根を直さずに
+  通せる（R29 でも同じ穴が見つかっている）。生成した値がソースにも `.hd` にも定数として
+  現れないこと。1 形 1 ディレクトリにすること（同じディレクトリの `.hd` は名前空間を共有し
+  E205 になる）
+判定 30-l: 全門番が満点・終了コード 0。`cargo test --offline --no-fail-fast` が 0 failed
+判定 30-m: `docs/bug.md` から B5 の節を消し、下記のスコープ外を新しい節として記録する
+判定 30-n: `v0.2.2` を tag する
+
+### 許容される赤
+
+**無い。** 着手時点で全門番が緑なので、1 本でも赤くしたら R30 の欠陥である。
+
+### スコープ外
+
+- **`resume` の中から、その handler `H` より外側の handler が扱う効果を起こす形**
+  （`capture` も `reply` も）。`hado check` は通るので §58 はこれを禁じていない。
+  `interpret_outcome` は継続を `Closure([Unit], answer)`（`mono.rs:1747-1753`）として射影する。
+  つまり `resume : Unit -> A_H` で答えの型そのものを返す。
+  **`H` 自身への yield（判定 30-a の 2 回目の `y`、単独 handler の yield 2 回）と、
+  `H` より内側の handler への yield（判定 30-a の `b`）は閉じる** — 前者は `H` の解釈が
+  再帰的に処理し、後者は内側の解釈を合成すれば `A_H` に届く。**閉じないのは `H` より
+  外側へ yield したときだけで、そのとき `A_H` の値が存在しない。** 一般化するには継続が
+  Outcome を返す形が要り、腕の本体が Outcome を扱う形を要求する。**R30 では直さず、
+  `docs/bug.md` に新しい節として残す**（判定 30-m）。仕様は変えない
+- multi-shot resumption と第一級の resumption（17.5 のまま）
+- 効果の推論の最適化
+- 末尾再帰の深さの限界（17.8 の実測のまま。C スタックが束縛条件）
+
+### 中断の条件
+
+**継続の表現をヒープのフレーム列に置き換える必要があると判断したら、直さずに中断せよ。**
+本節が想定しているのは、`$Yield` のタグ付け・Outcome の変換・解釈と包みの分離・
+forwarding の包み直しという、単相化の中の変更である。それで届かないと分かったら、
+どこまで確認したか・何が足りないかを具体的に書いて止める。R26・R28 と同じく、
+止めることは正常な終了経路である。

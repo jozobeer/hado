@@ -1583,6 +1583,63 @@ R26 が打ち切った `docs/bug.md` の B4 を直した。`$Fail` の実行時 
 
 **次の一手:** R29 の発注書を書いて builder に出す。B5 のプロトタイプ実測がそれに続く。
 
+## B5 の最小モデル — prompt / under フレームの復元（2026-09-10）
+
+17.6 の未確認 2 を実測した。B5 の修正は継続の表現に踏み込むので、mono.rs を触る前に置いた。
+結果は `docs/plan.md` 17.9。
+
+**環境。** python3 のみ。外部依存なし。計算を生成器で表し、中断点をそのまま継続として使う。
+生成器は 1 回しか再開できないので、§58 の「`resume` は捕まえた継続を 1 回だけ再開する」と
+構造が一致する。フレーム列は「prompt を境にした生成器の列」で表した。
+
+**測ったもの。** 争点は capture のときにフレーム列をどこで切り、何を復元するかである。
+畳み方を 2 つ用意して同じ 10 形に通した。
+
+```python
+if mode == "under":
+    # prompt 自身を含めて切る。内側の prompt も継続に入り、resume で再設置される
+    segment = stack[index:]
+else:
+    # 現行 hado。継続は最内 handler で閉じ、prompt を含めない
+    segment = stack[-1:]
+below = stack[:index]
+
+def resume(x, _captured=list(segment), _h=h):
+    value, ty = run(list(_captured), x, trace, mode)
+    if ty != _h.answer_ty:
+        raise TypeMismatch("continuation result type mismatch")
+    return value
+
+answer = arm(payload, resume)
+stack = below
+pending = (answer, deliver(h.answer_ty, stack, mode, trace, h.name))
+```
+
+`deliver` は現行 hado の forwarding を写したもので、その handler より下に handler が残っていれば
+答えを外側の Outcome の `$Done` に包む（`interpret_outcome` の `forwarding = handler_stack.len() > 1`）。
+success 欄は yield の払い出し型のままなので、下の handler の本体の型と食い違う。
+
+**診断。** 数値と表は 17.9 に置いた。`under` は 10 形のうち 9 形で正しい値と型を出し、
+残る 1 形（`resume` の中から外側の handler の `capture` を起こす）だけを畳めなかった。
+`resume` が答えの型そのものを返す形では、継続の中でさらに中断する経路を表せない。
+
+**モデルの限界を先に書いておく。** モデルは型検査を持たず、forwarding を実行時に決める。
+本体は単相化の時点で型を決める。そのため `hado` の側は 12 形のうち 5 形しか症状を再現しない。
+**負の側の根拠は本体の実測（17.9 の 1 つ目の表）であって、モデルではない。**
+モデルが担ったのは `under` の意味論が畳めることの確認だけで、`$Outcome` の型付けは
+確かめていない。移植では型の設計を別に立てる必要がある。
+
+**指揮者がモデルを 2 度直した。** 最初は `run` を非生成器で書いて `reply` の再開点を
+表せず、次は forwarding の条件を「capture の下に handler が残っているか」と読み違えて
+v5 と v10 を再現できなかった。現物の条件は `handler_stack.len() > 1` で、
+**その handler より下に handler が残っているか**である。3 度目に本体と 5 形で一致した。
+それ以上モデルを本体に寄せるのはやめ、負の側は本体の実測に任せた。
+
+**範囲が広がった。** `docs/bug.md` の B5 は 3 段の入れ子だけを記録していたが、実測では
+2 段で既に壊れ、`capture` handler が内側か外側かで症状が変わる。通るのは単独のときだけである。
+`hado check` は 12 形すべてを通すので、仕様も型システムもこの形を認めており、
+追いついていないのは単相化の畳み方だけだと分かった。
+
 ## R29 印字の失敗（2026-09-10）
 
 `docs/bug.md` の B1 を直した。§51 に印字の失敗の規範を足し、runtime の 4 つの出力経路の
