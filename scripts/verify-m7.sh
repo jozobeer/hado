@@ -10,15 +10,30 @@ from pathlib import Path
 import re
 import sys
 
-required = {
-    "List": "map filter fold length reverse append sort",
-    "Option": "map unwrap_or is_some ok_or",
-    "Result": "map map_error is_ok",
-    "String": "length concat",
-    "Int": "to_string",
-    "Float": "to_string",
-}
+spec = Path("docs/spec.md").read_text().splitlines()
+section, on = [], False
+for line in spec:
+    if line.startswith("# 49."):
+        on = True
+    elif on and line.startswith("# ") and not line.startswith("# 49."):
+        break
+    if on:
+        section.append(line)
+block = re.search(r"関数集合は次とする。\s*```text\n(.*?)```", "\n".join(section), flags=re.S)
+required = {}
+if block:
+    for raw in block.group(1).splitlines():
+        line = raw.strip()
+        if not line or ":" not in line:
+            continue
+        names, members = line.split(":", 1)
+        member_list = members.split()
+        for name in re.split(r"\s*/\s*", names.strip()):
+            required[name] = member_list
 passed = total = 0
+if not required:
+    total = 1
+    print("NG: prelude inventory: missing function set in §49")
 for module, members in required.items():
     path = Path("stdlib") / (module.lower() + ".hd")
     source = path.read_text() if path.exists() else ""
@@ -26,7 +41,7 @@ for module, members in required.items():
     ok = re.search(r"^module " + module + r"$", source, flags=re.M) and re.search(r"^implement " + module + " as " + module + r"$", source, flags=re.M)
     passed += bool(ok)
     print(f"{'OK' if ok else 'NG'}: {module} signature")
-    for member in members.split():
+    for member in members:
         total += 1
         ok = len(re.findall(r"\bdef\s+(?:rec\s+)?(?:[A-Z]\w*\s+|\([A-Z]\w*(?:\s*,\s*[A-Z]\w*)+\)\s+)?" + re.escape(member) + r"\b", source)) >= 2
         passed += ok
