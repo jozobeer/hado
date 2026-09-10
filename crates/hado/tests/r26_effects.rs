@@ -356,3 +356,58 @@ fn capture_arm_keeps_pure_helpers_at_their_result_type() {
         assert_eq!(output.stdout, format!("{}\n", list_literal(&doubled)).as_bytes());
     }
 }
+
+#[test]
+fn return_arm_runs_when_types_already_match() {
+    let mut state = 0x26_21;
+    for _ in 0..8 {
+        let k = random(&mut state, 11);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn _ => 9\ndef f (n: Int): Int {{Fail}} => if n > 0 => n | bail\ndef main = with H -> f {k}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if k > 0 { 9 } else { 0 };
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+    }
+}
+
+#[test]
+fn return_arm_does_not_rewrite_a_non_tail_branch() {
+    let mut state = 0x26_22;
+    for _ in 0..8 {
+        let k = random(&mut state, 11);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn value => value + 1\ndef f (n: Int): Int {{Fail}} => let x = (if n > 0 => n | bail) -> x + 10\ndef main = with H -> f {k}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if k > 0 { k + 10 + 1 } else { 0 };
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+    }
+}
+
+#[test]
+fn return_arm_does_not_rewrite_a_pure_helper() {
+    let mut state = 0x26_23;
+    for _ in 0..8 {
+        let k = random(&mut state, 11);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect Fail\nabort bail\nhandler Fail as H\nabort bail => None\nreturn value => Some(value)\ndef twice (n: Int): Int => n * 2\ndef f (n: Int): Int {{Fail}} => if n > 0 => twice n | bail\ndef main = with H -> f {k}\n"
+        ));
+        assert_eq!(case.print_type("main.hd"), "Int Option\n");
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if k > 0 { format!("Some({})\n", k * 2) } else { "None\n".into() };
+        assert_eq!(output.stdout, expected.as_bytes());
+    }
+}
