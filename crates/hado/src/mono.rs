@@ -49,12 +49,16 @@ const FAIL: &str = "$Fail";
 const YIELD: &str = "$Yield";
 
 pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
-    Some(match constructor {
-        DONE => 0,
-        FAIL => 1,
-        YIELD => 2,
-        _ => return None,
-    })
+    if constructor == DONE {
+        return Some(0);
+    }
+    if constructor == YIELD {
+        return Some(2);
+    }
+    if is_fail(constructor) {
+        return Some(fail_tag(constructor));
+    }
+    None
 }
 
 pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> {
@@ -67,10 +71,28 @@ pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> 
     let payload = args.get(2).cloned().unwrap_or(Type::Unit);
     Some(match constructor {
         DONE => vec![success],
-        FAIL => vec![payload],
         YIELD => vec![payload, Type::Closure(vec![Type::Unit], Box::new(answer))],
+        _ if is_fail(constructor) => vec![payload],
         _ => return None,
     })
+}
+
+fn is_fail(constructor: &str) -> bool {
+    constructor.starts_with("$Fail#")
+}
+
+fn fail_constructor(effect: &str) -> String {
+    format!("{FAIL}#{effect}")
+}
+
+fn fail_tag(constructor: &str) -> u32 {
+    let effect = constructor.strip_prefix("$Fail#").unwrap_or("");
+    let mut hash: u32 = 2166136261;
+    for byte in effect.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    hash | 1
 }
 
 fn is_outcome(ty: &Type) -> bool {
@@ -1351,10 +1373,10 @@ impl Lowerer {
         match kind {
             crate::parser::OpKind::Capture => self.capture_operation(name, arguments, None),
             crate::parser::OpKind::Reply => self.handled_operation(name, arguments),
-            crate::parser::OpKind::Abort if self.handler_for(name).is_some() => {
-                self.abort_outcome(node, arguments)
-            }
-            crate::parser::OpKind::Abort => self.abort_raise(node, arguments),
+            crate::parser::OpKind::Abort => match self.handler_for(name).map(|handler| handler.effect.clone()) {
+                Some(effect) => self.abort_outcome(node, arguments, &effect),
+                None => self.abort_raise(node, arguments),
+            },
         }
     }
 
@@ -1387,9 +1409,11 @@ impl Lowerer {
         if let Some(answer) = answer.clone() {
             self.capture_answers.push(answer);
         }
+        let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
         let value = self.completion(body);
         self.handler_stack.pop();
+        self.rewriting_return = saved;
         if answer.is_some() {
             self.capture_answers.pop();
         }
@@ -1627,17 +1651,48 @@ impl Lowerer {
     }
 
     fn finish_handler(&mut self, value: Expression) -> Result<Expression, String> {
-        if self.rewriting_return {
-            return Ok(value);
-        }
         let Some(handler) = self.handler_stack.last().cloned() else {
             return Ok(value);
         };
         if is_outcome(&value.ty()) {
-            self.interpret_outcome(&handler, value)
-        } else {
-            self.apply_return_arm(&handler, value)
+            if self.rewriting_return {
+                return self.take_done(value);
+            }
+            return self.interpret_outcome(&handler, value);
         }
+        if self.rewriting_return {
+            return Ok(value);
+        }
+        self.apply_return_arm(&handler, value)
+    }
+
+    fn take_done(&mut self, value: Expression) -> Result<Expression, String> {
+        let ty = value.ty();
+        let success = match &ty {
+            Type::Data(name, args) if name == OUTCOME => {
+                args.first().cloned().ok_or("outcome missing success type")?
+            }
+            _ => return Err("expected outcome".into()),
+        };
+        let id = self.next;
+        self.next += 1;
+        let variable = Expression::Variable { id, ty: ty.clone() };
+        let done = Expression::Project {
+            value: Box::new(variable.clone()),
+            constructor: DONE.into(),
+            index: 0,
+            result: success.clone(),
+        };
+        Ok(Expression::Let {
+            id,
+            value: Box::new(value),
+            body: Box::new(Expression::Switch {
+                value: Box::new(variable),
+                arms: vec![(DONE.into(), done)],
+                fallback: None,
+                result: success,
+            }),
+        })
     }
 
     fn interpret_outcome(
@@ -1663,18 +1718,18 @@ impl Lowerer {
             result: success,
         };
         let done = self.apply_return_arm(handler, done_value)?;
-        let result = done.ty();
         let mut arms = vec![(DONE.into(), done)];
         if handler.arms.iter().any(|arm| {
             matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Abort, .. })
         }) {
+            let fail = fail_constructor(&handler.effect);
             let fail_value = Expression::Project {
                 value: Box::new(variable.clone()),
-                constructor: FAIL.into(),
+                constructor: fail.clone(),
                 index: 0,
                 result: payload.clone(),
             };
-            arms.push((FAIL.into(), self.abort_arm(handler, fail_value)?));
+            arms.push((fail, self.abort_arm(handler, fail_value)?));
         }
         if handler.arms.iter().any(|arm| {
             matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Capture, .. })
@@ -1693,7 +1748,20 @@ impl Lowerer {
             };
             arms.push((YIELD.into(), self.yield_arm(handler, yield_value, resume)?));
         }
-        if arms.iter().any(|(_, body)| body.ty() != result) {
+        let forwarding = self.handler_stack.len() > 1;
+        let (arms, fallback) = if forwarding {
+            self.align_switch_arms(arms, Some(Box::new(variable.clone())))?
+        } else {
+            (arms, None)
+        };
+        let result = arms
+            .first()
+            .map(|(_, body)| body.ty())
+            .or_else(|| fallback.as_ref().map(|body| body.ty()))
+            .ok_or("handler produced no arms")?;
+        if arms.iter().any(|(_, body)| body.ty() != result)
+            || fallback.as_ref().is_some_and(|body| body.ty() != result)
+        {
             return Err("handler arms disagree on the answer type".into());
         }
         Ok(Expression::Let {
@@ -1702,7 +1770,7 @@ impl Lowerer {
             body: Box::new(Expression::Switch {
                 value: Box::new(variable),
                 arms,
-                fallback: None,
+                fallback,
                 result,
             }),
         })
@@ -1728,7 +1796,7 @@ impl Lowerer {
         };
         self.with_params(&params, arguments, |this| {
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let result = this.expression(&body);
+            let result = this.expression(&body).and_then(|value| this.finish_handler(value));
             this.rewriting_return = saved;
             result
         })
@@ -1757,7 +1825,7 @@ impl Lowerer {
         let saved_resume = self.resume_binding.replace((id, resume_ty));
         let result = self.with_params(&params, vec![value], |this| {
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let result = this.expression(&body);
+            let result = this.expression(&body).and_then(|value| this.finish_handler(value));
             this.rewriting_return = saved;
             result
         });
@@ -1773,6 +1841,7 @@ impl Lowerer {
         &mut self,
         node: &crate::parser::Node,
         arguments: Vec<Expression>,
+        effect: &str,
     ) -> Result<Expression, String> {
         let success = self.node_type(node).unwrap_or(Type::Unit);
         let answer = self.capture_answers.last().cloned().ok_or("abort without handler answer")?;
@@ -1780,7 +1849,7 @@ impl Lowerer {
         let payload = payload_value.ty();
         let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
         Ok(Expression::Construct {
-            constructor: FAIL.into(),
+            constructor: fail_constructor(effect),
             fields: vec![payload_value],
             result: outcome,
         })
@@ -1899,8 +1968,8 @@ impl Lowerer {
             value: Box::new(value),
             body: Box::new(Expression::Switch {
                 value: Box::new(variable),
-                arms: vec![(DONE.into(), rest), (FAIL.into(), Expression::Variable { id, ty: ty.clone() }), (YIELD.into(), Expression::Variable { id, ty })],
-                fallback: None,
+                arms: vec![(DONE.into(), rest)],
+                fallback: Some(Box::new(Expression::Variable { id, ty })),
                 result,
             }),
         })
@@ -2512,6 +2581,17 @@ mod tests {
         assert!(lowerer
             .direct_call("f", vec![Expression::Constant(Constant::Bool(true))])
             .is_err());
+    }
+
+    #[test]
+    fn fail_tags_carry_effect_identity() {
+        let mut tags = std::collections::BTreeSet::new();
+        for index in 0..32u32 {
+            let tag = fail_tag(&fail_constructor(&format!("Eff{index}")));
+            assert_ne!(tag, 0);
+            assert_ne!(tag, 2);
+            assert!(tags.insert(tag), "effect tag collided at {index}");
+        }
     }
 
     #[test]
