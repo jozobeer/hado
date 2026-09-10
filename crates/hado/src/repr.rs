@@ -17,6 +17,7 @@ pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String>
         Type::Char => MachineType::I32,
         Type::String | Type::Closure(..) => MachineType::Pointer,
         Type::Abstract(..) => return Err("abstract type needs its concrete representation".into()),
+        Type::Data(name, _) if name == crate::mono::OUTCOME => MachineType::Pointer,
         Type::Data(name, _) if checked.records.contains_key(name) => MachineType::Pointer,
         Type::Data(name, _) => {
             let mut found = false;
@@ -119,6 +120,13 @@ pub fn constructor_layout(
     checked: &Checked,
     pointer_bytes: u32,
 ) -> Result<Option<AggregateLayout>, String> {
+    if let Some(fields) = crate::mono::outcome_fields(constructor, ty) {
+        let fields = fields
+            .iter()
+            .map(|field| machine_type(field, checked))
+            .collect::<Result<Vec<_>, String>>()?;
+        return Ok(Some(aggregate_layout(&fields, pointer_bytes, true)?));
+    }
     let scheme = checked
         .constructors
         .get(constructor)
@@ -180,6 +188,9 @@ pub fn function_signature(
 
 
 pub fn constructor_tag(constructor: &str, ty: &Type, checked: &Checked) -> Result<u32, String> {
+    if let Some(tag) = crate::mono::outcome_tag(constructor) {
+        return Ok(tag);
+    }
     let scheme = checked.constructors.get(constructor).ok_or("unknown constructor")?;
     let mut inference = crate::types::Inference::default();
     let instantiated = inference.instantiate(scheme);

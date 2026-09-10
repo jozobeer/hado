@@ -43,6 +43,40 @@ fn convert_types(types: &[Ty]) -> Result<Vec<Type>, UnresolvedType> {
     types.iter().map(Type::try_from).collect()
 }
 
+pub(crate) const OUTCOME: &str = "$Outcome";
+const DONE: &str = "$Done";
+const FAIL: &str = "$Fail";
+const YIELD: &str = "$Yield";
+
+pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
+    Some(match constructor {
+        DONE => 0,
+        FAIL => 1,
+        YIELD => 2,
+        _ => return None,
+    })
+}
+
+pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> {
+    let Type::Data(name, args) = ty else { return None };
+    if name != OUTCOME {
+        return None;
+    }
+    let success = args.first()?.clone();
+    let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
+    let payload = args.get(2).cloned().unwrap_or(Type::Unit);
+    Some(match constructor {
+        DONE => vec![success],
+        FAIL => vec![payload],
+        YIELD => vec![payload, Type::Closure(vec![Type::Unit], Box::new(answer))],
+        _ => return None,
+    })
+}
+
+fn is_outcome(ty: &Type) -> bool {
+    matches!(ty, Type::Data(name, _) if name == OUTCOME)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
@@ -402,6 +436,9 @@ impl Lowerer {
         }
         if let NodeKind::Let { pat, value, body } = &node.kind {
             let value = self.expression(value)?;
+            if is_outcome(&value.ty()) {
+                return self.propagate_outcome(pat, value, body);
+            }
             return self.bound_body(pat, value, body);
         }
 
@@ -417,18 +454,20 @@ impl Lowerer {
             let fallback = fallback
                 .as_ref()
                 .ok_or("condition column requires a fallback")?;
-            let mut result = self.completion(fallback)?;
+            let mut result = self.expression(fallback)?;
             for (condition, body) in arms.iter().rev() {
                 let condition = self.expression(condition)?;
-                let body = self.completion(body)?;
-                result = branch(condition, body, result)?;
+                let body = self.expression(body)?;
+                let (body, result_arm) = self.align_outcomes(body, result)?;
+                result = branch(condition, body, result_arm)?;
             }
             return Ok(result);
         }
         if let NodeKind::BoolBranch { cond, then, els } = &node.kind {
             let condition = self.expression(cond)?;
-            let then = self.completion(then)?;
-            let otherwise = self.completion(els)?;
+            let then = self.expression(then)?;
+            let otherwise = self.expression(els)?;
+            let (then, otherwise) = self.align_outcomes(then, otherwise)?;
             return branch(condition, then, otherwise);
         }
         if let NodeKind::With { handler, args, body } = &node.kind {
@@ -734,7 +773,7 @@ impl Lowerer {
         };
         let then = match pattern {
             Some(pattern) => self.bound_body(pattern, projected, body)?,
-            None => self.completion(body)?,
+            None => self.expression(body)?,
         };
         let result = then.ty();
         let otherwise = self.construct("None", vec![], &Ty::from(&result))?;
@@ -786,15 +825,16 @@ impl Lowerer {
                     _ => return Err("invalid Boolean pattern coverage".into()),
                 }
             }
-            let then = self.completion(on_true.ok_or("missing true pattern")?)?;
-            let otherwise = self.completion(on_false.ok_or("missing false pattern")?)?;
+            let then = self.expression(on_true.ok_or("missing true pattern")?)?;
+            let otherwise = self.expression(on_false.ok_or("missing false pattern")?)?;
+            let (then, otherwise) = self.align_outcomes(then, otherwise)?;
             return branch(value, then, otherwise);
         }
         let id = self.next;
         self.next += 1;
         let variable = Expression::Variable { id, ty: value.ty() };
         let mut result =
-            self.completion(fallback.ok_or("pattern branch without fallback is not implemented")?)?;
+            self.expression(fallback.ok_or("pattern branch without fallback is not implemented")?)?;
         for (pattern, body) in arms.iter().rev() {
             let crate::parser::PatternKind::Literal(literal) = &pattern.kind else {
                 return Err("nonliteral pattern branch is not implemented".into());
@@ -808,7 +848,9 @@ impl Lowerer {
                 left: Box::new(variable.clone()),
                 right: Box::new(literal),
             };
-            result = branch(condition, self.completion(body)?, result)?;
+            let body = self.expression(body)?;
+            let (body, result_arm) = self.align_outcomes(body, result)?;
+            result = branch(condition, body, result_arm)?;
         }
         Ok(Expression::Let {
             id,
@@ -826,13 +868,13 @@ impl Lowerer {
         let id = self.next;
         self.next += 1;
         let variable = Expression::Variable { id, ty: value.ty() };
-        let mut next = fallback.map(|body| self.completion(body)).transpose()?;
+        let mut next = fallback.map(|body| self.expression(body)).transpose()?;
         for (pattern, body) in arms.iter().rev() {
             let saved = self.scope.clone();
             let mut steps = Vec::new();
             let result = self
                 .match_steps(pattern, variable.clone(), &mut steps)
-                .and_then(|()| self.completion(body));
+                .and_then(|()| self.expression(body));
             self.scope = saved;
             next = Some(Self::finish_match(steps, result?, next.as_ref())?);
         }
@@ -853,7 +895,7 @@ impl Lowerer {
         self.next += 1;
         let variable = Expression::Variable { id, ty: value.ty() };
         let fallback = fallback
-            .map(|body| self.completion(body).map(Box::new))
+            .map(|body| self.expression(body).map(Box::new))
             .transpose()?;
         let mut lowered: Vec<(String, Expression)> = Vec::new();
         for (pattern, body) in arms.iter().rev() {
@@ -880,6 +922,7 @@ impl Lowerer {
             }
         }
         lowered.reverse();
+        let (lowered, fallback) = self.align_switch_arms(lowered, fallback)?;
         let result = lowered
             .first()
             .map(|(_, body)| body.ty())
@@ -927,7 +970,7 @@ impl Lowerer {
                 };
                 self.match_steps(pattern, field, &mut steps)?;
             }
-            self.completion(body)
+            self.expression(body)
         })();
         self.scope = saved;
         Self::finish_match(steps, result?, fallback)
@@ -1044,7 +1087,7 @@ impl Lowerer {
         let mut bindings = Vec::new();
         let result = self
             .bind_pattern(pat, value, &mut bindings)
-            .and_then(|()| self.completion(body));
+            .and_then(|()| self.expression(body));
         self.scope = saved;
         let mut body = result?;
         for (id, value) in bindings.into_iter().rev() {
@@ -1309,7 +1352,7 @@ impl Lowerer {
             crate::parser::OpKind::Capture => self.capture_operation(name, arguments, None),
             crate::parser::OpKind::Reply => self.handled_operation(name, arguments),
             crate::parser::OpKind::Abort if self.handler_for(name).is_some() => {
-                self.handled_operation(name, arguments)
+                self.abort_outcome(node, arguments)
             }
             crate::parser::OpKind::Abort => self.abort_raise(node, arguments),
         }
@@ -1334,7 +1377,10 @@ impl Lowerer {
             matches!(
                 arm,
                 crate::parser::HandlerArm::Return { .. }
-                    | crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Capture, .. }
+                    | crate::parser::HandlerArm::Operation {
+                        kind: crate::parser::OpKind::Capture | crate::parser::OpKind::Abort,
+                        ..
+                    }
             )
         });
         let answer = if needs_answer { self.capture_answer_of(node)? } else { None };
@@ -1425,37 +1471,8 @@ impl Lowerer {
     }
 
     fn completion(&mut self, node: &crate::parser::Node) -> Result<Expression, String> {
-        match &node.kind {
-            crate::parser::NodeKind::CondBranch { .. }
-            | crate::parser::NodeKind::BoolBranch { .. }
-            | crate::parser::NodeKind::PatternBranch { .. }
-            | crate::parser::NodeKind::Let { .. }
-            | crate::parser::NodeKind::LetQ { .. } => self.expression(node),
-            crate::parser::NodeKind::DoQ { .. }
-                if self.is_abort_node(node) || self.is_capture_node(node) =>
-            {
-                self.expression(node)
-            }
-            _ if self.skips_return(node) => self.expression(node),
-            _ => {
-                let value = self.expression(node)?;
-                self.to_answer(value)
-            }
-        }
-    }
-
-    fn skips_return(&self, node: &crate::parser::Node) -> bool {
-        self.is_abort_node(node) || self.is_capture_node(node) || self.is_definition_call(node)
-    }
-
-    fn is_definition_call(&self, node: &crate::parser::Node) -> bool {
-        let callee = match &node.kind {
-            crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) => callee.as_ref(),
-            crate::parser::NodeKind::Pipe(_, target) => target.as_ref(),
-            _ => return false,
-        };
-        let crate::parser::NodeKind::Name(name) = &callee.kind else { return false };
-        self.definitions.contains_key(&self.resolve_definition(name))
+        let value = self.expression(node)?;
+        self.finish_handler(value)
     }
 
     fn specialized_name(&self, name: &str) -> String {
@@ -1526,7 +1543,7 @@ impl Lowerer {
 
     fn capture_operation(
         &mut self,
-        name: &str,
+        _name: &str,
         arguments: Vec<Expression>,
         rest: Option<&crate::parser::Node>,
     ) -> Result<Expression, String> {
@@ -1534,20 +1551,18 @@ impl Lowerer {
         let continuation = match rest {
             Some(body) => self.make_continuation(body, &answer)?,
             None => {
-                let unit = self.to_answer(Expression::Constant(Constant::Unit))?;
+                let unit = self.finish_handler(Expression::Constant(Constant::Unit))?;
                 self.continuation_closure(unit, &answer)?
             }
         };
-        let id = self.next;
-        self.next += 1;
-        let resume_ty = Type::Closure(vec![Type::Unit], Box::new(answer));
-        let saved = self.resume_binding.replace((id, resume_ty));
-        let result = self.handled_operation(name, arguments);
-        self.resume_binding = saved;
-        Ok(Expression::Let {
-            id,
-            value: Box::new(continuation),
-            body: Box::new(result?),
+        let success = Type::Unit;
+        let payload = arguments.first().map(Expression::ty).unwrap_or(Type::Unit);
+        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
+        let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
+        Ok(Expression::Construct {
+            constructor: YIELD.into(),
+            fields: vec![value, continuation],
+            result: outcome,
         })
     }
 
@@ -1611,25 +1626,164 @@ impl Lowerer {
         })
     }
 
-    fn to_answer(&mut self, value: Expression) -> Result<Expression, String> {
-        if self.capture_answers.is_empty() || self.rewriting_return {
+    fn finish_handler(&mut self, value: Expression) -> Result<Expression, String> {
+        if self.rewriting_return {
             return Ok(value);
         }
-        let answer = self.capture_answers.last().cloned().unwrap();
-        if value.ty() == answer && self.return_discards_value() {
+        let Some(handler) = self.handler_stack.last().cloned() else {
             return Ok(value);
+        };
+        if is_outcome(&value.ty()) {
+            self.interpret_outcome(&handler, value)
+        } else {
+            self.apply_return_arm(&handler, value)
         }
-        let handler = self.handler_stack.last().cloned().ok_or("handler answer without handler")?;
-        self.apply_return_arm(&handler, value)
     }
 
-    fn return_discards_value(&self) -> bool {
-        self.handler_stack.last().and_then(|handler| {
-            handler.arms.iter().find_map(|arm| match arm {
-                crate::parser::HandlerArm::Return { param, .. } => Some(param.name == "_"),
-                _ => None,
-            })
-        }).unwrap_or(true)
+    fn interpret_outcome(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        value: Expression,
+    ) -> Result<Expression, String> {
+        let ty = value.ty();
+        let args = match &ty {
+            Type::Data(name, args) if name == OUTCOME => args,
+            _ => return Err("expected outcome".into()),
+        };
+        let success = args.first().cloned().ok_or("outcome missing success type")?;
+        let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
+        let payload = args.get(2).cloned().unwrap_or(Type::Unit);
+        let id = self.next;
+        self.next += 1;
+        let variable = Expression::Variable { id, ty: ty.clone() };
+        let done_value = Expression::Project {
+            value: Box::new(variable.clone()),
+            constructor: DONE.into(),
+            index: 0,
+            result: success,
+        };
+        let done = self.apply_return_arm(handler, done_value)?;
+        let result = done.ty();
+        let mut arms = vec![(DONE.into(), done)];
+        if handler.arms.iter().any(|arm| {
+            matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Abort, .. })
+        }) {
+            let fail_value = Expression::Project {
+                value: Box::new(variable.clone()),
+                constructor: FAIL.into(),
+                index: 0,
+                result: payload.clone(),
+            };
+            arms.push((FAIL.into(), self.abort_arm(handler, fail_value)?));
+        }
+        if handler.arms.iter().any(|arm| {
+            matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Capture, .. })
+        }) {
+            let yield_value = Expression::Project {
+                value: Box::new(variable.clone()),
+                constructor: YIELD.into(),
+                index: 0,
+                result: payload,
+            };
+            let resume = Expression::Project {
+                value: Box::new(variable.clone()),
+                constructor: YIELD.into(),
+                index: 1,
+                result: Type::Closure(vec![Type::Unit], Box::new(answer)),
+            };
+            arms.push((YIELD.into(), self.yield_arm(handler, yield_value, resume)?));
+        }
+        if arms.iter().any(|(_, body)| body.ty() != result) {
+            return Err("handler arms disagree on the answer type".into());
+        }
+        Ok(Expression::Let {
+            id,
+            value: Box::new(value),
+            body: Box::new(Expression::Switch {
+                value: Box::new(variable),
+                arms,
+                fallback: None,
+                result,
+            }),
+        })
+    }
+
+    fn abort_arm(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        payload: Expression,
+    ) -> Result<Expression, String> {
+        let Some((params, body)) = handler.arms.iter().find_map(|arm| match arm {
+            crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Abort, params, body, .. } => {
+                Some((params.clone(), body.clone()))
+            }
+            _ => None,
+        }) else {
+            return Err("missing abort arm".into());
+        };
+        let arguments = match params.len() {
+            0 => Vec::new(),
+            1 => vec![payload],
+            _ => return Err("abort arm arity mismatch".into()),
+        };
+        self.with_params(&params, arguments, |this| {
+            let saved = std::mem::replace(&mut this.rewriting_return, true);
+            let result = this.expression(&body);
+            this.rewriting_return = saved;
+            result
+        })
+    }
+
+    fn yield_arm(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        value: Expression,
+        resume: Expression,
+    ) -> Result<Expression, String> {
+        let Some((params, body)) = handler.arms.iter().find_map(|arm| match arm {
+            crate::parser::HandlerArm::Operation {
+                kind: crate::parser::OpKind::Capture,
+                params,
+                body,
+                ..
+            } => Some((params.clone(), body.clone())),
+            _ => None,
+        }) else {
+            return Err("missing capture arm".into());
+        };
+        let id = self.next;
+        self.next += 1;
+        let resume_ty = resume.ty();
+        let saved_resume = self.resume_binding.replace((id, resume_ty));
+        let result = self.with_params(&params, vec![value], |this| {
+            let saved = std::mem::replace(&mut this.rewriting_return, true);
+            let result = this.expression(&body);
+            this.rewriting_return = saved;
+            result
+        });
+        self.resume_binding = saved_resume;
+        Ok(Expression::Let {
+            id,
+            value: Box::new(resume),
+            body: Box::new(result?),
+        })
+    }
+
+    fn abort_outcome(
+        &mut self,
+        node: &crate::parser::Node,
+        arguments: Vec<Expression>,
+    ) -> Result<Expression, String> {
+        let success = self.node_type(node).unwrap_or(Type::Unit);
+        let answer = self.capture_answers.last().cloned().ok_or("abort without handler answer")?;
+        let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
+        let payload = payload_value.ty();
+        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
+        Ok(Expression::Construct {
+            constructor: FAIL.into(),
+            fields: vec![payload_value],
+            result: outcome,
+        })
     }
 
     fn apply_return_arm(
@@ -1649,6 +1803,193 @@ impl Lowerer {
         let result = self.with_params(&[param], vec![value], |this| this.expression(&ret));
         self.rewriting_return = saved;
         result
+    }
+
+    fn align_outcomes(
+        &self,
+        left: Expression,
+        right: Expression,
+    ) -> Result<(Expression, Expression), String> {
+        match (is_outcome(&left.ty()), is_outcome(&right.ty())) {
+            (false, false) => Ok((left, right)),
+            (true, true) if left.ty() == right.ty() => Ok((left, right)),
+            (true, false) => {
+                let ty = left.ty();
+                Ok((left, self.done(right, &ty)?))
+            }
+            (false, true) => {
+                let ty = right.ty();
+                Ok((self.done(left, &ty)?, right))
+            }
+            _ => Err("outcome types differ".into()),
+        }
+    }
+
+    fn align_switch_arms(
+        &self,
+        mut arms: Vec<(String, Expression)>,
+        mut fallback: Option<Box<Expression>>,
+    ) -> Result<(Vec<(String, Expression)>, Option<Box<Expression>>), String> {
+        let outcome = arms
+            .iter()
+            .map(|(_, body)| body.ty())
+            .chain(fallback.as_ref().map(|body| body.ty()))
+            .find(is_outcome);
+        let Some(outcome) = outcome else {
+            return Ok((arms, fallback));
+        };
+        for (_, body) in &mut arms {
+            if !is_outcome(&body.ty()) {
+                *body = self.done(body.clone(), &outcome)?;
+            }
+        }
+        if let Some(body) = fallback.as_mut() {
+            if !is_outcome(&body.ty()) {
+                *body = Box::new(self.done(body.as_ref().clone(), &outcome)?);
+            }
+        }
+        Ok((arms, fallback))
+    }
+
+    fn done(&self, value: Expression, outcome: &Type) -> Result<Expression, String> {
+        let Type::Data(name, args) = outcome else {
+            return Err("done requires an outcome type".into());
+        };
+        if name != OUTCOME {
+            return Err("done requires an outcome type".into());
+        }
+        let success = args.first().ok_or("outcome missing success type")?;
+        if value.ty() != *success {
+            return Err("done payload mismatch".into());
+        }
+        Ok(Expression::Construct {
+            constructor: DONE.into(),
+            fields: vec![value],
+            result: outcome.clone(),
+        })
+    }
+
+    fn propagate_outcome(
+        &mut self,
+        pat: &crate::parser::Pattern,
+        value: Expression,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let ty = value.ty();
+        let success = match &ty {
+            Type::Data(name, args) if name == OUTCOME => args.first().cloned().ok_or("outcome missing success type")?,
+            _ => return Err("propagate requires an outcome".into()),
+        };
+        let id = self.next;
+        self.next += 1;
+        let variable = Expression::Variable { id, ty: ty.clone() };
+        let payload = Expression::Project {
+            value: Box::new(variable.clone()),
+            constructor: DONE.into(),
+            index: 0,
+            result: success,
+        };
+        let mut rest = self.bound_body(pat, payload, body)?;
+        if !is_outcome(&rest.ty()) {
+            rest = self.done(rest, &ty)?;
+        }
+        let result = rest.ty();
+        Ok(Expression::Let {
+            id,
+            value: Box::new(value),
+            body: Box::new(Expression::Switch {
+                value: Box::new(variable),
+                arms: vec![(DONE.into(), rest), (FAIL.into(), Expression::Variable { id, ty: ty.clone() }), (YIELD.into(), Expression::Variable { id, ty })],
+                fallback: None,
+                result,
+            }),
+        })
+    }
+
+    fn handler_needs_outcome(&self) -> bool {
+        self.handler_stack.last().is_some_and(|handler| {
+            handler.arms.iter().any(|arm| {
+                matches!(
+                    arm,
+                    crate::parser::HandlerArm::Operation {
+                        kind: crate::parser::OpKind::Abort | crate::parser::OpKind::Capture,
+                        ..
+                    }
+                )
+            })
+        })
+    }
+
+    fn outcome_of(&self, success: &Type, body: &crate::parser::Node) -> Result<Type, String> {
+        let answer = self.capture_answers.last().cloned().ok_or("handler answer missing")?;
+        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, self.payload_in(body)]))
+    }
+
+    fn payload_in(&self, node: &crate::parser::Node) -> Type {
+        self.find_payload(node).unwrap_or(Type::Unit)
+    }
+
+    fn find_payload(&self, node: &crate::parser::Node) -> Option<Type> {
+        use crate::parser::NodeKind::*;
+        match &node.kind {
+            Apply(callee, args) | Call(callee, args) => {
+                if let crate::parser::NodeKind::Name(name) = &callee.kind {
+                    if matches!(
+                        self.operations.get(name),
+                        Some(crate::parser::OpKind::Abort | crate::parser::OpKind::Capture)
+                    ) {
+                        return args.first().and_then(|arg| self.node_type(arg)).or(Some(Type::Unit));
+                    }
+                }
+                self.find_payload(callee).or_else(|| args.iter().find_map(|arg| self.find_payload(arg)))
+            }
+            Name(name)
+                if matches!(
+                    self.operations.get(name),
+                    Some(crate::parser::OpKind::Abort | crate::parser::OpKind::Capture)
+                ) =>
+            {
+                Some(Type::Unit)
+            }
+            Neg(inner) | Not(inner) | Field(inner, _) => self.find_payload(inner),
+            Bin(_, left, right) | Pipe(left, right) => {
+                self.find_payload(left).or_else(|| self.find_payload(right))
+            }
+            Record(fields) => fields.iter().find_map(|(_, node)| self.find_payload(node)),
+            NamedConstructor(_, fields) => fields.iter().find_map(|(_, node)| self.find_payload(node)),
+            List(items, rest) => items
+                .iter()
+                .find_map(|node| self.find_payload(node))
+                .or_else(|| rest.as_ref().and_then(|node| self.find_payload(node))),
+            Let { value, body, .. } | LetQ { value, body, .. } | DoQ { value, body } => {
+                self.find_payload(value).or_else(|| self.find_payload(body))
+            }
+            Fn { body, .. } => self.find_payload(body),
+            BoolBranch { cond, then, els } => self
+                .find_payload(cond)
+                .or_else(|| self.find_payload(then))
+                .or_else(|| self.find_payload(els)),
+            CondBranch { arms, fallback } => arms
+                .iter()
+                .find_map(|(condition, body)| self.find_payload(condition).or_else(|| self.find_payload(body)))
+                .or_else(|| fallback.as_ref().and_then(|node| self.find_payload(node))),
+            PatternBranch { scrutinee, arms, fallback } => self
+                .find_payload(scrutinee)
+                .or_else(|| arms.iter().find_map(|(_, body)| self.find_payload(body)))
+                .or_else(|| fallback.as_ref().and_then(|node| self.find_payload(node))),
+            With { args, body, .. } => args
+                .iter()
+                .find_map(|node| self.find_payload(node))
+                .or_else(|| self.find_payload(body)),
+            _ => None,
+        }
+    }
+
+    fn node_type(&self, node: &crate::parser::Node) -> Option<Type> {
+        self.composite_types
+            .get(&(node.span.line, node.span.col))
+            .or_else(|| self.value_types.get(&(node.span.line, node.span.col)))
+            .and_then(|ty| Type::try_from(&self.specialization.resolve(ty)).ok())
     }
 
     fn resume_variable(&self) -> Result<Expression, String> {
@@ -2008,24 +2349,7 @@ impl Lowerer {
         }
         let definition = self.definitions.get(name).ok_or_else(|| format!("unknown function {name}"))?.clone();
         let scheme = self.schemes.get(name).ok_or_else(|| format!("missing inferred signature for {name}"))?.clone();
-        let captured = self.capture_answers.last().cloned().filter(|_| Self::scheme_carries_effects(&scheme));
         let key = self.specialized_name(name);
-        let answer = captured.as_ref().or(expected_result);
-        if let Some(function) = self.functions.iter().find(|function| {
-            function.name == key
-                && function.signature.parameters == types
-                && answer.is_none_or(|ty| function.signature.result == *ty)
-        }) {
-            return Ok((function.id, function.signature.clone()));
-        }
-        if let Some((_, id, signature)) = self.active.iter().find(|(active, _, _)| active == &key) {
-            if signature.parameters != types
-                || answer.is_some_and(|ty| signature.result != *ty)
-            {
-                return Err("recursive specialization changes argument types".into());
-            }
-            return Ok((*id, signature.clone()));
-        }
         let (params, body, scheme) = match definition.kind {
             crate::parser::DefKind::Function { params, body, .. } => (params, body, scheme),
             crate::parser::DefKind::Value(body) => {
@@ -2036,15 +2360,31 @@ impl Lowerer {
                 (vec![], body, scheme)
             }
         };
-        let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| captured.is_none()))?;
-        let signature = match &captured {
-            Some(answer) if *answer != inferred.result => {
-                Signature { parameters: inferred.parameters.clone(), result: answer.clone() }
-            }
-            _ => inferred.clone(),
-        };
         if params.len() != types.len() {
             return Err("function arity mismatch".into());
+        }
+        let outcome = self.handler_needs_outcome() && Self::scheme_carries_effects(&scheme);
+        let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| !outcome))?;
+        let signature = if outcome {
+            Signature {
+                parameters: inferred.parameters.clone(),
+                result: self.outcome_of(&inferred.result, &body)?,
+            }
+        } else {
+            inferred.clone()
+        };
+        if let Some(function) = self.functions.iter().find(|function| {
+            function.name == key
+                && function.signature.parameters == types
+                && function.signature.result == signature.result
+        }) {
+            return Ok((function.id, function.signature.clone()));
+        }
+        if let Some((_, id, active)) = self.active.iter().find(|(active, _, _)| active == &key) {
+            if active.parameters != types || active.result != signature.result {
+                return Err("recursive specialization changes argument types".into());
+            }
+            return Ok((*id, active.clone()));
         }
         let mut specialization = crate::types::Inference::default();
         let concrete = Ty::fn_with(
@@ -2067,11 +2407,14 @@ impl Lowerer {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         self.active.push((key.clone(), id, signature.clone()));
-        let body = self.completion(&body);
+        let lowered = self.expression(&body);
         self.active.pop();
         self.specialization = saved_specialization;
         self.scope = saved;
-        let body = body?.in_tail_position();
+        let mut body = lowered?.in_tail_position();
+        if is_outcome(&signature.result) && !is_outcome(&body.ty()) {
+            body = self.done(body, &signature.result)?;
+        }
         if body.ty() != signature.result {
             return Err(format!(
                 "lowered return type differs from inferred signature for {name}"
