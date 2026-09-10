@@ -52,10 +52,10 @@ pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
     if constructor == DONE {
         return Some(0);
     }
-    if constructor == YIELD {
-        return Some(2);
+    if let Some(tag) = constructor.strip_prefix("$Fail#") {
+        return tag.parse().ok();
     }
-    constructor.strip_prefix("$Fail#")?.parse().ok()
+    constructor.strip_prefix("$Yield#")?.parse().ok()
 }
 
 pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> {
@@ -64,11 +64,10 @@ pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> 
         return None;
     }
     let success = args.first()?.clone();
-    let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
     let payload = args.get(2).cloned().unwrap_or(Type::Unit);
     Some(match constructor {
         DONE => vec![success],
-        YIELD => vec![payload, Type::Closure(vec![Type::Unit], Box::new(answer))],
+        _ if is_yield(constructor) => vec![payload, Type::Closure(vec![Type::Unit], Box::new(ty.clone()))],
         _ if is_fail(constructor) => vec![payload],
         _ => return None,
     })
@@ -76,6 +75,10 @@ pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> 
 
 fn is_fail(constructor: &str) -> bool {
     constructor.starts_with("$Fail#")
+}
+
+fn is_yield(constructor: &str) -> bool {
+    constructor.starts_with("$Yield#")
 }
 
 fn is_outcome(ty: &Type) -> bool {
@@ -311,10 +314,13 @@ struct Lowerer {
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
     handler_stack: Vec<crate::parser::HandlerDecl>,
+    handler_answers: Vec<Option<Type>>,
     capture_answers: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
+    continuation_prompts: Vec<usize>,
     fail_ids: std::collections::HashMap<String, u32>,
+    yield_ids: std::collections::HashMap<String, u32>,
     next_fail_tag: u32,
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
@@ -629,6 +635,50 @@ pub struct FunctionId(pub usize);
 pub struct Signature {
     pub parameters: Vec<Type>,
     pub result: Type,
+}
+
+fn outcome_parts(ty: &Type) -> Result<(Type, Type, Type), String> {
+    let Type::Data(name, args) = ty else {
+        return Err("expected outcome".into());
+    };
+    if name != OUTCOME {
+        return Err("expected outcome".into());
+    }
+    let success = args.first().cloned().ok_or("outcome missing success type")?;
+    let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
+    let payload = args.get(2).cloned().unwrap_or(Type::Unit);
+    Ok((success, answer, payload))
+}
+
+fn handles_op(handler: &crate::parser::HandlerDecl, kind: crate::parser::OpKind) -> bool {
+    handler.arms.iter().any(|arm| {
+        matches!(arm, crate::parser::HandlerArm::Operation { kind: found, .. } if *found == kind)
+    })
+}
+
+fn project(value: &Expression, constructor: &str, index: usize, result: Type) -> Expression {
+    Expression::Project {
+        value: Box::new(value.clone()),
+        constructor: constructor.into(),
+        index,
+        result,
+    }
+}
+
+struct ConvertCtx {
+    incoming: Type,
+    outgoing: Type,
+    success: Type,
+    payload: Type,
+    convert_id: FunctionId,
+    convert_sig: Signature,
+    forwarding: bool,
+}
+
+impl ConvertCtx {
+    fn continuation_ty(&self) -> Type {
+        Type::Closure(vec![Type::Unit], Box::new(self.incoming.clone()))
+    }
 }
 
 impl Signature {
@@ -1396,8 +1446,10 @@ impl Lowerer {
         }
         let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
+        self.handler_answers.push(answer.clone());
         let value = self.completion(body);
         self.handler_stack.pop();
+        self.handler_answers.pop();
         self.rewriting_return = saved;
         if answer.is_some() {
             self.capture_answers.pop();
@@ -1471,20 +1523,45 @@ impl Lowerer {
         format!("{FAIL}#{}", self.fail_tag_for(effect))
     }
 
+    fn yield_constructor(&mut self, effect: &str) -> String {
+        format!("{YIELD}#{}", self.yield_tag_for(effect))
+    }
+
     fn fail_tag_for(&mut self, effect: &str) -> u32 {
         if let Some(&tag) = self.fail_ids.get(effect) {
             return tag;
         }
+        let tag = self.alloc_outcome_tag();
+        self.fail_ids.insert(effect.to_string(), tag);
+        tag
+    }
+
+    fn yield_tag_for(&mut self, effect: &str) -> u32 {
+        if let Some(&tag) = self.yield_ids.get(effect) {
+            return tag;
+        }
+        let tag = self.alloc_outcome_tag();
+        self.yield_ids.insert(effect.to_string(), tag);
+        tag
+    }
+
+    fn alloc_outcome_tag(&mut self) -> u32 {
         if self.next_fail_tag < 1 {
             self.next_fail_tag = 1;
         }
-        if self.next_fail_tag == 2 {
-            self.next_fail_tag = 3;
-        }
         let tag = self.next_fail_tag;
         self.next_fail_tag += 1;
-        self.fail_ids.insert(effect.to_string(), tag);
         tag
+    }
+
+    fn answer_for_handler(&self, target: &crate::parser::HandlerDecl) -> Result<Type, String> {
+        self.handler_stack
+            .iter()
+            .rev()
+            .zip(self.handler_answers.iter().rev())
+            .find(|(handler, _)| handler.name == target.name && handler.effect == target.effect)
+            .and_then(|(_, answer)| answer.clone())
+            .ok_or_else(|| "capture handler missing answer".into())
     }
 
     fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
@@ -1572,33 +1649,63 @@ impl Lowerer {
 
     fn capture_operation(
         &mut self,
-        _name: &str,
+        name: &str,
         arguments: Vec<Expression>,
         rest: Option<&crate::parser::Node>,
     ) -> Result<Expression, String> {
-        let answer = self.capture_answers.last().cloned().ok_or("unhandled capture")?;
+        let handler = self.handler_for(name).cloned().ok_or("unhandled capture")?;
+        if self.capture_escapes_prompt(&handler) {
+            return Err("resume cannot yield a capture handled outside this handler".into());
+        }
+        let answer = self.answer_for_handler(&handler)?;
+        let constructor = self.yield_constructor(&handler.effect);
+        let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
+        let payload = value.ty();
+        let outcome = Type::Data(OUTCOME.into(), vec![Type::Unit, answer, payload]);
         let continuation = match rest {
-            Some(body) => self.make_continuation(body, &answer)?,
+            Some(body) => self.continuation_under(&handler, body, &outcome)?,
             None => {
-                let unit = self.finish_handler(Expression::Constant(Constant::Unit))?;
-                self.continuation_closure(unit, &answer)?
+                let unit = self.done(Expression::Constant(Constant::Unit), &outcome)?;
+                self.continuation_closure(unit, &outcome)?
             }
         };
-        let success = Type::Unit;
-        let payload = arguments.first().map(Expression::ty).unwrap_or(Type::Unit);
-        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
-        let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
         Ok(Expression::Construct {
-            constructor: YIELD.into(),
+            constructor,
             fields: vec![value, continuation],
             result: outcome,
         })
     }
 
+    fn capture_escapes_prompt(&self, handler: &crate::parser::HandlerDecl) -> bool {
+        let Some(&prompt) = self.continuation_prompts.last() else {
+            return false;
+        };
+        self.handler_index(handler).is_some_and(|here| here < prompt)
+    }
+
+    fn handler_index(&self, handler: &crate::parser::HandlerDecl) -> Option<usize> {
+        self.handler_stack
+            .iter()
+            .rposition(|entry| handler.name == entry.name && handler.effect == entry.effect)
+    }
+
+    fn continuation_under(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        body: &crate::parser::Node,
+        outcome: &Type,
+    ) -> Result<Expression, String> {
+        let prompt = self.handler_index(handler).ok_or("capture handler not on stack")?;
+        self.continuation_prompts.push(prompt);
+        let continuation = self.make_continuation(body, outcome);
+        self.continuation_prompts.pop();
+        continuation
+    }
+
     fn make_continuation(
         &mut self,
         body: &crate::parser::Node,
-        answer: &Type,
+        outcome: &Type,
     ) -> Result<Expression, String> {
         let saved = std::mem::take(&mut self.scope);
         for (name, binding) in &saved {
@@ -1611,13 +1718,19 @@ impl Lowerer {
         self.next += 1;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        let lowered = self.completion(body);
+        let lowered = self.expression(body);
         self.scope = saved;
-        let body = lowered?.in_tail_position();
-        if body.ty() != *answer {
+        let lowered = lowered?;
+        let body = if is_outcome(&lowered.ty()) {
+            lowered
+        } else {
+            self.done(lowered, outcome)?
+        }
+        .in_tail_position();
+        if body.ty() != *outcome {
             return Err("continuation result type mismatch".into());
         }
-        self.continuation_function(id, param, captures, body, answer)
+        self.continuation_function(id, param, captures, body, outcome)
     }
 
     fn continuation_closure(&mut self, body: Expression, answer: &Type) -> Result<Expression, String> {
@@ -1705,79 +1818,202 @@ impl Lowerer {
         handler: &crate::parser::HandlerDecl,
         value: Expression,
     ) -> Result<Expression, String> {
-        let ty = value.ty();
-        let args = match &ty {
-            Type::Data(name, args) if name == OUTCOME => args,
-            _ => return Err("expected outcome".into()),
-        };
-        let success = args.first().cloned().ok_or("outcome missing success type")?;
-        let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
-        let payload = args.get(2).cloned().unwrap_or(Type::Unit);
-        let id = self.next;
-        self.next += 1;
-        let variable = Expression::Variable { id, ty: ty.clone() };
-        let done_value = Expression::Project {
-            value: Box::new(variable.clone()),
-            constructor: DONE.into(),
-            index: 0,
-            result: success,
-        };
-        let done = self.apply_return_arm(handler, done_value)?;
-        let mut arms = vec![(DONE.into(), done)];
-        if handler.arms.iter().any(|arm| {
-            matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Abort, .. })
-        }) {
-            let fail = self.fail_constructor(&handler.effect);
-            let fail_value = Expression::Project {
-                value: Box::new(variable.clone()),
-                constructor: fail.clone(),
-                index: 0,
-                result: payload.clone(),
-            };
-            arms.push((fail, self.abort_arm(handler, fail_value)?));
-        }
-        if handler.arms.iter().any(|arm| {
-            matches!(arm, crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Capture, .. })
-        }) {
-            let yield_value = Expression::Project {
-                value: Box::new(variable.clone()),
-                constructor: YIELD.into(),
-                index: 0,
-                result: payload,
-            };
-            let resume = Expression::Project {
-                value: Box::new(variable.clone()),
-                constructor: YIELD.into(),
-                index: 1,
-                result: Type::Closure(vec![Type::Unit], Box::new(answer)),
-            };
-            arms.push((YIELD.into(), self.yield_arm(handler, yield_value, resume)?));
-        }
+        let incoming = value.ty();
+        let (success, answer, payload) = outcome_parts(&incoming)?;
         let forwarding = self.handler_stack.len() > 1;
-        let (arms, fallback) = if forwarding {
-            self.align_switch_arms(arms, Some(Box::new(variable.clone())))?
+        let handler_answer = self.handler_answers.last().cloned().flatten();
+        let outgoing = if forwarding {
+            Type::Data(
+                OUTCOME.into(),
+                vec![handler_answer.unwrap_or_else(|| success.clone()), answer, payload.clone()],
+            )
         } else {
-            (arms, None)
+            handler_answer.unwrap_or_else(|| success.clone())
         };
-        let result = arms
-            .first()
-            .map(|(_, body)| body.ty())
-            .or_else(|| fallback.as_ref().map(|body| body.ty()))
-            .ok_or("handler produced no arms")?;
-        if arms.iter().any(|(_, body)| body.ty() != result)
-            || fallback.as_ref().is_some_and(|body| body.ty() != result)
+        let convert_id = FunctionId(self.next_function);
+        self.next_function += 1;
+        let convert_param = self.next;
+        self.next += 1;
+        let convert = ConvertCtx {
+            incoming: incoming.clone(),
+            outgoing: outgoing.clone(),
+            success,
+            payload,
+            convert_id,
+            convert_sig: Signature {
+                parameters: vec![incoming.clone()],
+                result: outgoing.clone(),
+            },
+            forwarding,
+        };
+        let variable = Expression::Variable {
+            id: convert_param,
+            ty: incoming,
+        };
+        let arms = self.convert_arms(handler, &variable, &convert)?;
+        let fallback = forwarding.then(|| {
+            Box::new(Expression::Unreachable {
+                result: outgoing.clone(),
+            })
+        });
+        if arms.iter().any(|(_, body)| body.ty() != outgoing)
+            || fallback.as_ref().is_some_and(|body| body.ty() != outgoing)
         {
             return Err("handler arms disagree on the answer type".into());
         }
-        Ok(Expression::Let {
-            id,
-            value: Box::new(value),
-            body: Box::new(Expression::Switch {
+        self.functions.push(Function {
+            id: convert_id,
+            name: format!("convert_{}", convert_id.0),
+            signature: convert.convert_sig.clone(),
+            parameters: vec![convert_param],
+            captures: Vec::new(),
+            body: Expression::Switch {
                 value: Box::new(variable),
                 arms,
                 fallback,
-                result,
-            }),
+                result: outgoing,
+            }
+            .in_tail_position(),
+        });
+        Expression::call_direct(convert_id, &convert.convert_sig, vec![value])
+    }
+
+    fn convert_arms(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        variable: &Expression,
+        convert: &ConvertCtx,
+    ) -> Result<Vec<(String, Expression)>, String> {
+        let done = self.apply_return_arm(handler, project(variable, DONE, 0, convert.success.clone()))?;
+        let done = self.finish_convert_arm(done, convert)?;
+        let mut arms = vec![(DONE.into(), done)];
+        if handles_op(handler, crate::parser::OpKind::Abort) {
+            let fail = self.fail_constructor(&handler.effect);
+            let body = self.abort_arm(handler, project(variable, &fail, 0, convert.payload.clone()))?;
+            arms.push((fail, self.finish_convert_arm(body, convert)?));
+        }
+        if handles_op(handler, crate::parser::OpKind::Capture) {
+            arms.push(self.own_yield_arm(handler, variable, convert)?);
+        }
+        if convert.forwarding {
+            arms.extend(self.forward_yield_arms(handler, variable, convert)?);
+            arms.extend(self.forward_fail_arms(handler, variable, convert)?);
+        }
+        Ok(arms)
+    }
+
+    fn finish_convert_arm(&self, value: Expression, convert: &ConvertCtx) -> Result<Expression, String> {
+        if convert.forwarding && !is_outcome(&value.ty()) {
+            self.done(value, &convert.outgoing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    fn own_yield_arm(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        variable: &Expression,
+        convert: &ConvertCtx,
+    ) -> Result<(String, Expression), String> {
+        let constructor = self.yield_constructor(&handler.effect);
+        let yield_value = project(variable, &constructor, 0, convert.payload.clone());
+        let continuation = project(variable, &constructor, 1, convert.continuation_ty());
+        let resume = self.continuation_calling_convert(continuation, convert, convert.forwarding)?;
+        let body = self.yield_arm(handler, yield_value, resume)?;
+        Ok((constructor, self.finish_convert_arm(body, convert)?))
+    }
+
+    fn forward_yield_arms(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        variable: &Expression,
+        convert: &ConvertCtx,
+    ) -> Result<Vec<(String, Expression)>, String> {
+        let effects: Vec<_> = self.yield_ids.keys().cloned().collect();
+        let mut arms = Vec::new();
+        for effect in effects {
+            if effect == handler.effect {
+                continue;
+            }
+            let constructor = self.yield_constructor(&effect);
+            let payload_value = project(variable, &constructor, 0, convert.payload.clone());
+            let continuation = project(variable, &constructor, 1, convert.continuation_ty());
+            let wrapped = self.continuation_calling_convert(continuation, convert, false)?;
+            arms.push((
+                constructor.clone(),
+                Expression::Construct {
+                    constructor,
+                    fields: vec![payload_value, wrapped],
+                    result: convert.outgoing.clone(),
+                },
+            ));
+        }
+        Ok(arms)
+    }
+
+    fn forward_fail_arms(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        variable: &Expression,
+        convert: &ConvertCtx,
+    ) -> Result<Vec<(String, Expression)>, String> {
+        let effects: Vec<_> = self.fail_ids.keys().cloned().collect();
+        let mut arms = Vec::new();
+        for effect in effects {
+            if effect == handler.effect {
+                continue;
+            }
+            let constructor = self.fail_constructor(&effect);
+            let payload_value = project(variable, &constructor, 0, convert.payload.clone());
+            arms.push((
+                constructor.clone(),
+                Expression::Construct {
+                    constructor,
+                    fields: vec![payload_value],
+                    result: convert.outgoing.clone(),
+                },
+            ));
+        }
+        Ok(arms)
+    }
+
+    fn continuation_calling_convert(
+        &mut self,
+        continuation: Expression,
+        convert: &ConvertCtx,
+        take_answer: bool,
+    ) -> Result<Expression, String> {
+        let continuation_ty = continuation.ty();
+        let captured = self.next;
+        self.next += 1;
+        let param = self.next;
+        self.next += 1;
+        let called = Expression::call_closure(
+            Expression::Variable {
+                id: captured,
+                ty: continuation_ty.clone(),
+            },
+            vec![Expression::Constant(Constant::Unit)],
+        )?;
+        let mut body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
+        if take_answer && is_outcome(&body.ty()) {
+            body = self.take_done(body)?;
+        }
+        let id = FunctionId(self.next_function);
+        self.next_function += 1;
+        let result = body.ty();
+        let closure = self.continuation_function(
+            id,
+            param,
+            vec![(captured, continuation_ty)],
+            body.in_tail_position(),
+            &result,
+        )?;
+        Ok(Expression::Let {
+            id: captured,
+            value: Box::new(continuation),
+            body: Box::new(closure),
         })
     }
 
@@ -2592,17 +2828,25 @@ mod tests {
     fn fail_tags_are_dense_and_injective() {
         let mut lowerer = Lowerer::default();
         let mut tags = std::collections::BTreeSet::new();
-        for index in 0..32u32 {
+        for index in 0..16u32 {
             let effect = format!("Eff{index}");
             let constructor = lowerer.fail_constructor(&effect);
             let tag = outcome_tag(&constructor).unwrap();
             assert_eq!(constructor, format!("$Fail#{tag}"));
             assert_ne!(tag, 0);
-            assert_ne!(tag, 2);
             assert_eq!(lowerer.fail_tag_for(&effect), tag);
             assert!(tags.insert(tag), "assigned tag collided at {index}");
         }
+        for index in 0..16u32 {
+            let effect = format!("Cap{index}");
+            let constructor = lowerer.yield_constructor(&effect);
+            let tag = outcome_tag(&constructor).unwrap();
+            assert_eq!(constructor, format!("$Yield#{tag}"));
+            assert_ne!(tag, 0);
+            assert!(tags.insert(tag), "yield tag collided with fail at {index}");
+        }
         assert_eq!(tags.len(), 32);
+        assert_eq!(tags.iter().copied().collect::<Vec<_>>(), (1..=32).collect::<Vec<_>>());
     }
 
     #[test]
