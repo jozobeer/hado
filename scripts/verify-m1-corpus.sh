@@ -37,13 +37,13 @@ awk -F '|' '
     }
 ' "$TMPD/sec50.txt" >"$TMPD/codes.tsv"
 
-# --- shared: corpus item names (coverage column extraction, 2.2, 9.2, 11.2 and 13.2 rows) ---
+# --- shared: corpus item names (coverage column extraction, 2.2, 9.2, 11.2, 13.2 and 18.4 rows) ---
 awk -F '|' '
     {
         t=$2; name=$3
         gsub(/^ +| +$/, "", t)
         gsub(/^ +| +$/, "", name)
-        if (t != "2.2" && t != "9.2" && t != "11.2" && t != "13.2") next
+        if (t != "2.2" && t != "9.2" && t != "11.2" && t != "13.2" && t != "18.4") next
         if (name == "" || name == "項目名") next
         print name
     }
@@ -129,12 +129,12 @@ else
     fail 2 "sec39-examples:$c2_reasons"
 fi
 
-# --- check 3: accept covers all items of plan 2.2, 9.2, 11.2 and 13.2; reject covers all but the 2 exempt ---
+# --- check 3: accept covers all items of plan 2.2, 9.2, 11.2, 13.2 and 18.4; reject covers all but the exempt ---
 c3_reasons=""
 n_items=$(wc -l <"$TMPD/items22.txt" | tr -d ' ')
 n_plan=$(awk -F '|' '
-    /^### 2\.2/ || /^### 9\.2/ || /^### 11\.2/ || /^### 13\.2/ { p=1; next }
-    /^### 2\.3/ || /^### 9\.3/ || /^### 11\.3/ || /^### 13\.3/ { p=0 }
+    /^### 2\.2/ || /^### 9\.2/ || /^### 11\.2/ || /^### 13\.2/ || /^### 18\.4 仕様の項目/ { p=1; next }
+    /^### 2\.3/ || /^### 9\.3/ || /^### 11\.3/ || /^### 13\.3/ || /^### 18\.5/ { p=0 }
     p {
         name=$2
         gsub(/^ +| +$/, "", name)
@@ -159,10 +159,12 @@ while IFS= read -r name || [ -n "$name" ]; do
         grep -qFx -- "// item: $name" "$f" && nr=$((nr + 1))
     done
     [ "$na" -ge 1 ] || c3_reasons="$c3_reasons accept-missing:$name"
-    # Reject-exempt (no rejectable form by definition, docs/plan.md M1):
+    # Reject-exempt (no rejectable form by definition):
     # - 冗長の対象外: permission ("eta expansion is not redundant"), §2
     # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §48
-    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ]; then
+    # - Unit payload: E509 (Ok(())) は Result と共に消え、§50 に拒否コードが無い。
+    #   近くの拒否へ item: を寄せると被覆が嘘になる。
+    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ] && [ "$name" != "Unit payload" ]; then
         [ "$nr" -ge 1 ] || c3_reasons="$c3_reasons reject-missing:$name"
     fi
 done <"$TMPD/items22.txt"
@@ -303,7 +305,7 @@ for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
             nerror=$(grep -cE '^// error:' "$f" || true)
             [ $((nexpect + nexpect_err)) -eq 1 ] || c6_reasons="$c6_reasons $f:accept-expect-lines=$((nexpect + nexpect_err))"
             [ "$nerror" -eq 0 ] || c6_reasons="$c6_reasons $f:accept-has-error"
-            for m in 'List.map' 'List.filter' 'List.fold' 'List.length' 'List.reverse' 'List.append' 'List.sort' 'Option.map' 'Option.unwrap_or' 'Option.is_some' 'Option.ok_or' 'Result.map' 'Result.map_error' 'Result.is_ok' 'String.length' 'String.concat' 'Int.to_string' 'Float.to_string'; do
+            for m in 'List.map' 'List.filter' 'List.fold' 'List.length' 'List.reverse' 'List.append' 'List.sort' 'Option.map' 'Option.unwrap_or' 'Option.is_some' 'Option.ok_or' 'String.length' 'String.concat' 'Int.to_string' 'Float.to_string'; do
                 if grep -qF -- "$m" "$f"; then
                     grep -qE '^// needs: prelude$' "$f" || c6_reasons="$c6_reasons $f:uses-$m-without-needs-prelude"
                 fi
