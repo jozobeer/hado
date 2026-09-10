@@ -1330,7 +1330,14 @@ impl Lowerer {
         for arg in args {
             let _ = self.expression(arg)?;
         }
-        let answer = self.capture_answer_of(node)?;
+        let needs_answer = handler.arms.iter().any(|arm| {
+            matches!(
+                arm,
+                crate::parser::HandlerArm::Return { .. }
+                    | crate::parser::HandlerArm::Operation { kind: crate::parser::OpKind::Capture, .. }
+            )
+        });
+        let answer = if needs_answer { self.capture_answer_of(node)? } else { None };
         if let Some(answer) = answer.clone() {
             self.capture_answers.push(answer);
         }
@@ -2031,8 +2038,10 @@ impl Lowerer {
         };
         let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| captured.is_none()))?;
         let signature = match &captured {
-            Some(answer) => Signature { parameters: inferred.parameters.clone(), result: answer.clone() },
-            None => inferred.clone(),
+            Some(answer) if *answer != inferred.result => {
+                Signature { parameters: inferred.parameters.clone(), result: answer.clone() }
+            }
+            _ => inferred.clone(),
         };
         if params.len() != types.len() {
             return Err("function arity mismatch".into());
