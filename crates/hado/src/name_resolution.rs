@@ -1,4 +1,4 @@
-use crate::parser::{Ast, DefKind, Diagnostic, ImplementationForm, Item, Node, NodeKind, Pattern, PatternKind, Span, TypeKind};
+use crate::parser::{Ast, DefKind, Diagnostic, HandlerArm, ImplementationForm, Item, Node, NodeKind, Pattern, PatternKind, Span, TypeKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Default)]
@@ -107,6 +107,21 @@ impl Resolver<'_> {
                     if !scope.signatures.contains_key(&module.sig) { self.report(module.sig_span, "E204", &module.sig); }
                     let local = self.implementation_scope(module, &scope);
                     self.items(&module.items, &local);
+                }
+                Item::Handler(handler) => {
+                    for arm in &handler.arms {
+                        let mut local = scope.clone();
+                        match arm {
+                            HandlerArm::Operation { params, body, .. } => {
+                                local.values.extend(params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
+                                self.expression(body, &local, None, false);
+                            }
+                            HandlerArm::Return { param, body, .. } => {
+                                if param.name != "_" { local.values.insert(param.name.clone()); }
+                                self.expression(body, &local, None, false);
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

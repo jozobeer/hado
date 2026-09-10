@@ -1919,22 +1919,19 @@ impl Checker<'_> {
         };
         self.add_effects(&row.without_effect(&effect));
         let Some(decl) = self.handler_decls.get(&handler.name).cloned() else { return Ok(ty); };
-        if !decl.arms.iter().any(|arm| matches!(arm, HandlerArm::Operation { kind: OpKind::Capture, .. })) {
-            return Ok(ty);
-        }
-        self.capture_answer(&decl, &ty, &row, handler.span)
+        self.handler_answer(&decl, &ty, &row, handler.span)
     }
 
-    fn capture_answer(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, span: Span) -> Result<Ty, Diagnostic> {
+    fn handler_answer(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, span: Span) -> Result<Ty, Diagnostic> {
         let answer = self.inference.fresh();
         let saved = self.values.clone();
-        let result = self.infer_capture_arms(handler, body, row, &answer, span);
+        let result = self.infer_handler_arms(handler, body, row, &answer, span);
         self.values = saved;
         result?;
         Ok(self.inference.resolve(&answer))
     }
 
-    fn infer_capture_arms(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, answer: &Ty, span: Span) -> Result<(), Diagnostic> {
+    fn infer_handler_arms(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, answer: &Ty, span: Span) -> Result<(), Diagnostic> {
         let mut saw_return = false;
         for arm in &handler.arms {
             match arm {
@@ -1952,6 +1949,12 @@ impl Checker<'_> {
                     let ty = self.expression(ret);
                     self.resume_type = previous;
                     self.unify(&ty?, answer, *arm_span)?;
+                }
+                HandlerArm::Operation { kind: OpKind::Abort, name, params, body: ret, span: arm_span, .. } => {
+                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Unit));
+                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                    let ty = self.expression(ret)?;
+                    self.unify(&ty, answer, *arm_span)?;
                 }
                 HandlerArm::Operation { name, params, body: ret, .. } => {
                     let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Unit));

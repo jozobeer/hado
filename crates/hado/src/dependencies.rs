@@ -1,4 +1,4 @@
-use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Span, TypeExpr, TypeKind};
+use crate::parser::{Ast, DefKind, Diagnostic, HandlerArm, HandlerDecl, Item, Node, NodeKind, Span, TypeExpr, TypeKind};
 use crate::types::Ty;
 use crate::parser::ImplementationForm;
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +24,12 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     let mut used = transitive_references(&Key::Value("main".into()), &graph);
     for name in other_entry_roots {
         used.extend(transitive_references(&Key::Value(name.clone()), &graph));
+    }
+    let scope = Scope::default();
+    for item in &ast.items {
+        if let Item::Handler(handler) = item {
+            collector.handler(handler, &scope, &mut used);
+        }
     }
     let mut diagnostics: Vec<_> = ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
@@ -213,8 +219,33 @@ impl Collector<'_> {
                 }
                 self.items(&def.items, &body_scope, references);
             }
-            Item::Effect(_) | Item::Handler(_) => {}
+            Item::Effect(_) => {}
+            Item::Handler(handler) => self.handler(handler, scope, references),
         }
+    }
+
+    fn handler(&self, handler: &HandlerDecl, scope: &Scope, references: &mut References) {
+        for arm in &handler.arms {
+            match arm {
+                HandlerArm::Operation { params, body, .. } => {
+                    let mut bound = scope.values.clone();
+                    bound.extend(params.iter().map(|param| param.name.clone()));
+                    self.body(body, scope, &bound, references);
+                }
+                HandlerArm::Return { param, body, .. } => {
+                    let mut bound = scope.values.clone();
+                    bound.insert(param.name.clone());
+                    self.body(body, scope, &bound, references);
+                }
+            }
+        }
+    }
+
+    fn body(&self, body: &Node, scope: &Scope, bound: &BTreeSet<String>, references: &mut References) {
+        let mut free = BTreeSet::new();
+        crate::names::free_names(body, bound, &mut free);
+        references.extend(free.iter().filter(|name| crate::names::is_value_reference(name)).cloned().map(Key::Value));
+        self.expression(body, scope, references);
     }
 
     fn items(&self, items: &[Item], scope: &Scope, references: &mut References) {
@@ -235,10 +266,7 @@ impl Collector<'_> {
                 body
             }
         };
-        let mut free = BTreeSet::new();
-        crate::names::free_names(body, &bound, &mut free);
-        references.extend(free.iter().filter(|name| crate::names::is_value_reference(name)).cloned().map(Key::Value));
-        self.expression(body, scope, references);
+        self.body(body, scope, &bound, references);
     }
 
     fn expression(&self, node: &Node, scope: &Scope, references: &mut References) {

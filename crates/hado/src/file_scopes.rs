@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::parser::{Ast, DefKind, Item, Node, NodeKind, Param, Pattern};
+use crate::parser::{Ast, DefKind, HandlerArm, HandlerDecl, Item, Node, NodeKind, Param, Pattern};
 
 pub(crate) fn isolate(ast: &mut Ast, file_index: usize) -> Vec<String> {
     let scope = FileScope {
@@ -13,11 +13,13 @@ pub(crate) fn isolate(ast: &mut Ast, file_index: usize) -> Vec<String> {
         Vec::new()
     };
     for item in &mut ast.items {
-        if let Item::Def(definition) = item {
-            definition.name = scope.internal_name(&definition.name);
-            scope.definition(&mut definition.kind, &BTreeSet::new());
-        } else {
-            scope.module(item, &BTreeSet::new());
+        match item {
+            Item::Def(definition) => {
+                definition.name = scope.internal_name(&definition.name);
+                scope.definition(&mut definition.kind, &BTreeSet::new());
+            }
+            Item::Handler(handler) => scope.handler(handler, &BTreeSet::new()),
+            _ => scope.module(item, &BTreeSet::new()),
         }
     }
     roots
@@ -65,6 +67,15 @@ impl FileScope {
             match item {
                 Item::Def(definition) => self.definition(&mut definition.kind, &bound),
                 _ => self.module(item, &bound),
+            }
+        }
+    }
+
+    fn handler(&self, handler: &mut HandlerDecl, inherited: &BTreeSet<String>) {
+        for arm in &mut handler.arms {
+            match arm {
+                HandlerArm::Operation { params, body, .. } => self.function(params, body, inherited),
+                HandlerArm::Return { param, body, .. } => self.function(std::slice::from_ref(param), body, inherited),
             }
         }
     }
