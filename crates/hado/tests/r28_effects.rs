@@ -123,3 +123,34 @@ fn abort_arm_can_call_an_effectful_function() {
         assert_eq!(stdout, format!("{}\n", success + add));
     }
 }
+
+fn fnv1a_odd(effect: &str) -> u32 {
+    let mut hash: u32 = 2166136261;
+    for byte in effect.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    hash | 1
+}
+
+fn colliding_effect_names() -> (String, String) {
+    let mut seen = std::collections::HashMap::new();
+    for index in 0..1_000_000u32 {
+        let name = format!("E{index}");
+        if let Some(previous) = seen.insert(fnv1a_odd(&name), name.clone()) {
+            return (previous, name);
+        }
+    }
+    panic!("no colliding effect names in search range");
+}
+
+#[test]
+fn hashed_fail_tags_that_collided_stay_distinct() {
+    let (outer, inner) = colliding_effect_names();
+    assert_eq!(fnv1a_odd(&outer), fnv1a_odd(&inner));
+    let (status, stdout) = run_main(&format!(
+        "effect {outer}\nabort a\neffect {inner}\nabort b\nhandler {outer} as Outer\nabort a => 7\nreturn x => x + 10\nhandler {inner} as Inner\nabort b => 2\nreturn x => x + 100\ndef f (n: Int): Int {{{outer}}} => if n > 0 => n | a\ndef main = with Outer -> with Inner -> f 0\n"
+    ));
+    assert_eq!(status, 0);
+    assert_eq!(stdout, "7\n");
+}
