@@ -1,0 +1,12 @@
+// spec: §58
+// expect: 101
+effect A
+abort a
+handler A as G
+abort a => 99
+return x => x + 100
+handler A as H
+abort a => f 1
+return x => x + 10
+def f (n: Int): Int {A} => if n > 0 => n | a
+def main = with G -> with H -> f 0
