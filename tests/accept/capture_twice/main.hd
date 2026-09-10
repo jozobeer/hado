@@ -1,0 +1,8 @@
+// spec: §58
+// expect: [1, 2]
+effect Y
+capture y(value: Int): Unit
+handler Y as Collect
+capture y value => let rest = resume () -> [value, ...rest]
+return _ => []
+def main = with Collect -> do y 1 -> do y 2 -> ()

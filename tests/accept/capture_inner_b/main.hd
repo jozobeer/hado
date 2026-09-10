@@ -1,0 +1,12 @@
+// spec: §58
+// expect: [2]
+effect Y
+capture y(value: Int): Unit
+effect B
+reply b: Int
+handler Y as Collect
+capture y value => let rest = resume () -> [value, ...rest]
+return _ => []
+handler B as Inner
+reply b => 2
+def main = with Collect -> with Inner -> do y b -> ()

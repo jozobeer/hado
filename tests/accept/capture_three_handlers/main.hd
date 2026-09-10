@@ -1,0 +1,16 @@
+// spec: §58
+// expect: [3]
+effect A
+reply a: Int
+effect Y
+capture y(value: Int): Unit
+effect B
+reply b: Int
+handler A as Outer
+reply a => 1
+handler Y as Collect
+capture y value => let rest = resume () -> [value, ...rest]
+return _ => []
+handler B as Inner
+reply b => 2
+def main = with Outer -> with Collect -> with Inner -> do y (a + b) -> ()
