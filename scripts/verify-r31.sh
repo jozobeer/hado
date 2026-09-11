@@ -179,5 +179,45 @@ check '31-k generated 31-a' check_prints generated_a "[$payload_b]"
 check '31-k generated 31-c' check_prints generated_c "[$payload_b, $payload_a, $payload_c]"
 check '31-k generated 31-f' check_prints generated_f "[$payload_b, $((payload_a + 100))]"
 
+write_ask_source() {
+    local kind=$1 seed=$2
+    mkdir -p "$workdir/$kind"
+    cat >"$workdir/$kind/main.hd" <<EOF
+effect Ask
+capture ask(seed: Int): Int
+handler Ask as Twice
+capture ask seed => resume (seed * 2)
+return x => x
+def main = with Twice -> let v = ask $seed -> [v]
+EOF
+}
+
+write_mixed_source() {
+    local kind=$1 body=$2 prefix=$3
+    mkdir -p "$workdir/$kind"
+    cat >"$workdir/$kind/main.hd" <<EOF
+effect S
+capture s(value: String): Unit
+effect Y
+capture y(value: Int): Unit
+handler S as Names
+capture s value => let rest = resume () -> [value, ...rest]
+return x => x
+handler Y as Collect
+capture y value => let rest = resume () -> [String.concat "$prefix" (Int.to_string value), ...rest]
+return _ => []
+def main = with Names -> with Collect -> $body
+EOF
+}
+
+write_ask_source h 21
+write_ask_source generated_h "$payload_a"
+write_mixed_source i 'do s "a" -> do y 1 -> ()' n
+write_mixed_source j 'do y 1 -> do s "b" -> ()' ''
+check '31-h non-Unit capture result' check_prints h '[42]'
+check '31-i mixed payloads' check_prints i '["a", "n1"]'
+check '31-j mixed payloads through resume' check_prints j '["b", "1"]'
+check '31-k generated 31-h' check_prints generated_h "[$((payload_a * 2))]"
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
