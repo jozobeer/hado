@@ -1,0 +1,14 @@
+// spec: §58
+// expect: ["a", "n1"]
+// needs: prelude
+effect S
+capture s(value: String): Unit
+effect Y
+capture y(value: Int): Unit
+handler S as Names
+capture s value => let rest = resume () -> [value, ...rest]
+return x => x
+handler Y as Collect
+capture y value => let rest = resume () -> [String.concat "n" (Int.to_string value), ...rest]
+return _ => []
+def main = with Names -> with Collect -> do s "a" -> do y 1 -> ()
