@@ -63,15 +63,6 @@ check_prints() {
     fi
 }
 
-rejects_build() {
-    local kind=$1
-    rm -f "$workdir/$kind/main"
-    if "$compiler" build "$workdir/$kind/main.hd" 2>"$workdir/$kind/err"; then
-        return 1
-    fi
-    [ ! -e "$workdir/$kind/main" ]
-}
-
 write_source a "$(cat <<EOF
 effect Y
 capture y(value: Int): Unit
