@@ -62,3 +62,11 @@ fn pattern_scrutinee_is_evaluated_before_its_arm() {
         "type Box = | Empty | Full(Unit)\ndef main = with Keep -> if Full(y {a}) | Full(_) => [{b}] | Empty => []"
     ), &[a, b]);
 }
+
+#[test]
+fn capture_arguments_are_evaluated_before_the_outer_operation() {
+    let (a, b) = payloads();
+    run_main(&format!(
+        "def n u => if u == () => {b} | 0\ndef main = with Keep -> do y (n (y {a})) -> [7]"
+    ), &[a, b, 7]);
+}
