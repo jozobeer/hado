@@ -333,6 +333,56 @@ pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String
 }
 
 impl Lowerer {
+    fn contains_capture(&self, node: &crate::parser::Node) -> bool {
+        self.is_capture_node(node)
+            || crate::check::children(node).iter().any(|child| self.contains_capture(child))
+    }
+
+    fn lift_capture_arguments(&mut self, node: &crate::parser::Node) -> Option<crate::parser::Node> {
+        use crate::parser::{BinOp, NodeKind::*};
+        let mut result = node.clone();
+        if let Pipe(value, target) = &node.kind {
+            let (callee, mut args) = match &target.kind {
+                Apply(callee, args) => (callee.clone(), args.clone()),
+                _ => (target.clone(), Vec::new()),
+            };
+            args.insert(0, *value.clone());
+            result.kind = Apply(callee, args);
+        }
+        let children: Vec<&mut crate::parser::Node> = match &mut result.kind {
+            Apply(_, args) | Call(_, args) => args.iter_mut().collect(),
+            Neg(value) | Not(value) | Field(value, _) => vec![value],
+            Bin(BinOp::And | BinOp::Or, left, _) => vec![left],
+            Bin(_, left, right) => vec![left, right],
+            List(items, tail) => items.iter_mut().chain(tail.iter_mut().map(Box::as_mut)).collect(),
+            Record(fields) | NamedConstructor(_, fields) => fields.iter_mut().map(|(_, value)| value).collect(),
+            BoolBranch { cond, .. } => vec![cond],
+            PatternBranch { scrutinee, .. } => vec![scrutinee],
+            _ => Vec::new(),
+        };
+        if !children.iter().any(|child| self.contains_capture(child)) {
+            return None;
+        }
+        let mut bindings = Vec::new();
+        for child in children {
+            let name = format!("$anf{}", self.next);
+            self.next += 1;
+            let value = child.clone();
+            child.kind = Name(name.clone());
+            bindings.push((crate::parser::Pattern {
+                kind: crate::parser::PatternKind::Name(name),
+                span: child.span,
+            }, value));
+        }
+        for (pat, value) in bindings.into_iter().rev() {
+            result = crate::parser::Node {
+                span: node.span,
+                kind: Let { pat, value: Box::new(value), body: Box::new(result) },
+            };
+        }
+        Some(result)
+    }
+
     fn expression_at(
         &mut self,
         node: &crate::parser::Node,
@@ -346,6 +396,9 @@ impl Lowerer {
 
     fn expression(&mut self, node: &crate::parser::Node) -> Result<Expression, String> {
         use crate::parser::NodeKind;
+        if let Some(normalized) = self.lift_capture_arguments(node) {
+            return self.expression(&normalized);
+        }
         if let NodeKind::Pipe(value, target) = &node.kind {
             let mut arguments = vec![self.expression_at(value, false)?];
             let callee = if let NodeKind::Apply(callee, args) = &target.kind {
@@ -442,12 +495,27 @@ impl Lowerer {
         }
         if let NodeKind::DoQ { value, body } = &node.kind {
             if self.is_capture_node(value) {
-                return self.capture_do(value, body);
+                return self.capture_do(value, body, None);
             }
             if self.is_abort_node(value) && self.handler_for_node(value).is_some() {
                 return self.expression(value);
             }
             let source = self.expression_at(value, false)?;
+            if is_outcome(&source.ty()) && self.contains_capture(value) {
+                let name = format!("$do{}", self.next);
+                self.next += 1;
+                let pat = crate::parser::Pattern {
+                    kind: crate::parser::PatternKind::Name(name.clone()), span: value.span,
+                };
+                let rest = crate::parser::Node {
+                    kind: NodeKind::DoQ {
+                        value: Box::new(crate::parser::Node { kind: NodeKind::Name(name), span: value.span }),
+                        body: body.clone(),
+                    },
+                    span: node.span,
+                };
+                return self.bind_capture_outcome(&pat, source, &rest);
+            }
             if matches!(&source.ty(), Type::Data(name, args) if name == "Option" && args.len() == 1) {
                 return self.option_propagation(None, source, body);
             }
@@ -460,8 +528,15 @@ impl Lowerer {
             });
         }
         if let NodeKind::Let { pat, value, body } = &node.kind {
+            if self.is_capture_node(value) {
+                return self.capture_do(value, body, Some(pat));
+            }
+            let captures = self.contains_capture(value);
             let value = self.expression_at(value, false)?;
             if is_outcome(&value.ty()) {
+                if captures {
+                    return self.bind_capture_outcome(pat, value, body);
+                }
                 return self.propagate_outcome(pat, value, body);
             }
             return self.bound_body(pat, value, body);
@@ -536,10 +611,12 @@ impl Lowerer {
         let left = self.expression_at(left, false)?;
         let right = self.expression_at(right, false)?;
         if op == BinOp::And {
-            return branch(left, right, Expression::Constant(Constant::Bool(false)));
+            let (right, otherwise) = self.align_outcomes(right, Expression::Constant(Constant::Bool(false)))?;
+            return branch(left, right, otherwise);
         }
         if op == BinOp::Or {
-            return branch(left, Expression::Constant(Constant::Bool(true)), right);
+            let (then, right) = self.align_outcomes(Expression::Constant(Constant::Bool(true)), right)?;
+            return branch(left, then, right);
         }
         if !matches!(
             op,
@@ -1459,7 +1536,9 @@ impl Lowerer {
         let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
         self.handler_answers.push(answer.clone());
+        let tail = std::mem::replace(&mut self.syntax_tail, true);
         let value = self.completion(body);
+        self.syntax_tail = tail;
         self.handler_stack.pop();
         self.handler_answers.pop();
         self.rewriting_return = saved;
@@ -1648,7 +1727,20 @@ impl Lowerer {
         &mut self,
         value: &crate::parser::Node,
         rest: &crate::parser::Node,
+        pat: Option<&crate::parser::Pattern>,
     ) -> Result<Expression, String> {
+        if let Some(value) = self.lift_capture_arguments(value) {
+            let pat = pat.cloned().unwrap_or(crate::parser::Pattern {
+                kind: crate::parser::PatternKind::Underscore, span: value.span,
+            });
+            let node = crate::parser::Node {
+                span: value.span,
+                kind: crate::parser::NodeKind::Let {
+                    pat, value: Box::new(value), body: Box::new(rest.clone()),
+                },
+            };
+            return self.expression(&node);
+        }
         let name = self.operation_name(value).ok_or("capture do without operation")?.to_string();
         let arguments = match &value.kind {
             crate::parser::NodeKind::Apply(_, args) | crate::parser::NodeKind::Call(_, args) => {
@@ -1656,18 +1748,15 @@ impl Lowerer {
             }
             _ => Vec::new(),
         };
-        self.capture_operation(&name, arguments, Some(rest))
+        self.capture_operation(&name, arguments, Some((rest, pat)))
     }
 
     fn capture_operation(
         &mut self,
         name: &str,
         arguments: Vec<Expression>,
-        rest: Option<&crate::parser::Node>,
+        rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
     ) -> Result<Expression, String> {
-        if rest.is_none() && !self.syntax_tail {
-            return Err("capture requires do or tail position".into());
-        }
         let handler = self.handler_for(name).cloned().ok_or("unhandled capture")?;
         if self.capture_escapes_prompt(&handler) {
             return Err("resume cannot yield a capture handled outside this handler".into());
@@ -1678,7 +1767,7 @@ impl Lowerer {
         let payload = value.ty();
         let outcome = Type::Data(OUTCOME.into(), vec![Type::Unit, answer, payload]);
         let continuation = match rest {
-            Some(body) => self.continuation_under(&handler, body, &outcome)?,
+            Some((body, pat)) => self.continuation_under(&handler, body, pat, &outcome)?,
             None => {
                 let unit = self.done(Expression::Constant(Constant::Unit), &outcome)?;
                 self.continuation_closure(unit, &outcome)?
@@ -1686,8 +1775,11 @@ impl Lowerer {
         };
         Ok(Expression::Construct {
             constructor,
+            result: match continuation.ty() {
+                Type::Closure(_, result) => *result,
+                _ => return Err("capture continuation is not a closure".into()),
+            },
             fields: vec![value, continuation],
-            result: outcome,
         })
     }
 
@@ -1708,11 +1800,12 @@ impl Lowerer {
         &mut self,
         handler: &crate::parser::HandlerDecl,
         body: &crate::parser::Node,
+        pat: Option<&crate::parser::Pattern>,
         outcome: &Type,
     ) -> Result<Expression, String> {
         let prompt = self.handler_index(handler).ok_or("capture handler not on stack")?;
         self.continuation_prompts.push(prompt);
-        let continuation = self.make_continuation(body, outcome);
+        let continuation = self.make_continuation(body, pat, outcome);
         self.continuation_prompts.pop();
         continuation
     }
@@ -1720,6 +1813,7 @@ impl Lowerer {
     fn make_continuation(
         &mut self,
         body: &crate::parser::Node,
+        pat: Option<&crate::parser::Pattern>,
         outcome: &Type,
     ) -> Result<Expression, String> {
         let saved = std::mem::take(&mut self.scope);
@@ -1733,19 +1827,36 @@ impl Lowerer {
         self.next += 1;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        let lowered = self.expression(body);
+        let input = outcome_parts(outcome)?.0;
+        let lowered = match pat {
+            Some(pat) => self.bound_body(pat, Expression::Variable { id: param, ty: input.clone() }, body),
+            None => self.expression_at(body, true),
+        };
         self.scope = saved;
         let lowered = lowered?;
         let body = if is_outcome(&lowered.ty()) {
             lowered
         } else {
-            self.done(lowered, outcome)?
+            let (_, answer, payload) = outcome_parts(outcome)?;
+            let result = Type::Data(OUTCOME.into(), vec![lowered.ty(), answer, payload]);
+            self.done(lowered, &result)?
         }
         .in_tail_position();
-        if body.ty() != *outcome {
+        let result = body.ty();
+        if outcome_parts(&result)?.1 != outcome_parts(outcome)?.1
+            || outcome_parts(&result)?.2 != outcome_parts(outcome)?.2
+        {
             return Err("continuation result type mismatch".into());
         }
-        self.continuation_function(id, param, captures, body, outcome)
+        let signature = Signature { parameters: vec![input], result };
+        self.functions.push(Function {
+            id, name: format!("cont_{}", id.0), signature: signature.clone(),
+            parameters: vec![param], captures: captures.clone(), body,
+        });
+        Ok(Expression::MakeClosure {
+            function: id, signature,
+            captures: captures.into_iter().map(|(id, ty)| Expression::Variable { id, ty }).collect(),
+        })
     }
 
     fn continuation_closure(&mut self, body: Expression, answer: &Type) -> Result<Expression, String> {
@@ -2192,6 +2303,88 @@ impl Lowerer {
             fields: vec![value],
             result: outcome.clone(),
         })
+    }
+
+    fn bind_capture_outcome(
+        &mut self,
+        pat: &crate::parser::Pattern,
+        value: Expression,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let incoming = value.ty();
+        let continuation = self.make_continuation(body, Some(pat), &incoming)?;
+        let Type::Closure(_, outgoing) = continuation.ty() else {
+            return Err("binding continuation is not a closure".into());
+        };
+        let signature = Signature {
+            parameters: vec![incoming.clone(), continuation.ty()],
+            result: *outgoing,
+        };
+        let id = FunctionId(self.next_function);
+        self.next_function += 1;
+        self.capture_bind_function(id, &signature)?;
+        Expression::call_direct(id, &signature, vec![value, continuation])
+    }
+
+    fn capture_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
+        let parameters = vec![self.next, self.next + 1];
+        self.next += 2;
+        let value = Expression::Variable { id: parameters[0], ty: signature.parameters[0].clone() };
+        let rest = Expression::Variable { id: parameters[1], ty: signature.parameters[1].clone() };
+        let (success, _, payload) = outcome_parts(&value.ty())?;
+        let mut arms = vec![(DONE.into(), Expression::call_closure(
+            rest.clone(), vec![project(&value, DONE, 0, success)],
+        )?)];
+        for effect in self.yield_ids.keys().cloned().collect::<Vec<_>>() {
+            let constructor = self.yield_constructor(&effect);
+            let continuation = self.capture_bind_yield(&constructor, id, signature, &value, &rest)?;
+            arms.push((constructor.clone(), Expression::Construct {
+                fields: vec![project(&value, &constructor, 0, payload.clone()), continuation],
+                constructor,
+                result: signature.result.clone(),
+            }));
+        }
+        for effect in self.fail_ids.keys().cloned().collect::<Vec<_>>() {
+            let constructor = self.fail_constructor(&effect);
+            arms.push((constructor.clone(), Expression::Construct {
+                fields: vec![project(&value, &constructor, 0, payload.clone())],
+                constructor,
+                result: signature.result.clone(),
+            }));
+        }
+        self.functions.push(Function {
+            id,
+            name: format!("bind_{}", id.0),
+            signature: signature.clone(),
+            parameters,
+            captures: Vec::new(),
+            body: Expression::Switch {
+                value: Box::new(value), arms, fallback: None, result: signature.result.clone(),
+            }.in_tail_position(),
+        });
+        Ok(())
+    }
+
+    fn capture_bind_yield(
+        &mut self,
+        constructor: &str,
+        bind: FunctionId,
+        signature: &Signature,
+        value: &Expression,
+        rest: &Expression,
+    ) -> Result<Expression, String> {
+        let continuation = project(value, constructor, 1, Type::Closure(vec![Type::Unit], Box::new(value.ty())));
+        let resumed = Expression::call_closure(continuation, vec![Expression::Constant(Constant::Unit)])?;
+        let body = Expression::call_direct(bind, signature, vec![resumed, rest.clone()])?;
+        let captures = [value, rest].into_iter().map(|value| match value {
+            Expression::Variable { id, ty } => Ok((*id, ty.clone())),
+            _ => Err("capture bind requires variables".to_string()),
+        }).collect::<Result<Vec<_>, _>>()?;
+        let id = FunctionId(self.next_function);
+        self.next_function += 1;
+        let param = self.next;
+        self.next += 1;
+        self.continuation_function(id, param, captures, body.in_tail_position(), &signature.result)
     }
 
     fn propagate_outcome(
