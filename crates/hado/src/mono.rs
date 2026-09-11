@@ -318,7 +318,6 @@ struct Lowerer {
     capture_answers: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
-    continuation_prompts: Vec<usize>,
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
     next_fail_tag: u32,
@@ -334,6 +333,8 @@ pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String
 impl Lowerer {
     fn contains_capture(&self, node: &crate::parser::Node) -> bool {
         self.is_capture_node(node)
+            || (matches!(node.kind, crate::parser::NodeKind::Resume)
+                && matches!(&self.resume_binding, Some((_, Type::Closure(_, result))) if is_outcome(result)))
             || crate::check::children(node).iter().any(|child| self.contains_capture(child))
     }
 
@@ -1744,16 +1745,13 @@ impl Lowerer {
         rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
     ) -> Result<Expression, String> {
         let handler = self.handler_for(name).cloned().ok_or("unhandled capture")?;
-        if self.capture_escapes_prompt(&handler) {
-            return Err("resume cannot yield a capture handled outside this handler".into());
-        }
         let answer = self.answer_for_handler(&handler)?;
         let constructor = self.yield_constructor(&handler.effect);
         let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
         let payload = value.ty();
         let outcome = Type::Data(OUTCOME.into(), vec![Type::Unit, answer, payload]);
         let continuation = match rest {
-            Some((body, pat)) => self.continuation_under(&handler, body, pat, &outcome)?,
+            Some((body, pat)) => self.make_continuation(body, pat, &outcome)?,
             None => {
                 let unit = self.done(Expression::Constant(Constant::Unit), &outcome)?;
                 self.continuation_closure(unit, &outcome)?
@@ -1767,33 +1765,6 @@ impl Lowerer {
             },
             fields: vec![value, continuation],
         })
-    }
-
-    fn capture_escapes_prompt(&self, handler: &crate::parser::HandlerDecl) -> bool {
-        let Some(&prompt) = self.continuation_prompts.last() else {
-            return false;
-        };
-        self.handler_index(handler).is_some_and(|here| here < prompt)
-    }
-
-    fn handler_index(&self, handler: &crate::parser::HandlerDecl) -> Option<usize> {
-        self.handler_stack
-            .iter()
-            .rposition(|entry| handler.name == entry.name && handler.effect == entry.effect)
-    }
-
-    fn continuation_under(
-        &mut self,
-        handler: &crate::parser::HandlerDecl,
-        body: &crate::parser::Node,
-        pat: Option<&crate::parser::Pattern>,
-        outcome: &Type,
-    ) -> Result<Expression, String> {
-        let prompt = self.handler_index(handler).ok_or("capture handler not on stack")?;
-        self.continuation_prompts.push(prompt);
-        let continuation = self.make_continuation(body, pat, outcome);
-        self.continuation_prompts.pop();
-        continuation
     }
 
     fn make_continuation(
@@ -2023,7 +1994,7 @@ impl Lowerer {
         let constructor = self.yield_constructor(&handler.effect);
         let yield_value = project(variable, &constructor, 0, convert.payload.clone());
         let continuation = project(variable, &constructor, 1, convert.continuation_ty());
-        let resume = self.continuation_calling_convert(continuation, convert, convert.forwarding)?;
+        let resume = self.continuation_calling_convert(continuation, convert)?;
         let body = self.yield_arm(handler, yield_value, resume)?;
         Ok((constructor, self.finish_convert_arm(body, convert)?))
     }
@@ -2043,7 +2014,7 @@ impl Lowerer {
             let constructor = self.yield_constructor(&effect);
             let payload_value = project(variable, &constructor, 0, convert.payload.clone());
             let continuation = project(variable, &constructor, 1, convert.continuation_ty());
-            let wrapped = self.continuation_calling_convert(continuation, convert, false)?;
+            let wrapped = self.continuation_calling_convert(continuation, convert)?;
             arms.push((
                 constructor.clone(),
                 Expression::Construct {
@@ -2086,7 +2057,6 @@ impl Lowerer {
         &mut self,
         continuation: Expression,
         convert: &ConvertCtx,
-        take_answer: bool,
     ) -> Result<Expression, String> {
         let continuation_ty = continuation.ty();
         let captured = self.next;
@@ -2100,10 +2070,7 @@ impl Lowerer {
             },
             vec![Expression::Constant(Constant::Unit)],
         )?;
-        let mut body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
-        if take_answer && is_outcome(&body.ty()) {
-            body = self.take_done(body)?;
-        }
+        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         let result = body.ty();
@@ -2170,7 +2137,7 @@ impl Lowerer {
         let saved_resume = self.resume_binding.replace((id, resume_ty));
         let result = self.with_params(&params, vec![value], |this| {
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let result = this.expression(&body).and_then(|value| this.finish_handler(value));
+            let result = this.expression(&body);
             this.rewriting_return = saved;
             result
         });
