@@ -318,7 +318,6 @@ struct Lowerer {
     capture_answers: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
-    syntax_tail: bool,
     continuation_prompts: Vec<usize>,
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
@@ -329,7 +328,7 @@ struct Lowerer {
 }
 
 pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String> {
-    Lowerer::default().expression_at(node, true)
+    Lowerer::default().expression(node)
 }
 
 impl Lowerer {
@@ -383,27 +382,16 @@ impl Lowerer {
         Some(result)
     }
 
-    fn expression_at(
-        &mut self,
-        node: &crate::parser::Node,
-        syntax_tail: bool,
-    ) -> Result<Expression, String> {
-        let saved = std::mem::replace(&mut self.syntax_tail, syntax_tail);
-        let result = self.expression(node);
-        self.syntax_tail = saved;
-        result
-    }
-
     fn expression(&mut self, node: &crate::parser::Node) -> Result<Expression, String> {
         use crate::parser::NodeKind;
         if let Some(normalized) = self.lift_capture_arguments(node) {
             return self.expression(&normalized);
         }
         if let NodeKind::Pipe(value, target) = &node.kind {
-            let mut arguments = vec![self.expression_at(value, false)?];
+            let mut arguments = vec![self.expression(value)?];
             let callee = if let NodeKind::Apply(callee, args) = &target.kind {
                 for arg in args {
-                    arguments.push(self.expression_at(arg, false)?);
+                    arguments.push(self.expression(arg)?);
                 }
                 callee.as_ref()
             } else {
@@ -414,7 +402,7 @@ impl Lowerer {
         if let NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) = &node.kind {
             let arguments = args
                 .iter()
-                .map(|arg| self.expression_at(arg, false))
+                .map(|arg| self.expression(arg))
                 .collect::<Result<Vec<_>, _>>()?;
             return self.application(node, callee, arguments);
         }
@@ -426,7 +414,7 @@ impl Lowerer {
                     return self.definition_reference(&qualified, node.span);
                 }
             }
-            let record = self.expression_at(record, false)?;
+            let record = self.expression(record)?;
             return self.record_get(record, &field.name);
         }
         if let NodeKind::NamedConstructor(name, fields) = &node.kind {
@@ -441,7 +429,7 @@ impl Lowerer {
                 .map_err(|_| "record type is not concrete")?;
             let fields = fields
                 .iter()
-                .map(|(name, value)| Ok((name.name.clone(), self.expression_at(value, false)?)))
+                .map(|(name, value)| Ok((name.name.clone(), self.expression(value)?)))
                 .collect::<Result<Vec<_>, String>>()?;
             return Ok(Expression::Record { fields, result });
         }
@@ -453,10 +441,10 @@ impl Lowerer {
                 .clone();
             let values = items
                 .iter()
-                .map(|item| self.expression_at(item, false))
+                .map(|item| self.expression(item))
                 .collect::<Result<Vec<_>, _>>()?;
             let mut list = match tail {
-                Some(tail) => self.expression_at(tail, false)?,
+                Some(tail) => self.expression(tail)?,
                 None => self.construct("Nil", vec![], &ty)?,
             };
             for value in values.into_iter().rev() {
@@ -500,7 +488,7 @@ impl Lowerer {
             if self.is_abort_node(value) && self.handler_for_node(value).is_some() {
                 return self.expression(value);
             }
-            let source = self.expression_at(value, false)?;
+            let source = self.expression(value)?;
             if is_outcome(&source.ty()) && self.contains_capture(value) {
                 let name = format!("$do{}", self.next);
                 self.next += 1;
@@ -532,7 +520,7 @@ impl Lowerer {
                 return self.capture_do(value, body, Some(pat));
             }
             let captures = self.contains_capture(value);
-            let value = self.expression_at(value, false)?;
+            let value = self.expression(value)?;
             if is_outcome(&value.ty()) {
                 if captures {
                     return self.bind_capture_outcome(pat, value, body);
@@ -556,7 +544,7 @@ impl Lowerer {
                 .ok_or("condition column requires a fallback")?;
             let mut result = self.expression(fallback)?;
             for (condition, body) in arms.iter().rev() {
-                let condition = self.expression_at(condition, false)?;
+                let condition = self.expression(condition)?;
                 let body = self.expression(body)?;
                 let (body, result_arm) = self.align_outcomes(body, result)?;
                 result = branch(condition, body, result_arm)?;
@@ -564,7 +552,7 @@ impl Lowerer {
             return Ok(result);
         }
         if let NodeKind::BoolBranch { cond, then, els } = &node.kind {
-            let condition = self.expression_at(cond, false)?;
+            let condition = self.expression(cond)?;
             let then = self.expression(then)?;
             let otherwise = self.expression(els)?;
             let (then, otherwise) = self.align_outcomes(then, otherwise)?;
@@ -587,7 +575,7 @@ impl Lowerer {
             NodeKind::Not(value) => (UnaryOp::Not, value),
             _ => return Err("expression lowering is not implemented for this node".into()),
         };
-        let value = self.expression_at(operand, false)?;
+        let value = self.expression(operand)?;
         let valid = match op {
             UnaryOp::Negate => matches!(value.ty(), Type::Int | Type::Float),
             UnaryOp::Not => value.ty() == Type::Bool,
@@ -608,8 +596,8 @@ impl Lowerer {
         right: &crate::parser::Node,
     ) -> Result<Expression, String> {
         use crate::parser::BinOp;
-        let left = self.expression_at(left, false)?;
-        let right = self.expression_at(right, false)?;
+        let left = self.expression(left)?;
+        let right = self.expression(right)?;
         if op == BinOp::And {
             let (right, otherwise) = self.align_outcomes(right, Expression::Constant(Constant::Bool(false)))?;
             return branch(left, right, otherwise);
@@ -710,7 +698,7 @@ pub fn lower_program(
     let instances: Vec<_> = checked.instantiated_modules.iter().cloned().map(Item::ModuleImpl).collect();
     lowerer.collect_modules(&instances, "");
     lowerer.schemes.extend(checked.module_definitions.clone());
-    let body = lowerer.expression_at(ast.main().ok_or("main must be a value definition")?, true)?;
+    let body = lowerer.expression(ast.main().ok_or("main must be a value definition")?)?;
     Ok(Program {
         entry: body.in_tail_position(),
         functions: lowerer.functions,
@@ -850,7 +838,7 @@ impl Lowerer {
                 let qualified = self.resolve_definition(&format!("{module}.{}", member.name));
                 if self.schemes.contains_key(&qualified) {
                     if self.is_value_definition(&qualified) {
-                        return Expression::call_closure(self.expression_at(callee, false)?, arguments);
+                        return Expression::call_closure(self.expression(callee)?, arguments);
                     }
                     return self.direct_call(&qualified, arguments);
                 }
@@ -859,7 +847,7 @@ impl Lowerer {
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
             return self.direct_call(name, arguments);
         }
-        Expression::call_closure(self.expression_at(callee, false)?, arguments)
+        Expression::call_closure(self.expression(callee)?, arguments)
     }
 
     fn direct_call(
@@ -887,7 +875,7 @@ impl Lowerer {
         source: &crate::parser::Node,
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
-        let value = self.expression_at(source, false)?;
+        let value = self.expression(source)?;
         self.option_propagation(pattern, value, body)
     }
 
@@ -942,7 +930,7 @@ impl Lowerer {
         arms: &[(crate::parser::Pattern, crate::parser::Node)],
         fallback: Option<&crate::parser::Node>,
     ) -> Result<Expression, String> {
-        let value = self.expression_at(scrutinee, false)?;
+        let value = self.expression(scrutinee)?;
         if let [(pattern, body)] = arms {
             if fallback.is_none() && matches!(pattern.kind, crate::parser::PatternKind::Record(_)) {
                 return self.bound_body(pattern, value, body);
@@ -1337,7 +1325,7 @@ impl Lowerer {
         let mut bindings = Vec::new();
         let mut variables = std::collections::HashMap::new();
         for (field, value) in written {
-            let value = self.expression_at(value, false)?;
+            let value = self.expression(value)?;
             let id = self.next;
             self.next += 1;
             variables.insert(field.name.clone(), Expression::Variable { id, ty: value.ty() });
@@ -1432,7 +1420,7 @@ impl Lowerer {
             if !self.scope.contains_key(name) {
                 let qualified = self.resolve_definition(name);
                 if self.is_value_definition(&qualified) {
-                    let closure = self.expression_at(callee, false)?;
+                    let closure = self.expression(callee)?;
                     return Expression::call_closure(closure, arguments);
                 }
                 let expected = self
@@ -1517,7 +1505,7 @@ impl Lowerer {
             .cloned()
             .ok_or_else(|| format!("unknown handler {name}"))?;
         for arg in args {
-            let _ = self.expression_at(arg, false)?;
+            let _ = self.expression(arg)?;
         }
         let needs_answer = handler.arms.iter().any(|arm| {
             matches!(
@@ -1536,9 +1524,7 @@ impl Lowerer {
         let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
         self.handler_answers.push(answer.clone());
-        let tail = std::mem::replace(&mut self.syntax_tail, true);
         let value = self.completion(body);
-        self.syntax_tail = tail;
         self.handler_stack.pop();
         self.handler_answers.pop();
         self.rewriting_return = saved;
@@ -1744,7 +1730,7 @@ impl Lowerer {
         let name = self.operation_name(value).ok_or("capture do without operation")?.to_string();
         let arguments = match &value.kind {
             crate::parser::NodeKind::Apply(_, args) | crate::parser::NodeKind::Call(_, args) => {
-                args.iter().map(|arg| self.expression_at(arg, false)).collect::<Result<Vec<_>, _>>()?
+                args.iter().map(|arg| self.expression(arg)).collect::<Result<Vec<_>, _>>()?
             }
             _ => Vec::new(),
         };
@@ -1830,7 +1816,7 @@ impl Lowerer {
         let input = outcome_parts(outcome)?.0;
         let lowered = match pat {
             Some(pat) => self.bound_body(pat, Expression::Variable { id: param, ty: input.clone() }, body),
-            None => self.expression_at(body, true),
+            None => self.expression(body),
         };
         self.scope = saved;
         let lowered = lowered?;
@@ -1848,15 +1834,7 @@ impl Lowerer {
         {
             return Err("continuation result type mismatch".into());
         }
-        let signature = Signature { parameters: vec![input], result };
-        self.functions.push(Function {
-            id, name: format!("cont_{}", id.0), signature: signature.clone(),
-            parameters: vec![param], captures: captures.clone(), body,
-        });
-        Ok(Expression::MakeClosure {
-            function: id, signature,
-            captures: captures.into_iter().map(|(id, ty)| Expression::Variable { id, ty }).collect(),
-        })
+        self.continuation_function(id, (param, input), captures, body, &result)
     }
 
     fn continuation_closure(&mut self, body: Expression, answer: &Type) -> Result<Expression, String> {
@@ -1864,23 +1842,23 @@ impl Lowerer {
         self.next += 1;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        self.continuation_function(id, param, Vec::new(), body.in_tail_position(), answer)
+        self.continuation_function(id, (param, Type::Unit), Vec::new(), body.in_tail_position(), answer)
     }
 
     fn continuation_function(
         &mut self,
         id: FunctionId,
-        param: usize,
+        param: (usize, Type),
         captures: Vec<(usize, Type)>,
         body: Expression,
         answer: &Type,
     ) -> Result<Expression, String> {
-        let signature = Signature { parameters: vec![Type::Unit], result: answer.clone() };
+        let signature = Signature { parameters: vec![param.1], result: answer.clone() };
         self.functions.push(Function {
             id,
             name: format!("cont_{}", id.0),
             signature: signature.clone(),
-            parameters: vec![param],
+            parameters: vec![param.0],
             captures: captures.clone(),
             body,
         });
@@ -2131,7 +2109,7 @@ impl Lowerer {
         let result = body.ty();
         let closure = self.continuation_function(
             id,
-            param,
+            (param, Type::Unit),
             vec![(captured, continuation_ty)],
             body.in_tail_position(),
             &result,
@@ -2384,7 +2362,7 @@ impl Lowerer {
         self.next_function += 1;
         let param = self.next;
         self.next += 1;
-        self.continuation_function(id, param, captures, body.in_tail_position(), &signature.result)
+        self.continuation_function(id, (param, Type::Unit), captures, body.in_tail_position(), &signature.result)
     }
 
     fn propagate_outcome(
@@ -2552,7 +2530,7 @@ impl Lowerer {
         }
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        let body = self.expression_at(body, true);
+        let body = self.expression(body);
         self.scope = saved;
         let body = body?.in_tail_position();
         if body.ty() != signature.result {
@@ -2925,7 +2903,7 @@ impl Lowerer {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         self.active.push((key.clone(), id, signature.clone()));
-        let lowered = self.expression_at(&body, true);
+        let lowered = self.expression(&body);
         self.active.pop();
         self.specialization = saved_specialization;
         self.scope = saved;
