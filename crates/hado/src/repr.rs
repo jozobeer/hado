@@ -120,11 +120,18 @@ pub fn constructor_layout(
     checked: &Checked,
     pointer_bytes: u32,
 ) -> Result<Option<AggregateLayout>, String> {
-    if let Some(fields) = crate::mono::outcome_fields(constructor, ty) {
-        let fields = fields
-            .iter()
-            .map(|field| machine_type(field, checked))
-            .collect::<Result<Vec<_>, String>>()?;
+    if matches!(ty, Type::Data(name, _) if name == crate::mono::OUTCOME) {
+        // Payloads occupy a full slot: concrete store/load types live in mono's
+        // Construct/Project nodes, while every effect shares these offsets.
+        let fields = match constructor {
+            "$Done" => {
+                let Type::Data(_, args) = ty else { unreachable!() };
+                vec![machine_type(args.first().ok_or("outcome missing success type")?, checked)?]
+            }
+            _ if constructor.starts_with("$Yield#") => vec![MachineType::I64, MachineType::Pointer],
+            _ if constructor.starts_with("$Fail#") => vec![MachineType::I64],
+            _ => return Err("unknown outcome constructor".into()),
+        };
         return Ok(Some(aggregate_layout(&fields, pointer_bytes, true)?));
     }
     let scheme = checked

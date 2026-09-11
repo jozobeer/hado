@@ -58,20 +58,6 @@ pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
     constructor.strip_prefix("$Yield#")?.parse().ok()
 }
 
-pub(crate) fn outcome_fields(constructor: &str, ty: &Type) -> Option<Vec<Type>> {
-    let Type::Data(name, args) = ty else { return None };
-    if name != OUTCOME {
-        return None;
-    }
-    let success = args.first()?.clone();
-    let payload = args.get(2).cloned().unwrap_or(Type::Unit);
-    Some(match constructor {
-        DONE => vec![success],
-        _ if is_yield(constructor) => vec![payload, Type::Closure(vec![Type::Unit], Box::new(ty.clone()))],
-        _ if is_fail(constructor) => vec![payload],
-        _ => return None,
-    })
-}
 
 fn is_fail(constructor: &str) -> bool {
     constructor.starts_with("$Fail#")
@@ -320,6 +306,7 @@ struct Lowerer {
     rewriting_return: bool,
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
+    operation_types: std::collections::HashMap<String, Signature>,
     next_fail_tag: u32,
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
@@ -747,15 +734,14 @@ struct ConvertCtx {
     incoming: Type,
     outgoing: Type,
     success: Type,
-    payload: Type,
     convert_id: FunctionId,
     convert_sig: Signature,
     forwarding: bool,
 }
 
 impl ConvertCtx {
-    fn continuation_ty(&self) -> Type {
-        Type::Closure(vec![Type::Unit], Box::new(self.incoming.clone()))
+    fn continuation_ty(&self, input: Type) -> Type {
+        Type::Closure(vec![input], Box::new(self.incoming.clone()))
     }
 }
 
@@ -1484,7 +1470,7 @@ impl Lowerer {
         kind: crate::parser::OpKind,
     ) -> Result<Expression, String> {
         match kind {
-            crate::parser::OpKind::Capture => self.capture_operation(name, arguments, None),
+            crate::parser::OpKind::Capture => self.capture_operation(node, name, arguments, None),
             crate::parser::OpKind::Reply => self.handled_operation(name, arguments),
             crate::parser::OpKind::Abort => match self.handler_for(name).map(|handler| handler.effect.clone()) {
                 Some(effect) => self.abort_outcome(node, arguments, &effect),
@@ -1595,6 +1581,11 @@ impl Lowerer {
             };
         }
         Ok(body)
+    }
+
+    fn outcome_payload(&self, constructor: &str) -> Result<Type, String> {
+        let signature = self.operation_types.get(constructor).ok_or("operation type missing")?;
+        Ok(signature.parameters.first().cloned().unwrap_or(Type::Unit))
     }
 
     fn fail_constructor(&mut self, effect: &str) -> String {
@@ -1735,11 +1726,33 @@ impl Lowerer {
             }
             _ => Vec::new(),
         };
-        self.capture_operation(&name, arguments, Some((rest, pat)))
+        self.capture_operation(value, &name, arguments, Some((rest, pat)))
+    }
+
+    fn capture_result_type(&self, node: &crate::parser::Node) -> Result<Type, String> {
+        use crate::parser::NodeKind;
+        let callee = match &node.kind {
+            NodeKind::Apply(callee, _) | NodeKind::Call(callee, _) => callee.as_ref(),
+            NodeKind::Pipe(_, target) => match &target.kind {
+                NodeKind::Apply(callee, _) => callee.as_ref(),
+                _ => target.as_ref(),
+            },
+            _ => node,
+        };
+        // pipe と左辺は span を共有するので、複合式の型ではなく操作名の型を使う。
+        let ty = self.value_types.get(&(callee.span.line, callee.span.col))
+            .ok_or("capture operation type missing")?;
+        let ty = self.specialization.resolve(ty);
+        let result = match &ty {
+            Ty::Fn(_, result, _) if !matches!(node.kind, NodeKind::Name(_)) => result.as_ref(),
+            _ => &ty,
+        };
+        Type::try_from(result).map_err(|_| "capture result type is not concrete".into())
     }
 
     fn capture_operation(
         &mut self,
+        node: &crate::parser::Node,
         name: &str,
         arguments: Vec<Expression>,
         rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
@@ -1747,14 +1760,23 @@ impl Lowerer {
         let handler = self.handler_for(name).cloned().ok_or("unhandled capture")?;
         let answer = self.answer_for_handler(&handler)?;
         let constructor = self.yield_constructor(&handler.effect);
+        let input = self.capture_result_type(node)?;
+        let signature = Signature {
+            parameters: arguments.iter().map(Expression::ty).collect(),
+            result: input.clone(),
+        };
+        self.operation_types.insert(constructor.clone(), signature);
         let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
-        let payload = value.ty();
-        let outcome = Type::Data(OUTCOME.into(), vec![Type::Unit, answer, payload]);
+        let outcome = Type::Data(OUTCOME.into(), vec![input.clone(), answer, Type::Unit]);
         let continuation = match rest {
             Some((body, pat)) => self.make_continuation(body, pat, &outcome)?,
             None => {
-                let unit = self.done(Expression::Constant(Constant::Unit), &outcome)?;
-                self.continuation_closure(unit, &outcome)?
+                let param = self.next;
+                self.next += 1;
+                let id = FunctionId(self.next_function);
+                self.next_function += 1;
+                let body = self.done(Expression::Variable { id: param, ty: input.clone() }, &outcome)?;
+                self.continuation_function(id, (param, input), Vec::new(), body.in_tail_position(), &outcome)?
             }
         };
         Ok(Expression::Construct {
@@ -1913,7 +1935,6 @@ impl Lowerer {
             incoming: incoming.clone(),
             outgoing: outgoing.clone(),
             success,
-            payload,
             convert_id,
             convert_sig: Signature {
                 parameters: vec![incoming.clone()],
@@ -1953,6 +1974,8 @@ impl Lowerer {
         Expression::call_direct(convert_id, &convert.convert_sig, vec![value])
     }
 
+    // 宣言では型引数を具体化できないため、本体を先に単相化して登録した操作だけを扱う。
+    // 未登録タグは本体から到達しないので腕を生成しない。
     fn convert_arms(
         &mut self,
         handler: &crate::parser::HandlerDecl,
@@ -1964,11 +1987,16 @@ impl Lowerer {
         let mut arms = vec![(DONE.into(), done)];
         if handles_op(handler, crate::parser::OpKind::Abort) {
             let fail = self.fail_constructor(&handler.effect);
-            let body = self.abort_arm(handler, project(variable, &fail, 0, convert.payload.clone()))?;
-            arms.push((fail, self.finish_convert_arm(body, convert)?));
+            if self.operation_types.contains_key(&fail) {
+                let body = self.abort_arm(handler, project(variable, &fail, 0, self.outcome_payload(&fail)?))?;
+                arms.push((fail, self.finish_convert_arm(body, convert)?));
+            }
         }
         if handles_op(handler, crate::parser::OpKind::Capture) {
-            arms.push(self.own_yield_arm(handler, variable, convert)?);
+            let constructor = self.yield_constructor(&handler.effect);
+            if self.operation_types.contains_key(&constructor) {
+                arms.push(self.own_yield_arm(handler, variable, convert)?);
+            }
         }
         if convert.forwarding {
             arms.extend(self.forward_yield_arms(handler, variable, convert)?);
@@ -1992,8 +2020,8 @@ impl Lowerer {
         convert: &ConvertCtx,
     ) -> Result<(String, Expression), String> {
         let constructor = self.yield_constructor(&handler.effect);
-        let yield_value = project(variable, &constructor, 0, convert.payload.clone());
-        let continuation = project(variable, &constructor, 1, convert.continuation_ty());
+        let yield_value = project(variable, &constructor, 0, self.outcome_payload(&constructor)?);
+        let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("capture type missing")?.result.clone()));
         let resume = self.continuation_calling_convert(continuation, convert)?;
         let body = self.yield_arm(handler, yield_value, resume)?;
         Ok((constructor, self.finish_convert_arm(body, convert)?))
@@ -2012,8 +2040,11 @@ impl Lowerer {
                 continue;
             }
             let constructor = self.yield_constructor(&effect);
-            let payload_value = project(variable, &constructor, 0, convert.payload.clone());
-            let continuation = project(variable, &constructor, 1, convert.continuation_ty());
+            if !self.operation_types.contains_key(&constructor) {
+                continue;
+            }
+            let payload_value = project(variable, &constructor, 0, self.outcome_payload(&constructor)?);
+            let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("capture type missing")?.result.clone()));
             let wrapped = self.continuation_calling_convert(continuation, convert)?;
             arms.push((
                 constructor.clone(),
@@ -2040,7 +2071,10 @@ impl Lowerer {
                 continue;
             }
             let constructor = self.fail_constructor(&effect);
-            let payload_value = project(variable, &constructor, 0, convert.payload.clone());
+            if !self.operation_types.contains_key(&constructor) {
+                continue;
+            }
+            let payload_value = project(variable, &constructor, 0, self.outcome_payload(&constructor)?);
             arms.push((
                 constructor.clone(),
                 Expression::Construct {
@@ -2059,6 +2093,10 @@ impl Lowerer {
         convert: &ConvertCtx,
     ) -> Result<Expression, String> {
         let continuation_ty = continuation.ty();
+        let Type::Closure(inputs, _) = &continuation_ty else {
+            return Err("capture continuation is not a closure".into());
+        };
+        let input = inputs.first().cloned().ok_or("capture continuation input missing")?;
         let captured = self.next;
         self.next += 1;
         let param = self.next;
@@ -2068,7 +2106,7 @@ impl Lowerer {
                 id: captured,
                 ty: continuation_ty.clone(),
             },
-            vec![Expression::Constant(Constant::Unit)],
+            vec![Expression::Variable { id: param, ty: input.clone() }],
         )?;
         let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
         let id = FunctionId(self.next_function);
@@ -2076,7 +2114,7 @@ impl Lowerer {
         let result = body.ty();
         let closure = self.continuation_function(
             id,
-            (param, Type::Unit),
+            (param, input),
             vec![(captured, continuation_ty)],
             body.in_tail_position(),
             &result,
@@ -2158,10 +2196,13 @@ impl Lowerer {
         let success = self.node_type(node).unwrap_or(Type::Unit);
         let answer = self.capture_answers.last().cloned().ok_or("abort without handler answer")?;
         let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
-        let payload = payload_value.ty();
-        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, payload]);
+        let constructor = self.fail_constructor(effect);
+        self.operation_types.insert(constructor.clone(), Signature {
+            parameters: vec![payload_value.ty()], result: Type::Unit,
+        });
+        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, Type::Unit]);
         Ok(Expression::Construct {
-            constructor: self.fail_constructor(effect),
+            constructor,
             fields: vec![payload_value],
             result: outcome,
         })
@@ -2271,28 +2312,35 @@ impl Lowerer {
         Expression::call_direct(id, &signature, vec![value, continuation])
     }
 
+    // 宣言では型引数を具体化できないため、先に単相化した value の登録済み操作だけを扱う。
     fn capture_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
         let parameters = vec![self.next, self.next + 1];
         self.next += 2;
         let value = Expression::Variable { id: parameters[0], ty: signature.parameters[0].clone() };
         let rest = Expression::Variable { id: parameters[1], ty: signature.parameters[1].clone() };
-        let (success, _, payload) = outcome_parts(&value.ty())?;
+        let (success, _, _) = outcome_parts(&value.ty())?;
         let mut arms = vec![(DONE.into(), Expression::call_closure(
             rest.clone(), vec![project(&value, DONE, 0, success)],
         )?)];
         for effect in self.yield_ids.keys().cloned().collect::<Vec<_>>() {
             let constructor = self.yield_constructor(&effect);
+            if !self.operation_types.contains_key(&constructor) {
+                continue;
+            }
             let continuation = self.capture_bind_yield(&constructor, id, signature, &value, &rest)?;
             arms.push((constructor.clone(), Expression::Construct {
-                fields: vec![project(&value, &constructor, 0, payload.clone()), continuation],
+                fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?), continuation],
                 constructor,
                 result: signature.result.clone(),
             }));
         }
         for effect in self.fail_ids.keys().cloned().collect::<Vec<_>>() {
             let constructor = self.fail_constructor(&effect);
+            if !self.operation_types.contains_key(&constructor) {
+                continue;
+            }
             arms.push((constructor.clone(), Expression::Construct {
-                fields: vec![project(&value, &constructor, 0, payload.clone())],
+                fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?)],
                 constructor,
                 result: signature.result.clone(),
             }));
@@ -2318,8 +2366,11 @@ impl Lowerer {
         value: &Expression,
         rest: &Expression,
     ) -> Result<Expression, String> {
-        let continuation = project(value, constructor, 1, Type::Closure(vec![Type::Unit], Box::new(value.ty())));
-        let resumed = Expression::call_closure(continuation, vec![Expression::Constant(Constant::Unit)])?;
+        let input = self.operation_types.get(constructor).ok_or("capture type missing")?.result.clone();
+        let param = self.next;
+        self.next += 1;
+        let continuation = project(value, constructor, 1, Type::Closure(vec![input.clone()], Box::new(value.ty())));
+        let resumed = Expression::call_closure(continuation, vec![Expression::Variable { id: param, ty: input.clone() }])?;
         let body = Expression::call_direct(bind, signature, vec![resumed, rest.clone()])?;
         let captures = [value, rest].into_iter().map(|value| match value {
             Expression::Variable { id, ty } => Ok((*id, ty.clone())),
@@ -2327,9 +2378,7 @@ impl Lowerer {
         }).collect::<Result<Vec<_>, _>>()?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        let param = self.next;
-        self.next += 1;
-        self.continuation_function(id, (param, Type::Unit), captures, body.in_tail_position(), &signature.result)
+        self.continuation_function(id, (param, input), captures, body.in_tail_position(), &signature.result)
     }
 
     fn propagate_outcome(
@@ -2383,9 +2432,9 @@ impl Lowerer {
         })
     }
 
-    fn outcome_of(&self, success: &Type, body: &crate::parser::Node) -> Result<Type, String> {
+    fn outcome_of(&self, success: &Type, _body: &crate::parser::Node) -> Result<Type, String> {
         let answer = self.capture_answers.last().cloned().ok_or("handler answer missing")?;
-        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, self.payload_in(body)]))
+        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Unit]))
     }
 
     fn payload_in(&self, node: &crate::parser::Node) -> Type {
