@@ -2025,3 +2025,72 @@ fun main()
 実行は `docker run --rm -v <dir>:/work -w /work koka-probe:latest koka -e --buildtag=<name> <name>.kk`。
 
 **次の一手:** R31 の発注。工程 0 を先に出し、工程 1 の緑を実測してから工程 2 を出す。
+
+## R31 yield 地点の継続と `$Outcome` の型（2026-09-11）
+
+`docs/bug.md` の B6〜B9 を直した。yield 地点の後ろを常に継続にし（構文木の A 正規化と Outcome の bind）、
+`resume` の結果を bind して外側の handler への yield を通し、`$Outcome` の payload 欄を消して
+効果ごとの payload 型と継続の引数型をタグの表に持たせた。**全 30 門番が満点・終了コード 0、
+`cargo test --offline --no-fail-fast` が 0 failed。**
+
+指揮・計画・審査は claude（fable-5.1）、実装と修正は codex（gpt-6-astra medium、`codex exec` の非対話、
+本リポジトリで直接作業）。審査は指揮者が本リポジトリで直列に行い、欠陥注入は `git add -A` を復元点にした。
+
+| 判定 | 実測 |
+|---|---|
+| 31-0 | `[y 1, y 2]`・`let` の右辺・引数位置を単相化で拒否。対照 3 本は生成 payload を印字。工程 1a で 31-d に置き換えた |
+| 31-a/b/c | B6 の再現例が `[2]`、Outer `x => x` で `[2, 1]`、外へ渡った後の `y 3` で `[2, 1, 3]` |
+| 31-d | `[y 1, y 2]` が `[1, 2]`。`let` / 引数 / record / pipe / 被演算子の位置も `Keep`（`return x => x`）で残りの値まで固定。負の対照: 分岐の腕 `[1]`、`&&` の右辺 `[3]`、内側の `with` の本体 `[2]` |
+| 31-e/f | k3 が `[5]`、展開位置の `resume` が外へ yield して `[3, 102]` |
+| 31-g | 30-k の対照 `[4]` と `[9, 1]` |
+| 31-h/i/j | 非 Unit の `ask` が `[42]`、payload 混在が `["a", "n1"]`、混在で外へ yield が `["b", "1"]` |
+| 31-k | `verify-r31.sh` `PASSED: 25/25`。31-a・c・d・f・h と被演算子の形は payload を実行時に生成し、期待値を判定器側で計算。`r31_effects.rs` 8 本 |
+| 31-l | 全 30 門番 exit 0、`cargo test` 0 failed |
+| 31-m | 受理コーパスに 9 形を追加、`tests/corpus.sha256` を更新 |
+| 31-n | `docs/bug.md` から B6〜B9 を削除 |
+| 31-o | `v0.2.3` を tag |
+
+**期待値は 9 形すべて仮説のまま当たった。** 23 節の表（§58 からの導出、Koka 3.2.3 で確認）と本体の実測が
+1 つも食い違わなかった。探針で足した形（非 Unit の `resume` が外へ yield して `[42, 43]`、
+`[ask 1 + ask 2, ask 3]` が `[6, 6]`、Float の payload が `[1.5, 2.25]`）も導出どおり。
+
+**builder が指揮者の期待値の誤りを捕まえた。** 工程 1a の 1 回目の発注は、`return _ => []` の `Collect` の下で
+`let u = y 1 -> [7]` を `[1, 7]` と書いていた。§58 では `return` が正常完了値を捨てるので `[1]` になる。
+builder は契約の「食い違ったら止める」に従って中断し、指揮者が `return x => x` の `Keep` を導入して再発注した。
+残りの計算が走ったことを値で固定するには、正常完了値を捨てない handler が要る。
+
+**工程 1 は 1a（A 正規化）と 1b（`resume` の bind）に割り、1a の `bind_N` が 1b でそのまま使えた。**
+1a は構文木で子式を `let $anfN = … ->` に持ち上げ、`capture` を含む複合式が Outcome になったときに
+`bind_capture_outcome`（`$Done` → 残り、`$Yield#e` → 継続を付け直して再 yield、`$Fail#e` → そのまま）で繋ぐ。
+1b は forwarding 中の `resume`（閉包が Outcome を返す）を「Outcome を返す式」と認識するだけで同じ経路に乗り、
+差分は mono.rs で 47 行の削除が中心になった。B6 の根は `continuation_calling_convert` の `take_done` が
+`$Done` 以外を潰す（SIGILL）ことで、これを止めて `yield_arm` の `finish_handler` を外した。
+
+**工程 2 は 1 回の fixer で通った。** builder は指揮者が提案した「payload 欄を消してタグ → 型の表を持つ」設計で
+31-h〜31-j を通したが、表への登録が操作の呼び出し時だけなのに変換の腕が全タグを引くため、呼ばれない操作の
+タグで `operation type missing` が出て既存の門番を後退させ、契約どおり未コミットで中断した。分類は
+「不合格:内部構造」。fixer は本体と bind 入力が先に単相化されることを根拠に未登録タグの腕を飛ばし、
+pipe が左辺と span を共有して戻り型を取り違える件を操作名の型から取る形で直した。`align_outcomes` は触っていない。
+23 節の中断の条件（型引数に効果ごとの列が要り型合わせが壊れる）には当たらなかった。`repr.rs` は
+`$Yield#` の payload を 1 語（I64）に固定し、実際の型は `Construct` / `Project` が持つ。
+
+**欠陥注入で判定器の判定力を実測した。** 工程 0 の拒否を外す → 3/6。`&&` の右辺も持ち上げる → 短絡の対照だけ NG
+（Rust 側の短絡テストは右辺が評価される形しか無く通ったので、1b で右辺が評価されない形を足させた）。
+`resume` の検出を外す → 31-b/c/f と生成 c/f が NG（31-a は Outer が答えを捨てるので単独では弱い、23 節の注意どおり）。
+bind の yield 腕で残りを付け直さない → 31-d の record/operand と 31-b/c/f が NG。戻り型を Unit に固定 → 31-h が NG。
+
+**codex のサンドボックスで `git add` が `.git/index.lock: Read-only file system` になった**（工程 0 で 2 回に 1 回）。
+工程 0 の実装は指揮者が代理コミットし、以後は `--add-dir <repo>/.git` を足して再発しなかった。ログインシェルの
+`RUSTC_WRAPPER=sccache` はサンドボックスで動かず、`CARGO_TARGET_DIR` も無いので、契約で前置させた。
+
+**所要（codex のセッション記録の首尾）:** 工程 0 が 6.6 分、工程 1a が 3.9 分（中断）＋ 15.3 分、
+工程 1b が 6.0 分、工程 2 が 6.4 分（中断）＋ 6.6 分（fixer）、工程 3 が 4.2 分。
+工程の合間（指揮者の審査と次の発注書の作成。前の記録の終わりから次の記録の始まりまで）は 2.0〜4.5 分。
+
+**未確認。** 型引数付き効果（`effect A Yield`）を異なる型で重ねる形。タグが効果名ごとなので同じ `$Yield#k` になり
+表も上書きされるが、探針は E701（`main` が多相）で書けなかった。R30 のタグ付けから続く性質で、R31 の判定には無い。
+`fn` の本体で `capture` を起こす形は R31 以前から `lambda return type mismatch` で拒否される（誤答は返さない）。
+handler の値引数（§58 の `Take(limit: Int)`）は型検査が腕で引数を束縛せず E204 になり到達しない。
+
+**`v0.2.3` を tag した（判定 31-o）。** 最終確認は全 30 門番が満点・終了コード 0、`cargo test --offline --no-fail-fast` が
+0 failed、`git status --short` が空、`sha256sum --strict -c tests/corpus.sha256` が整合。
