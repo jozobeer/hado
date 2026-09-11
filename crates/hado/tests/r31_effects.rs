@@ -40,6 +40,9 @@ fn branch_result_is_bound_after_the_selected_capture() {
 fn short_circuit_takes_the_right_branch_only_when_needed() {
     let (a, b) = payloads();
     run_main(&format!(
+        "def g u => if u == () => true | false\ndef main = with Keep -> let b = false && g (y {a}) -> if b => [] | [{b}]"
+    ), &[b]);
+    run_main(&format!(
         "def g u => if u == () => true | false\ndef main = with Keep -> let b = true && g (y {a}) -> if b => [{b}] | []"
     ), &[a, b]);
     run_main(&format!(

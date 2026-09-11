@@ -318,8 +318,10 @@ check_prints h "[$expected_h]" "30-h three handlers yield generated payload plus
 check_prints i "[103]" "30-i inner capture wins"
 check_prints j1 "[3]" "30-j solo Collect"
 check_prints j2 "[1, 2]" "30-j solo Collect yields twice"
-check "30-k two-level resume cannot capture outer" rejects_build k2
-check "30-k three-level resume cannot capture outer" rejects_build k3
+# R31 は拒否を値の一致に置き換える。クラッシュと黙った誤答を防ぐ
+# 30-k の保証に正しい実行結果を加えるため、門番を緩めてはいない。
+check_prints k2 "[2]" "30-k two-level resume captures outer"
+check_prints k3 "[5]" "30-k three-level resume captures outer"
 check_prints ok_outer "[4]" "30-k control outer capture without resume"
 check_prints ok_reply "[9, 1]" "30-k control resume may call outer reply"
 
