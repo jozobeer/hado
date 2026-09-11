@@ -1806,3 +1806,222 @@ R28 の「起きにくくした」を「直した」と取り違えた修正を�
 
 **次の一手:** `docs/bug.md` の B6（`resume` の中から外側の `capture`）。直すには継続が
 Outcome を返す形への一般化が要り、腕の本体が Outcome を扱う形を要求する。
+
+## B6 の対応方針（2026-09-11）
+
+`docs/bug.md` の B6 の扱いを grilling（8 問）で確定した。決定は `docs/plan.md` 23 節。
+途中で B7〜B9 が見つかり、同じ節に入れた。
+
+**B6 だけでなく共通の仕組みを直す。** 事実の収集で 2 件が新たに出た。`with Collect -> [y 1, y 2]`
+が `hado check` も `hado build` も通って `[]` を印字する（B7。§58 の意味論では `[1, 2]`）。
+`capture ask(seed: Int): Int` がビルドできない（B8）。B7 は「受理して誤答を黙って返す」形で、
+`v0.2` を tag した根拠を破っており、どの門番にも見えていなかった。B6 と B7 の根は同じで、
+yield 地点の後ろを継続に切り出す仕組みが `do <capture> -> rest` の形にしか無い。「B6 だけ」の案は、
+受理コーパスの `capture_resume_inner_capture` が `resume` を展開位置に置いているため、
+`let rest = resume () ->` の形だけ直すと展開位置に旧経路と拒否を残す部分修正になり、実際には
+小さくならなかった。
+
+**期待値は仕様から導き、Koka で独立に確かめた。** §58 と 17.5 で意味論は深い handler に一つに
+決まる。判定 30-f の導出と同じ流儀で 9 形を導き、17.8 の `koka-probe` コンテナ（Koka 3.2.3）で
+走らせたところ、9 形すべて一致した（表は plan の 23 節）。先に抽象的に問うより、コードを並べて
+「Koka でも同じか」を測る方が 1 往復で決まった（0.2 の構文の grilling と同じ傾向）。
+
+**機構は mono の中に収める。** A 正規化（yield しうる呼び出しを `let` に持ち上げる）と、
+`resume` の結果の bind（`$Done` なら腕の残りへ、外側の `$Yield#e` なら継続を付け直して再 yield）。
+継続は閉包のままで、§22 の中断条件（ヒープのフレーム列が要るなら止める）をそのまま持ち越す。
+
+**payload の型が異なる handler の合成もビルドできない（B9）。** 機構の境界を決めた後、
+`$Outcome` が payload の型を 1 つしか持たないことから測った。`String` と `Int` の capture 効果を
+重ねると、`resume` を経なくても `continuation result type mismatch`。R30 の合成は payload が
+すべて `Int` だったので通っていた。根は継続と型の 2 本と分かり、同じラウンドで 3 工程に切った。
+工程 0 は B7 を初日に拒否へ変える暫定措置で、30-k と同じ扱い。
+
+**30-k の門番は値の一致に置き換える。** 直せば `verify-r30.sh` の 30-k の 2 行が設計上赤くなる。
+30-k が約束したのは「受理してクラッシュしない、誤答を黙って返さない」で、導出した値の印字は
+それより強い。同じスクリプトに残し、理由をコメントに書く。31-0 も工程 1 で同じ運命なので、
+手順書に先に書いた。
+
+**版は `v0.2.3`。** 仕様は 1 文字も変わらず、9 形すべてを `hado check` が既に通す。
+
+**Koka のソース。**
+
+`common.kk`
+
+```koka
+module common
+
+pub effect ey
+  ctl y(value: int): ()
+
+pub effect ez
+  ctl z(value: int): ()
+
+pub fun show-ints(xs: list<int>): string
+  "[" ++ xs.map(fn(i) i.show).join(", ") ++ "]"
+
+// Collect: return _ => []
+pub fun collect(action: () -> <ey|e> a): e list<int>
+  with handler
+    return(_) Nil
+    ctl y(value)
+      val rest = resume(())
+      Cons(value, rest)
+  action()
+
+// Outer: return _ => []
+pub fun outer-drop(action: () -> <ez|e> a): e list<int>
+  with handler
+    return(_) Nil
+    ctl z(value)
+      val rest = resume(())
+      Cons(value, rest)
+  action()
+
+// Outer: return x => x
+pub fun outer-keep(action: () -> <ez|e> list<int>): e list<int>
+  with handler
+    return(x) x
+    ctl z(value)
+      val rest = resume(())
+      Cons(value, rest)
+  action()
+```
+
+`form1.kk`
+
+```koka
+import common
+fun main()
+  val r = outer-drop { collect { y(1); z(2) } }
+  println(r.show-ints)
+```
+
+`form2.kk`
+
+```koka
+import common
+fun main()
+  val r = outer-keep { collect { y(1); z(2) } }
+  println(r.show-ints)
+```
+
+`form3.kk`
+
+```koka
+import common
+fun main()
+  val r = outer-keep { collect { y(1); z(2); y(3) } }
+  println(r.show-ints)
+```
+
+`form4.kk`
+
+```koka
+import common
+fun main()
+  val r = collect { [y(1), y(2)] }
+  println(r.show-ints)
+```
+
+`form5.kk`
+
+```koka
+import common
+effect ask
+  ctl ask(seed: int): int
+
+fun twice(action: () -> <ask|e> list<int>): e list<int>
+  with handler
+    return(x) x
+    ctl ask(seed) resume(seed * 2)
+  action()
+
+fun main()
+  val r = twice { val v = ask(21); [v] }
+  println(r.show-ints)
+```
+
+`k3.kk`
+
+```koka
+import common
+effect eb
+  fun b(): int
+fun inner(action: () -> <eb|e> a): e a
+  with fun b() 2
+  action()
+fun main()
+  val r = outer-drop { collect { inner { y(b()); z(5) } } }
+  println(r.show-ints)
+```
+
+`spread.kk`
+
+```koka
+import common
+effect ew
+  ctl w(value: int): ()
+fun inner(action: () -> <ew|e> a): e list<int>
+  with handler
+    return(_) Nil
+    ctl w(value) Cons(value + 100, resume(()))
+  action()
+fun main()
+  val r = outer-keep { inner { w(2); z(3) } }
+  println(r.show-ints)
+```
+
+`mixpay.kk`
+
+```koka
+import common
+effect es
+  ctl s(value: string): ()
+fun names(action: () -> <es|e> list<string>): e list<string>
+  with handler
+    return(x) x
+    ctl s(value)
+      val rest = resume(())
+      Cons(value, rest)
+  action()
+fun collect-str(action: () -> <ey|e> a): e list<string>
+  with handler
+    return(_) Nil
+    ctl y(value)
+      val rest = resume(())
+      Cons("n" ++ value.show, rest)
+  action()
+fun main()
+  val r = names { collect-str { s("a"); y(1) } }
+  println("[" ++ r.map(fn(x) "\"" ++ x ++ "\"").join(", ") ++ "]")
+```
+
+`mixres.kk`
+
+```koka
+effect ezs
+  ctl zs(value: string): ()
+effect ey
+  ctl y(value: int): ()
+fun outer-s(action: () -> <ezs|e> list<string>): e list<string>
+  with handler
+    return(x) x
+    ctl zs(value)
+      val rest = resume(())
+      Cons(value, rest)
+  action()
+fun collect-s(action: () -> <ey|e> a): e list<string>
+  with handler
+    return(_) Nil
+    ctl y(value)
+      val rest = resume(())
+      Cons(value.show, rest)
+  action()
+fun main()
+  val r = outer-s { collect-s { y(1); zs("b") } }
+  println("[" ++ r.map(fn(x) "\"" ++ x ++ "\"").join(", ") ++ "]")
+```
+
+実行は `docker run --rm -v <dir>:/work -w /work koka-probe:latest koka -e --buildtag=<name> <name>.kk`。
+
+**次の一手:** R31 の発注。工程 0 を先に出し、工程 1 の緑を実測してから工程 2 を出す。
