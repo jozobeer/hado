@@ -58,15 +58,6 @@ pub(crate) fn outcome_tag(constructor: &str) -> Option<u32> {
     constructor.strip_prefix("$Yield#")?.parse().ok()
 }
 
-
-fn is_fail(constructor: &str) -> bool {
-    constructor.starts_with("$Fail#")
-}
-
-fn is_yield(constructor: &str) -> bool {
-    constructor.starts_with("$Yield#")
-}
-
 fn is_outcome(ty: &Type) -> bool {
     matches!(ty, Type::Data(name, _) if name == OUTCOME)
 }
@@ -1830,14 +1821,6 @@ impl Lowerer {
         self.continuation_function(id, (param, input), captures, body, &result)
     }
 
-    fn continuation_closure(&mut self, body: Expression, answer: &Type) -> Result<Expression, String> {
-        let param = self.next;
-        self.next += 1;
-        let id = FunctionId(self.next_function);
-        self.next_function += 1;
-        self.continuation_function(id, (param, Type::Unit), Vec::new(), body.in_tail_position(), answer)
-    }
-
     fn continuation_function(
         &mut self,
         id: FunctionId,
@@ -2435,66 +2418,6 @@ impl Lowerer {
     fn outcome_of(&self, success: &Type, _body: &crate::parser::Node) -> Result<Type, String> {
         let answer = self.capture_answers.last().cloned().ok_or("handler answer missing")?;
         Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Unit]))
-    }
-
-    fn payload_in(&self, node: &crate::parser::Node) -> Type {
-        self.find_payload(node).unwrap_or(Type::Unit)
-    }
-
-    fn find_payload(&self, node: &crate::parser::Node) -> Option<Type> {
-        use crate::parser::NodeKind::*;
-        match &node.kind {
-            Apply(callee, args) | Call(callee, args) => {
-                if let crate::parser::NodeKind::Name(name) = &callee.kind {
-                    if matches!(
-                        self.operations.get(name),
-                        Some(crate::parser::OpKind::Abort | crate::parser::OpKind::Capture)
-                    ) {
-                        return args.first().and_then(|arg| self.node_type(arg)).or(Some(Type::Unit));
-                    }
-                }
-                self.find_payload(callee).or_else(|| args.iter().find_map(|arg| self.find_payload(arg)))
-            }
-            Name(name)
-                if matches!(
-                    self.operations.get(name),
-                    Some(crate::parser::OpKind::Abort | crate::parser::OpKind::Capture)
-                ) =>
-            {
-                Some(Type::Unit)
-            }
-            Neg(inner) | Not(inner) | Field(inner, _) => self.find_payload(inner),
-            Bin(_, left, right) | Pipe(left, right) => {
-                self.find_payload(left).or_else(|| self.find_payload(right))
-            }
-            Record(fields) => fields.iter().find_map(|(_, node)| self.find_payload(node)),
-            NamedConstructor(_, fields) => fields.iter().find_map(|(_, node)| self.find_payload(node)),
-            List(items, rest) => items
-                .iter()
-                .find_map(|node| self.find_payload(node))
-                .or_else(|| rest.as_ref().and_then(|node| self.find_payload(node))),
-            Let { value, body, .. } | LetQ { value, body, .. } | DoQ { value, body } => {
-                self.find_payload(value).or_else(|| self.find_payload(body))
-            }
-            Fn { body, .. } => self.find_payload(body),
-            BoolBranch { cond, then, els } => self
-                .find_payload(cond)
-                .or_else(|| self.find_payload(then))
-                .or_else(|| self.find_payload(els)),
-            CondBranch { arms, fallback } => arms
-                .iter()
-                .find_map(|(condition, body)| self.find_payload(condition).or_else(|| self.find_payload(body)))
-                .or_else(|| fallback.as_ref().and_then(|node| self.find_payload(node))),
-            PatternBranch { scrutinee, arms, fallback } => self
-                .find_payload(scrutinee)
-                .or_else(|| arms.iter().find_map(|(_, body)| self.find_payload(body)))
-                .or_else(|| fallback.as_ref().and_then(|node| self.find_payload(node))),
-            With { args, body, .. } => args
-                .iter()
-                .find_map(|node| self.find_payload(node))
-                .or_else(|| self.find_payload(body)),
-            _ => None,
-        }
     }
 
     fn node_type(&self, node: &crate::parser::Node) -> Option<Type> {
