@@ -113,20 +113,6 @@ expect_code_message() {
     fi
 }
 
-# code の診断が出て、そのメッセージに forbidden を含まない。
-expect_code_absent() {
-    local label=$1 entry=$2 code=$3 forbidden=$4
-    total=$((total + 1))
-    local err status
-    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
-    if [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]] && [[ "$err" != *"$forbidden"* ]]; then
-        echo "OK: $label"
-        passed=$((passed + 1))
-    else
-        echo "NG: $label (want $code without '$forbidden', got status=$status '$err')"
-    fi
-}
-
 # code の診断が出て、needles を全て含み、forbidden を含まない。
 # 引数: label entry code forbidden needle...
 expect_code_contains() {
@@ -221,7 +207,8 @@ rand_rec="r${RANDOM}"
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
     "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept" \
-    "$workdir/33wrap" "$workdir/33wrapneg" "$workdir/33dist" "$workdir/33distpos" "$workdir/33lrec" "$workdir/33lrecneg"
+    "$workdir/33wrap" "$workdir/33wrapneg" "$workdir/33dist" "$workdir/33distpos" "$workdir/33lrec" "$workdir/33lrecneg" \
+    "$workdir/33ident" "$workdir/33cyc"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -362,17 +349,17 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 
 # 契約 Monoid と Fold。functor MakeFold の実体化を functor_body が作る。
 functor_contracts() {
-    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\n\n'
+    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\ndef show(value: T): String Pure\n\n'
     printf 'module Fold\ntype T\ndef fold(values: T List): T Pure\n'
 }
 functor_body() {
     printf '\nimplement Fold as MakeFold(M: Monoid)\n%s type T = M.T\ndef fold values => List.fold values M.empty M.combine\n' "$1"
 }
 string_monoid() {
-    printf 'implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\n'
+    printf 'implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n'
 }
 opaque_monoid() {
-    printf 'implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\n'
+    printf 'implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n'
 }
 
 mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$workdir/33a1bneg" \
@@ -405,10 +392,10 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 } >"$workdir/33a1c/main.hd"
 
 # 33-a(1b): shared functor を印なしの引数に適用する。OpaqueFold.T は OpaqueMonoid.T と
-# 同一なので、OpaqueMonoid.of の値を fold が受け取れる（E305 が出ない）。印なしの T は
-# main から返せないので E705 になる（正の対照は E305 の不在で測る）。
+# 同一なので、OpaqueMonoid.of の値が fold を通り、実装の公開関数 show で String に戻って
+# 実行値が一致する（印なしの T は main から直接は返せないので公開関数を挟む）。
 {
-    printf 'def main = OpaqueFold.fold [OpaqueMonoid.of "%s"]\n' "$rand_a"
+    printf 'def main = OpaqueMonoid.show (OpaqueFold.fold [OpaqueMonoid.of "%s"])\n' "$rand_a"
     functor_contracts; opaque_monoid
     functor_body 'shared'
     printf 'implement Fold as OpaqueFold = MakeFold(OpaqueMonoid)\n'
@@ -421,6 +408,28 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     functor_body 'shared'
     printf 'implement Fold as OpaqueFold = MakeFold(OpaqueMonoid)\n'
 } >"$workdir/33a1bneg/main.hd"
+
+# 33-a(1b) 同一性: OpaqueFold.T が OpaqueMonoid.T と同一であることを、両者の間の
+# 注釈付き関数 squash を挟んでも通ることで測る。適用で等式を登録し落とすと、2 つの
+# 抽象型が揃わず squash の注釈で E305 になる（OpaqueMonoid.of を直接 fold に渡す
+# だけでは型変数の単一化で隠れるため、注釈で固定する）。
+{
+    printf 'def main = OpaqueMonoid.show (squash (OpaqueFold.fold [OpaqueMonoid.of "%s"]))\ndef squash (x: OpaqueFold.T): OpaqueMonoid.T => x\n' "$rand_a"
+    functor_contracts; opaque_monoid
+    functor_body 'shared'
+    printf 'implement Fold as OpaqueFold = MakeFold(OpaqueMonoid)\n'
+} >"$workdir/33ident/main.hd"
+
+# functor の shared 適用の輪: functor の shared 適用が輪になるときは E602 で止まる。循環防止を
+# 外すと検査が停止せず SIGABRT になるため、終了コードと stderr の error[E602] の
+# 両方を見る（expect_code は status=1 とコードの出現を要求する）。
+{
+    printf 'def main = A.read (A.make 7)\n'
+    printf 'module Id\ntype T\ndef make(n: Int): T Pure\ndef read(value: T): Int Pure\n\n'
+    printf 'implement Id as I\nshared type T = Int\ndef make n => n\ndef read value => value\n\n'
+    printf 'implement Id as Make(Arg: Id)\nshared type T = Arg.T\ndef make n => Arg.make n\ndef read value => Arg.read value\n\n'
+    printf 'implement Id as A = Make(B)\nimplement Id as B = Make(A)\n'
+} >"$workdir/33cyc/main.hd"
 
 # 33-b(1): 印なしの type T = M.T を 2 回適用すると別の抽象型（A.read (B.make 7) が E305）。
 {
@@ -527,7 +536,7 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33a1/main.hd" "$workdir/33a1c/main.hd" "$workdir/33a3/main.hd" "$workdir/33a1b/main.hd" "$workdir/33a1bneg/main.hd" \
     "$workdir/33b1/main.hd" "$workdir/33b1b/main.hd" "$workdir/33g1/main.hd" "$workdir/33g2/main.hd" "$workdir/33g3/main.hd" \
     "$workdir/33wrap/main.hd" "$workdir/33wrapneg/main.hd" "$workdir/33dist/main.hd" "$workdir/33distpos/main.hd" \
-    "$workdir/33lrec/main.hd" "$workdir/33lrecneg/main.hd"; do
+    "$workdir/33lrec/main.hd" "$workdir/33lrecneg/main.hd" "$workdir/33ident/main.hd" "$workdir/33cyc/main.hd"; do
     random_padding "$probe"
 done
 
@@ -556,8 +565,10 @@ accept_quiet '33-0 構文受理 (main 無しのライブラリ、stdout/stderr �
 accept_build_run '33-a(1) shared functor の fold が String List を取る' "$workdir/33a1/main.hd" "${rand_a}${rand_b}"
 accept_build_run '33-a(1c) 適用結果の StringFold.T が引数の shared で String に解ける' "$workdir/33a1c/main.hd" "${rand_a}${rand_b}"
 accept_build_run '33-a(3) shared functor の fold が of の String を取る' "$workdir/33a3/main.hd" "${rand_a}${rand_b}"
-expect_code_absent '33-a(1b) 正の対照: fold が印なしの引数の T を取り、引数に E305 は出ない' "$workdir/33a1b/main.hd" E705 'E305'
+accept_build_run '33-a(1b) shared functor を印なしの引数に通し公開関数で実行値が一致' "$workdir/33a1b/main.hd" "$rand_a"
 expect_code '33-a(1b) 負の対照: 印なしの引数の T に String は渡せない' "$workdir/33a1bneg/main.hd" E305
+accept_build_run '33-a(1b) 同一性: OpaqueFold.T を OpaqueMonoid.T に注釈で通す' "$workdir/33ident/main.hd" "$rand_a"
+expect_code 'shared functor の適用の輪は E602 で止まる' "$workdir/33cyc/main.hd" E602
 expect_code '33-b(1) 印なし functor の 2 適用は別の抽象型' "$workdir/33b1/main.hd" E305
 expect_code_message '33-b(1b) 印なし functor を shared 引数に適用すると T は不透明' "$workdir/33b1b/main.hd" E305 'StringFold.T'
 accept_build_run '33-g(1) 契約修飾型 Id.T が shared で Int に解ける' "$workdir/33g1/main.hd" "$rand_int"

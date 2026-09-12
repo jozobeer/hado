@@ -210,8 +210,8 @@ fn shared_realization_cycles_are_rejected() {
 
 // --- 工程 2: functor の shared type T = M.T が適用結果に引き継がれる ---
 
-const FOLD_CONTRACTS: &str = "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\n\nmodule Fold\ntype T\ndef fold(values: T List): T Pure";
-const STRING_MONOID: &str = "implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"";
+const FOLD_CONTRACTS: &str = "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\ndef show(value: T): String Pure\n\nmodule Fold\ntype T\ndef fold(values: T List): T Pure";
+const STRING_MONOID: &str = "implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"\ndef show value => value";
 
 fn make_fold(shared: &str) -> String {
     format!("implement Fold as MakeFold(M: Monoid)\n{shared}type T = M.T\ndef fold values => List.fold values M.empty M.combine")
@@ -252,7 +252,7 @@ fn unmarked_functor_equation_keeps_the_application_type_distinct() {
 fn a_shared_functor_follows_an_unmarked_argument() {
     let contracts = FOLD_CONTRACTS;
     let functor = make_fold("shared ");
-    let opaque = "implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"";
+    let opaque = "implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"\ndef show value => value";
     // 印なしの引数の T は不透明なので main からは返せない（E705）。fold が
     // OpaqueMonoid.T を受け取れていることは、E305 が出ないことで測る。
     let positive = format!("def main = OpaqueFold.fold [OpaqueMonoid.of \"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
@@ -261,6 +261,17 @@ fn a_shared_functor_follows_an_unmarked_argument() {
     let negative = format!("def main = OpaqueFold.fold [\"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
     let error = check_source(&negative, "t").err().expect("the argument's own type must still reject a String");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
+
+#[test]
+fn an_opaque_functor_result_matches_the_arguments_type() {
+    // OpaqueFold.T と OpaqueMonoid.T が同一であることを、両者の間の注釈付き関数
+    // squash を挟んでも通ることで測る。適用で等式を登録し落とすと、2 つの抽象型が
+    // 揃わず squash の注釈で E305 になる。公開関数 show で String に戻して型を測る。
+    let opaque = "implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"\ndef show value => value";
+    let source = format!("def main = OpaqueMonoid.show (squash (OpaqueFold.fold [OpaqueMonoid.of \"a\"]))\ndef squash (x: OpaqueFold.T): OpaqueMonoid.T => x\n{}\n\n{opaque}\n\n{}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)", FOLD_CONTRACTS, make_fold("shared "));
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
 }
 
 #[test]
