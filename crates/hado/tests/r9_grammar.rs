@@ -9,6 +9,7 @@ struct Generator {
     choices: BTreeMap<&'static str, Vec<bool>>,
     declarations: usize,
     allow_resume: bool,
+    library_emitted: bool,
 }
 
 impl Generator {
@@ -42,6 +43,7 @@ impl Generator {
 
     fn program(&mut self) -> String {
         self.declarations = 0;
+        self.library_emitted = false;
         self.mark("program", 1, 0);
         let outer_count = self.choose("outer_item*", 3);
         let section_count = self.choose("section*", 3);
@@ -51,8 +53,12 @@ impl Generator {
     }
 
     fn outer_item(&mut self) -> String {
-        match self.choose("outer_item", 2) {
-            0 => self.type_definition(),
+        match self.choose("outer_item", 3) {
+            0 if !self.library_emitted => {
+                self.library_emitted = true;
+                "library".to_string()
+            }
+            0 | 1 => self.type_definition(),
             _ => self.definition(),
         }
     }
@@ -758,10 +764,12 @@ fn declaration_count(items: &[Item]) -> usize {
 #[test]
 fn grammar_generated_programs_preserve_every_declaration() {
     let mut generator = Generator { state: 0x4152_395f_4752_414d, ..Generator::default() };
+    let mut library_seen = false;
     for sample in 0..1200 {
         let source = generator.program();
         let ast = parser::parse_source(&source, "generated-grammar.hd")
             .unwrap_or_else(|error| panic!("sample {sample}: {error}\n{source}"));
+        library_seen |= ast.library.is_some();
         assert_eq!(declaration_count(&ast.items), generator.declarations, "sample {sample}: {source}");
         let spaced = generator.perturb(&source);
         let spaced_ast = parser::parse_source(&spaced, "spaced-grammar.hd")
@@ -773,6 +781,7 @@ fn grammar_generated_programs_preserve_every_declaration() {
         assert_eq!(shapes(&ast.items), shapes(&restored.items), "sample {sample}: {source}\n{canonical}");
         assert_eq!(canonical, parser::canonical_program(&restored));
     }
+    assert!(library_seen, "generator never emitted library");
     let spec = include_str!("../../../docs/spec.md");
     let grammar = spec.split("# 41.").nth(1).unwrap().split("# 42.").next().unwrap();
     let rules: BTreeSet<_> = grammar.lines().filter_map(|line| line.split_once(":=").map(|(name, _)| name.trim())).collect();
