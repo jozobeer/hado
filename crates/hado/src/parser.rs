@@ -661,8 +661,13 @@ impl Parser<'_> {
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
+        // §41: outer_item は最初の見出しより前にだけ現れる。
+        let mut outer = context == TypeContext::TopLevel;
         while self.kind() != &TokKind::Eof {
             if context != TypeContext::TopLevel && self.section_boundary() { break; }
+            if outer && matches!(self.kind(), TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) {
+                outer = false;
+            }
             let start = self.pos;
             let item = match self.kind() {
                 TokKind::Def if context == TypeContext::Signature => self.parse_sig_def(),
@@ -672,7 +677,7 @@ impl Parser<'_> {
                 TokKind::KwImplement => self.parse_implementation(),
                 TokKind::KwEffect => self.parse_effect(),
                 TokKind::KwHandler => self.parse_handler(),
-                TokKind::KwLibrary if context == TypeContext::TopLevel => {
+                TokKind::KwLibrary if outer => {
                     if self.library.is_none() { self.library = Some(self.span()); }
                     self.bump();
                     continue;

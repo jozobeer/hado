@@ -25,15 +25,17 @@ impl Project {
     pub fn load(entry: &Path) -> Result<Self, LoadError> {
         let (token_files, directories) = read_files(entry)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
-        let libraries = library_roots(&token_files)
-            .map_err(|error| LoadError::Diagnostic(source_diagnostic(&files, error)))?;
+        let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
-        if let Some(span) = library_main {
-            return Err(LoadError::Diagnostic(source_diagnostic(&files, Diagnostic {
-                path: files[0].path.clone(), line: span.line, col: span.col,
-                code: Some("E206".into()),
-                message: "a library directory cannot declare main".into(),
-            })));
+        let library_error = library_main.map(|span| Diagnostic {
+            path: files[0].path.clone(), line: span.line, col: span.col,
+            code: Some("E206".into()),
+            message: "a library directory cannot declare main".into(),
+        });
+        // §50: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
+        if let Some(error) = [duplicate_library, library_error].into_iter().flatten()
+            .min_by_key(crate::diagnostic_order) {
+            return Err(LoadError::Diagnostic(source_diagnostic(&files, error)));
         }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
         let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
@@ -232,23 +234,29 @@ fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<S
 }
 
 /// Directories that declare `library`, in file order (entry first, then relative path bytes).
-/// The second declaration of a directory, and the second in a file, are E205 (§59).
-fn library_roots(files: &[TokenFile]) -> Result<BTreeSet<Vec<String>>, Diagnostic> {
+/// The second declaration of a directory, and the second in a file, are E205 (§59);
+/// the diagnostic is returned rather than raised so the caller can order it with E206.
+fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnostic>) {
     let mut roots = BTreeSet::new();
+    let mut duplicate: Option<Diagnostic> = None;
     for file in files {
         let mut declared = false;
         for token in &file.tokens {
             if token.kind != TokKind::KwLibrary { continue; }
             if declared || roots.contains(&file.source.directory) {
-                return Err(Diagnostic { path: file.source.path.clone(), line: token.span.line,
+                let error = Diagnostic { path: file.source.path.clone(), line: token.span.line,
                     col: token.span.col, code: Some("E205".into()),
-                    message: "duplicate library declaration".into() });
+                    message: "duplicate library declaration".into() };
+                if duplicate.as_ref().map_or(true, |current| crate::diagnostic_order(&error) < crate::diagnostic_order(current)) {
+                    duplicate = Some(error);
+                }
+                continue;
             }
             declared = true;
             roots.insert(file.source.directory.clone());
         }
     }
-    Ok(roots)
+    (roots, duplicate)
 }
 
 fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic {
