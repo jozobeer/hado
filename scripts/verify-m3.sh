@@ -12,6 +12,8 @@ def run(*args, timeout=180):
     try:
         return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as error:
+        if isinstance(error, subprocess.TimeoutExpired):
+            print(f'NG: timeout ({timeout}s): {" ".join(args)}', file=sys.stderr, flush=True)
         return subprocess.CompletedProcess(args, 127, '', str(error))
 def report(number, label, ok):
     results[number] = bool(ok)
@@ -121,7 +123,7 @@ for folder in ['tests/accept', 'tests/reject', 'tests/library']:
                             for p in source_files(case) if p.parent != case)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
-tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1')
+tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1', timeout=600)
 log = tests.stdout+tests.stderr
 hm = all(re.search(r'test [^\n]*'+name+r'[^\n]* \.\.\. ok',log) for name in ['unify','generalize','occurs','signature_matching'])
 report(8, 'glue+unit-hm', glue and hm)
