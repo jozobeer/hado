@@ -235,6 +235,13 @@ fn shared_functor_equation_follows_the_arguments_members() {
 }
 
 #[test]
+fn shared_functor_application_type_resolves_to_the_argument() {
+    let source = format!("def main = squash (StringFold.fold [\"a\", \"b\"])\ndef squash (x: StringFold.T): String => x\n{}", string_fold("shared "));
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
 fn unmarked_functor_equation_keeps_the_application_type_distinct() {
     let source = format!("def main = StringFold.fold [\"a\"]\n{}", string_fold(""));
     let error = check_source(&source, "t").err().expect("an unmarked functor equation stays opaque");

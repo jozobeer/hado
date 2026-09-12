@@ -350,7 +350,7 @@ opaque_monoid() {
     printf 'implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\n'
 }
 
-mkdir -p "$workdir/33a1" "$workdir/33a3" "$workdir/33a1b" "$workdir/33a1bneg" \
+mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$workdir/33a1bneg" \
     "$workdir/33b1" "$workdir/33b1b" "$workdir/33g1" "$workdir/33g2" "$workdir/33g3"
 
 # 33-a(1): shared functor を shared な引数に適用し、String の List を fold する。
@@ -368,6 +368,16 @@ mkdir -p "$workdir/33a1" "$workdir/33a3" "$workdir/33a1b" "$workdir/33a1bneg" \
     functor_body 'shared'
     printf 'implement Fold as StringFold = MakeFold(StringMonoid)\n'
 } >"$workdir/33a3/main.hd"
+
+# 33-a(1c): 適用結果の抽象型 StringFold.T は引数の shared に従い String に解ける。
+# 注釈 StringFold.T に String を渡せることで測る（適用の写しで shared の登録を
+# 落とすと、StringFold.T が不透明に戻り E305 になる）。
+{
+    printf 'def main = squash (StringFold.fold ["%s", "%s"])\ndef squash (x: StringFold.T): String => x\n' "$rand_a" "$rand_b"
+    functor_contracts; string_monoid
+    functor_body 'shared'
+    printf 'implement Fold as StringFold = MakeFold(StringMonoid)\n'
+} >"$workdir/33a1c/main.hd"
 
 # 33-a(1b): shared functor を印なしの引数に適用する。OpaqueFold.T は OpaqueMonoid.T と
 # 同一なので、OpaqueMonoid.of の値を fold が受け取れる（E305 が出ない）。印なしの T は
@@ -441,7 +451,7 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
     "$workdir/33e/main.hd" "$workdir/33eneg/main.hd" "$workdir/33f2/main.hd" "$workdir/33h/main.hd" \
     "$workdir/33i1/main.hd" "$workdir/33i2/main.hd" "$workdir/33i3/main.hd" "$workdir/33accept/main.hd" \
-    "$workdir/33a1/main.hd" "$workdir/33a3/main.hd" "$workdir/33a1b/main.hd" "$workdir/33a1bneg/main.hd" \
+    "$workdir/33a1/main.hd" "$workdir/33a1c/main.hd" "$workdir/33a3/main.hd" "$workdir/33a1b/main.hd" "$workdir/33a1bneg/main.hd" \
     "$workdir/33b1/main.hd" "$workdir/33b1b/main.hd" "$workdir/33g1/main.hd" "$workdir/33g2/main.hd" "$workdir/33g3/main.hd"; do
     random_padding "$probe"
 done
@@ -469,6 +479,7 @@ expect_error_at '33-i (3) 負の対照 (印なし type T = T) は E602' "$workdi
 accept_quiet '33-0 構文受理 (main 無しのライブラリ、stdout/stderr 空)' "$workdir/33accept/main.hd"
 
 accept_build_run '33-a(1) shared functor の fold が String List を取る' "$workdir/33a1/main.hd" "${rand_a}${rand_b}"
+accept_build_run '33-a(1c) 適用結果の StringFold.T が引数の shared で String に解ける' "$workdir/33a1c/main.hd" "${rand_a}${rand_b}"
 accept_build_run '33-a(3) shared functor の fold が of の String を取る' "$workdir/33a3/main.hd" "${rand_a}${rand_b}"
 expect_code_absent '33-a(1b) 正の対照: fold が印なしの引数の T を取り、引数に E305 は出ない' "$workdir/33a1b/main.hd" E705 'E305'
 expect_code '33-a(1b) 負の対照: 印なしの引数の T に String は渡せない' "$workdir/33a1bneg/main.hd" E305
