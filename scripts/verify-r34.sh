@@ -201,6 +201,11 @@ write("c2a", f"def main = Bytes.to_list (Bytes.of_list [{lit(payload)}])\n", exp
 add("c2a", "34-c(2a) of_list → to_list の往復", "print")
 write("c2a_empty", "def main = Bytes.to_list (Bytes.of_list [])\n", expect="[]\n")
 add("c2a_empty", "34-c(2a) 空の of_list → to_list", "print")
+for index, values in enumerate(([0], [0, 65])):
+    kind = f"c2a_nul_{index}"
+    write(kind, f"def main = Bytes.to_list (Bytes.of_list {plist(values)})\n",
+          expect=plist(values) + "\n")
+    add(kind, f"34-c(2a) 0x00 を含む of_list → to_list は {plist(values)}", "print")
 
 # 34-c(2b): get が生成した要素を返す。
 index = random.randrange(len(payload))
@@ -286,8 +291,8 @@ invalid_utf8 = [
     ("five_bytes", utf8_bytes(0, 5)),
     ("above_max", utf8_bytes(0x110000, 4)),
 ]
-valid_utf8 = [(0x41, 1), (0x80, 2), (0x800, 3), (0x10000, 4), (0x10FFFF, 4)]
-for scalar, width in valid_utf8[:4]:
+valid_utf8 = [(0x00, 1), (0x41, 1), (0x80, 2), (0x800, 3), (0x10000, 4), (0x10FFFF, 4)]
+for scalar, width in valid_utf8[:-1]:
     for position in range(1, width):
         encoded = utf8_bytes(scalar, width)
         encoded[position] = 0x41
@@ -307,6 +312,12 @@ for scalar, width in valid_utf8:
           f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
           expect=f"Bytes.of_list {plist(encoded)}\n")
     add(kind, f"34-c(4b) 負の対照 U+{scalar:04X} {plist(encoded)} は受理・往復一致", "print")
+
+encoded = [0, 65]
+write("c4b_valid_nul_ascii",
+      f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
+      expect=f"Bytes.of_list {plist(encoded)}\n")
+add("c4b_valid_nul_ascii", f"34-c(4b) 負の対照 {plist(encoded)} は受理・往復一致", "print")
 
 # 34-c(4c): get の範囲外。
 write(
@@ -407,6 +418,24 @@ for length in (0, random.randint(1, len(sequence) - 1)):
         expect=plist([order, -order]) + "\n",
     )
     add(kind, f"34-e 長さ {length}/{len(sequence)} の接頭辞対は compare の両方向で符号が逆", "print")
+
+for index, (left, right) in enumerate((
+    ([0, 0, 1], [0, 0, 2]),
+    ([0], [0, 0]),
+    ([0, 255], [0, 255, 0]),
+)):
+    expected = []
+    for a, b in ((left, right), (right, left)):
+        expected.extend([int(a == b), int(a != b), (a > b) - (a < b)])
+    kind = f"e_nul_{index}"
+    write(
+        kind,
+        f"def main = let x = Bytes.of_list {plist(left)} -> let y = Bytes.of_list {plist(right)} -> "
+        "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y, "
+        "if y == x => 1 | 0, if y != x => 1 | 0, compare y x]\n",
+        expect=plist(expected) + "\n",
+    )
+    add(kind, f"34-e 0x00 を含む {plist(left)}/{plist(right)} の == != compare 両方向は {plist(expected)}", "print")
 
 # 34-f: Bytes 注釈の関数は受理される。
 write(
