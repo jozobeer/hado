@@ -23,7 +23,7 @@ impl Checker<'_> {
         let Ty::Fn(payload, result, _) = self.inference.instantiate(&scheme) else { return Ok(Ty::Error); };
         for (field, value) in fields {
             let index = declared.iter().position(|candidate| candidate == &field.name).unwrap();
-            self.branch_result(value, &payload[index])?;
+            self.branch_result(value, &self.reveal_shared(&payload[index]))?;
         }
         let result = self.inference.resolve(&result);
         self.value_types.insert((name.span.line, name.span.col), result.clone());
@@ -41,8 +41,9 @@ impl Checker<'_> {
         self.unify(&result, expected, name.span)?;
         for (field, nested) in fields {
             let index = declared.iter().position(|candidate| candidate == &field.name).unwrap();
-            if let Some(pattern) = nested { self.pattern(pattern, &payload[index])?; }
-            else { self.values.insert(field.name.clone(), Scheme::monomorphic(payload[index].clone())); }
+            let payload = self.reveal_shared(&payload[index]);
+            if let Some(pattern) = nested { self.pattern(pattern, &payload)?; }
+            else { self.values.insert(field.name.clone(), Scheme::monomorphic(payload)); }
         }
         Ok(())
     }
