@@ -8,11 +8,13 @@ def rec join
   | [head, ...tail] => String.concat head (String.concat " " (join tail))
 
 module Report
-def empty: Tally Pure
-def add(tally: Tally, name: String, passed: Int, total: Int): Tally Pure
-def render(tally: Tally): String Pure
+type T
+def empty: T Pure
+def add(tally: T, name: String, passed: Int, total: Int): T Pure
+def render(tally: T): String Pure
 
 implement Report as Report
+shared type T = Tally
 def empty = { passed = 0; total = 0; red = [] }
 def add tally name passed total =>
   if passed < total
