@@ -10,7 +10,6 @@ struct Generator {
     declarations: usize,
     allow_resume: bool,
     library_emitted: bool,
-    shared_emitted: bool,
 }
 
 impl Generator {
@@ -45,7 +44,6 @@ impl Generator {
     fn program(&mut self) -> String {
         self.declarations = 0;
         self.library_emitted = false;
-        self.shared_emitted = false;
         self.mark("program", 1, 0);
         let outer_count = self.choose("outer_item*", 3);
         let section_count = self.choose("section*", 3);
@@ -237,12 +235,7 @@ impl Generator {
             format!("{} : {}{sig_name}", g.name(true), g.path())
         }, " , ");
         self.declarations += 2;
-        let shared = if self.choose("functor_shared", 2) == 0 {
-            self.shared_emitted = true;
-            "shared "
-        } else {
-            ""
-        };
+        let shared = if self.choose("functor_shared", 2) == 0 { "shared " } else { "" };
         (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) {shared}type {abstract_name} = Int", self.path()), sig_name, name)
     }
 
@@ -267,7 +260,6 @@ impl Generator {
             }
             _ => {
                 self.declarations += 1;
-                self.shared_emitted = true;
                 format!("shared type {abstract_name} = {}", self.type_expr(2))
             }
         }
@@ -774,17 +766,47 @@ fn declaration_count(items: &[Item]) -> usize {
     }).sum()
 }
 
+fn shared_counts(items: &[Item]) -> (usize, usize) {
+    let mut ordinary = 0;
+    let mut functor = 0;
+    for item in items {
+        match item {
+            Item::ModuleSig(sig) => {
+                let (nested_ordinary, nested_functor) = shared_counts(&sig.items);
+                ordinary += nested_ordinary;
+                functor += nested_functor;
+            }
+            Item::ModuleImpl(module) => {
+                let direct = module.items.iter().filter(|item| matches!(item, Item::TypeDef(def) if def.shared)).count();
+                match module.form {
+                    ImplementationForm::Ordinary => ordinary += direct,
+                    ImplementationForm::Functor(_) => functor += direct,
+                    ImplementationForm::Application { .. } => {}
+                }
+                let (nested_ordinary, nested_functor) = shared_counts(&module.items);
+                ordinary += nested_ordinary;
+                functor += nested_functor;
+            }
+            _ => {}
+        }
+    }
+    (ordinary, functor)
+}
+
 #[test]
 fn grammar_generated_programs_preserve_every_declaration() {
     let mut generator = Generator { state: 0x4152_395f_4752_414d, ..Generator::default() };
     let mut library_seen = false;
-    let mut shared_seen = false;
+    let mut ordinary_shared_seen = false;
+    let mut functor_shared_seen = false;
     for sample in 0..1200 {
         let source = generator.program();
-        shared_seen |= generator.shared_emitted;
         let ast = parser::parse_source(&source, "generated-grammar.hd")
             .unwrap_or_else(|error| panic!("sample {sample}: {error}\n{source}"));
         library_seen |= ast.library.is_some();
+        let (ordinary_shared, functor_shared) = shared_counts(&ast.items);
+        ordinary_shared_seen |= ordinary_shared > 0;
+        functor_shared_seen |= functor_shared > 0;
         assert_eq!(declaration_count(&ast.items), generator.declarations, "sample {sample}: {source}");
         let spaced = generator.perturb(&source);
         let spaced_ast = parser::parse_source(&spaced, "spaced-grammar.hd")
@@ -797,7 +819,8 @@ fn grammar_generated_programs_preserve_every_declaration() {
         assert_eq!(canonical, parser::canonical_program(&restored));
     }
     assert!(library_seen, "generator never emitted library");
-    assert!(shared_seen, "generator never emitted shared");
+    assert!(ordinary_shared_seen, "generator never emitted shared in ordinary implementation");
+    assert!(functor_shared_seen, "generator never emitted shared in functor body");
     let spec = include_str!("../../../docs/spec.md");
     let grammar = spec.split("# 41.").nth(1).unwrap().split("# 42.").next().unwrap();
     let rules: BTreeSet<_> = grammar.lines().filter_map(|line| line.split_once(":=").map(|(name, _)| name.trim())).collect();
