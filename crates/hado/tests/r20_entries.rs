@@ -151,13 +151,16 @@ fn nonselected_main_body_is_still_checked() {
     }
 }
 #[test]
-fn missing_selected_main_reports_selected_file_one_one_for_all_commands() {
+fn missing_selected_main_is_a_library_for_check_and_entry_error_for_build() {
     for padding in 0..5 {
         let case = Case::new();
         case.write("a.hd", "def main = 1");
         case.write("z.hd", "def main = 2");
         case.write("empty.hd", &format!("// no entry\n{}", "\n".repeat(padding)));
-        for command in ["check", "build", "dump-mono"] { case.reject(command, "empty.hd", "empty.hd", "E206", 0); }
+        // A1: no main means a library inspection, so a.hd's main is an ordinary
+        // unreferenced def (E513); build/dump-mono still report a missing entry.
+        case.reject("check", "empty.hd", "a.hd", "E513", 0);
+        for command in ["build", "dump-mono"] { case.reject(command, "empty.hd", "empty.hd", "E206", 0); }
     }
 }
 #[test]
@@ -166,7 +169,10 @@ fn used_support_file_cannot_fall_back_to_sibling_main() {
     contract(&case);
     case.write("entry.hd", "def main = M.apply 7");
     case.write("support.hd", "def helper x => x + 3\nimplement Calc as M\ndef apply x => helper x");
-    for command in ["check", "build", "dump-mono"] { case.reject(command, "support.hd", "support.hd", "E206", 0); }
+    // A1: support.hd has no main, so check treats its directory as a library and
+    // entry.hd's main is an ordinary def (E513); build/dump-mono need an entry.
+    case.reject("check", "support.hd", "entry.hd", "E513", 0);
+    for command in ["build", "dump-mono"] { case.reject(command, "support.hd", "support.hd", "E206", 0); }
 }
 #[test]
 fn file_isolation_preserves_parameter_let_lambda_and_pattern_shadowing() {

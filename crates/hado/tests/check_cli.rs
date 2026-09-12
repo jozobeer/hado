@@ -233,16 +233,6 @@ fn every_reject_preserves_code_and_column_after_header_line_insertion() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-fn missing_main_has_fixed_position(source: &str, rejection: &Rejection) -> bool {
-    if rejection.code != "E206" { return false; }
-    let ast = hado::parser::parse_source(source, "main.hd").expect("E206 requires syntactically valid entry");
-    let missing = !ast.items.iter().any(|item| matches!(item, hado::parser::Item::Def(def) if def.name == "main"));
-    if missing {
-        assert_eq!((&*rejection.file, rejection.line, rejection.column), ("main.hd", 1, 1));
-    }
-    missing
-}
-
 #[test]
 fn every_reject_preserves_its_actual_diagnostic_file_after_leading_newline() {
     let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/reject");
@@ -270,7 +260,7 @@ fn every_reject_preserves_its_actual_diagnostic_file_after_leading_newline() {
         let diagnostic_file = copied.join(&expected.file);
         let before = std::fs::read_to_string(&diagnostic_file).unwrap();
         std::fs::write(&diagnostic_file, format!("\n{before}")).unwrap();
-        if !missing_main_has_fixed_position(&source, &expected) { expected.line += 1; }
+        expected.line += 1;
         let actual = positioned_rejection(&entry, code);
         if actual.as_ref() != Ok(&expected) { failures.push(format!("{code}: expected {expected:?}, got {actual:?}")); }
     }

@@ -21,7 +21,6 @@ fn duplicate_definitions_report_the_second_name() {
 #[test]
 fn entry_form_is_checked_before_types() {
     for (source, position) in [
-        ("def f x => x + true", (1, 1)),
         ("\n\ndef main x => x + true", (3, 1)),
         ("def main | Some(x) => x | 0", (1, 1)),
     ] {

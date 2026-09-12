@@ -183,7 +183,22 @@ fn selecting_a_child_file_makes_its_directory_the_root() {
     let case = Case::new();
     case.write("main.hd", "def main = 99");
     case.write("nested/empty.hd", "// no main\n\n");
-    for command in ["check", "build", "dump-mono"] { case.reject(command, "nested/empty.hd", "nested/empty.hd", "E206", 0); }
+    // A1: no main is a library inspection, which accepts an empty program;
+    // build/dump-mono still report a missing entry.
+    let accepted = case.command("check", "nested/empty.hd");
+    assert_eq!(accepted.status.code(), Some(0), "{}", String::from_utf8_lossy(&accepted.stderr));
+    assert!(accepted.stderr.is_empty());
+    for command in ["build", "dump-mono"] { case.reject(command, "nested/empty.hd", "nested/empty.hd", "E206", 0); }
+
+    // The root really moves: a root type of main.hd is accepted from nested/
+    // when main.hd is selected, but invisible once a file below nested/ is.
+    let case = Case::new();
+    case.write("main.hd", "type Root = | Root(Int)\ndef main = nested::deep::M.run (Root(7))");
+    case.write("nested/deep/s.hdi", "module S\ndef run(value: Root): Int");
+    case.write("nested/deep/m.hd", "implement S as M\ndef run | Root(n) => n");
+    case.run("main.hd", 7);
+    let source = "implement S as M\ndef run | Root(n) => n";
+    case.reject("check", "nested/deep/m.hd", "nested/deep/m.hd", "E204", source.find("Root").unwrap());
 }
 #[test]
 fn root_values_remain_file_local_even_when_modules_use_namespace_paths() {

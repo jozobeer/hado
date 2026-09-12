@@ -115,7 +115,10 @@ fn file_role_errors_keep_original_paths_and_positions() {
         let source = format!("{}{}def helper x => x + 1\ndef main = helper 1", "\n".repeat(padding % 3), " ".repeat(padding));
         case.write("main.hd", &source);
         case.write("other.hd", "");
-        for command in ["check", "build", "dump-mono"] {
+        // A1: check on a file without main is a library inspection, so main.hd's
+        // unreferenced `helper` is E513; build/dump-mono still require an entry.
+        case.reject("check", "other.hd", "main.hd", &source, "E513", "def helper");
+        for command in ["build", "dump-mono"] {
             case.reject(command, "other.hd", "other.hd", "", "E206", "");
         }
 
@@ -176,7 +179,7 @@ fn single_file_entry_diagnostics_keep_existing_positions() {
         let source = format!("{}{}def helper x => x + 1", "\n".repeat(padding), " ".repeat(padding));
         case.write("main.hd", &source);
         let expected = hado::check_source(&source, "main.hd").err().unwrap();
-        assert_eq!(expected.code.as_deref(), Some("E206"));
+        assert_eq!(expected.code.as_deref(), Some("E513"));
         let actual = case.command("check", "main.hd");
         assert_eq!(actual.stderr, format!("{expected}\n").as_bytes());
         assert_eq!(actual.status.code(), Some(1));
