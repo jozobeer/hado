@@ -97,6 +97,29 @@ fn def_main_is_still_an_item_next_to_library() {
 }
 
 #[test]
+fn library_after_the_first_heading_is_a_syntax_error() {
+    // §41: outer_item は最初の見出しより前にだけ現れる。
+    let error = parse_source("def main = 1\neffect E\nabort stop\nlibrary\n", "generated.hd")
+        .expect_err("library after a section heading must be rejected");
+    assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
+    assert_eq!((error.line, error.col), (4, 1), "{error}");
+}
+
+#[test]
+fn main_of_a_library_directory_is_e206_before_a_duplicate_library() {
+    // §50: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
+    let case = Case::new();
+    case.write("main.hd", "def main = 1\nlibrary\nlibrary\n");
+    let error = match hado::project::Project::load(&case.0.join("main.hd")) {
+        Ok(_) => panic!("expected E206"),
+        Err(hado::project::LoadError::Diagnostic(error)) => error,
+        Err(other) => panic!("unexpected load error: {other}"),
+    };
+    assert_eq!(error.code.as_deref(), Some("E206"), "{error}");
+    assert_eq!((error.line, error.col), (1, 1), "{error}");
+}
+
+#[test]
 fn library_and_shared_are_not_names() {
     for source in ["def library = 1", "def shared = 1", "type shared = | A"] {
         let error = parse_source(source, "generated.hd").expect_err(source);
