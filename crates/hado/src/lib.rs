@@ -118,12 +118,12 @@ struct ParsedSource {
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
     let ast = parser::parse_source(source, path)?;
     let mut parsed = with_prelude(ast, path, source.lines().count())?;
-    resolve_namespaces(&mut parsed, &[(0, Vec::new())], &std::collections::BTreeSet::from([Vec::new()]), path);
+    resolve_namespaces(&mut parsed, &[(0, Vec::new())], &std::collections::BTreeSet::from([Vec::new()]), &std::collections::BTreeSet::new(), path);
     Ok(parsed)
 }
 
-fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)], directories: &std::collections::BTreeSet<Vec<String>>, path: &str) {
-    let resolved = namespaces::resolve(&mut parsed.ast, files, directories, parsed.prelude_items, path);
+fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)], directories: &std::collections::BTreeSet<Vec<String>>, libraries: &std::collections::BTreeSet<Vec<String>>, path: &str) {
+    let resolved = namespaces::resolve(&mut parsed.ast, files, directories, libraries, parsed.prelude_items, path);
     parsed.namespace_diagnostics = resolved.diagnostics;
     parsed.namespace_anchors = resolved.error_anchors;
 }

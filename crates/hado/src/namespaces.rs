@@ -23,11 +23,23 @@ struct Local {
 struct Resolver<'a> {
     symbols: Symbols,
     directories: &'a BTreeSet<Directory>,
+    // §49: the prelude is placed at `[]`, but a library must still see it while
+    // the user root `[]` stays invisible, so it keeps its own table.
+    prelude: BTreeMap<Space, BTreeSet<String>>,
+    // §55, §59: the root that the current item resolves paths from.
+    root: Directory,
     sites: BTreeMap<(usize, usize), Vec<DeclaredName>>,
     renamed: BTreeMap<(usize, usize), String>,
     operations: BTreeMap<Directory, BTreeSet<String>>,
     path: &'a str,
     result: Resolution,
+}
+
+/// §59: the deepest library root that contains `directory`, or the user root
+/// `[]` when the item sits outside every library.
+fn innermost_library_root(directory: &[String], libraries: &BTreeSet<Directory>) -> Directory {
+    libraries.iter().filter(|library| directory.starts_with(library.as_slice()))
+        .max_by_key(|library| library.len()).cloned().unwrap_or_default()
 }
 
 fn qualify(directory: &[String], name: &str) -> String {
@@ -82,34 +94,44 @@ fn file_value(name: &str) -> Option<&str> {
 
 pub(crate) fn resolve(
     ast: &mut Ast, files: &[(usize, Directory)], directories: &BTreeSet<Directory>,
-    prelude_items: usize, path: &str,
+    libraries: &BTreeSet<Directory>, prelude_items: usize, path: &str,
 ) -> Resolution {
     let locations: Vec<_> = ast.items.iter().enumerate().map(|(index, item)| {
         if index < prelude_items { return Vec::new(); }
         files.iter().rev().find(|(offset, _)| *offset < item_span(item).line)
             .map(|(_, directory)| directory.clone()).unwrap_or_default()
     }).collect();
+    let roots: Vec<_> = locations.iter().map(|directory| innermost_library_root(directory, libraries)).collect();
     let mut resolver = Resolver {
         symbols: BTreeMap::new(), directories,
+        prelude: BTreeMap::new(), root: Vec::new(),
         sites: ast.name_sites.iter().map(|site| ((site.start.line, site.start.col), site.parts.clone())).collect(),
         renamed: BTreeMap::new(), operations: BTreeMap::new(), path,
         result: Resolution { diagnostics: Vec::new(), error_anchors: Vec::new() },
     };
     resolver.symbols.entry((Vec::new(), Space::Type)).or_default()
         .extend(crate::names::BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
-    for (item, directory) in ast.items.iter().zip(&locations) {
+    resolver.prelude.entry(Space::Type).or_default()
+        .extend(crate::names::BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
+    for (index, (item, directory)) in ast.items.iter().zip(&locations).enumerate() {
         for (space, name, _) in declarations(item) {
             resolver.symbols.entry((directory.clone(), space)).or_default().insert(name.into());
+            if index < prelude_items { resolver.prelude.entry(space).or_default().insert(name.into()); }
         }
         if let Item::Effect(effect) = item {
             resolver.operations.entry(directory.clone()).or_default()
                 .extend(effect.ops.iter().map(|op| op.name.clone()));
         }
     }
-    for (item, directory) in ast.items.iter_mut().zip(&locations) {
-        if !directory.is_empty() {
+    for ((item, directory), root) in ast.items.iter_mut().zip(&locations).zip(&roots) {
+        resolver.root = root.clone();
+        // §59: a declaration in a library subdirectory conflicts with the
+        // library root and the prelude, not with the user root.
+        if directory != root {
             for (space, name, span) in declarations(item) {
-                if resolver.has(&[], space, name) { resolver.error(span, "E205", "declaration conflicts with root name"); }
+                if resolver.has(&resolver.root, space, name) || resolver.has_prelude(space, name) {
+                    resolver.error(span, "E205", "declaration conflicts with root name");
+                }
             }
         }
         resolver.item(item, directory, &Local::default(), true);
@@ -125,6 +147,10 @@ pub(crate) fn resolve(
 impl Resolver<'_> {
     fn has(&self, directory: &[String], space: Space, name: &str) -> bool {
         self.symbols.get(&(directory.to_vec(), space)).is_some_and(|names| names.contains(name))
+    }
+
+    fn has_prelude(&self, space: Space, name: &str) -> bool {
+        self.prelude.get(&space).is_some_and(|names| names.contains(name))
     }
 
     fn error(&mut self, span: Span, code: &str, message: &str) {
@@ -144,13 +170,20 @@ impl Resolver<'_> {
     }
 
     fn resolve_global(&mut self, name: &mut String, span: Span, space: Space, directory: &[String]) {
+        // §55, §59: unqualified names reach the own directory, then the item's
+        // root (the innermost library root, or the user root outside a library).
+        // The prelude stays visible from everywhere (§49) while the user root
+        // does not reach into a library.
         if !name.contains("::") {
             if self.has(directory, space, name) { *name = qualify(directory, name); }
-            else if !self.has(&[], space, name) { self.unknown(span, span); }
+            else if self.has(&self.root, space, name) { *name = qualify(&self.root, name); }
+            else if !self.has_prelude(space, name) { self.unknown(span, span); }
             return;
         }
+        // Absolute paths are read from the root: the innermost library root
+        // inside a library, the user root outside one.
         let parts: Vec<_> = name.split("::").collect();
-        let mut prefix = Vec::new();
+        let mut prefix = self.root.clone();
         for (index, part) in parts.iter().enumerate() {
             let known = if index + 1 == parts.len() { self.has(&prefix, space, part) }
                 else { prefix.push((*part).into()); self.directories.contains(&prefix) };
@@ -160,6 +193,10 @@ impl Resolver<'_> {
                 return;
             }
         }
+        // The declaration table is indexed by the path from the user root, so a
+        // path written from a library root becomes absolute for the rest of the
+        // pipeline. Outside a library the root is `[]`, a no-op.
+        *name = qualify(&self.root, name);
     }
 
     fn unknown(&mut self, start: Span, anchor: Span) {
@@ -172,7 +209,9 @@ impl Resolver<'_> {
         for item in items {
             if let Item::TypeDef(def) = item {
                 if check_outer && def.ty.as_ref().is_some_and(|ty| matches!(ty.kind, TypeKind::Adt(_) | TypeKind::Record(_)))
-                    && (self.has(directory, Space::Type, &def.name) || self.has(&[], Space::Type, &def.name)) {
+                    && (self.has(directory, Space::Type, &def.name)
+                        || self.has(&self.root, Space::Type, &def.name)
+                        || self.has_prelude(Space::Type, &def.name)) {
                     self.error(def.name_span, "E205", "local data type conflicts with a visible outer type");
                 }
                 local.types.insert(def.name.clone());
