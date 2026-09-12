@@ -140,12 +140,11 @@ fn shared_to_a_type_absent_from_the_contract_is_unbound() {
 }
 
 #[test]
-fn shared_to_a_known_type_does_not_trigger_unbound() {
+fn shared_to_a_known_type_is_accepted() {
     let case = Case::new();
     let source = format!("def main = StringMonoid.of \"a\"\n\n{MONOID}\n\n{IMPLEMENTATION}");
     case.write("main.hd", &source);
-    let error = case.check("main.hd").expect_err("phase 0 leaves the abstract type opaque");
-    assert_ne!(error.code.as_deref(), Some("E204"), "{error}");
+    assert!(case.check("main.hd").is_ok(), "a shared realization must let main be typed");
 }
 
 const UNSHARED: &str = "implement Monoid as StringMonoid\ntype T = String\ndef combine left _ => left\ndef of value => value";

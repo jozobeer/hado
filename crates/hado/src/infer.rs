@@ -19,6 +19,7 @@ struct Checker<'a> {
     ambiguous_types: HashSet<String>,
     ambiguous_constructors: HashSet<String>,
     abstract_representations: HashMap<String, TypeRealization>,
+    shared_realizations: HashMap<String, TypeRealization>,
     deferred: Vec<Diagnostic>,
     module_constructors: HashMap<String, (u32, Scheme)>,
     module_named_constructors: HashMap<String, Vec<String>>,
@@ -83,6 +84,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         ambiguous_types: HashSet::new(),
         ambiguous_constructors: HashSet::new(),
         abstract_representations: HashMap::new(),
+        shared_realizations: HashMap::new(),
         deferred: contract_diagnostics,
         module_constructors: HashMap::new(),
         module_records: HashMap::new(),
@@ -221,7 +223,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         }
         checker.inference.close_rows(&main);
         checker.main_effects = checker.inference.close_row(&checker.main_effects);
-        let main = checker.inference.resolve(&main);
+        let main = checker.reveal_shared(&checker.inference.resolve(&main));
         if !main.is_monomorphic() {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
         }
@@ -539,9 +541,13 @@ impl Checker<'_> {
         let mut abstract_names = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
-                if !ast.items.iter().any(|item| matches!(item, Item::TypeDef(actual) if actual.name == def.name && actual.params.len() == def.params.len())) {
+                let actual = ast.items.iter().find_map(|item| match item {
+                    Item::TypeDef(actual) if actual.name == def.name && actual.params.len() == def.params.len() => Some(actual),
+                    _ => None,
+                });
+                let Some(actual) = actual else {
                     return Err(self.error(module.span, Some("E602"), "missing signature type"));
-                }
+                };
                 if def.ty.is_some() {
                     return Err(self.error(
                         def.span,
@@ -556,7 +562,11 @@ impl Checker<'_> {
                 let reference = TypeExpr { kind, span: def.name_span, name_span: def.name_span, effects: None };
                 let body = self.payload_type(&reference, &parameters, def.name_span)?;
                 let parameters = def.params.iter().map(|p| match parameters[&p.name] { Ty::Var(id) => id, _ => unreachable!() }).collect();
-                self.abstract_representations.insert(qualified.clone(), TypeRealization { parameters, body });
+                let realization = TypeRealization { parameters, body };
+                if actual.shared {
+                    self.shared_realizations.insert(qualified.clone(), realization.clone());
+                }
+                self.abstract_representations.insert(qualified.clone(), realization);
                 abstract_names.insert(def.name.clone(), qualified);
             }
         }
@@ -635,11 +645,15 @@ impl Checker<'_> {
         let result = self.payload_type(result_ty, parameters, declaration.span)?;
         let row = self.row_annotation(&result_ty.effects)?;
         let ty = Ty::fn_with(args, result, row);
-        if public { return Ok(ty); }
+        if public { return Ok(self.reveal_shared(&ty)); }
         let prefix = format!("{}.", self.module_path.join("."));
         let local = self.abstract_representations.iter().filter(|(name, _)| name.starts_with(&prefix))
             .map(|(name, representation)| (name.clone(), representation.clone())).collect();
-        Ok(ty.reveal(&local))
+        Ok(self.reveal_shared(&ty.reveal(&local)))
+    }
+
+    fn reveal_shared(&self, ty: &Ty) -> Ty {
+        ty.reveal(&self.shared_realizations)
     }
 
     fn definition_group(
@@ -1632,7 +1646,7 @@ impl Checker<'_> {
             return result;
         }
         if let Some((arity, qualified)) = self.abstract_types.get(name) {
-            if *arity == args.len() { return Ok(Ty::Abstract(qualified.clone(), args)); }
+            if *arity == args.len() { return Ok(self.reveal_shared(&Ty::Abstract(qualified.clone(), args))); }
         }
         if self.type_arities.get(name) == Some(&args.len()) { return Ok(Ty::Adt(name.clone(), args)); }
         if !args.is_empty() { return Err(self.error(span, None, "type annotation is not implemented")); }
