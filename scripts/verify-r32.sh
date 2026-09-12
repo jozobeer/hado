@@ -26,14 +26,50 @@ spaces() { printf '%*s' "$1" ''; }
 blank_lines() { local i; for ((i = 0; i < $1; i++)); do printf '\n'; done; }
 
 # ケースの代表ファイル（docs/corpus.md）: library を宣言したファイル。無ければ
-# パスのバイト順の先頭。ファイル名は判定器に書かない。
+# パスのバイト順の先頭。ファイル名は判定器に書かない。宣言は行コメント（`//` 以降）を
+# 除いた上で、行頭の空白の後に library が単独で現れる行（runner の parse と同じ字句）。
 library_rep() {
     local dir=$1 rep
-    rep=$(grep -rlxE '[[:space:]]*library[[:space:]]*' --include='*.hd' "$dir" 2>/dev/null | LC_ALL=C sort | head -n1)
+    rep=$(
+        find "$dir" -type f -name '*.hd' -print0 \
+            | while IFS= read -r -d '' file; do
+                if sed 's|//.*||' "$file" | grep -qE '^[[:space:]]*library([[:space:]]|$)'; then
+                    printf '%s\n' "$file"
+                fi
+            done \
+            | LC_ALL=C sort | head -n1
+    )
     if [ -z "$rep" ]; then
         rep=$(find "$dir" -type f \( -name '*.hd' -o -name '*.hdi' \) | LC_ALL=C sort | head -n1)
     fi
     printf '%s' "$rep"
+}
+
+# 32-i 補助: 代表ファイルの選択が runner（corpus.rs）と同じ字句規則で決まることを
+# 確かめる。library の行末コメント（`//` 以降）と行頭の空白を通す。library を宣言した
+# ファイルをバイト順で後ろに置き、選択がそれと一致しなければ落ちる。探針が自分で
+# 作るファイルだけを使い、tests/library の名前は判定器に書かない。
+verify_library_rep() {
+    local base="$workdir/32i-rep"
+    mkdir -p "$base/comment" "$base/indent"
+    for c in comment indent; do
+        printf '// no library declaration here\n\nmodule Extra\ndef f(x: Int): Int\n\nimplement Extra as E\ndef f x => x\n' >"$base/$c/a.hd"
+    done
+    printf 'library // declaration\n' >"$base/comment/z.hd"
+    printf '  library\n' >"$base/indent/z.hd"
+    local c rep want
+    for c in comment indent; do
+        want="$base/$c/z.hd"
+        rep=$(library_rep "$base/$c")
+        if [ "$rep" != "$want" ]; then
+            echo "  representative for $c: want $want got '$rep'"
+            return 1
+        fi
+        if ! cargo run --offline -q -- check "$rep" >"$workdir/lib-out" 2>"$workdir/lib-err"; then
+            echo "  library rejected: $rep ($(cat "$workdir/lib-err"))"
+            return 1
+        fi
+    done
 }
 
 # 32-i: tests/library の全ケースを代表ファイルから check して受理。
@@ -59,6 +95,94 @@ verify_library() {
     [ "$n" -ge 1 ]
 }
 
+# 32-j 補助: base/main.hd を build して実行し、印字が expected と一致するか。
+report_build_run() {
+    local base=$1 expected=$2 got status
+    if ! cargo run --offline -q -- build "$base/main.hd" >/dev/null 2>"$workdir/rep-build-err"; then
+        echo "  report build failed: $(cat "$workdir/rep-build-err")"
+        return 1
+    fi
+    got=$("$base/main" 2>"$workdir/rep-run-err"); status=$?
+    if [ "$status" -ne 0 ] || [ "$got" != "$expected" ]; then
+        echo "  report run want '$expected' got '$got' status=$status"
+        return 1
+    fi
+}
+
+# 32-j 補助: base に report/ を写し、3 つ組（name:passed:total）を add で畳む
+# main.hd を書いて build → 実行。期待値は呼び出し側で計算して渡す。
+report_case() {
+    local base=$1 state="report::Report.empty" step=0 name passed total triple
+    mkdir -p "$base"
+    cp -r tools/gates/report "$base/report"
+    {
+        printf 'def main =\n'
+        for triple in "$3" "$4" "$5"; do
+            IFS=: read -r name passed total <<<"$triple"
+            printf '  let t%d = report::Report.add %s "%s" %s %s ->\n' "$step" "$state" "$name" "$passed" "$total"
+            state="t$step"
+            step=$((step + 1))
+        done
+        printf '  report::Report.render %s\n' "$state"
+    } >"$base/main.hd"
+    report_build_run "$base" "$2"
+}
+
+# 32-j (a): 実行時に生成した 3 つ組。少なくとも 1 つは赤になる。
+report_case_random() {
+    local names=("a$RANDOM" "b$RANDOM" "c$RANDOM")
+    local totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
+    local passed=("${totals[0]}" "$((RANDOM % totals[1]))" "$((RANDOM % (totals[2] + 1)))")
+    local red=()
+    [ "${passed[0]}" -lt "${totals[0]}" ] && red+=("${names[0]}")
+    [ "${passed[1]}" -lt "${totals[1]}" ] && red+=("${names[1]}")
+    [ "${passed[2]}" -lt "${totals[2]}" ] && red+=("${names[2]}")
+    local red_str="none"
+    [ "${#red[@]}" -gt 0 ] && red_str="${red[*]}"
+    local sum_passed=$((passed[0] + passed[1] + passed[2]))
+    local sum_total=$((totals[0] + totals[1] + totals[2]))
+    report_case "$workdir/32j" "$sum_passed/$sum_total passed; red: $red_str" \
+        "${names[0]}:${passed[0]}:${totals[0]}" \
+        "${names[1]}:${passed[1]}:${totals[1]}" \
+        "${names[2]}:${passed[2]}:${totals[2]}"
+}
+
+# 32-j (b): 全件緑の 3 つ組。赤が無いときの `red: none` を測る。
+report_case_green() {
+    local totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
+    local sum=$((totals[0] + totals[1] + totals[2]))
+    report_case "$workdir/32j-green" "$sum/$sum passed; red: none" \
+        "g0:${totals[0]}:${totals[0]}" \
+        "g1:${totals[1]}:${totals[1]}" \
+        "g2:${totals[2]}:${totals[2]}"
+}
+
+# 32-j (c): 空のリスト。`0/0 passed; red: none` を測る。
+report_case_empty() {
+    local base="$workdir/32j-empty"
+    mkdir -p "$base"
+    cp -r tools/gates/report "$base/report"
+    printf 'def main = report::Report.render report::Report.empty\n' >"$base/main.hd"
+    report_build_run "$base" "0/0 passed; red: none"
+}
+
+# 32-j (d): 実物の入口を check → 写して build → 実行。実行ファイルは残さない。
+report_case_real() {
+    local base="$workdir/32j-real"
+    mkdir -p "$base"
+    cp tools/gates/main.hd "$base/main.hd"
+    cp -r tools/gates/report "$base/report"
+    if ! cargo run --offline -q -- check "$base/main.hd" >"$workdir/rep-out" 2>"$workdir/rep-err"; then
+        echo "  real main.hd rejected: $(cat "$workdir/rep-err")"
+        return 1
+    fi
+    if [ -s "$workdir/rep-out" ] || [ -s "$workdir/rep-err" ]; then
+        echo "  real main.hd diagnostics"
+        return 1
+    fi
+    report_build_run "$base" "33/35 passed; red: m7"
+}
+
 # 32-j: E2 の要約プログラム。report.hd を単体で check し、実行時に生成した
 # 3 つ組で main.hd を書いて build → 実行。期待値は判定器側で計算する。
 verify_report() {
@@ -71,39 +195,10 @@ verify_report() {
         echo "  report.hd diagnostics"
         return 1
     fi
-    local base="$workdir/32j"
-    mkdir -p "$base"
-    cp -r tools/gates/report "$base/report"
-    local names=("a$RANDOM" "b$RANDOM" "c$RANDOM")
-    local totals passed i
-    totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
-    passed=("${totals[0]}" "$((RANDOM % totals[1]))" "$((RANDOM % (totals[2] + 1)))")
-    local red=()
-    for i in 0 1 2; do
-        if [ "${passed[$i]}" -lt "${totals[$i]}" ]; then red+=("${names[$i]}"); fi
-    done
-    local red_str="none"
-    if [ "${#red[@]}" -gt 0 ]; then red_str="${red[*]}"; fi
-    local sum_passed=$((passed[0] + passed[1] + passed[2]))
-    local sum_total=$((totals[0] + totals[1] + totals[2]))
-    local expected="$sum_passed/$sum_total passed; red: $red_str"
-    {
-        printf 'def main =\n'
-        printf '  let t0 = report::Report.add report::Report.empty "%s" %d %d ->\n' "${names[0]}" "${passed[0]}" "${totals[0]}"
-        printf '  let t1 = report::Report.add t0 "%s" %d %d ->\n' "${names[1]}" "${passed[1]}" "${totals[1]}"
-        printf '  let t2 = report::Report.add t1 "%s" %d %d ->\n' "${names[2]}" "${passed[2]}" "${totals[2]}"
-        printf '  report::Report.render t2\n'
-    } >"$base/main.hd"
-    if ! cargo run --offline -q -- build "$base/main.hd" >/dev/null 2>"$workdir/rep-build-err"; then
-        echo "  report build failed: $(cat "$workdir/rep-build-err")"
-        return 1
-    fi
-    local got status
-    got=$("$base/main" 2>"$workdir/rep-run-err"); status=$?
-    if [ "$status" -ne 0 ] || [ "$got" != "$expected" ]; then
-        echo "  report run want '$expected' got '$got' status=$status"
-        return 1
-    fi
+    report_case_random || return 1
+    report_case_green || return 1
+    report_case_empty || return 1
+    report_case_real || return 1
 }
 
 mkdir -p "$workdir/32a" "$workdir/32b" "$workdir/32b2" "$workdir/32b3" "$workdir/32c1" "$workdir/32c2" "$workdir/32c3" \
@@ -478,6 +573,7 @@ printf 'library\n\ndef helper x => x + 1\n\nmodule Local\ndef run(x: Int): Int\n
 accept '32-d (3) 再確認 (同じファイルの実装から参照)' "$workdir/32d3c/lib.hd"
 
 # 32-i: tests/library を代表ファイルから check して全件受理。
+check '32-i (代表ファイルの選択が runner と一致)' verify_library_rep
 check '32-i (tests/library 全件受理)' verify_library
 
 # 32-j: E2 の要約プログラムを check / build / 実行。
