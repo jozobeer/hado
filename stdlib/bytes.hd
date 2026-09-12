@@ -1,0 +1,30 @@
+module Bytes
+def length(bytes: Bytes): Int Pure
+def get(bytes: Bytes, index: Int): Int {Error}
+def of_list(values: Int List): Bytes {Error}
+def to_list(bytes: Bytes): Int List Pure
+def to_string(bytes: Bytes): String {Error}
+def of_string(value: String): Bytes Pure
+implement Bytes as Bytes
+def length bytes => __bytes_length bytes
+def get bytes index =>
+  if index >= 0 && index < __bytes_length bytes
+    => __bytes_get bytes index
+    | raise { message = "IndexOutOfRange" }
+def of_list values =>
+  if range_ok values
+    => build values 0 (__bytes_alloc (List.length values))
+    | raise { message = "ByteOutOfRange" }
+def to_list bytes => elements bytes 0 (__bytes_length bytes)
+def to_string bytes =>
+  if __bytes_is_utf8 bytes
+    => __bytes_to_string_unchecked bytes
+    | raise { message = "InvalidUtf8" }
+def of_string value => __bytes_of_string value
+def range_ok values => List.fold values true fn(ok, value => ok && value >= 0 && value <= 255)
+def rec build values index target =>
+  if values
+  | [] => target
+  | [head, ...tail] => build tail (index + 1) (__bytes_fill_unchecked target index head)
+def rec elements bytes index count =>
+  if index >= count => [] | [__bytes_get bytes index, ...elements bytes (index + 1) count]
