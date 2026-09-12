@@ -910,5 +910,40 @@ print(f'   (member count: {len(members)} → {len(members) + 1} → {len(members
 print('   (対照: 同値・削除は追随、空の仕様・関数集合は拒否)')
 PY
 
+# 34-j: ディスク上のタグと lock を列挙し、件数は実数から導く。
+check '34-j Bytes と String 操作の受理・失敗形と lock' python3 - <<'PY'
+from pathlib import Path
+import hashlib
+
+
+def coverage(sources, item):
+    tagged = [text for text in sources if f'// item: {item}' in text.splitlines()]
+    return (len(tagged) >= 3
+            and any('// expect-error: ' in text for text in tagged)
+            and any('// expect: ' in text for text in tagged)
+            and all('// needs: prelude' in text.splitlines() for text in tagged))
+
+
+sources = [path.read_text() for path in Path('tests/accept').glob('*/main.hd')]
+for item in ('Bytes', 'String 操作'):
+    assert not coverage([], item), 'empty corpus accepted'
+    assert not coverage([s for s in sources if '// expect-error:' not in s], item), 'all-success corpus accepted'
+    assert coverage(sources, item), f'missing accepted/error corpus: {item}'
+    count = sum(f'// item: {item}' in s.splitlines() for s in sources)
+    failures = sum(f'// item: {item}' in s.splitlines() and '// expect-error:' in s for s in sources)
+    print(f'   ({item}: accept={count}, expect-error={failures})')
+paths = sorted(p for folder in ('tests/accept', 'tests/reject', 'tests/library', 'stdlib')
+               for p in Path(folder).rglob('*') if p.suffix in ('.hd', '.hdi'))
+expected = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+lines = Path('tests/corpus.sha256').read_text().splitlines()
+actual = {line.split('  ', 1)[1]: line.split('  ', 1)[0] for line in lines}
+assert len(lines) == len(actual) == len(paths) and actual == expected, 'lock mismatch'
+assert expected and actual != dict(list(actual.items())[1:]), 'missing lock entry escaped'
+changed = dict(actual)
+changed[str(paths[0])] = '0' * 64
+assert changed != expected, 'wrong digest escaped'
+print(f'   (lock: {len(lines)} entries = {len(paths)} source files; missing/wrong digest rejected)')
+PY
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
