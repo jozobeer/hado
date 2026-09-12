@@ -42,7 +42,7 @@ impl Project {
         // §59: another file's `main` is an entry only in an entry inspection.
         parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry { other_entry_roots } else { Vec::new() };
         let namespaces: Vec<_> = files.iter().map(|file| (file.offset, file.directory.clone())).collect();
-        crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &files[0].path);
+        crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &libraries, &files[0].path);
         Ok(Self { parsed, files })
     }
 
@@ -178,11 +178,11 @@ fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagn
 }
 
 fn parse_files(files: &[TokenFile], libraries: &BTreeSet<Vec<String>>) -> Result<(Ast, Vec<String>, Option<Span>), Diagnostic> {
-    let mut ast = parse_file(&files[0])?;
+    let mut ast = parse_file(&files[0], libraries)?;
     let mut library_main = library_main_span(&ast, &files[0].source.directory, libraries);
     let mut roots = crate::file_scopes::isolate(&mut ast, 0);
     for (index, file) in files.iter().enumerate().skip(1) {
-        let mut parsed = parse_file(file)
+        let mut parsed = parse_file(file, libraries)
             .map_err(|mut error| { error.line -= file.source.offset; error })?;
         if library_main.is_none() {
             library_main = library_main_span(&parsed, &file.source.directory, libraries);
@@ -193,9 +193,12 @@ fn parse_files(files: &[TokenFile], libraries: &BTreeSet<Vec<String>>) -> Result
     Ok((ast, roots, library_main))
 }
 
-fn parse_file(file: &TokenFile) -> Result<Ast, Diagnostic> {
+fn parse_file(file: &TokenFile, libraries: &BTreeSet<Vec<String>>) -> Result<Ast, Diagnostic> {
     let path = Path::new(&file.source.path);
-    let role_error = role_error(&file.tokens, path, file.source.directory.is_empty());
+    // §59: an outer `def` is allowed in the root directory and in a library
+    // root directory (A3), not in a plain subdirectory (§54).
+    let root_file = file.source.directory.is_empty() || libraries.contains(&file.source.directory);
+    let role_error = role_error(&file.tokens, path, root_file);
     let parsed = crate::parser::parse_tokens(&file.tokens, &file.source.path);
     match (parsed, role_error) {
         (Ok(ast), None) => Ok(ast),
