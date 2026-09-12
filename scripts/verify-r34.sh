@@ -145,6 +145,26 @@ add("c4a_256", "34-c(4a) of_list [256] は ByteOutOfRange", "error")
 write("c4a_neg1", "def main = Bytes.of_list [-1]\n", expect_error="ByteOutOfRange")
 add("c4a_neg1", "34-c(4a) of_list [-1] は ByteOutOfRange", "error")
 
+range_values = [0, 255] + [random.randint(0, 255) for _ in range(random.randint(3, 10))]
+for limit_name, limit in (("upper", 256), ("lower", -1)):
+    for location, index in (("middle", random.randrange(2, len(range_values) - 1)),
+                            ("last", len(range_values) - 1)):
+        invalid_values = range_values.copy()
+        invalid_values[index] = limit
+        kind = f"c4a_{limit_name}_{location}"
+        write(
+            kind,
+            f"def main = Bytes.of_list {plist(invalid_values)}\n",
+            expect_error="ByteOutOfRange",
+        )
+        add(kind, f"34-c(4a) of_list {plist(invalid_values)} の位置 {index + 1} は ByteOutOfRange", "error")
+write(
+    "c4a_valid",
+    f"def main = Bytes.of_list {plist(range_values)}\n",
+    expect=f"Bytes.of_list {plist(range_values)}\n",
+)
+add("c4a_valid", f"34-c(4a) 負の対照 同じ長さの範囲内列 {plist(range_values)} は受理・値一致", "print")
+
 # 34-c(4b): 不正 UTF-8。
 write("c4b", "def main = Bytes.to_string (Bytes.of_list [255])\n", expect_error="InvalidUtf8")
 add("c4b", "34-c(4b) to_string 255 は InvalidUtf8", "error")
