@@ -47,8 +47,8 @@ def write(kind, source, expect=None, expect_error=None):
         with open(os.path.join(directory, "expect"), "wb") as handle:
             handle.write(expect.encode("utf-8"))
     if expect_error is not None:
-        with open(os.path.join(directory, "expect_error"), "w") as handle:
-            handle.write(expect_error)
+        with open(os.path.join(directory, "expect_error"), "wb") as handle:
+            handle.write((expect_error + "\n").encode("utf-8"))
 
 
 manifest = []
@@ -114,15 +114,30 @@ add("c2c", "34-c(2c) of_string → to_string の往復", "print")
 # 34-c(3): 3 万要素の of_list。構築が O(n²) なら 2 秒に収まらない。
 # 3 万要素のリテラルはコンパイラの深い再帰でスタックを溢れさせるため、リストは
 # hado 側の純粋な生成器で実行時に作る（Bytes.of_list が見る要素数は同じ 3 万）。
-write(
-    "c3",
+large_count = 30000
+large_indices = [0, large_count // 2, large_count - 1]
+large_expect = plist([large_count] + [(large_count - 1 - index) % 256 for index in large_indices]) + "\n"
+large_source = (
     "def rec mod256 n => if n < 256 => n | mod256 (n - 256)\n"
     "def rec gen n => if n <= 0 => [] | [mod256 (n - 1), ...gen (n - 1)]\n"
-    "def main = let b = Bytes.of_list (gen 30000) -> "
-    "[Bytes.length b, Bytes.get b 0, Bytes.get b 29999]\n",
-    expect=f"[30000, {(30000 - 1) % 256}, {0 % 256}]\n",
+)
+write(
+    "c3",
+    large_source + f"def main = let b = Bytes.of_list (gen {large_count}) -> "
+    "[Bytes.length b, " + ", ".join(f"Bytes.get b {index}" for index in large_indices) + "]\n",
+    expect=large_expect,
 )
 add("c3", "34-c(3) 3 万要素の of_list が 2 秒以内に一致", "timeout")
+write(
+    "c3_to_list",
+    large_source
+    + "def rec at values index => if values | [] => -1 | [head, ...tail] => at_head head tail index\n"
+    "def rec at_head head tail index => if index == 0 => head | at tail (index - 1)\n"
+    f"def main = let values = Bytes.to_list (Bytes.of_list (gen {large_count})) -> "
+    "[List.length values, " + ", ".join(f"at values {index}" for index in large_indices) + "]\n",
+    expect=large_expect,
+)
+add("c3_to_list", "34-c(3) 3 万要素の to_list の長さ・先頭・中間・末尾が 2 秒以内に一致", "timeout")
 
 # 34-c(4a): of_list の 0..255 の範囲外。
 write("c4a_256", "def main = Bytes.of_list [256]\n", expect_error="ByteOutOfRange")
@@ -299,7 +314,7 @@ error_matches() {
     "$dir/main" >"$workdir/out-$kind" 2>"$workdir/err-$kind" || status=$?
     [ "$status" -eq 1 ] || return 1
     [ "$(wc -c <"$workdir/out-$kind")" -eq 0 ] || return 1
-    [ "$(cat "$dir/expect_error")" = "$(cat "$workdir/err-$kind")" ]
+    cmp -s "$workdir/err-$kind" "$dir/expect_error"
 }
 
 # build と実行を合わせて 1 つの期限で測る。build だけ遅い注入も落ちるよう、
