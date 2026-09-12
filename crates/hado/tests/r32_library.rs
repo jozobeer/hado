@@ -177,3 +177,53 @@ fn library_directory_rejects_an_argument_main_in_a_separate_file() {
     assert_eq!((error.line, error.col), (line, 1), "{error}");
     assert_eq!(error.path, "main.hd", "{error}");
 }
+
+#[test]
+fn a_library_root_conflicts_with_the_prelude_embedded_and_alone() {
+    // §55, §59: a library root does not compare with the user root, but the
+    // prelude stays visible inside the library, so its own `type Option` is E205.
+    let case = Case::new();
+    case.write("app/main.hd", "def main = 1");
+    case.write("app/lib/lib.hd", "library\n\ntype Option = | Local");
+    for (entry, path) in [("app/main.hd", "lib/lib.hd"), ("app/lib/lib.hd", "lib.hd")] {
+        let project = hado::project::Project::load(&case.0.join(entry)).unwrap();
+        let error = match project.check() {
+            Ok(_) => panic!("expected E205 for {entry}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code.as_deref(), Some("E205"), "{entry}: {error}");
+        assert_eq!(error.path, path, "{entry}: {error}");
+        assert_eq!((error.line, error.col), (3, 6), "{entry}: {error}");
+    }
+}
+
+#[test]
+fn a_library_root_conflicts_with_its_subdirectories() {
+    // §55: the library root is the root of its subtree, so a same-named
+    // declaration in a subdirectory points at the subdirectory's declaration.
+    let types = Case::new();
+    types.write("app/main.hd", "def main = 1");
+    types.write("app/lib/lib.hd", "library\n\ntype Found = | A");
+    types.write("app/lib/store/store.hd", "type Found = | B");
+    let project = hado::project::Project::load(&types.0.join("app/main.hd")).unwrap();
+    let error = match project.check() {
+        Ok(_) => panic!("expected E205 for the type conflict"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
+    assert_eq!(error.path, "lib/store/store.hd", "{error}");
+    assert_eq!((error.line, error.col), (1, 6), "{error}");
+
+    let contracts = Case::new();
+    contracts.write("app/main.hd", "def main = 1");
+    contracts.write("app/lib/lib.hd", "library\n\nmodule Store\ndef read(x: Int): Int");
+    contracts.write("app/lib/store/store.hd", "module Store\ndef read(x: Int): Int");
+    let project = hado::project::Project::load(&contracts.0.join("app/main.hd")).unwrap();
+    let error = match project.check() {
+        Ok(_) => panic!("expected E205 for the contract conflict"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
+    assert_eq!(error.path, "lib/store/store.hd", "{error}");
+    assert_eq!((error.line, error.col), (1, 8), "{error}");
+}

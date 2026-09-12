@@ -483,5 +483,31 @@ check '32-i (tests/library 全件受理)' verify_library
 # 32-j: E2 の要約プログラムを check / build / 実行。
 check '32-j (E2 の要約を check / build / 実行)' verify_report
 
+# ライブラリ根自身の宣言も prelude の名前と衝突する（§55, §59）。ライブラリ根は
+# 利用側の根の名前とは比べないが、prelude はライブラリの中でも見える。単体検査と
+# 埋め込みで同じ位置になる。
+mkdir -p "$workdir/32f4/app/lib"
+printf 'def main = 1\n' >"$workdir/32f4/app/main.hd"
+blank_f4=$((1 + RANDOM % 4))
+{ printf 'library\n'; blank_lines "$blank_f4"; printf 'type Option = | Local\n'; } >"$workdir/32f4/app/lib/lib.hd"
+expect_error '32-f4 prelude 衝突 (埋め込み)' "$workdir/32f4/app/main.hd" lib/lib.hd E205 $((blank_f4 + 2)) 6
+expect_error '32-f4 prelude 衝突 (単体)' "$workdir/32f4/app/lib/lib.hd" lib.hd E205 $((blank_f4 + 2)) 6
+
+# ライブラリ根と配下の型の衝突（§55）。配下側の宣言を指す。
+mkdir -p "$workdir/32f5/app/lib/store"
+printf 'def main = 1\n' >"$workdir/32f5/app/main.hd"
+printf 'library\n\ntype Found = | A\n' >"$workdir/32f5/app/lib/lib.hd"
+blank_f5=$((1 + RANDOM % 4))
+{ blank_lines "$blank_f5"; printf 'type Found = | B\n'; } >"$workdir/32f5/app/lib/store/store.hd"
+expect_error '32-f5 ライブラリ根と配下の型の衝突' "$workdir/32f5/app/main.hd" lib/store/store.hd E205 $((blank_f5 + 1)) 6
+
+# ライブラリ根と配下の契約の衝突（§55）。constructor と同じ名前空間の規則。
+mkdir -p "$workdir/32f6/app/lib/store"
+printf 'def main = 1\n' >"$workdir/32f6/app/main.hd"
+printf 'library\n\nmodule Store\ndef read(x: Int): Int\n' >"$workdir/32f6/app/lib/lib.hd"
+blank_f6=$((1 + RANDOM % 4))
+{ blank_lines "$blank_f6"; printf 'module Store\ndef read(x: Int): Int\n'; } >"$workdir/32f6/app/lib/store/store.hd"
+expect_error '32-f6 ライブラリ根と配下の契約の衝突' "$workdir/32f6/app/main.hd" lib/store/store.hd E205 $((blank_f6 + 1)) 8
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
