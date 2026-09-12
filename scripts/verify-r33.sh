@@ -99,6 +99,34 @@ expect_not_code() {
     fi
 }
 
+# code の診断が出て、そのメッセージに needle を含む。
+expect_code_message() {
+    local label=$1 entry=$2 code=$3 needle=$4
+    total=$((total + 1))
+    local err status
+    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
+    if [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]] && [[ "$err" == *"$needle"* ]]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want $code containing '$needle', got status=$status '$err')"
+    fi
+}
+
+# code の診断が出て、そのメッセージに forbidden を含まない。
+expect_code_absent() {
+    local label=$1 entry=$2 code=$3 forbidden=$4
+    total=$((total + 1))
+    local err status
+    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
+    if [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]] && [[ "$err" != *"$forbidden"* ]]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want $code without '$forbidden', got status=$status '$err')"
+    fi
+}
+
 # stdout / stderr が空であることは、ファイルに保存してバイト数で測る
 # （コマンド置換は末尾改行を落とすので使わない）。
 accept_quiet() {
@@ -115,16 +143,60 @@ accept_quiet() {
     fi
 }
 
+# check 受理 → build → 実行。実行ファイルの印字が expected と一致すること。
+accept_build_run() {
+    local label=$1 entry=$2 expected=$3
+    total=$((total + 1))
+    local artifact="${entry%.hd}" got status
+    if ! cargo run --offline -q -- check "$entry" >/dev/null 2>"$workdir/abr-check-err"; then
+        echo "NG: $label (check failed: $(cat "$workdir/abr-check-err"))"
+        return
+    fi
+    if ! cargo run --offline -q -- build "$entry" >/dev/null 2>"$workdir/abr-build-err"; then
+        echo "NG: $label (build failed: $(cat "$workdir/abr-build-err"))"
+        return
+    fi
+    got=$("$artifact" 2>"$workdir/abr-run-err"); status=$?
+    if [ "$status" -eq 0 ] && [ "$got" = "$expected" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want '$expected' got status=$status '$got')"
+    fi
+}
+
+# check --print-type の stdout が expected と一致し、抽象型の修飾名 `.T` を含まない。
+print_type_is() {
+    local label=$1 entry=$2 expected=$3
+    total=$((total + 1))
+    local out="$workdir/print-type-out" err="$workdir/print-type-err" status got
+    cargo run --offline -q -- check --print-type "$entry" >"$out" 2>"$err"; status=$?
+    got=$(cat "$out")
+    if [ "$status" -eq 0 ] && [ "$got" = "$expected" ] && [[ "$got" != *".T"* ]]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want '$expected' without .T, got status=$status '$got' err='$(cat "$err")')"
+    fi
+}
+
 # 共通の探針。契約 Monoid と実装 StringMonoid。
 monoid_contract() {
     printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n'
 }
-monoid_implementation() {
-    printf 'implement Monoid as StringMonoid\nshared type T = String\ndef combine left _ => left\ndef of value => value\n'
+monoid_realization() {
+    printf 'implement Monoid as StringMonoid\n%s type T = String\ndef combine left right => String.concat left right\ndef of value => value\n' "$1"
 }
 
+# 実行で印字する値は実行時に生成し、期待値は判定器側で計算する（定数で書かない）。
+rand_a="a${RANDOM}"
+rand_b="b${RANDOM}"
+rand_name="n${RANDOM}"
+rand_int=$(( (RANDOM << 15) | RANDOM ))
+
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
-    "$workdir/33o1" "$workdir/33o2" "$workdir/33accept"
+    "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
+    "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -171,35 +243,101 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
     printf '\nimplement Monoid as StringMonoid\nshared def f = 1\ndef combine left _ => left\ndef of value => value\n'
 } >"$workdir/33c6/main.hd"
 
-# 33-0 意味なし: 工程 0 では shared は意味を持たない。combine "a" "b" は E305 のまま。
+# 33-a (2): shared の等式が公開面に出て、combine/of が String で単一化する。
 {
-    printf 'def main = StringMonoid.combine "a" "b"\n\n'
+    printf 'def main = StringMonoid.combine (StringMonoid.of "%s") "%s"\n\n' "$rand_a" "$rand_b"
     monoid_contract
     printf '\n'
-    monoid_implementation
-} >"$workdir/33o1/main.hd"
+    monoid_realization shared
+} >"$workdir/33a2/main.hd"
 
-# 33-0 受理は工程 1: 工程 0 では of の結果は不透明のままなので E705。
-# （発注書の表は受理を期待するが、発注書の本文「この工程では shared は意味を持たない」と
-#   手順書 26 節の工程 0 に従い、工程 0 の実測として E705 を固定する。工程 1 で受理に書き換える。）
+# 33-b (2): 同じ形で shared 無し。不透明のまま E305 で StringMonoid.T が出る。
+{
+    printf 'def main = StringMonoid.combine (StringMonoid.of "%s") "%s"\n\n' "$rand_a" "$rand_b"
+    monoid_contract
+    printf '\n'
+    monoid_realization ''
+} >"$workdir/33b2/main.hd"
+
+# 33-d: 契約 Store の抽象型 T を shared type T = Int で実体化し、main が整数を返す。
+{
+    printf 'def main = Store.find 1\n\n'
+    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = Int\ndef find _ => %s\n' "$rand_int"
+} >"$workdir/33d/main.hd"
+
+# 33-d 緩和なし: 印なしは E705 で def main。
+{
+    printf 'def main = Store.find 1\n\n'
+    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = Int\ndef find _ => 1\n'
+} >"$workdir/33dneg/main.hd"
+
+# 33-e: shared で record に解け、実装の外の field 参照が通る。
+{
+    printf 'def main = describe (UserStore.make "%s")\ndef describe (t: UserStore.T) => t.name\n\n' "$rand_name"
+    printf 'type User = { name: String }\n\n'
+    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement UserStore as UserStore\nshared type T = User\ndef make name => { name = name }\n'
+} >"$workdir/33e/main.hd"
+
+# 33-e 緩和なし: 印なしは E601 で field 参照の `.` の位置。
+{
+    printf 'def main = describe (UserStore.make "%s")\ndef describe (t: UserStore.T) => t.name\n\n' "$rand_name"
+    printf 'type User = { name: String }\n\n'
+    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement UserStore as UserStore\ntype T = User\ndef make name => { name = name }\n'
+} >"$workdir/33eneg/main.hd"
+
+# 33-f (2): shared type T = String の値に Int を渡すと E305、両辺に `.T` は現れない。
+{
+    printf 'def main = StringMonoid.combine (StringMonoid.of "a") 1\n\n'
+    monoid_contract
+    printf '\n'
+    monoid_realization shared
+} >"$workdir/33f2/main.hd"
+
+# 33-h: 型引数付きの shared type A T = A List。push と Int Stack.T の注釈が通る。
+{
+    printf 'def main = Stack.push (f [1]) 2\ndef f (s: Int Stack.T) => s\n\n'
+    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n\n'
+    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n'
+} >"$workdir/33h/main.hd"
+
+# 33-i (1): shared type T = T は E602 で implement。
 {
     printf 'def main = StringMonoid.of "a"\n\n'
     monoid_contract
-    printf '\n'
-    monoid_implementation
-} >"$workdir/33o2/main.hd"
+    printf '\nimplement Monoid as StringMonoid\nshared type T = T\ndef combine left right => left\ndef of value => value\n'
+} >"$workdir/33i1/main.hd"
+
+# 33-i (2): shared type T = U と shared type U = T は E602 で implement。
+{
+    printf 'def main = StringMonoid.of "a"\n\n'
+    printf 'module Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\n'
+    printf 'implement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left right => left\ndef of value => value\n'
+} >"$workdir/33i2/main.hd"
+
+# 33-i (3) 負の対照: 印なしの type T = T も E602（変わらない）。
+{
+    printf 'def main = StringMonoid.of "a"\n\n'
+    monoid_contract
+    printf '\nimplement Monoid as StringMonoid\ntype T = T\ndef combine left right => left\ndef of value => value\n'
+} >"$workdir/33i3/main.hd"
 
 # 33-0 構文受理: main の無い .hd はライブラリとして受理。shared 実体化があっても
 # 抽象型が main に出ないので受理し、stdout / stderr は空。
 {
     monoid_contract
     printf '\n'
-    monoid_implementation
+    monoid_realization shared
 } >"$workdir/33accept/main.hd"
 
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
-    "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" "$workdir/33o1/main.hd" "$workdir/33o2/main.hd" \
-    "$workdir/33accept/main.hd"; do
+    "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
+    "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
+    "$workdir/33e/main.hd" "$workdir/33eneg/main.hd" "$workdir/33f2/main.hd" "$workdir/33h/main.hd" \
+    "$workdir/33i1/main.hd" "$workdir/33i2/main.hd" "$workdir/33i3/main.hd" "$workdir/33accept/main.hd"; do
     random_padding "$probe"
 done
 
@@ -210,8 +348,19 @@ expect_not_code '33-c (3) 負の対照 (契約が U を宣言)' "$workdir/33c3ne
 expect_error_at '33-c (4) 外の shared は E100' "$workdir/33c4/main.hd" E100 'shared'
 expect_error_at '33-c (5) 契約の中の shared は E100' "$workdir/33c5/main.hd" E100 'shared'
 expect_error_at '33-c (6) shared の後の def は E100' "$workdir/33c6/main.hd" E100 'def f'
-expect_code '33-0 意味なし (combine は E305 のまま)' "$workdir/33o1/main.hd" E305
-expect_code '33-0 受理は工程 1 (of は E705 のまま)' "$workdir/33o2/main.hd" E705
+
+accept_build_run '33-a(2) shared で combine が String に解け実行値が一致' "$workdir/33a2/main.hd" "${rand_a}${rand_b}"
+expect_code_message '33-b(2) 印なしは E305 で StringMonoid.T が出る' "$workdir/33b2/main.hd" E305 'StringMonoid.T'
+accept_build_run '33-d shared で E705 が緩和され整数を印字' "$workdir/33d/main.hd" "$rand_int"
+expect_error_at '33-d 緩和なしは E705 で def main' "$workdir/33dneg/main.hd" E705 'def main'
+accept_build_run '33-e shared で E601 が緩和され field が読める' "$workdir/33e/main.hd" "$rand_name"
+expect_error_at '33-e 緩和なしは E601 で field の .' "$workdir/33eneg/main.hd" E601 '.name'
+print_type_is '33-f (1) --print-type が String を出す' "$workdir/33a2/main.hd" 'String'
+expect_code_absent '33-f (2) E305 の両辺に .T が現れない' "$workdir/33f2/main.hd" E305 '.T'
+accept_build_run '33-h 型引数付き shared で push と注釈が通る' "$workdir/33h/main.hd" '[2, 1]'
+expect_error_at '33-i (1) shared type T = T は E602' "$workdir/33i1/main.hd" E602 'implement'
+expect_error_at '33-i (2) shared の相互参照は E602' "$workdir/33i2/main.hd" E602 'implement'
+expect_error_at '33-i (3) 負の対照 (印なし type T = T) は E602' "$workdir/33i3/main.hd" E602 'implement'
 accept_quiet '33-0 構文受理 (main 無しのライブラリ、stdout/stderr 空)' "$workdir/33accept/main.hd"
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。

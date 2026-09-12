@@ -1,4 +1,6 @@
 use hado::parser::{self, parse_source, Diagnostic, Item, TypeDef};
+use hado::types::Ty;
+use hado::check_source;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -144,4 +146,65 @@ fn shared_to_a_known_type_does_not_trigger_unbound() {
     case.write("main.hd", &source);
     let error = case.check("main.hd").expect_err("phase 0 leaves the abstract type opaque");
     assert_ne!(error.code.as_deref(), Some("E204"), "{error}");
+}
+
+const UNSHARED: &str = "implement Monoid as StringMonoid\ntype T = String\ndef combine left _ => left\ndef of value => value";
+
+// --- 工程 1: shared の等式が「解けた型への置き換え」になる ---
+
+#[test]
+fn shared_equation_reaches_the_public_interface() {
+    let source = format!("def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{IMPLEMENTATION}");
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_implementation_keeps_the_abstract_type() {
+    let source = format!("def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{UNSHARED}");
+    let error = check_source(&source, "t").err().expect("an unmarked realization stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("StringMonoid.T"), "{}", error.message);
+}
+
+#[test]
+fn shared_equation_relaxes_e705() {
+    let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\nshared type T = Int\ndef find _ => 1";
+    assert_eq!(check_source(source, "t").unwrap_or_else(|error| panic!("{error}")).main, Ty::Int);
+}
+
+#[test]
+fn unshared_realization_keeps_e705() {
+    let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\ntype T = Int\ndef find _ => 1";
+    let error = check_source(source, "t").err().expect("an unmarked realization keeps E705");
+    assert_eq!(error.code.as_deref(), Some("E705"), "{error}");
+}
+
+#[test]
+fn shared_record_realization_allows_field_access() {
+    let source = "def main = describe (UserStore.make \"n\")\ndef describe (t: UserStore.T) => t.name\ntype User = { name: String }\n\nmodule UserStore\ntype T\ndef make(name: String): T Pure\n\nimplement UserStore as UserStore\nshared type T = User\ndef make name => { name = name }";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_record_realization_rejects_field_access() {
+    let source = "def main = describe (UserStore.make \"n\")\ndef describe (t: UserStore.T) => t.name\ntype User = { name: String }\n\nmodule UserStore\ntype T\ndef make(name: String): T Pure\n\nimplement UserStore as UserStore\ntype T = User\ndef make name => { name = name }";
+    let error = check_source(source, "t").err().expect("an unmarked realization keeps E601");
+    assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
+}
+
+#[test]
+fn shared_parameterized_equation_transforms_arguments() {
+    let source = "def main = Stack.push [1] 2\nmodule Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n\nimplement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::Adt("List".into(), vec![Ty::Int]));
+}
+
+#[test]
+fn shared_realization_cycles_are_rejected() {
+    let direct = format!("def main = StringMonoid.of \"a\"\n{MONOID}\n\nimplement Monoid as StringMonoid\nshared type T = T\ndef combine left _ => left\ndef of value => value");
+    assert_eq!(check_source(&direct, "t").err().unwrap().code.as_deref(), Some("E602"));
+    let mutual = "def main = StringMonoid.of \"a\"\nmodule Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\nimplement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left _ => left\ndef of value => value";
+    assert_eq!(check_source(mutual, "t").err().unwrap().code.as_deref(), Some("E602"));
 }
