@@ -155,6 +155,24 @@ expect_code_one_of() {
     fi
 }
 
+# code の診断が出て終了 1 になり、かつ panic（終了 101）ではないことを明示的に測る。
+# 前処理の arity 照合が抜けると TypeRealization::apply の assert で panic する。
+# 終了 101 を「失敗」として数えるだけでは、別の経路の 101 を見逃すので分けて判定する。
+expect_code_not_panic() {
+    local label=$1 entry=$2 code=$3
+    total=$((total + 1))
+    local err status
+    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
+    if [ "$status" -eq 101 ]; then
+        echo "NG: $label (panicked: status=101 stderr='$err')"
+    elif [ "$status" -ne 101 ] && [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]]; then
+        echo "OK: $label (status=$status, not 101)"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want $code with status 1 and not 101, got status=$status '$err')"
+    fi
+}
+
 # stdout / stderr が空であることは、ファイルに保存してバイト数で測る
 # （コマンド置換は末尾改行を落とすので使わない）。
 accept_quiet() {
@@ -303,7 +321,8 @@ mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$wo
     "$workdir/33named" "$workdir/33namedneg" \
     "$workdir/33ip" "$workdir/33ipneg" "$workdir/33rp" "$workdir/33rpneg" \
     "$workdir/33eff" "$workdir/33effneg" "$workdir/33harm" "$workdir/33harmneg" \
-    "$workdir/33fn" "$workdir/33fnneg" "$workdir/33fneff" "$workdir/33fneffneg"
+    "$workdir/33fn" "$workdir/33fnneg" "$workdir/33fneff" "$workdir/33fneffneg" \
+    "$workdir/33arity1" "$workdir/33arity2" "$workdir/33arityok"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -781,6 +800,31 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef touch _ => ()\n'
 } >"$workdir/33fneffneg/main.hd"
 
+# --- 工程 1 の修正 7: 契約と実体化の型引数の個数の照合 ---
+
+# 負 1: 契約 type T（型引数 0）に対し shared type A T = A List（型引数 1）。照合が
+# 前処理に無いと TypeRealization::apply の assert で panic（終了 101）する。
+# 期待は E602 で終了 1（shared を消した対照と同じ診断）。
+{
+    printf 'def main = Store.make "hi"\n'
+    printf 'module Store\ntype T\ndef make(x: String): T Pure\n'
+    printf 'implement Store as Store\nshared type A T = A List\ndef make x => [x]\n'
+} >"$workdir/33arity1/main.hd"
+
+# 負 2: 契約 type A T（型引数 1）に対し shared type T = Int（型引数 0）。実体化の方が
+# 少ない形でも同じ assert に到達する。
+{
+    printf 'module Stack\ntype A T\ndef A empty: A T Pure\n'
+    printf 'implement Stack as Stack\nshared type T = Int\ndef empty = 1\n'
+} >"$workdir/33arity2/main.hd"
+
+# 正の対照: 個数が合う shared type A T = A List は受理され、push が実行値と一致する。
+{
+    printf 'def main = Stack.push [1] %s\n' "$rand_int"
+    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n'
+    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n'
+} >"$workdir/33arityok/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
@@ -794,7 +838,8 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33named/main.hd" "$workdir/33namedneg/main.hd" \
     "$workdir/33ip/main.hd" "$workdir/33ipneg/main.hd" "$workdir/33rp/main.hd" "$workdir/33rpneg/main.hd" \
     "$workdir/33eff/main.hd" "$workdir/33effneg/main.hd" "$workdir/33harm/main.hd" "$workdir/33harmneg/main.hd" \
-    "$workdir/33fn/main.hd" "$workdir/33fnneg/main.hd" "$workdir/33fneff/main.hd" "$workdir/33fneffneg/main.hd"; do
+    "$workdir/33fn/main.hd" "$workdir/33fnneg/main.hd" "$workdir/33fneff/main.hd" "$workdir/33fneffneg/main.hd" \
+    "$workdir/33arity1/main.hd" "$workdir/33arity2/main.hd" "$workdir/33arityok/main.hd"; do
     random_padding "$probe"
 done
 
@@ -866,6 +911,11 @@ accept_build_run '前処理: 関数型の shared が record の field に届き�
 expect_code '前処理の負: 関数型の shared 無しは型検査で落ちる' "$workdir/33fnneg/main.hd" E305
 accept_build_run_quiet '前処理: 効果行付きの関数型の shared が record の field に届き効果が起きる' "$workdir/33fneff/main.hd" "${rand_fe_suffix}${rand_fe_message}"
 expect_code '前処理の負: 効果行付きの shared 無しは型検査で落ちる' "$workdir/33fneffneg/main.hd" E305
+
+# 工程 1 の修正 7: 契約と実体化の型引数の個数の照合。panic（101）でないことを明示的に測る。
+expect_code_not_panic 'arity 負 1: 契約より多い実体化は panic せず E602' "$workdir/33arity1/main.hd" E602
+expect_code_not_panic 'arity 負 2: 契約より少ない実体化は panic せず E602' "$workdir/33arity2/main.hd" E602
+accept_build_run 'arity 正の対照: 個数が合う shared type A T = A List が受理され実行値が一致' "$workdir/33arityok/main.hd" "[$rand_int, 1]"
 
 # --- 33-k: E2。tools/gates の Report.T を shared で公開する。 ---
 

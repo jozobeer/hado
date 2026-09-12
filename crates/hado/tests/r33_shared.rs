@@ -417,3 +417,30 @@ fn shared_function_realization_resolves_an_effect_row() {
     let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(checked.main, Ty::String);
 }
+
+// --- 工程 1 の修正 7: 契約と実体化の型引数の個数の照合 ---
+
+#[test]
+fn a_shared_realization_with_more_type_arguments_than_the_contract_is_rejected() {
+    // 契約 type T（型引数 0）に shared type A T = A List（型引数 1）。前処理が等式を
+    // 登録すると reveal の apply の assert で panic する。E602 で拒否すること。
+    let source = "def main = Store.make \"hi\"\nmodule Store\ntype T\ndef make(x: String): T Pure\n\nimplement Store as Store\nshared type A T = A List\ndef make x => [x]";
+    let error = check_source(source, "t").err().expect("a wider realization must be rejected, not crash");
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+}
+
+#[test]
+fn a_shared_realization_with_fewer_type_arguments_than_the_contract_is_rejected() {
+    // 契約 type A T（型引数 1）に shared type T = Int（型引数 0）。実体化の方が少ない形。
+    let source = "module Stack\ntype A T\ndef A empty: A T Pure\n\nimplement Stack as Stack\nshared type T = Int\ndef empty = 1";
+    let error = check_source(source, "t").err().expect("a narrower realization must be rejected, not crash");
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+}
+
+#[test]
+fn a_shared_realization_with_a_matching_type_argument_count_is_accepted() {
+    let source = "def main = Stack.push [1] 2\nmodule Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n\nimplement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::Adt("List".into(), vec![Ty::Int]));
+}
+
