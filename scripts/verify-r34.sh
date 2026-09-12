@@ -1042,5 +1042,56 @@ while IFS=$'\t' read -r kind desc mode; do
     esac
 done <"$workdir/cases/fields-manifest.tsv"
 
+# §47・§57: prelude の操作だけがディレクトリ境界を越える。
+for layout in directory library; do
+    for mode in success handled unhandled; do
+        kind="prelude-$layout-$mode"
+        dir=$(case_dir "$kind")
+        mkdir -p "$dir/sub"
+        value=$((1 + RANDOM))
+        message="probe-$RANDOM-$RANDOM"
+        {
+            if [ "$layout" = library ]; then printf 'library\n'; fi
+            cat <<HD
+module Helper
+def pick(x: Int): String {Error}
+implement Helper as Helper
+def pick x => if x > 0 => Int.to_string x | raise { message = "$message" }
+HD
+        } >"$dir/sub/helper.hd"
+        case "$mode" in
+            success)
+                printf 'def main = sub::Helper.pick %s\n' "$value" >"$dir/main.hd"
+                printf '%s\n' "$value" >"$dir/expect"
+                ;;
+            handled)
+                printf 'def main = with H -> sub::Helper.pick 0\nhandler Error as H\nabort raise e => e.message\n' >"$dir/main.hd"
+                printf '%s\n' "$message" >"$dir/expect"
+                ;;
+            unhandled)
+                printf 'def main = sub::Helper.pick 0\n' >"$dir/main.hd"
+                printf '%s\n' "$message" >"$dir/expect_error"
+                ;;
+        esac
+        if [ "$mode" = unhandled ]; then
+            check "34-prelude $layout/$mode" error_matches "$kind"
+        else
+            check "34-prelude $layout/$mode" prints_match "$kind"
+        fi
+    done
+done
+
+for visibility in local unknown; do
+    dir=$(case_dir "operation-$visibility")
+    mkdir -p "$dir/sub"
+    operation="probe_$RANDOM"
+    printf 'def main = %s\n' "$operation" >"$dir/main.hd"
+    if [ "$visibility" = local ]; then
+        printf 'effect Probe\nreply %s: Int\n' "$operation" >"$dir/sub/effect.hd"
+    fi
+    random_padding "$dir/main.hd"
+    expect_error_at "34-prelude $visibility の操作は親から未束縛" "$dir/main.hd" E204 "$operation"
+done
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
