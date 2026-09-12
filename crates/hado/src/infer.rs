@@ -60,14 +60,15 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
 }
 
 pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<Checked, Diagnostic> {
-    let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start)?;
+    let inspection = if ast.main().is_some() { crate::Inspection::Entry } else { crate::Inspection::Library };
+    let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start, inspection)?;
     match deferred.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
     }
 }
 
-pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
+pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let contracts = crate::contract_types::Contracts::collect(&ast.items);
     let contract_diagnostics = contracts.diagnostics(ast, path);
     let mut checker = Checker {
@@ -205,6 +206,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             };
             checker.deferred.push(checker.error(constraint.span.expect("row constraint has an origin"), Some(constraint.code), message));
         }
+        // A library has no entry: skip the `main` type rules (E206 stays in
+        // `entry_form`, and E701/E702/E705/E706 need a `main` to apply).
+        if inspection == crate::Inspection::Library { return Ok(Ty::Unit); }
         let scheme = checker
             .values
             .get("main")

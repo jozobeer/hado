@@ -25,24 +25,27 @@ impl Project {
     pub fn load(entry: &Path) -> Result<Self, LoadError> {
         let (token_files, directories) = read_files(entry)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
-        let (ast, other_entry_roots) = parse_files(&token_files)?;
         let libraries = library_roots(&token_files)
             .map_err(|error| LoadError::Diagnostic(source_diagnostic(&files, error)))?;
-        if libraries.contains(&files[0].directory) {
-            if let Some(span) = value_main(&ast) {
-                return Err(LoadError::Diagnostic(source_diagnostic(&files, Diagnostic {
-                    path: files[0].path.clone(), line: span.line, col: span.col,
-                    code: Some("E206".into()),
-                    message: "a library directory cannot declare main".into(),
-                })));
-            }
+        let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
+        if let Some(span) = library_main {
+            return Err(LoadError::Diagnostic(source_diagnostic(&files, Diagnostic {
+                path: files[0].path.clone(), line: span.line, col: span.col,
+                code: Some("E206".into()),
+                message: "a library directory cannot declare main".into(),
+            })));
         }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
         let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
-        parsed.other_entry_roots = other_entry_roots;
+        // §59: another file's `main` is an entry only in an entry inspection.
+        parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry { other_entry_roots } else { Vec::new() };
         let namespaces: Vec<_> = files.iter().map(|file| (file.offset, file.directory.clone())).collect();
         crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &files[0].path);
         Ok(Self { parsed, files })
+    }
+
+    pub fn is_library(&self) -> bool {
+        self.parsed.inspection == crate::Inspection::Library
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
@@ -61,6 +64,9 @@ impl Project {
     }
 
     pub fn compile_to_object(&self, output: &Path) -> Result<(), String> {
+        if self.is_library() {
+            return Err(crate::entry_required(&self.files[0].path).to_string());
+        }
         let checked = self.check().map_err(|error| error.to_string())?;
         let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
         crate::emit::compile_mono_to_object(&program, &checked, output)
@@ -169,16 +175,20 @@ fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagn
     Ok(TokenFile { source: SourceFile { physical: path.to_path_buf(), path: display, directory, offset }, tokens })
 }
 
-fn parse_files(files: &[TokenFile]) -> Result<(Ast, Vec<String>), Diagnostic> {
+fn parse_files(files: &[TokenFile], libraries: &BTreeSet<Vec<String>>) -> Result<(Ast, Vec<String>, Option<Span>), Diagnostic> {
     let mut ast = parse_file(&files[0])?;
+    let mut library_main = library_main_span(&ast, &files[0].source.directory, libraries);
     let mut roots = crate::file_scopes::isolate(&mut ast, 0);
     for (index, file) in files.iter().enumerate().skip(1) {
         let mut parsed = parse_file(file)
             .map_err(|mut error| { error.line -= file.source.offset; error })?;
+        if library_main.is_none() {
+            library_main = library_main_span(&parsed, &file.source.directory, libraries);
+        }
         roots.extend(crate::file_scopes::isolate(&mut parsed, index));
         ast.append(parsed);
     }
-    Ok((ast, roots))
+    Ok((ast, roots, library_main))
 }
 
 fn parse_file(file: &TokenFile) -> Result<Ast, Diagnostic> {
@@ -213,6 +223,12 @@ fn value_main(ast: &Ast) -> Option<Span> {
         Item::Def(def) if def.name == "main" && matches!(def.kind, DefKind::Value(_)) => Some(def.span),
         _ => None,
     })
+}
+
+/// A `main` in a directory that declares `library` is E206 (§59), whichever
+/// file of the directory it sits in.
+fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<String>>) -> Option<Span> {
+    libraries.contains(directory).then(|| value_main(ast)).flatten()
 }
 
 /// Directories that declare `library`, in file order (entry first, then relative path bytes).

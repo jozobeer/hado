@@ -100,8 +100,14 @@ impl Checked {
     }
 }
 
+/// Whether the program passed to `Project::load` (or the single-file API) has an
+/// entry `main`, or is checked as a library (A1, §5, §54, §59).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Inspection { Entry, Library }
+
 struct ParsedSource {
     ast: parser::Ast,
+    inspection: Inspection,
     trusted_start: Option<usize>,
     prelude_items: usize,
     other_entry_roots: Vec<String>,
@@ -123,6 +129,7 @@ fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)],
 }
 
 fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
+    let inspection = if ast.main().is_some() { Inspection::Entry } else { Inspection::Library };
     let mut prelude = Vec::new();
     for (name, source) in [
         ("stdlib/list.hd", include_str!("../../../stdlib/list.hd")),
@@ -156,7 +163,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
     let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    Ok(ParsedSource { ast, trusted_start, prelude_items, other_entry_roots: Vec::new(), namespace_diagnostics: Vec::new(), namespace_anchors: Vec::new() })
+    Ok(ParsedSource { ast, inspection, trusted_start, prelude_items, other_entry_roots: Vec::new(), namespace_diagnostics: Vec::new(), namespace_anchors: Vec::new() })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
@@ -172,10 +179,10 @@ pub(crate) fn check_parsed_for_print(parsed: &ParsedSource, path: &str) -> Resul
 }
 
 fn check_parsed_filtered(parsed: &ParsedSource, path: &str, reject_user_main_effects: bool) -> Result<Checked, parser::Diagnostic> {
-    let ParsedSource { ast, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
+    let ParsedSource { ast, inspection, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
     let adjust = |error| namespace_diagnostic(check::arm_diagnostic(ast, error), namespace_anchors);
-    let name_error = names::resolve_with_prelude(ast, path, *trusted_start).err();
-    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start) {
+    let name_error = names::resolve_with_prelude(ast, path, *trusted_start, *inspection).err();
+    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection) {
         Ok(result) => result,
         Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).chain(namespace_diagnostics.iter().cloned()).map(adjust).min_by_key(diagnostic_order).unwrap()),
     };
@@ -235,7 +242,15 @@ pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic>
     dump_parsed(&parse_with_prelude(source, path)?, path)
 }
 
+pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
+    parser::Diagnostic { path: path.into(), line: 1, col: 1, code: Some("E206".into()),
+        message: "build requires an entry file with main; check treats this directory as a library".into() }
+}
+
 fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diagnostic> {
+    if parsed.inspection == Inspection::Library {
+        return Err(entry_required(path));
+    }
     let checked = check_parsed(parsed, path)?;
     let ast = &parsed.ast;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {

@@ -177,14 +177,15 @@ struct Namespaces {
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
-    resolve_with_prelude(ast, path, None)
+    let inspection = if ast.main().is_some() { crate::Inspection::Entry } else { crate::Inspection::Library };
+    resolve_with_prelude(ast, path, None, inspection)
 }
 
-pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<(), crate::parser::Diagnostic> {
+pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
     if let Err(error) = crate::type_realizations::check(ast, path) { diagnostics.push(error); }
     if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
-    if let Err(error) = entry_form(ast, path) { diagnostics.push(error); }
+    if let Err(error) = entry_form(ast, path, inspection) { diagnostics.push(error); }
     if let Err(error) = check_cycles(ast, path) { diagnostics.push(error); }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
     declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), &BTreeSet::new(), path, &mut diagnostics);
@@ -410,12 +411,15 @@ fn resolve_effect_label(
     }
 }
 
-fn entry_form(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
+fn entry_form(ast: &Ast, path: &str, inspection: crate::Inspection) -> Result<(), crate::parser::Diagnostic> {
     let main = ast.items.iter().find_map(|item| match item {
         Item::Def(def) if def.name == "main" => Some(def),
         _ => None,
     });
     if main.is_some_and(|def| matches!(def.kind, DefKind::Value(_))) { return Ok(()); }
+    // A library inspection has no entry by definition (§59); an argument-taking
+    // `main` is still E206 (§5).
+    if inspection == crate::Inspection::Library && main.is_none() { return Ok(()); }
     let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
     Err(crate::parser::Diagnostic { path: path.into(), line: span.line, col: span.col,
         code: Some("E206".into()), message: "main must be a value definition".into() })

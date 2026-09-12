@@ -49,7 +49,7 @@ fn main() -> ExitCode {
     }
     match if print { project.check_for_print() } else { project.check() } {
         Ok(checked) => {
-            if print {
+            if print && !project.is_library() {
                 println!("{}{}", checked.main, checked.effects.suffix());
             }
             ExitCode::SUCCESS
