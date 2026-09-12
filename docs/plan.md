@@ -2319,3 +2319,119 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
   - ライブラリ根の判定は他ファイルの `library` を要するので、外の `def` の E100 を単一ファイルの parse で決められるか
   - `read_stdin` を 2 回呼んだときの 2 回目の値
 - R31 の台帳の未確認 3 件（型引数付き効果の重ね、`fn` の本体の `capture`、handler の値引数）は本版の範囲外で、D の設計で当たったら `docs/bug.md` に置く
+
+## 25. R32 ライブラリ単位の手順書（2026-09-12）
+
+24.1 の A（A1〜A8）と 24.4 の細則を実装する。`v0.3` の最初のラウンドで、tag は R38 まで打たない。
+
+**読む順:** 本節 → 24.1 の A 表と 24.4 → `docs/spec.md` の §59・§54・§55・§27・§5・§41 の `program` → `docs/corpus.md` の冒頭（`tests/library/` の規約）。
+
+**着手時点で赤の門番:** 24.8 の 7 本（`cargo test` の `keywords_cannot_be_names`、m0、m1-spec、m1-corpus、m2、m3、m7、r23）。m1-spec の見出しは 24 節の改訂のコミット `8f49366` で解消しているはずで、R32 の入口で単独で測り直す。
+
+### 決定
+
+- **工程は 4 つ。字句と構文（工程 0）、check と build の分岐と公開面（工程 1）、ライブラリ根（工程 2）、コーパスと道具（工程 3）。** 工程ごとに指揮者が緑を実測してから次を発注する
+- **`library` と `shared` を同時に予約語にする。** `keywords_cannot_be_names`（`r23_syntax.rs:144`）は §41 のキーワード列を 1 つのテストで回すので、`library` だけ予約しても赤のまま m0・m2・m3・r23 に連鎖する。`shared` の構文と意味は R33 で、R32 では字句だけ予約する（`shared type T = ...` は R32 では E100 のまま）
+- **check と build の分岐は `Project` に「検査の種類」を持たせて作る。** 今は `main.rs:5-16` が 4 つの bool に畳んだ後、`Project::check` / `check_for_print` / `dump_mono` / `compile_to_object`（`project.rs:37-56`）が全て `check_parsed_filtered`（`lib.rs:174`）に落ちる。命令に依存する唯一の項は E706 を落とす `reject_user_main_effects` である。渡したファイル（file 0）に値定義の `main` があれば入口検査、無ければライブラリ検査とし、`build` と `dump-mono` はライブラリ検査のとき E206 を 1:1 で返す（メッセージは entry 向け: `build requires an entry file with main; check treats this directory as a library` の趣旨）。`--print-type` はライブラリ検査では何も印字せず終了コード 0
+- **E206 は 2 箇所にある。** `names.rs:413-422` の `entry_form`（`main` 無し → 1:1、引数付き → その `def`）と `infer.rs:206-212` の `main is not defined`（`?` で推論を打ち切る）。ライブラリ検査では両方とも「`main` 無し」を通し、引数付き `main` の E206 は残す（§5 は変わらない）。`library` を宣言したディレクトリの `main` は、どのファイルにあっても E206 でその `def` を指す（他のファイルの `main` は `fileN$main` に改名されている。`file_scopes.rs:41-47`）
+- **ライブラリ検査の E513 の根は公開面（A2）。** `dependencies.rs:24-27` は `"main"` と `other_entry_roots` を根にする。ライブラリ検査の根は、通常の実装・functor の適用結果・未適用の functor・実装の無い契約・外の型・効果・handler の全てである。外の `def` は根にしない（ファイル内で実装や他の外の `def` から辿れなければ E513。今の `fileN$` の機構のまま）。`other_entry_roots`（`file_scopes.rs:10-14`）はライブラリ検査では空にし、宣言の無いディレクトリの `main` を普通の `def` にする（§59）。E514（`infer.rs:606-608`）と実装局所の型の E513（`dependencies.rs:81-87`）は変えない
+- **prelude の根（A6）は `.skip(prelude_items)` のままでよい。** 振る舞いは「prelude の項目は E513 にならない」で同じである。§49 の文言に合わせて、`dependencies.rs:34` と `:44` のコメントに「prelude は公開面として根」と書く。これ以上の構造変更はしない
+- **ライブラリ根（A7 / A8）は `Project::load` で決める。** `library` は外の宣言なので、`role_error`（`project.rs:184-197`）と同じトークン走査で「そのディレクトリのどのファイルが `library` を持つか」を組み立ての前に集められる。ディレクトリごとに 1 つ（2 つ目は E205、ファイル順で後のもの。同一ファイルの 2 つ目も E205）。`.hdi` の `library` は E100（`role_error` の `interface` の枝）。`library` 自身は `outer` を false にしない（`project.rs:195` の見出し集合に足さない）
+- **ライブラリ根の中のパス解決。** `namespaces.rs:145-161` の `resolve_global` は、無修飾を「自分のディレクトリ → 根 `[]`」、修飾を根からの絶対パスで解く。ライブラリ根の中の項目は、無修飾を「自分のディレクトリ → 最内のライブラリ根」、修飾を最内のライブラリ根からの絶対パスで解く。利用側の根 `[]` の宣言は見えない（E204）。prelude の項目は `[]` に置かれているが、どこからも無修飾で見える（§49）ので、prelude だけは別扱いで最後に引く。根との同名の E205（`namespaces.rs:108-113`）は、ライブラリ根の中ではライブラリ根の宣言と prelude の名前に対して数える
+- **外の `def` の E100（A3）は `role_error` の `root_file` を「根のディレクトリ、またはライブラリ根のディレクトリ」に広げる。** `root_file` は今も「入口ファイル」ではなく「根のディレクトリのファイル」（`project.rs:175`）なので、集合を広げるだけでよい。24.9 の「単一ファイルの parse で決められるか」の答えは「決められない。組み立て（`Project::load`）で決める」で、既にそうなっている
+- **`Item` に足すか `Ast` の欄にするか。** `library` は名前も本体も持たないので、`Ast` に `library: Option<Span>` を持たせる形を推す。`Item::Library` にすると `dependencies.rs:11-19`、`namespaces.rs:42-70`、`file_scopes.rs:15-23` の網羅 match に腕が増える。builder が選んでよいが、選んだ理由を報告に書く
+- **E206 コーパスは工程 0 で差し替える。** 今の `tests/reject/E206/main.hd` は「`main` 無しの check」で、工程 1 の A1 で受理に変わる。工程 0 で `library` を宣言したディレクトリの `main` に差し替え（`// spec: §59`、`// item: ライブラリ単位`）、lock を更新する。新形は工程 0 の時点で拒否されるので、既存の門番は緑のまま。**AGENTS.md の「lock を実装の工程で更新しない」は、工程 0 と工程 3 に限って解除する**
+- **E2 のソースは `tools/gates/` に起票する。** `tools/gates/main.hd` が入口、`tools/gates/report/report.hd` が `library` を宣言するライブラリで、契約 `Report` と実装 `Report` を持つ。R32 では純粋な集計だけ（`Tally` record、`add`、`render`）で、`main` は固定の 3 つ組のリストを畳んで印字する。R34 で `PASSED: n/N` の行の解析、R36 で `Int.parse`、R37 で `read_dir` / `read_file` を足す。R33 で `Tally` を契約の抽象型にし `shared` で公開する
+
+### 期待値の根拠
+
+| 形 | 導出 | 根拠 |
+|---|---|---|
+| `main` 無しの `.hd` を `check` | 受理（診断なし、終了コード 0） | §5、§54、A1 |
+| 同じファイルを `build` / `dump-mono` | E206、1:1 | §5、§54、A4 |
+| 同じファイルを `check --print-type` | 何も印字せず終了コード 0 | 24.4 |
+| `library` のディレクトリの `main` | E206、その `def` | §59、§50 |
+| `library` の 2 つ目（同一ファイル / 別ファイル） | E205、2 つ目 | §59、§50 |
+| `.hdi` の `library` | E100 | §59 |
+| ライブラリ検査で未参照の実装・functor・契約・外の型・効果・handler | 受理 | §27、A2 |
+| ライブラリ根のファイルの外の `def` が未使用 | E513 | §54、§59 |
+| 根でもライブラリ根でもないファイルの外の `def` | E100 | §54 |
+| 宣言の無いディレクトリを check、他ファイルに `main` | その `main` は普通の `def`（未使用なら E513） | §59 |
+| 埋め込み: `app/main.hd` から `app/lib/`（`library`）の実装を `lib::store::X.f` で参照 | 受理して実行 | §55、§59、A8 |
+| 埋め込み: `app/lib/` の中から `app/main.hd` の外の型を無修飾で参照 | E204 | §55 |
+| 埋め込み: `app/lib/` の中から兄弟 `app/other/` を参照 | E204 | §55、§59 |
+| 埋め込み: 入口検査で `app/lib/` の未参照の実装 | E513 | §59 |
+| `def library = 1`、`def shared = 1` | E100 | §41 |
+
+**本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+### 成果物
+
+`crates/hado/src/`（`lexer.rs` `parser.rs` `project.rs` `lib.rs` `main.rs` `names.rs` `infer.rs` `dependencies.rs` `file_scopes.rs` `namespaces.rs`）、`crates/hado/tests/r32_library.rs`（新設）、既存テストの書き換え（下記）、`crates/hado/tests/r9_grammar.rs`、`crates/hado/tests/corpus.rs`、`scripts/verify-r32.sh`（新設）、`scripts/verify-m2.sh:14`（`tests/library` を足す）、`tests/reject/E206/`、`tests/accept/`（埋め込みの受理 1 本）、`tests/library/`（新設）、`tests/corpus.sha256`、`tools/gates/`。
+
+### 工程
+
+- 工程 0: 字句と構文。`lexer.rs:539-563` に `library` `shared`。parser の `outer_item` に `library`。`.hdi` の `library` は E100、2 つ目は E205、`library` のディレクトリの `main` は E206。E206 コーパスの差し替えと lock。判定 32-b 32-c 32-g。`keywords_cannot_be_names` が緑になる
+- 工程 1: check と build の分岐（A1 A4）と公開面（A2）。`entry_form` と `infer.rs:206-212` の条件化、`main.rs` からの検査の種類の伝搬、`--print-type`、build のメッセージ、`dependencies.rs:24` の根、`other_entry_roots` の扱い。E206 を期待する既存テストの書き換え。判定 32-a 32-d 32-e
+- 工程 2: ライブラリ根（A3 A7 A8）。`Project::load` でのライブラリ根の集合、`resolve_global` のパス解決、可視性、E205 の単位、`role_error` の `root_file`。判定 32-f
+- 工程 3: コーパスと道具。`tests/library/` と runner、埋め込みの受理 1 本を `tests/accept/`、lock、`verify-m2.sh:14`、`r9_grammar` の `library`、`tools/gates/` の起票。判定 32-h 32-i 32-j
+
+### 判定
+
+判定 32-a: `main` の無い `.hd`（契約 1 つと実装 1 つ、外の `def` 1 つを実装が使う）を `check` して受理（stderr が空、終了コード 0）。`check --print-type` は stdout も空。`build` と `dump-mono` は E206 で 1:1、メッセージに `check` と `library` の語を含み、実行ファイルを作らない
+判定 32-b: `library` を宣言した `lib.hd` と `def main = 1` の `main.hd` を同じディレクトリに置き、`main.hd` を `check` / `build` して E206 でその `def main` の位置。`lib.hd` を渡しても同じ（`main` は他ファイル）
+判定 32-c: `library` の重複。(1) 同一ファイルに 2 つ → E205 で 2 つ目の位置。(2) `a.hd` と `b.hd` に 1 つずつ → E205 で `b.hd` の位置（渡したのが `a.hd` のとき）。(3) `.hdi` に `library` → E100
+判定 32-d: 公開面。ライブラリに未参照の実装、未適用の functor、実装の無い契約、外の型、効果、handler を 1 つずつ置いて受理。負の対照: (1) 契約に無い実装の `def` → E514、(2) 実装局所の ADT が未使用 → E513、(3) ライブラリ根のファイルの外の `def` が未使用 → E513、(4) 根でもライブラリ根でもないサブディレクトリのファイルの外の `def` → E100
+判定 32-e: 宣言の無いディレクトリ。`a.hd`（`def main = 1`）と `lib.hd`（契約と実装）を置き `lib.hd` を `check` して E513 で `a.hd` の `def main`。`a.hd` の `main` を実装から参照する形は書けない（外の `def` はファイル局所）ので、`a.hd` を消せば受理
+判定 32-f: 埋め込み。`app/main.hd`、`app/lib/lib.hd`（`library`、外の型）、`app/lib/store/memory.hd`（実装。`id::IntId` をライブラリ根からの絶対パスで参照）、`app/lib/id/int_id.hd`（実装）。`app/main.hd` の `main` が `lib::store::Memory.find` を呼ぶ形を `check` → `build` → 実行して値が一致。負の対照: (1) `app/lib/store/memory.hd` から `app/main.hd` の外の型を無修飾で参照 → E204、(2) `app/lib/` の中から兄弟 `app/other/` の実装を `other::X` で参照 → E204、(3) `app/lib/extra/spare.hd` に誰も参照しない実装を置く → E513 でその実装（`Memory` が `IntId` を辿るので、`IntId` を未参照にする形では測れない）。**実行で印字する値は実行時に生成した整数をライブラリの `def` に埋め、期待値を判定器側で計算すること**（30-l・31-k と同じ規約）
+判定 32-g: `def library = 1` と `def shared = 1` が E100（`keywords_cannot_be_names` が緑）
+判定 32-h: `r9_grammar` の生成器が `outer_item` の `library` を生成し、生成した全プログラムを parser が受理する（`cargo test --offline --test r9_grammar`）
+判定 32-i: `tests/library/` に 1 ケース以上。判定器は各ケースの代表ファイル（`library` を宣言したファイル。無ければパスのバイト順の先頭）を `check` して受理。`corpus.rs`（または新設のテスト）が同じ規則で回し、`cargo test` に含まれる
+判定 32-j: E2 の起票。(1) `tools/gates/report/report.hd` を単体で `check` して受理。(2) 判定器が一時ディレクトリに `report/` を写し、実行時に生成した 3 つ組（名前・通過数・総数）の `main.hd` を書いて `build` → 実行し、`render` の出力が判定器側で計算した文字列と一致。書式は `<通過の合計>/<総数の合計> passed; red: <赤の名前を空白区切り>`、赤が無ければ `red: none`
+判定 32-k: `cargo test --offline --no-fail-fast` が 0 failed
+判定 32-l: 全門番を単独で走らせ、許容される赤（下記）以外が満点・終了コード 0
+判定 32-m: `tests/reject/E206` の差し替え、`tests/accept/` の埋め込み 1 本（`// item: ライブラリ単位`、`// spec: §59`）、`tests/library/` の 1 本以上、`tests/corpus.sha256` の更新。`sha256sum --strict -c tests/corpus.sha256` が全件 OK
+
+### 既存テストの書き換え（工程 1）
+
+| 場所 | 今 | A1 の後 |
+|---|---|---|
+| `r17_files.rs:114-120` | 空の `other.hd` を渡すと 3 命令とも E206 1:1 | `check` は E513 で `main.hd` の `def helper`（`main` は普通の `def` で未参照、`helper` はそこからしか辿れないので、ファイル順で最初の未使用宣言は `helper`）。`build` `dump-mono` は E206 1:1 |
+| `r17_files.rs:171-183` | `def helper x => x + 1` だけの `main.hd` を `check` して E206 | `check` は E513 で `def helper`（外の `def` が未使用）。`hado::check_source` も同じ |
+| `r20_entries.rs:153-161` | `a.hd` `z.hd` に `main`、`empty.hd` を渡すと E206 | `check` は E513 で `a.hd` の `def main`、`build` `dump-mono` は E206 1:1 |
+| `r20_entries.rs:163-170` | `support.hd`（契約の実装と外の `def`）を渡すと E206 | `check` は E513 で `entry.hd` の `def main`（宣言の無いディレクトリの `main` は普通の `def`）、`build` `dump-mono` は E206 1:1 |
+| `r22_namespaces.rs:181-187` | `nested/empty.hd` を渡すと E206（根の付け替えの観測） | `check` は受理、`build` `dump-mono` は E206。根の付け替えは、`nested/` のファイルが `main.hd` の外の**型**を無修飾で参照する形を対にして観測する（`main.hd` を渡せば受理、`nested/` のファイルを渡せば E204。外の `def` はファイル局所なので型で測る） |
+| `check_cli.rs:236-243` | E206 は 1:1 固定なので先頭改行で動かない | 新しい E206 コーパスは `def main` を指すので、この例外は到達しない。ヘルパを消してよい |
+| `r9_names.rs:22-32` | `def f x => x + true` が E206 1:1 | この 1 件は `build` 相当の API で測るか消す。引数付きの 2 件は残す |
+| `r13_conditions.rs:79` | 引数付き `main` が E206 | 変えない |
+
+### 許容される赤
+
+R32 の終了時に残ってよい赤は、24.8 のうち R33〜R37 に割り当てたものだけである:
+
+- `verify-m1-corpus.sh` の 3 pairs（型の共有・Bytes・配列・String 操作・Int.parse・Env と Io の受理が無い）と、その連鎖の `verify-m2.sh` 5、`verify-m3.sh` 9
+- `verify-m7.sh` の 3（stdlib に String の 5 操作・Bytes・Array・`Int.parse` が無い）
+
+`cargo test`、m0、m1-spec、r23 は R32 で緑に戻す。それ以外の門番を 1 本でも赤くしたら R32 の欠陥である。
+
+### スコープ外
+
+- `shared` の構文と意味（R33）。R32 では予約語にするだけ
+- 兄弟ライブラリの参照、ライブラリのリンク可能成果物、検索パス、設定ファイル（24.3）
+- 診断の文言の統一、`--print-type` の書式の変更
+- `tools/gates/` の I/O 部分（R37）
+
+### 確認して報告（24.9 から）
+
+- `trusted_start` はライブラリ検査でも同じ意味か（`lib.rs:135` の `stdlib` の判定と、prelude を prelude 無しで検査する経路 `trusted_start.is_none()`）
+- `library` を `.hdi` に置いたときに E100 になるか（`role_error` で決まるか）
+- 外の `def` の E100 が組み立てで決まること（`Project::load` の順序）
+- ユーザーの `type Bytes` / `type Array` が今どう扱われるか（R34・R35 で E205 にする前の現状）
+
+### 中断の条件
+
+**namespaces の対称表（`(Directory, Space)` の表）を捨てて、ファイルごとの別の解決器に置き換える必要があると判断したら、直さずに中断せよ。** 想定しているのは、項目ごとに「最内のライブラリ根」を持たせ、`resolve_global` の根の参照 `[]` をその値に差し替える変更である。
+
+**E206 の 2 箇所を条件化するために `check_parsed_filtered` を 2 本に複製する必要があると分かったら、工程 1 を止めて報告せよ。** 検査の種類は 1 つの値として持ち回る。
+
+それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
