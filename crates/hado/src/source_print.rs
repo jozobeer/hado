@@ -46,7 +46,8 @@ fn item(value: &Item) -> String {
                 .as_ref()
                 .map(|ty| format!(" = {}", type_source(ty)))
                 .unwrap_or_default();
-            format!("type {}{}{body}", type_parameters(&def.params), def.name)
+            let shared = if def.shared { "shared " } else { "" };
+            format!("{shared}type {}{}{body}", type_parameters(&def.params), def.name)
         }
         Item::SigDef(def) => format!(
             "def {}{}{}{}",

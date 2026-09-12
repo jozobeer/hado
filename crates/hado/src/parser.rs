@@ -386,6 +386,7 @@ pub struct TypeDef {
     pub name_span: Span,
     pub params: Vec<DeclaredName>,
     pub ty: Option<TypeExpr>,
+    pub shared: bool,
     pub span: Span,
 }
 
@@ -672,7 +673,15 @@ impl Parser<'_> {
             let item = match self.kind() {
                 TokKind::Def if context == TypeContext::Signature => self.parse_sig_def(),
                 TokKind::Def => self.parse_definition(),
-                TokKind::KwType => self.parse_type_def(context),
+                TokKind::KwShared if context == TypeContext::Implementation => {
+                    self.bump();
+                    if self.kind() != &TokKind::KwType {
+                        Err(self.error(None, "expected type after shared"))
+                    } else {
+                        self.parse_type_def(context, true)
+                    }
+                }
+                TokKind::KwType => self.parse_type_def(context, false),
                 TokKind::KwModule => self.parse_module(),
                 TokKind::KwImplement => self.parse_implementation(),
                 TokKind::KwEffect => self.parse_effect(),
@@ -700,7 +709,7 @@ impl Parser<'_> {
         self.pos = start;
         while self.kind() != &TokKind::Eof {
             if self.pos > start && self.pos >= failed_at
-                && matches!(self.kind(), TokKind::Def | TokKind::KwType | TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) {
+                && matches!(self.kind(), TokKind::Def | TokKind::KwType | TokKind::KwShared | TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) {
                 break;
             }
             self.bump();
@@ -796,7 +805,7 @@ impl Parser<'_> {
         }))
     }
 
-    fn parse_type_def(&mut self, context: TypeContext) -> Result<Item, Diagnostic> {
+    fn parse_type_def(&mut self, context: TypeContext, shared: bool) -> Result<Item, Diagnostic> {
         let span = self.span();
         self.expect(&TokKind::KwType)?;
         let params = self.parse_optional_type_params()?;
@@ -809,9 +818,9 @@ impl Parser<'_> {
             None
         } else {
             self.expect(&TokKind::Eq)?;
-            Some(self.parse_type_body(context)?)
+            Some(self.parse_type_body(context, shared)?)
         };
-        Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, span }))
+        Ok(Item::TypeDef(TypeDef { name, name_span, params, ty, shared, span }))
     }
 
     fn parse_module(&mut self) -> Result<Item, Diagnostic> {
@@ -1138,8 +1147,13 @@ impl Parser<'_> {
         Ok(params)
     }
 
-    fn parse_type_body(&mut self, context: TypeContext) -> Result<TypeExpr, Diagnostic> {
+    fn parse_type_body(&mut self, context: TypeContext, shared: bool) -> Result<TypeExpr, Diagnostic> {
         let span = self.span();
+        if shared {
+            if let Some(anchor) = self.shared_body_anchor() {
+                return Err(self.error_at(anchor, Some("E100"), "shared cannot prefix a constructor body"));
+            }
+        }
         match self.kind() {
             TokKind::LBrace => self.parse_record_type(),
             TokKind::Pipe => {
@@ -1164,6 +1178,16 @@ impl Parser<'_> {
                 let code = if matches!(next, Some(TokKind::Pipe | TokKind::LParen)) { "E108" } else { "E100" };
                 Err(self.error(Some(code), "expected a record or a leading | for an ADT"))
             }
+        }
+    }
+
+    fn shared_body_anchor(&self) -> Option<Span> {
+        match self.kind() {
+            TokKind::LBrace | TokKind::Pipe => Some(self.span()),
+            TokKind::Name(name) if name.starts_with(char::is_uppercase) => {
+                self.toks.get(self.pos + 1).filter(|token| token.kind == TokKind::LBrace).map(|token| token.span)
+            }
+            _ => None,
         }
     }
 
