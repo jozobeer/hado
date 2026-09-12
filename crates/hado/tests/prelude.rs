@@ -5,7 +5,16 @@ fn scalar_prelude_wrappers_check_and_execute() {
         include_str!("../../../stdlib/string.hd"),
         include_str!("../../../stdlib/int.hd"),
         include_str!("../../../stdlib/float.hd"),
-    ].join("\n").lines()
+    ].join("\n");
+    let type_declarations = modules.lines()
+        .filter(|line| line.trim_start().starts_with("type "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        type_declarations,
+        ["type Exception = { message: String }"],
+        "only error.hd's built-in Exception declaration may be excluded"
+    );
+    let modules = modules.lines()
         .filter(|line| !line.starts_with("type "))
         .collect::<Vec<_>>().join("\n");
     for (index, expression, expected) in [

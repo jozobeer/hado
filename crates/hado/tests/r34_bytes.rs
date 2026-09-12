@@ -71,6 +71,24 @@ fn runtime_declarations_expose_bytes_symbols() {
     assert_eq!(RuntimeFunction::BytesIsUtf8.declaration().result, Some(AbiType::I8));
 }
 
+#[test]
+fn utf8_case_count_is_seed_independent() {
+    let generator = include_str!("../../../scripts/verify-r34.sh")
+        .split_once("# BEGIN UTF8 CASE GENERATOR\n")
+        .unwrap().1
+        .split_once("# END UTF8 CASE GENERATOR")
+        .unwrap().0;
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(
+            "{generator}\n{}",
+            "counts = {len(utf8_cases(random.Random(seed))) for seed in range(256)}\nassert len(counts) == 1, counts\n"
+        ))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
 fn write_utf8_cases(path: &std::path::Path) {
     // 分類と独立 oracle を二重管理しないため、CLI 判定器の生成器を共有する。
     let generator = include_str!("../../../scripts/verify-r34.sh")

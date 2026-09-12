@@ -305,7 +305,7 @@ def invalid_utf8_classes(rng, boundaries):
     for scalar in (0x110000, rng.randint(0x110000, 0x1FFFFF)):
         yield f"above_max_{scalar:x}", utf8_bytes(scalar, 4)
     for lower, upper in ((0x80, 0xBF), (0xF8, 0xFF)):
-        for lead in sorted({lower, rng.randint(lower, upper), upper}):
+        for lead in sorted({lower, rng.randint(lower + 1, upper - 1), upper}):
             yield f"invalid_lead_{lead:x}", [lead]
     for scalar, width in boundaries:
         for position in range(1, width):
@@ -579,14 +579,33 @@ def check_split(category, s):
                  value='[' + ', '.join(map(quoted, s.split(longer))) + ']')
 
 
+def check_internal_parts(category, s):
+    positions = [j for j in range(1, len(s) - 1)
+                 if s[j] != s[0] and (category == 'ascii' or ord(s[j]) > 127)]
+    start = random.choice(positions)
+    for width in (1, random.randint(2, len(s) - start)):
+        part = s[start:start + width]
+        value = '[' + ', '.join(str(v).lower() for v in (s.startswith(part), part in s)) + ']'
+        assert not s.startswith(part) and part in s, (category, s, part)
+        string_probe(f'34-a(5,6) {category} internal {start}:{start + width} expected {value}',
+                     f'[String.starts_with {quoted(s)} {quoted(part)}, String.contains {quoted(s)} {quoted(part)}]',
+                     value=value)
+
+
 def check_predicates(category, s):
     for length in sorted({0, 1, len(s), len(s) + 1}):
         prefix = (s + 'Z')[:length]
-        for match_kind, candidate in [('matching', prefix), ('different', 'Z' * length),
-                                      ('different_tail', prefix[:-1] + 'Z' if prefix else '')]:
+        candidates = [('matching', prefix), ('different', 'Z' * length)]
+        if 0 < length <= len(s):
+            candidates.append(('different_tail', prefix[:-1] + 'Z'))
+        for match_kind, candidate in candidates:
+            if match_kind == 'different_tail':
+                assert len(candidate) == len(prefix) and candidate[:-1] == prefix[:-1] and candidate != prefix, (category, length, prefix, candidate)
             string_probe(f'34-a(5) {category} prefix {length} {match_kind}',
                          f'String.starts_with {quoted(s)} {quoted(candidate)}',
                          value=str(s.startswith(candidate)).lower())
+    if s:
+        check_internal_parts(category, s)
     middle = random.randrange(1, len(s) - 1) if len(s) > 2 else 0
     parts = {'leading': s[:1], 'middle': s[middle:middle + 1], 'trailing': s[-1:],
              'absent': 'Z', 'empty': '', 'whole': s, 'longer': s + 'Z',
@@ -598,7 +617,7 @@ def check_predicates(category, s):
 
 strings = {
     'empty': '',
-    'ascii': ''.join(random.choices('abcde', k=random.randint(3, 9))),
+    'ascii': ''.join(random.sample('abcde', 2) + random.choices('abcde', k=random.randint(1, 7))),
     'multibyte': 'あ😀' + ''.join(random.choices('あ😀', k=random.randint(1, 7))),
     'mixed': 'aあ😀' + ''.join(random.choices('abcあ😀', k=random.randint(1, 7))),
     'nul': '\0aあ😀' + ''.join(random.choices('aあ😀\0', k=random.randint(1, 7))) + '\0',
