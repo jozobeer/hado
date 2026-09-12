@@ -31,7 +31,7 @@ mkdir -p "$workdir/cases"
 
 # 探針の値は実行時に生成し、期待値は生成器の側で計算する。被験側のコードには
 # 期待値を書かない（暗記で通せないようにする）。
-SEED=$(( (RANDOM << 15) | RANDOM )) python3 - "$workdir/cases" <<'PY'
+if ! SEED=$(( (RANDOM << 15) | RANDOM )) python3 - "$workdir/cases" <<'PY'
 import os, random, sys
 
 base = sys.argv[1]
@@ -72,10 +72,15 @@ multi = ["あ", "い", "😀", "é", "ß", "Ω"]
 
 def rand_string():
     length = random.randint(3, 8)
-    return "".join(
-        random.choice(ascii_alphabet) if random.random() < 0.5 else random.choice(multi)
-        for _ in range(length)
-    )
+    # 3 バイトの `あ` と 4 バイトの `😀` を必ず 1 つずつ含める。ASCII だけの列で
+    # バイト数とスカラ値の個数が偶然一致して assert で生成器が落ちるのを防ぐ。
+    parts = ["あ", "😀"]
+    while len(parts) < length:
+        parts.append(
+            random.choice(ascii_alphabet) if random.random() < 0.5 else random.choice(multi)
+        )
+    random.shuffle(parts)
+    return "".join(parts)
 
 
 # 34-c(1): Bytes.length はバイト数、String.length はスカラ値の個数。
@@ -179,6 +184,12 @@ write("d2_record", "type Box = { b: Bytes }\ndef main = { b = Bytes.of_list [1] 
 add("d2_record", "34-d(2) record field の Bytes 印字", "print")
 
 # 34-e: == != compare がバイト列の構造比較。Bool は if で Int に落として同じリストに置く。
+# 同値の比較（== が真・compare が 0）を確実に測るため、同じ内容を別インスタンスで
+# 構築した探針と、空列どうしの探針を必ず置く。大小は最後のバイトだけを 1 増やした
+# 列で測り、compare の両方向の符号が逆になることまで見る（乱数で偶然に頼らない）。
+same = [random.randint(0, 255) for _ in range(random.randint(1, 6))]
+same[-1] = same[-1] % 255
+bumped = same[:-1] + [same[-1] + 1]
 left = [random.randint(0, 255) for _ in range(random.randint(0, 6))]
 right = [random.randint(0, 255) for _ in range(random.randint(0, 6))]
 order = -1 if left < right else (0 if left == right else 1)
@@ -189,6 +200,27 @@ write(
     expect=f"[{1 if left == right else 0}, {1 if left != right else 0}, {order}]\n",
 )
 add("e", "34-e == != compare がバイト列の構造比較", "print")
+write(
+    "e_same",
+    f"def main = let x = Bytes.of_list [{lit(same)}] -> let y = Bytes.of_list [{lit(same)}] -> "
+    "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y]\n",
+    expect="[1, 0, 0]\n",
+)
+add("e_same", "34-e 同内容の別インスタンスは == が真で compare 0", "print")
+write(
+    "e_empty",
+    "def main = let x = Bytes.of_list [] -> let y = Bytes.of_list [] -> "
+    "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y]\n",
+    expect="[1, 0, 0]\n",
+)
+add("e_empty", "34-e 空列どうしは == が真で compare 0", "print")
+write(
+    "e_order",
+    f"def main = let x = Bytes.of_list [{lit(same)}] -> let y = Bytes.of_list [{lit(bumped)}] -> "
+    "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y, compare y x]\n",
+    expect="[0, 1, -1, 1]\n",
+)
+add("e_order", "34-e 大小両方向で compare の符号が逆", "print")
 
 # 34-f: Bytes 注釈の関数は受理される。
 write(
@@ -230,6 +262,15 @@ with open(os.path.join(base, "manifest.tsv"), "w") as handle:
     for kind, desc, mode in manifest:
         handle.write(f"{kind}\t{desc}\t{mode}\n")
 PY
+then
+    echo "NG: 探針の生成器が失敗した（判定を実行できない）" >&2
+    exit 1
+fi
+
+if [ ! -s "$workdir/cases/manifest.tsv" ]; then
+    echo "NG: 探針の manifest が無いか空（判定を実行できない）" >&2
+    exit 1
+fi
 
 case_dir() { printf '%s/cases/%s' "$workdir" "$1"; }
 
@@ -239,12 +280,15 @@ build_case() {
     "$compiler" build "$dir/main.hd" >/dev/null 2>"$workdir/build-$kind.err"
 }
 
+# 標準出力 / 標準エラーが空であることは、ファイルに保存してバイト数で測る
+# （コマンド置換は末尾改行を落とすので使わない）。
 prints_match() {
     local kind="$1" dir status=0
     dir=$(case_dir "$kind")
     build_case "$kind" || return 1
     "$dir/main" >"$workdir/out-$kind" 2>"$workdir/err-$kind" || status=$?
     [ "$status" -eq 0 ] || return 1
+    [ "$(wc -c <"$workdir/err-$kind")" -eq 0 ] || return 1
     cmp -s "$workdir/out-$kind" "$dir/expect"
 }
 
@@ -254,27 +298,36 @@ error_matches() {
     build_case "$kind" || return 1
     "$dir/main" >"$workdir/out-$kind" 2>"$workdir/err-$kind" || status=$?
     [ "$status" -eq 1 ] || return 1
+    [ "$(wc -c <"$workdir/out-$kind")" -eq 0 ] || return 1
     [ "$(cat "$dir/expect_error")" = "$(cat "$workdir/err-$kind")" ]
 }
 
+# build と実行を合わせて 1 つの期限で測る。build だけ遅い注入も落ちるよう、
+# build と実行の両方に timeout を掛け、経過時間の合計も seconds 以下を要求する。
 builds_runs_within() {
-    local kind="$1" seconds="$2" dir start end build_seconds status=0
+    local kind="$1" seconds="$2" dir start end status=0
     dir=$(case_dir "$kind")
-    start=$(date +%s.%N)
-    build_case "$kind" || return 1
-    end=$(date +%s.%N)
-    build_seconds=$(python3 -c "print(f'{$end - $start:.3f}')")
+    start=$(date +%s%N)
+    if ! timeout "$seconds" "$compiler" build "$dir/main.hd" >/dev/null 2>"$workdir/build-$kind.err"; then
+        echo "   ($kind: build timed out or failed)"
+        return 1
+    fi
     timeout "$seconds" "$dir/main" >"$workdir/out-$kind" 2>"$workdir/err-$kind" || status=$?
-    echo "   ($kind: build=${build_seconds}s run_status=$status)"
+    end=$(date +%s%N)
+    echo "   ($kind: build+run=$(( (end - start) / 1000000 ))ms run_status=$status)"
     [ "$status" -eq 0 ] || return 1
-    cmp -s "$workdir/out-$kind" "$dir/expect"
+    [ "$(wc -c <"$workdir/err-$kind")" -eq 0 ] || return 1
+    cmp -s "$workdir/out-$kind" "$dir/expect" || return 1
+    [ $(( end - start )) -le $(( seconds * 1000000000 )) ]
 }
 
 code_present() {
-    local kind="$1" code="$2" dir err status
+    local kind="$1" code="$2" dir status
     dir=$(case_dir "$kind")
-    err=$("$compiler" check "$dir/main.hd" 2>&1 >/dev/null); status=$?
-    [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]]
+    "$compiler" check "$dir/main.hd" >"$workdir/check-$kind.out" 2>"$workdir/check-$kind.err"; status=$?
+    [ "$status" -eq 1 ] || return 1
+    [ "$(wc -c <"$workdir/check-$kind.out")" -eq 0 ] || return 1
+    [[ "$(cat "$workdir/check-$kind.err")" == *"error[$code]:"* ]]
 }
 
 while IFS=$'\t' read -r kind desc mode; do
@@ -322,10 +375,11 @@ expect_error_at() {
         echo "NG: $label (needle not found: $needle)"
         return
     fi
-    err=$("$compiler" check "$entry" 2>&1 >/dev/null); status=$?
+    "$compiler" check "$entry" >"$workdir/error-at.out" 2>"$workdir/error-at.err"; status=$?
+    err=$(cat "$workdir/error-at.err")
     local prefix
     prefix="$(basename "$entry"):$want: error[$code]: "
-    if [ "$status" -eq 1 ] && [[ "$err" == "$prefix"* ]]; then
+    if [ "$status" -eq 1 ] && [ "$(wc -c <"$workdir/error-at.out")" -eq 0 ] && [[ "$err" == "$prefix"* ]]; then
         echo "OK: $label"
         passed=$((passed + 1))
     else
