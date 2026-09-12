@@ -324,7 +324,7 @@ impl Checker<'_> {
             if !self.ambiguous_modules.contains(&module.name) { continue; }
             let saved = self.clone();
             self.module_path.push(module.name.clone());
-            let ast = Ast { items: module.items.clone(), span: module.span,
+            let ast = Ast { items: module.items.clone(), span: module.span, library: None,
                 branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new() };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
@@ -526,6 +526,7 @@ impl Checker<'_> {
         let ast = Ast {
             items: module.items.clone(),
             span: module.span,
+            library: None,
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
             written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new(),

@@ -302,6 +302,7 @@ pub struct Ast {
     pub name_sites: Vec<NameSite>,
     pub items: Vec<Item>,
     pub span: Span,
+    pub library: Option<Span>,
     pub branches_after_fallback: Vec<Span>,
     pub branch_anchors: Vec<(Span, Span)>,
     pub equality_anchors: Vec<(Span, Span, Span)>,
@@ -313,6 +314,7 @@ pub struct Ast {
 impl Ast {
     pub(crate) fn append(&mut self, other: Self) {
         self.items.extend(other.items);
+        self.library = self.library.or(other.library);
         self.branches_after_fallback.extend(other.branches_after_fallback);
         self.branch_anchors.extend(other.branch_anchors);
         self.equality_anchors.extend(other.equality_anchors);
@@ -569,6 +571,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         name_sites: Vec::new(),
         written_list_patterns: Vec::new(),
         long_condition_functions: Vec::new(),
+        library: None,
         diagnostics: Vec::new(),
         in_resume_scope: false,
     };
@@ -590,6 +593,7 @@ struct Parser<'a> {
     name_sites: Vec<NameSite>,
     written_list_patterns: Vec<Span>,
     long_condition_functions: Vec<Span>,
+    library: Option<Span>,
     diagnostics: Vec<Diagnostic>,
     in_resume_scope: bool,
 }
@@ -648,7 +652,7 @@ impl Parser<'_> {
     fn parse_program(&mut self) -> Ast {
         let span = self.span();
         let items = self.parse_items(TypeContext::TopLevel);
-        Ast { items, span, name_sites: self.name_sites.clone(), branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), qualified_type_anchors: self.qualified_type_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
+        Ast { library: self.library, items, span, name_sites: self.name_sites.clone(), branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), qualified_type_anchors: self.qualified_type_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
     }
 
     fn section_boundary(&self) -> bool {
@@ -668,6 +672,11 @@ impl Parser<'_> {
                 TokKind::KwImplement => self.parse_implementation(),
                 TokKind::KwEffect => self.parse_effect(),
                 TokKind::KwHandler => self.parse_handler(),
+                TokKind::KwLibrary if context == TypeContext::TopLevel => {
+                    if self.library.is_none() { self.library = Some(self.span()); }
+                    self.bump();
+                    continue;
+                }
                 other => Err(self.error(None, format!("expected a declaration, found {other}"))),
             };
             match item {

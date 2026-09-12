@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use crate::lexer::{Tok, TokKind};
-use crate::parser::{Ast, Diagnostic};
+use crate::parser::{Ast, DefKind, Diagnostic, Item, Span};
 
 #[derive(Clone)]
 struct SourceFile {
@@ -26,6 +26,17 @@ impl Project {
         let (token_files, directories) = read_files(entry)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (ast, other_entry_roots) = parse_files(&token_files)?;
+        let libraries = library_roots(&token_files)
+            .map_err(|error| LoadError::Diagnostic(source_diagnostic(&files, error)))?;
+        if libraries.contains(&files[0].directory) {
+            if let Some(span) = value_main(&ast) {
+                return Err(LoadError::Diagnostic(source_diagnostic(&files, Diagnostic {
+                    path: files[0].path.clone(), line: span.line, col: span.col,
+                    code: Some("E206".into()),
+                    message: "a library directory cannot declare main".into(),
+                })));
+            }
+        }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
         let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
         parsed.other_entry_roots = other_entry_roots;
@@ -185,7 +196,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
     let interface = path.extension().is_some_and(|extension| extension == "hdi");
     let mut outer = true;
     for token in tokens {
-        let invalid = (interface && token.kind == TokKind::KwImplement)
+        let invalid = (interface && matches!(token.kind, TokKind::KwImplement | TokKind::KwLibrary))
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic { path: path.to_string_lossy().into_owned(), line: token.span.line,
@@ -195,6 +206,33 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
         if matches!(token.kind, TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) { outer = false; }
     }
     None
+}
+
+fn value_main(ast: &Ast) -> Option<Span> {
+    ast.items.iter().find_map(|item| match item {
+        Item::Def(def) if def.name == "main" && matches!(def.kind, DefKind::Value(_)) => Some(def.span),
+        _ => None,
+    })
+}
+
+/// Directories that declare `library`, in file order (entry first, then relative path bytes).
+/// The second declaration of a directory, and the second in a file, are E205 (§59).
+fn library_roots(files: &[TokenFile]) -> Result<BTreeSet<Vec<String>>, Diagnostic> {
+    let mut roots = BTreeSet::new();
+    for file in files {
+        let mut declared = false;
+        for token in &file.tokens {
+            if token.kind != TokKind::KwLibrary { continue; }
+            if declared || roots.contains(&file.source.directory) {
+                return Err(Diagnostic { path: file.source.path.clone(), line: token.span.line,
+                    col: token.span.col, code: Some("E205".into()),
+                    message: "duplicate library declaration".into() });
+            }
+            declared = true;
+            roots.insert(file.source.directory.clone());
+        }
+    }
+    Ok(roots)
 }
 
 fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic {
