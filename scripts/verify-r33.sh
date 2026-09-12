@@ -232,7 +232,6 @@ rand_rp="q${RANDOM}"
 rand_eff="e${RANDOM}"
 rand_harm="h${RANDOM}"
 rand_fbody="f${RANDOM}"
-rand_fe_name="g${RANDOM}"
 rand_fe_prefix="p${RANDOM}"
 rand_fe_suffix="s${RANDOM}"
 
@@ -703,19 +702,20 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n'
 } >"$workdir/33fnneg/main.hd"
 
-# 正 2 (function-with-effects): 効果行を持つ関数型。効果は実際に起きる形にする
-# (go は {Error} の parse を呼ぶ)。等式の効果行が解けていないと E301 / E305 になる。
+# 正 2 (function-with-effects): 効果行を持つ関数型。go は {Error} の parse を呼び、
+# 効果が実際に起きる形にする。record schema の Store.T を登録より前に解くとき、
+# 効果行を落とすと field の型が合わず E301 / E305 になる。
 {
-    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\n' "$rand_fe_name" "$rand_fe_suffix"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\ndef make _ => go\n' "$rand_fe_prefix"
+    printf 'def main = read ({ value = go })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\n\n' "$rand_fe_suffix" "$rand_fe_prefix"
+    printf 'module Store\ntype T\ndef touch(name: String): Unit Pure\n\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n'
 } >"$workdir/33fneff/main.hd"
 
 # 負 2: shared を外すと効果行付きの field は不透明のまま型検査が落ちる。
 {
-    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\n' "$rand_fe_name" "$rand_fe_suffix"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\ndef make _ => go\n' "$rand_fe_prefix"
+    printf 'def main = read ({ value = go })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\n\n' "$rand_fe_suffix" "$rand_fe_prefix"
+    printf 'module Store\ntype T\ndef touch(name: String): Unit Pure\n\n'
+    printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef touch _ => ()\n'
 } >"$workdir/33fneffneg/main.hd"
 
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
