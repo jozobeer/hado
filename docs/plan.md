@@ -2432,3 +2432,105 @@ R32 の終了時に残ってよい赤は、24.8 のうち R33〜R37 に割り当
 **E206 の 2 箇所を条件化するために `check_parsed_filtered` を 2 本に複製する必要があると分かったら、工程 1 を止めて報告せよ。** 検査の種類は 1 つの値として持ち回る。
 
 それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
+
+## 26. R33 型の共有の手順書（2026-09-12）
+
+24.1 の B（B1〜B5）と 24.4 の細則（`shared` の 3 項）を実装する。R32 で `shared` は予約語になっており、今は `implement` の中に書くと E100 `expected a declaration, found shared` になる（`parser.rs:685` の既定腕）。
+
+**読む順:** 本節 → 24.1 の B 表と 24.4 → `docs/spec.md` の §35・§56・§34（`X.T`）・§5（E705）・§41 → 24.7 の探針 3 本。
+
+**着手時点で赤の門番:** R32 の終了時の許容される赤（m1-corpus の pairs、m7、m2 / m3 の連鎖）だけ。R33 の入口で単独で測り直す。
+
+### 決定
+
+- **工程は 4 つ。構文（工程 0）、通常の実装の `shared`（工程 1）、functor と契約修飾型（工程 2）、コーパスと道具（工程 3）。** 工程ごとに指揮者が緑を実測してから次を発注する
+- **`shared` は `TypeDef` の欄。** `parser.rs:384-390` の `TypeDef` に `shared: bool` を足す。`parse_items`（`parser.rs:664-696`）の `TypeContext::Implementation` でだけ `KwShared` を受理し、続く `type` の実体化に印を付ける。それ以外の文脈（外、契約、効果、handler、`Signature`）の `shared` は今までどおり E100。`functor_instances.rs:82` の `item` は `TypeDef` を clone するので、欄は適用結果に自動で乗る。`source_print.rs:42-49` は `shared ` を前置して印字し、`r9_grammar.rs:727` の `Shape::Type` は欄を持つ
+- **`shared` + constructor 付き本体は E100、契約に無い型への `shared` は E204。** 前者は `parse_type_body`（`parser.rs:1141-1168`）で本体が `{` / `|` / `Ctor{` に入る枝の手前で決める（構文段階）。後者は `type_realizations.rs:50-56` の既存の E204 の述語（契約の抽象型に無い名前）をそのまま使う。`shared` の有無で E204 の条件は変わらない（`type U = Int` も `shared type U = Int` も E204）
+- **意味は「解けた型への置き換え」で作る。不透明の機構（`types.rs:515-519` の名前比較）は触らない。** 検査器に `shared_realizations: HashMap<String, TypeRealization>`（修飾名 → 本体）を持たせ、`Ty::reveal`（`types.rs:719-726`）でそこだけを展開する `reveal_shared` を通す。通す場所は 4 つ。(1) 抽象型の参照の解決（`infer.rs:1633-1635` が `Ty::Abstract(qualified, args)` を返す所）、(2) 実装の公開面（`module_abstract_parameters` `infer.rs:432-446` と `signature_type` `infer.rs:618-643` の結果）、(3) functor 適用の写し（`functors.rs:134-137` の後、改名した公開面と表現）、(4) `checked.main`（`infer.rs:260`。E705 と `--print-type` の前）。これで `shared` の抽象型は型の中に残らず、単一化・E601・E705・印字の全てが「解けた型」で動く。**`unify` に unfold を足さない**（残っていたら (1)〜(4) の漏れであり、そこを直す）。`records` / `named_constructors` / 効果の操作の型 / handler の腕の型など 5 箇所目が見つかったら、中断せず報告して通す（中断の条件は単一化への unfold だけ）
+- **functor の本文の `shared type T = M.T`。** 本文検査では `M.T` は `Make$M.T`（`functors.rs:69-74`）で不透明のまま。`Template` に `shared` の集合（`representations` と同じ流儀で `owned`）を持たせ、適用（`functors.rs:99-121`）で改名した後、`shared_realizations["A.T"] = 改名した本体` を登録してから公開面を `reveal_shared` する。引数の `T` が `shared type T = String` なら `A.T` は `String`、引数の `T` が印なしなら `A.T` は `Concrete.T`（同じ不透明型。`shared_realizations["A.T"] = Abstract("Concrete.T")` の登録が §56 の「引数の実装の `T` と同一」の実装である）。印なしの `type T = M.T` は今までどおり適用ごとに別の抽象型（`r21_functors.rs:109` の固定）
+- **契約修飾型 `X.T`（§34）。** `contract_types.rs:25-26` は `X.T` を唯一の実装の `Y.T` に写す。`signature_type` の結果を `reveal_shared` に通せば、`Y.T` が `shared` なら解けた型になる。E603（0 個か 2 個以上）は変えない
+- **E705（B4）と E601。** `contains_abstract`（`infer.rs:1749-1770`）と `project_type`（`infer.rs:1103-1106`）は `Ty::Abstract` の形で判定している。`shared` の抽象型は (1)〜(4) で消えているので、判定は変えない。`shared` で record に解けた型は field 参照が通る（§35）
+- **印字。** `Display for Ty`（`types.rs:609-631`）は変えない。E305 の `cannot unify {a} with {b}` も、型が解けているので `String` と出る。`--print-type` は `checked.main` が解けた型なのでそのまま
+- **循環。** `check_realization_cycles`（`infer.rs:1732-1747`）の E602 は `shared` の有無によらず当てる（`shared type T = T`、`shared` の相互参照）
+- **codegen は変えない。** `Checked::for_codegen`（`lib.rs:82-100`）は全ての表現を展開してから mono に渡す。`shared` は型検査の性質であり、機械表現は既に解けた型で決まっている
+- **E2 のソースは R33 で `Tally` を契約の抽象型にする。** `tools/gates/report/report.hd` の契約 `Report` に `type T` を足し、実装で `shared type T = Tally` とする。`main.hd` は `Report.T` の値を作って `render` する。`shared` が無ければ `main` が E601 / E705 で書けない形にし、`shared` の効きを E2 で測る
+
+### 期待値の根拠
+
+| 形 | 導出 | 根拠 |
+|---|---|---|
+| `implement Monoid as StringMonoid` の `shared type T = String`、`StringMonoid.combine "a" "b"` | 受理して `"ab"` | §35、24.7 の探針 2 |
+| 同じ形で `shared` 無し | E305（`StringMonoid.T` と `String`） | §35、24.7 の探針 2（現状） |
+| functor `MakeFold(M: Monoid)` の `shared type T = M.T` を `StringMonoid` に適用し `StringFold.fold ["a", "b"]` | 受理して `"ab"` | §56、24.7 の探針 1 |
+| 同上で `StringFold.fold` に `StringMonoid.of "a"` を渡す | 受理 | §56、24.7 の探針 3 |
+| 印なし `type T = M.T` を 2 回適用し、一方の値を他方に渡す | E305 | §56、`r21_functors.rs:109` |
+| `shared type T = M.T` で引数の `T` が印なし | `A.T` は `Concrete.T` と同じ型（不透明のまま）。`Concrete.T` の値を `A` の member に渡せる | §56 |
+| `def main = Store.find 1` で `shared type T = Int` | 受理して整数を印字 | §5（B4） |
+| 同上で `shared` 無し | E705 | §5 |
+| `def name (t: UserStore.T) => t.name` で `shared type T = User`（record） | 受理 | §35 |
+| 同上で `shared` 無し | E601 | §35 |
+| `shared type T = \| A \| B`、`shared type T = { x: Int }` | E100 | 24.4 |
+| `shared type U = Int`（契約に `U` が無い） | E204 | §35 |
+| `shared` を外・契約・効果・handler に書く | E100 | §41 |
+| `shared type T = T`、`shared type T = U` と `shared type U = T` | E602 | §35 |
+| `shared type A T = A List` の `Stack.push` に `[1]` を渡す | 受理 | §35 |
+| `--print-type` で `main` が `StringMonoid.T` の値 | `String` と印字 | 24.4 |
+| `X.T`（契約修飾）で唯一の実装が `shared type T = Int` | `Int` として単一化 | §34 |
+
+**本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+### 成果物
+
+`crates/hado/src/`（`parser.rs` `source_print.rs` `type_realizations.rs` `infer.rs` `infer/functors.rs` `functor_instances.rs` `lib.rs`）、`crates/hado/tests/r33_shared.rs`（新設）、`crates/hado/tests/r9_grammar.rs`、`scripts/verify-r33.sh`（新設）、`tests/accept/`（`// item: 型の共有` の受理。通常の実装・functor・E705 の緩和の 3 本以上）、`tests/corpus.sha256`、`tools/gates/`。
+
+### 工程
+
+- 工程 0: 構文。`TypeDef.shared`、`parse_items` の `Implementation` 文脈の `shared`、E100（他の文脈、constructor 付き本体）、E204（契約に無い型）、`source_print` の往復、`r9_grammar` の `shared`（生成器は parse と往復だけで型検査を回さない（`r9_grammar.rs:770-782`）ので、意味の無い工程 0 で足してよい）。判定 33-c 33-j。この工程では `shared` は意味を持たない（受理するだけ。`StringMonoid.combine "a" "b"` は E305 のまま）
+- 工程 1: 通常の実装の `shared`。`shared_realizations` と `reveal_shared`、(1)(2)(4) の通し、E705 と E601 の緩和、印字。判定 33-a(2) 33-b(2) 33-d 33-e 33-f 33-h 33-i
+- 工程 2: functor と契約修飾型。`Template` の `shared`、適用の写し (3)、`X.T` の解決。判定 33-a(1)(3) 33-b(1) 33-g
+- 工程 3: コーパスと道具。受理 3 本以上と lock、`tools/gates/` の `Report.T`。判定 33-k 33-l 33-n
+
+### 判定
+
+判定 33-a: 24.7 の探針 3 本が受理され、実行値が一致する。(1) `MakeFold(M: Monoid)` の `shared type T = M.T` を `StringMonoid`（`shared type T = String`）に適用し `StringFold.fold ["a", "b"]` → `"ab"`。(2) functor 無しで `StringMonoid.combine "a" "b"` → `"ab"`。(3) (1) の `fold` に `[StringMonoid.of "a", StringMonoid.of "b"]` を渡す → `"ab"`。**印字する文字列は実行時に生成した値を `of` に渡して作り、期待値を判定器側で計算する**
+判定 33-b: 印なしは不透明のまま。(1) `type T = M.T` を 2 回適用し `A.read (B.make 7)` → E305（`r21_functors.rs:109` と同じ）。(2) `type T = String`（印なし）で `StringMonoid.combine "a" "b"` → E305
+判定 33-c: 不正形。(1) `shared type T = | A | B` → E100 で `shared` の位置。(2) `shared type T = { x: Int }` → E100。(3) `shared type U = Int`（契約に無い） → E204 で `U`（探針は 1 欠陥にする。契約の `T` も実体化し、実装は参照されている形で、E204 より先に E513 / E602 が出ないこと）。(4) 外の `shared type T = Int` → E100。(5) 契約の中の `shared type T` → E100。(6) `shared def f = 1` → E100
+判定 33-d: E705 の緩和。`def main = Store.find 1` で `shared type T = Int` → 実行して整数。`shared` 無し → E705
+判定 33-e: E601 の緩和。`def name (t: UserStore.T) => t.name` で `shared type T = User`（record） → 受理して実行。`shared` 無し → E601
+判定 33-f: 印字。`check --print-type` が `String` を出す（`StringMonoid.T` を含まない）。E305 のメッセージに `.T` が現れない（`shared type T = String` の値に `Int` を渡す形で `cannot unify String with Int` の形）
+判定 33-g: 契約修飾型。契約 `Store` の member の型に `Id.T`（契約 `Id`）を書き、唯一の実装 `IntId` が `shared type T = Int` → `Store.find` に `Int` を直接渡せる。実装が 2 つなら E603 のまま
+判定 33-h: 型引数。`shared type A T = A List` の `Stack.push` に `[1]` と `Int Stack.T` の注釈の両方が通る
+判定 33-i: 循環。`shared type T = T` → E602。`shared type T = U` と `shared type U = T` → E602
+判定 33-j: 構文の往復と生成。`r9_grammar` が `shared type T = ε` を `implement_item` と functor 本文で生成し、往復（`source_print`）で `shared` が落ちない。`keywords_cannot_be_names` は緑のまま
+判定 33-k: E2。`tools/gates/report/report.hd` の契約 `Report` が `type T` を持ち、実装が `shared type T = Tally`。`main.hd` が `Report.T` の値を `render` する。判定器が一時ディレクトリに写して実行時生成の 3 つ組で `build` → 実行し、R32 の 32-j と同じ書式で一致。負の対照: `shared` を消した写しは `check` が E705 か E601 で落ちる
+判定 33-l: 受理コーパスに `// item: 型の共有`（`// spec: §35` または §56）を 3 本以上。lock 更新
+判定 33-m: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、許容される赤以外が満点
+判定 33-n: `verify-r33.sh` が 33-a〜33-k を判定し満点
+
+### 許容される赤
+
+R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤から「型の共有」の pairs が消えたもの:
+
+- `verify-m1-corpus.sh` の 3 pairs（Bytes・配列・String 操作・Int.parse・Env と Io）と、その連鎖の m2 / m3
+- `verify-m7.sh` の 3
+
+### スコープ外
+
+- Bytes / Array / String 操作 / Int.parse / Env / Io（R34〜R37）
+- 実装の数え方（E603）と再適用の禁止（E604）の変更（B5）
+- `shared` の冗長の規則（24.4: 当てない）
+- first-class module、型の別名
+
+### 確認して報告（24.9 と工程で出た疑義から）
+
+- `Ty::reveal` が型引数付きの `shared`（`shared type A T = A List`）で `TypeRealization::apply` を通ること
+- functor の本文で `shared type T = M.T` と書いたとき、本文検査中の `M.T` が不透明のままであること（`Arg.make x + 1` が E305。`r21_functors.rs:226`）
+- 効果が `dependencies.rs` の宣言に数えられていない件（R32 の工程 1 で判明。§50 は E513 を効果にも当てる）: R33 では触らないが、探針 1 つで現状を報告する
+
+### 中断の条件
+
+**`types.rs:515-519` の単一化に `shared` の展開を足す必要があると分かったら、直さずに中断せよ。** 想定しているのは、`reveal_shared` を 4 箇所に通す変更で、単一化は名前比較のままである。
+
+**functor の `Template` に `shared` の集合を持たせても、適用の改名（`functors.rs:116-117`）で引数の実装名に届かないと分かったら、工程 2 を止めて報告せよ。** 工程 1 の成果はそのまま残す。
+
+それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
