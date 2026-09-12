@@ -26,6 +26,7 @@ struct Resolver<'a> {
     // §49: the prelude is placed at `[]`, but a library must still see it while
     // the user root `[]` stays invisible, so it keeps its own table.
     prelude: BTreeMap<Space, BTreeSet<String>>,
+    prelude_operations: BTreeSet<String>,
     // §55, §59: the root that the current item resolves paths from.
     root: Directory,
     sites: BTreeMap<(usize, usize), Vec<DeclaredName>>,
@@ -104,7 +105,7 @@ pub(crate) fn resolve(
     let roots: Vec<_> = locations.iter().map(|directory| innermost_library_root(directory, libraries)).collect();
     let mut resolver = Resolver {
         symbols: BTreeMap::new(), directories,
-        prelude: BTreeMap::new(), root: Vec::new(),
+        prelude: BTreeMap::new(), prelude_operations: BTreeSet::new(), root: Vec::new(),
         sites: ast.name_sites.iter().map(|site| ((site.start.line, site.start.col), site.parts.clone())).collect(),
         renamed: BTreeMap::new(), operations: BTreeMap::new(), path,
         result: Resolution { diagnostics: Vec::new(), error_anchors: Vec::new() },
@@ -121,6 +122,9 @@ pub(crate) fn resolve(
         if let Item::Effect(effect) = item {
             resolver.operations.entry(directory.clone()).or_default()
                 .extend(effect.ops.iter().map(|op| op.name.clone()));
+            if index < prelude_items {
+                resolver.prelude_operations.extend(effect.ops.iter().map(|op| op.name.clone()));
+            }
         }
     }
     for (index, ((item, directory), root)) in ast.items.iter_mut().zip(&locations).zip(&roots).enumerate() {
@@ -385,7 +389,9 @@ impl Resolver<'_> {
 
     fn operation(&mut self, name: &mut String, directory: &[String]) {
         let bare = file_value(name).unwrap_or(name.as_str());
-        if self.operations.get(directory).is_some_and(|names| names.contains(bare)) {
+        if self.prelude_operations.contains(bare) {
+            *name = bare.to_owned();
+        } else if self.operations.get(directory).is_some_and(|names| names.contains(bare)) {
             *name = operation_key(directory, bare);
         }
     }
