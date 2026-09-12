@@ -354,7 +354,7 @@ impl Checker<'_> {
         let saved_value_spans: std::collections::HashSet<_> = self.value_types.keys().copied().collect();
         let saved_composite_spans: std::collections::HashSet<_> = self.composite_types.keys().copied().collect();
         self.module_path.push(module.name.clone());
-        let exports = match self.module_body(module, signature, signatures) {
+        let mut exports = match self.module_body(module, signature, signatures) {
             Ok(exports) => exports,
             Err(error) => {
                 let diagnostics = self.deferred.split_off(saved.deferred.len());
@@ -376,6 +376,18 @@ impl Checker<'_> {
                 if name.starts_with(&prefix) {
                     representation.body = representation.body.qualify_data_types(&type_names);
                 }
+            }
+            // shared の本体も abstract_representations と同じく局所型名を実装名で
+            // 修飾する。これを落とすと別実装の同名局所型が同じ型に混同される。
+            for (name, representation) in &mut self.shared_realizations {
+                if name.starts_with(&prefix) {
+                    representation.body = representation.body.qualify_data_types(&type_names);
+                }
+            }
+            // 公開面にも同じ修飾を通す。shared の本体と公開面が食い違うと、
+            // 実装の member 呼び出しで型が一致しなくなる。
+            for scheme in exports.values_mut() {
+                *scheme = scheme.resolved(&self.inference).qualify_data_types(&type_names);
             }
             for (name, scheme) in &mut self.module_definitions {
                 if name.starts_with(&prefix) {
@@ -1045,6 +1057,8 @@ impl Checker<'_> {
         let Ty::Fn(payload, result, _) = self.inference.instantiate(scheme) else {
             unreachable!()
         };
+        let payload: Vec<_> = payload.iter().map(|ty| self.reveal_shared(ty)).collect();
+        let result = self.reveal_shared(&result);
         for (name, ty) in names.iter().zip(&payload) {
             let value = &fields.iter().find(|(field, _)| &field.name == name).unwrap().1;
             self.branch_result(value, ty)?;
@@ -1128,7 +1142,9 @@ impl Checker<'_> {
         let Ty::Adt(name, _) = self.inference.resolve(ty) else {
             return Err(self.error(receiver, Some("E305"), "field access requires a record"));
         };
-        let schema = self.records.get(&name).cloned().or_else(|| self.named_projection_schema(&name));
+        let schema = self.records.get(&name).cloned()
+            .or_else(|| self.module_records.get(&name).cloned())
+            .or_else(|| self.named_projection_schema(&name));
         let (names, scheme) = schema.ok_or_else(|| {
             let code = if self.has_named_variant(&name) { "E204" } else { "E305" };
             self.error(if code == "E204" { field.span } else { receiver }, Some(code), "field access requires a single record constructor")
@@ -1438,9 +1454,13 @@ impl Checker<'_> {
             return Ok(Ty::Error);
         }
         // Constructor schemes describe payloads internally; source expressions yield only data.
+        // The registered payload type may still hold a shared abstract type, so reveal it here.
         let (payloads, result) = match self.inference.instantiate(&scheme) {
-            Ty::Fn(payloads, result, _) => (payloads, *result),
-            result => (Vec::new(), result),
+            Ty::Fn(payloads, result, _) => (
+                payloads.iter().map(|ty| self.reveal_shared(ty)).collect(),
+                self.reveal_shared(&result),
+            ),
+            result => (Vec::new(), self.reveal_shared(&result)),
         };
         if args.len() != payloads.len() {
             return Err(self.error(span, Some("E301"), "constructor arity mismatch"));
@@ -1779,7 +1799,7 @@ impl Checker<'_> {
                 let instantiated = inference.instantiate(scheme);
                 let Ty::Fn(payload, result, _) = instantiated else { return false; };
                 if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
-                payload.iter().any(|field| self.contains_abstract(&inference.resolve(field), visited))
+                payload.iter().any(|field| self.contains_abstract(&self.reveal_shared(&inference.resolve(field)), visited))
             })
     }
 
@@ -1801,7 +1821,7 @@ impl Checker<'_> {
             let instantiated = inference.instantiate(scheme);
             let Ty::Fn(payload, result, _) = instantiated else { return false; };
             if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
-            payload.iter().any(|field| self.contains_function(&inference.resolve(field), visited))
+            payload.iter().any(|field| self.contains_function(&self.reveal_shared(&inference.resolve(field)), visited))
         })
     }
 
