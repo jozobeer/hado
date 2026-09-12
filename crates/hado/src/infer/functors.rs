@@ -6,6 +6,7 @@ pub(super) struct Template {
     module: ModuleImpl,
     exports: HashMap<String, Scheme>,
     representations: HashMap<String, TypeRealization>,
+    shared: HashMap<String, TypeRealization>,
     definitions: HashMap<String, Scheme>,
     named_constructors: HashMap<String, Vec<String>>,
     records: HashMap<String, (Vec<String>, Scheme)>,
@@ -81,6 +82,7 @@ impl Checker<'_> {
                 comparisons: self.comparison_constraints[before_comparisons..].iter().map(|constraint| ComparisonConstraint { ty: self.inference.resolve(&constraint.ty), code: constraint.code, span: constraint.span }).collect(),
                 exports: self.modules.get(&module.name).cloned().unwrap_or_default(),
                 representations: owned(&self.abstract_representations, &module.name),
+                shared: owned(&self.shared_realizations, &module.name),
                 definitions: owned(&self.module_definitions, &module.name),
                 named_constructors: owned(&self.module_named_constructors, &module.name),
                 records: owned(&self.module_records, &module.name),
@@ -130,28 +132,42 @@ impl Checker<'_> {
         self.instantiated_modules.push(instance);
         self.comparison_constraints.extend(template.comparisons.iter().map(|constraint| ComparisonConstraint {
             ty: constraint.ty.rename_modules(names), code: constraint.code, span: constraint.span }));
-        self.modules.insert(application.name.clone(), template.exports.iter().map(|(name, scheme)| (name.clone(), scheme.rename_modules(names))).collect());
+        // 本文の shared type T = M.T の等式を適用結果に引き継ぐ。改名した本体が
+        // 引数の実装名を指すので、引数の shared 実体化へ reveal が連鎖する。
+        for (name, realization) in &template.shared {
+            self.shared_realizations.insert(crate::functor_instances::rename(name, names), TypeRealization {
+                parameters: realization.parameters.clone(), body: realization.body.rename_modules(names) });
+        }
+        let exports: HashMap<_, _> = template.exports.iter()
+            .map(|(name, scheme)| (name.clone(), scheme.rename_modules(names).reveal(&self.shared_realizations)))
+            .collect();
+        self.modules.insert(application.name.clone(), exports);
         for (name, realization) in &template.representations {
             self.abstract_representations.insert(crate::functor_instances::rename(name, names), TypeRealization {
                 parameters: realization.parameters.clone(), body: realization.body.rename_modules(names) });
         }
         for (name, scheme) in &template.definitions {
-            self.module_definitions.insert(crate::functor_instances::rename(name, names), scheme.rename_modules(names));
+            let revealed = scheme.rename_modules(names).reveal(&self.shared_realizations);
+            self.module_definitions.insert(crate::functor_instances::rename(name, names), revealed);
         }
         for (name, (fields, scheme)) in &template.records {
-            self.module_records.insert(crate::functor_instances::rename(name, names), (fields.clone(), scheme.rename_modules(names)));
+            let revealed = scheme.rename_modules(names).reveal(&self.shared_realizations);
+            self.module_records.insert(crate::functor_instances::rename(name, names), (fields.clone(), revealed));
         }
         for (name, fields) in &template.named_constructors {
             self.module_named_constructors.insert(crate::functor_instances::rename(name, names), fields.clone());
         }
         for (name, (tag, scheme)) in &template.constructors {
-            self.module_constructors.insert(crate::functor_instances::rename(name, names), (*tag, scheme.rename_modules(names)));
+            let revealed = scheme.rename_modules(names).reveal(&self.shared_realizations);
+            self.module_constructors.insert(crate::functor_instances::rename(name, names), (*tag, revealed));
         }
         for ((line, col), ty) in &template.values {
-            self.value_types.insert((line + offset, *col), ty.rename_modules(names));
+            let revealed = ty.rename_modules(names).reveal(&self.shared_realizations);
+            self.value_types.insert((line + offset, *col), revealed);
         }
         for ((line, col), ty) in &template.composites {
-            self.composite_types.insert((line + offset, *col), ty.rename_modules(names));
+            let revealed = ty.rename_modules(names).reveal(&self.shared_realizations);
+            self.composite_types.insert((line + offset, *col), revealed);
         }
     }
 }
