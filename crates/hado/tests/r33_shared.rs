@@ -449,3 +449,53 @@ fn a_shared_realization_with_fewer_type_arguments_than_the_contract_is_rejected(
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
+// --- 工程 1 の修正 8: 前処理が作る抽象型の arity と functor 適用の契約 ---
+
+#[test]
+fn a_shared_realization_whose_rhs_under_applies_an_abstract_type_is_rejected() {
+    // 契約 Stack の T は型引数 1。右辺 Stack.T を型引数 0 で書いた等式を前処理が
+    // 登録すると、`Ty::reveal` から `TypeRealization::apply` の個数 assert で panic する。
+    // 登録せず、既存の経路（annotation_inner の arity 照合）が E204 で拒否すること。
+    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()";
+    let error = check_source(source, "t").err().expect("an under-applied rhs must be rejected, not crash");
+    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+}
+
+#[test]
+fn a_shared_realization_whose_rhs_over_applies_an_abstract_type_is_rejected() {
+    // 右辺 (Int, String) Stack.T は型引数 2。Stack.T の arity 1 と食い違う。同じく
+    // 登録せず、annotation_inner が型注釈として拒否すること（コード無しの型注釈エラー）。
+    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()";
+    let error = check_source(source, "t").err().expect("an over-applied rhs must be rejected, not crash");
+    assert!(error.code.is_none(), "{error}");
+}
+
+#[test]
+fn a_functor_shared_realization_whose_rhs_under_applies_a_parameter_is_rejected() {
+    // functor 本文の `shared type T = M.T`。契約 Stack の T は型引数 1 だが M.T を
+    // 型引数 0 で参照している。仮引数の契約の署名から arity を取り、食い違う等式を
+    // 登録しないこと（登録すると apply の assert で panic する）。
+    let source = "type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)";
+    let error = check_source(source, "t").err().expect("a parameter-dropping rhs must be rejected, not crash");
+    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+}
+
+#[test]
+fn a_functor_application_with_a_mismatched_result_contract_is_rejected() {
+    // functor Make の結果契約は Source。適用の見出しは Target。等式を登録する前に
+    // 結果契約を照合しないと、Out.T の arity が契約間で食い違い、apply の assert で
+    // panic する。登録せず application() が E602 を出すこと。
+    let source = "type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Source as Base\nshared type T = String\ndef make x => x\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Target as Out = Make(Base)";
+    let error = check_source(source, "t").err().expect("a result contract mismatch must be E602, not a crash");
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+}
+
+#[test]
+fn a_functor_application_with_a_mismatched_argument_contract_is_rejected() {
+    // 仮引数 M の契約は Source。引数 Base の契約は Target。等式を登録する前に
+    // 各引数の契約を照合しないと、Out.T と Base.T の arity が食い違い panic する。
+    let source = "type Box = { value: Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Target as Base\nshared type A T = A List\ndef empty = []\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Source as Out = Make(Base)";
+    let error = check_source(source, "t").err().expect("an argument contract mismatch must be E602, not a crash");
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+}
+

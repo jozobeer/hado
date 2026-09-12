@@ -173,6 +173,28 @@ expect_code_not_panic() {
     fi
 }
 
+# probe が panic（終了 101）せず、`shared` を外した対照と同じ診断本文で終了 1 になることを
+# 測る。行:列は乱数化した行頭空白と先頭空行で違うので、先頭の `file:line:col: ` を除いて
+# 比較する。終了 101 は「失敗」と数えるだけでなく、明示的に赤として扱う。
+expect_not_panic_matching_control() {
+    local label=$1 probe=$2 control=$3
+    total=$((total + 1))
+    local pout="$workdir/npc-probe-err" cout="$workdir/npc-control-err" pstatus cstatus pmsg cmsg pbytes
+    cargo run --offline -q -- check "$probe" >/dev/null 2>"$pout"; pstatus=$?
+    cargo run --offline -q -- check "$control" >/dev/null 2>"$cout"; cstatus=$?
+    pmsg=$(sed -E 's/^[^ ]+:[0-9]+:[0-9]+: //' "$pout")
+    cmsg=$(sed -E 's/^[^ ]+:[0-9]+:[0-9]+: //' "$cout")
+    pbytes=$(wc -c <"$pout")
+    if [ "$pstatus" -eq 101 ]; then
+        echo "NG: $label (panicked: status=101 stderr='$(cat "$pout")')"
+    elif [ "$pstatus" -eq 1 ] && [ "$cstatus" -eq 1 ] && [ "$pbytes" -gt 0 ] && [ "$pmsg" = "$cmsg" ]; then
+        echo "OK: $label (status=1, not 101, diagnostic='$pmsg')"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (probe status=$pstatus '$pmsg'; control status=$cstatus '$cmsg')"
+    fi
+}
+
 # stdout / stderr が空であることは、ファイルに保存してバイト数で測る
 # （コマンド置換は末尾改行を落とすので使わない）。
 accept_quiet() {
@@ -312,6 +334,7 @@ rand_fbody="f${RANDOM}"
 rand_fe_prefix="p${RANDOM}"
 rand_fe_suffix="s${RANDOM}"
 rand_fe_message="x${RANDOM}"
+rand_ne="z${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
@@ -322,7 +345,10 @@ mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$wo
     "$workdir/33ip" "$workdir/33ipneg" "$workdir/33rp" "$workdir/33rpneg" \
     "$workdir/33eff" "$workdir/33effneg" "$workdir/33harm" "$workdir/33harmneg" \
     "$workdir/33fn" "$workdir/33fnneg" "$workdir/33fneff" "$workdir/33fneffneg" \
-    "$workdir/33arity1" "$workdir/33arity2" "$workdir/33arityok"
+    "$workdir/33arity1" "$workdir/33arity2" "$workdir/33arityok" \
+    "$workdir/33rhs1" "$workdir/33rhs1c" "$workdir/33rhs2" "$workdir/33rhs2c" \
+    "$workdir/33frhs" "$workdir/33frhsc" "$workdir/33wres" "$workdir/33wresc" \
+    "$workdir/33warg" "$workdir/33wargc" "$workdir/33nested"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -825,6 +851,35 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n'
 } >"$workdir/33arityok/main.hd"
 
+# --- 工程 1 の修正 8: 前処理が作る抽象型の arity と functor 適用の契約 ---
+# 負 1〜5 は、前処理が不正な等式を登録すると `TypeRealization::apply` の個数 assert で
+# panic（終了 101）する形。`shared` を外した対照と同じ診断で終了 1（101 でない）を測る。
+
+# 負 1 (rhs-arity): 契約 Stack.T の arity は 1。右辺を型引数 0 で参照する。
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()\n' >"$workdir/33rhs1/main.hd"
+
+# 負 2 (rhs-too-many): 右辺を型引数 2 で参照する。
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()\n' >"$workdir/33rhs2/main.hd"
+
+# 負 3 (functor-rhs-arity): functor 本文の `shared type T = M.T`。仮引数の契約 Stack の
+# T は arity 1 だが、M.T を型引数 0 で参照する。
+printf 'type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)\n' >"$workdir/33frhs/main.hd"
+
+# 負 4 (wrong-result-contract): functor Make の結果契約は Source、適用の見出しは Target。
+printf 'type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Source as Base\nshared type T = String\ndef make x => x\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Target as Out = Make(Base)\n' >"$workdir/33wres/main.hd"
+
+# 負 5 (wrong-argument-contract): 仮引数 M の契約は Source、引数 Base の契約は Target。
+printf 'type Box = { value: Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Target as Base\nshared type A T = A List\ndef empty = []\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Source as Out = Make(Base)\n' >"$workdir/33warg/main.hd"
+
+# 対照は各探針から `shared` の印だけを外した写し（同じ診断になることを判定器側で照合する）。
+for pair in 33rhs1 33rhs2 33frhs 33wres 33warg; do
+    sed 's/^shared type/type/' "$workdir/$pair/main.hd" >"$workdir/${pair}c/main.hd"
+done
+
+# 正の対照 (nested-two-types): 二段適用・複数抽象型・二型引数。実行時に生成した文字列を
+# 二段適用した functor の抽象型に通し、List.length がそのリストの長さを印字する。
+printf 'def main = read ({ value = Second.make "%s" })\ndef read box => List.length box.value\ntype Box = { value: String Second.T }\nmodule Pair\ntype A T\ntype (A, B) U\ndef A make(x: A): A T Pure\nimplement Pair as Base\nshared type A T = A List\nshared type (A, B) U = Fn(A => B)\ndef make x => [x]\nimplement Pair as Make(M: Pair)\nshared type A T = A M.T\nshared type (A, B) U = (A, B) M.U\ndef make x => M.make x\nimplement Pair as First = Make(Base)\nimplement Pair as Second = Make(First)\n' "$rand_ne" >"$workdir/33nested/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
@@ -839,7 +894,10 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33ip/main.hd" "$workdir/33ipneg/main.hd" "$workdir/33rp/main.hd" "$workdir/33rpneg/main.hd" \
     "$workdir/33eff/main.hd" "$workdir/33effneg/main.hd" "$workdir/33harm/main.hd" "$workdir/33harmneg/main.hd" \
     "$workdir/33fn/main.hd" "$workdir/33fnneg/main.hd" "$workdir/33fneff/main.hd" "$workdir/33fneffneg/main.hd" \
-    "$workdir/33arity1/main.hd" "$workdir/33arity2/main.hd" "$workdir/33arityok/main.hd"; do
+    "$workdir/33arity1/main.hd" "$workdir/33arity2/main.hd" "$workdir/33arityok/main.hd" \
+    "$workdir/33rhs1/main.hd" "$workdir/33rhs1c/main.hd" "$workdir/33rhs2/main.hd" "$workdir/33rhs2c/main.hd" \
+    "$workdir/33frhs/main.hd" "$workdir/33frhsc/main.hd" "$workdir/33wres/main.hd" "$workdir/33wresc/main.hd" \
+    "$workdir/33warg/main.hd" "$workdir/33wargc/main.hd"; do
     random_padding "$probe"
 done
 
@@ -916,6 +974,15 @@ expect_code '前処理の負: 効果行付きの shared 無しは型検査で落
 expect_code_not_panic 'arity 負 1: 契約より多い実体化は panic せず E602' "$workdir/33arity1/main.hd" E602
 expect_code_not_panic 'arity 負 2: 契約より少ない実体化は panic せず E602' "$workdir/33arity2/main.hd" E602
 accept_build_run 'arity 正の対照: 個数が合う shared type A T = A List が受理され実行値が一致' "$workdir/33arityok/main.hd" "[$rand_int, 1]"
+
+# 工程 1 の修正 8: 前処理が作る抽象型の arity と functor 適用の契約。panic（101）で
+# ないことを明示的に測り、shared を外した対照と同じ診断で終了 1 になることを照合する。
+expect_not_panic_matching_control 'rhs-arity: 右辺の参照先の arity 不一致は panic せず対照と同じ診断' "$workdir/33rhs1/main.hd" "$workdir/33rhs1c/main.hd"
+expect_not_panic_matching_control 'rhs-too-many: 型引数過剰な右辺は panic せず対照と同じ診断' "$workdir/33rhs2/main.hd" "$workdir/33rhs2c/main.hd"
+expect_not_panic_matching_control 'functor-rhs-arity: functor 本文の仮引数の arity 不一致は panic せず対照と同じ診断' "$workdir/33frhs/main.hd" "$workdir/33frhsc/main.hd"
+expect_not_panic_matching_control 'wrong-result-contract: 結果契約の不一致は panic せず対照と同じ診断' "$workdir/33wres/main.hd" "$workdir/33wresc/main.hd"
+expect_not_panic_matching_control 'wrong-argument-contract: 引数契約の不一致は panic せず対照と同じ診断' "$workdir/33warg/main.hd" "$workdir/33wargc/main.hd"
+accept_build_run_quiet 'nested-two-types 正の対照: 二段適用・複数抽象型・二型引数が受理され実行値が一致' "$workdir/33nested/main.hd" '1'
 
 # --- 33-k: E2。tools/gates の Report.T を shared で公開する。 ---
 
