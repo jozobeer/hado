@@ -32,6 +32,19 @@ fn owned<T: Clone>(entries: &HashMap<String, T>, module: &str) -> HashMap<String
     entries.iter().filter(|(name, _)| name.starts_with(&prefix)).map(|(name, value)| (name.clone(), value.clone())).collect()
 }
 
+// reveal は名前の置き換えを再帰的に行うので、shared の等式が輪になっていると止まらない。
+// 適用の写しで輪を作る等式は shared_realizations に入れない。輪そのものは
+// abstract_representations に残るので check_realization_cycles が E602 で拒否する。
+fn introduces_cycle(base: &HashMap<String, TypeRealization>, additions: &HashMap<String, TypeRealization>) -> bool {
+    let mut graph: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
+    for (name, realization) in base.iter().chain(additions.iter()) {
+        let mut references = std::collections::BTreeSet::new();
+        realization.body.abstract_names(&mut references);
+        graph.insert(name.clone(), references);
+    }
+    additions.keys().any(|name| realization_reaches(name, name, &graph, &mut HashSet::new()))
+}
+
 impl Checker<'_> {
     pub(super) fn module(&mut self, module: &ModuleImpl, signatures: &HashMap<String, &ModuleSig>) -> Result<(), Diagnostic> {
         match &module.form {
@@ -134,9 +147,12 @@ impl Checker<'_> {
             ty: constraint.ty.rename_modules(names), code: constraint.code, span: constraint.span }));
         // 本文の shared type T = M.T の等式を適用結果に引き継ぐ。改名した本体が
         // 引数の実装名を指すので、引数の shared 実体化へ reveal が連鎖する。
-        for (name, realization) in &template.shared {
-            self.shared_realizations.insert(crate::functor_instances::rename(name, names), TypeRealization {
-                parameters: realization.parameters.clone(), body: realization.body.rename_modules(names) });
+        let additions: HashMap<_, _> = template.shared.iter().map(|(name, realization)| (
+            crate::functor_instances::rename(name, names),
+            TypeRealization { parameters: realization.parameters.clone(), body: realization.body.rename_modules(names) },
+        )).collect();
+        if !introduces_cycle(&self.shared_realizations, &additions) {
+            self.shared_realizations.extend(additions);
         }
         let exports: HashMap<_, _> = template.exports.iter()
             .map(|(name, scheme)| (name.clone(), scheme.rename_modules(names).reveal(&self.shared_realizations)))
