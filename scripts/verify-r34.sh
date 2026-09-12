@@ -27,6 +27,106 @@ compiler=$(readlink -f "$hado_target_dir/debug/hado")
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
+check '34-c(0) Bytes の member の引数型・戻り型・効果行は §49 と一致する' \
+    python3 - docs/spec.md stdlib/bytes.hd "$workdir" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+
+def only_block(pattern, text):
+    blocks = re.findall(pattern, text, flags=re.M | re.S)
+    if len(blocks) != 1:
+        raise ValueError(f"expected one block, found {len(blocks)}: {pattern}")
+    return blocks[0]
+
+
+def member_block(spec):
+    section = only_block(r"^# 49\.[^\n]*\n(.*?)(?=^# |\Z)", spec)
+    return only_block(r"member の型は次のとおり[^\n]*\n\s*```ocaml\n(.*?)```", section)
+
+
+def argument_type(argument):
+    match = re.fullmatch(r"\s*\w+\s*:\s*(.+)", argument)
+    if not match:
+        raise ValueError(f"invalid argument: {argument}")
+    return " ".join(match[1].split())
+
+
+def bytes_members(source):
+    body = only_block(r"^module Bytes[ \t]*\n(.*?)(?=^(?:module|implement)\b|\Z)", source)
+    members = {}
+    for line in body.splitlines():
+        line = line.split("//", 1)[0].strip()
+        if not line:
+            continue
+        match = re.fullmatch(r"def\s+(\w+)\s*\(([^()]*)\)\s*:\s*(.+?)\s+(Pure|\{[^{}]+\})", line)
+        if not match or match[1] in members:
+            raise ValueError(f"invalid or duplicate member: {line}")
+        members[match[1]] = (
+            tuple(argument_type(arg) for arg in match[2].split(",")) if match[2].strip() else (),
+            " ".join(match[3].split()),
+            re.sub(r"\s+", "", match[4]),
+        )
+    if not members:
+        raise ValueError("empty Bytes contract")
+    return members
+
+
+def differences(expected, actual):
+    return {name: (expected.get(name), actual.get(name))
+            for name in expected.keys() | actual.keys()
+            if expected.get(name) != actual.get(name)}
+
+
+spec = Path(sys.argv[1]).read_text()
+block = member_block(spec)
+expected = bytes_members(block)
+assert not differences(expected, bytes_members(block)), "equal contracts must match"
+bytes_block = only_block(r"^(module Bytes[ \t]*\n.*?)(?=^module|\Z)", block)
+
+# 仕様の写しを再読して照合する。期待値を被験側から取る判定では、この対照が落ちる。
+changed, count = re.subn(r"^(def length\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", bytes_block, flags=re.M)
+assert count == 1, "spec mutation must change Bytes.length exactly once"
+copy = Path(sys.argv[3]) / "spec-effect.md"
+copy.write_text(spec.replace(bytes_block, changed, 1))
+changed_members = bytes_members(member_block(copy.read_text()))
+assert set(differences(changed_members, expected)) == {"length"}, "spec effect mutation escaped"
+print("   (対照: §49 の写しの Bytes.length Pure → {Error} を検出)")
+
+for pattern, replacement in (
+    (r"^(def length\([^:]+: [^)]*)(\))", r"\1 List\2"),
+    (r"^(def length\([^)]*\): \w+)", r"\1 List"),
+):
+    changed, count = re.subn(pattern, replacement, bytes_block, flags=re.M)
+    assert count == 1, "type mutation must change Bytes.length exactly once"
+    assert set(differences(expected, bytes_members(changed))) == {"length"}, "type mutation escaped"
+
+for empty in ("", "module Bytes\n"):
+    try:
+        bytes_members(empty)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("empty contract accepted")
+try:
+    member_block("")
+except ValueError:
+    pass
+else:
+    raise AssertionError("empty spec accepted")
+print("   (対照: 全件一致は受理、空の仕様・契約と引数型・戻り型の不一致は拒否)")
+
+actual = bytes_members(Path(sys.argv[2]).read_text())
+mismatches = differences(expected, actual)
+for name in sorted(expected.keys() | actual.keys()):
+    if name in mismatches:
+        print(f"   Bytes.{name}: expected={expected.get(name)}, actual={actual.get(name)}")
+    else:
+        print(f"   Bytes.{name}: args={actual[name][0]}, result={actual[name][1]}, effect={actual[name][2]}")
+sys.exit(1 if mismatches else 0)
+PY
+
 mkdir -p "$workdir/cases"
 
 # 探針の値は実行時に生成し、期待値は生成器の側で計算する。被験側のコードには
