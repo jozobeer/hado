@@ -1157,7 +1157,7 @@ impl Checker<'_> {
             unreachable!()
         };
         self.unify(ty, &result, field.dot)?;
-        Ok(self.inference.resolve(&payload[index]))
+        Ok(self.reveal_shared(&self.inference.resolve(&payload[index])))
     }
 
     fn list(&mut self, items: &[Node], tail: Option<&Node>) -> Result<Ty, Diagnostic> {
@@ -1273,7 +1273,10 @@ impl Checker<'_> {
             .get(name)
             .cloned()
             .ok_or_else(|| self.error(span, Some("E204"), "unknown constructor"))?;
+        // The registered payload type may still hold a shared abstract type; the pattern
+        // binds its payload as a user expression type, so reveal it before matching.
         let ty = self.inference.instantiate(&scheme);
+        let ty = self.reveal_shared(&ty);
         if ty == Ty::Error {
             for pattern in args { self.pattern(pattern, &Ty::Error)?; }
             return Ok(());
