@@ -2340,7 +2340,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 - **ライブラリ根の中のパス解決。** `namespaces.rs:145-161` の `resolve_global` は、無修飾を「自分のディレクトリ → 根 `[]`」、修飾を根からの絶対パスで解く。ライブラリ根の中の項目は、無修飾を「自分のディレクトリ → 最内のライブラリ根」、修飾を最内のライブラリ根からの絶対パスで解く。利用側の根 `[]` の宣言は見えない（E204）。prelude の項目は `[]` に置かれているが、どこからも無修飾で見える（§49）ので、prelude だけは別扱いで最後に引く。根との同名の E205（`namespaces.rs:108-113`）は、ライブラリ根の中ではライブラリ根の宣言と prelude の名前に対して数える
 - **外の `def` の E100（A3）は `role_error` の `root_file` を「根のディレクトリ、またはライブラリ根のディレクトリ」に広げる。** `root_file` は今も「入口ファイル」ではなく「根のディレクトリのファイル」（`project.rs:175`）なので、集合を広げるだけでよい。24.9 の「単一ファイルの parse で決められるか」の答えは「決められない。組み立て（`Project::load`）で決める」で、既にそうなっている
 - **`Item` に足すか `Ast` の欄にするか。** `library` は名前も本体も持たないので、`Ast` に `library: Option<Span>` を持たせる形を推す。`Item::Library` にすると `dependencies.rs:11-19`、`namespaces.rs:42-70`、`file_scopes.rs:15-23` の網羅 match に腕が増える。builder が選んでよいが、選んだ理由を報告に書く
-- **E206 コーパスは工程 0 で差し替える。** 今の `tests/reject/E206/main.hd` は「`main` 無しの check」で、工程 1 の A1 で受理に変わる。工程 0 で `library` を宣言したディレクトリの `main` に差し替え（`// spec: §59`、`// item: ライブラリ単位`）、lock を更新する。新形は工程 0 の時点で拒否されるので、既存の門番は緑のまま。**AGENTS.md の「lock を実装の工程で更新しない」は、工程 0 と工程 3 に限って解除する**
+- **E206 コーパスは工程 0 で差し替える。** 今の `tests/reject/E206/main.hd` は「`main` 無しの check」で、工程 1 の A1 で受理に変わる。工程 0 で `library` を宣言したディレクトリの `main` に差し替え（`// spec: §59`、`// item: ライブラリ単位`）、lock を更新する。新形は工程 0 の時点で拒否される。ただし `parse_corpus.rs:121-129` は拒否コーパスの `main.hd` を単一ファイルとしてコンパイルして失敗を確かめるので、E206 の根拠が `lib.hd` にある新形では通ってしまう。この検査を `corpus.rs` の `try_reject` と同じくディレクトリ単位（`Project::load`）に変える（工程 0 の builder が捕まえた計画の漏れ）。**AGENTS.md の「lock を実装の工程で更新しない」は、工程 0 と工程 3 に限って解除する**
 - **E2 のソースは `tools/gates/` に起票する。** `tools/gates/main.hd` が入口、`tools/gates/report/report.hd` が `library` を宣言するライブラリで、契約 `Report` と実装 `Report` を持つ。R32 では純粋な集計だけ（`Tally` record、`add`、`render`）で、`main` は固定の 3 つ組のリストを畳んで印字する。R34 で `PASSED: n/N` の行の解析、R36 で `Int.parse`、R37 で `read_dir` / `read_file` を足す。R33 で `Tally` を契約の抽象型にし `shared` で公開する
 
 ### 期待値の根拠
@@ -2367,7 +2367,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 ### 成果物
 
-`crates/hado/src/`（`lexer.rs` `parser.rs` `project.rs` `lib.rs` `main.rs` `names.rs` `infer.rs` `dependencies.rs` `file_scopes.rs` `namespaces.rs`）、`crates/hado/tests/r32_library.rs`（新設）、既存テストの書き換え（下記）、`crates/hado/tests/r9_grammar.rs`、`crates/hado/tests/corpus.rs`、`scripts/verify-r32.sh`（新設）、`scripts/verify-m2.sh:14`（`tests/library` を足す）、`tests/reject/E206/`、`tests/accept/`（埋め込みの受理 1 本）、`tests/library/`（新設）、`tests/corpus.sha256`、`tools/gates/`。
+`crates/hado/src/`（`lexer.rs` `parser.rs` `project.rs` `lib.rs` `main.rs` `names.rs` `infer.rs` `dependencies.rs` `file_scopes.rs` `namespaces.rs`）、`crates/hado/tests/r32_library.rs`（新設）、既存テストの書き換え（下記）、`crates/hado/tests/parse_corpus.rs`（拒否の検査をディレクトリ単位に）、`crates/hado/tests/r9_grammar.rs`、`crates/hado/tests/corpus.rs`、`scripts/verify-r32.sh`（新設）、`scripts/verify-m2.sh:14`（`tests/library` を足す）、`tests/reject/E206/`、`tests/accept/`（埋め込みの受理 1 本）、`tests/library/`（新設）、`tests/corpus.sha256`、`tools/gates/`。
 
 ### 工程
 
