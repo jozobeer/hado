@@ -341,3 +341,35 @@ fn unshared_local_record_rejects_field_access() {
     let error = check_source(source, "t").err().expect("an unmarked local record keeps E601");
     assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
 }
+
+// --- 工程 1 の修正 2: パターン payload と field 射影への shared の展開 ---
+
+#[test]
+fn shared_equation_reaches_a_pattern_payload() {
+    let source = "def main = read (Box(Store.make \"hi\"))\ndef read | Box(value) => String.concat value \"!\"\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = String\ndef make name => name";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_pattern_payload_stays_abstract() {
+    let source = "def main = read (Box(Store.make \"hi\"))\ndef read | Box(value) => String.concat value \"!\"\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let error = check_source(source, "t").err().expect("an unmarked pattern payload stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("Store.T"), "{}", error.message);
+}
+
+#[test]
+fn shared_equation_reaches_a_field_projection() {
+    let source = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = String\ndef make name => name";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_field_projection_stays_abstract() {
+    let source = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let error = check_source(source, "t").err().expect("an unmarked field projection stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("Store.T"), "{}", error.message);
+}
