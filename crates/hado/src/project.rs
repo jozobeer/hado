@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use crate::lexer::{Tok, TokKind};
-use crate::parser::{Ast, DefKind, Diagnostic, Item, Span};
+use crate::parser::{Ast, Diagnostic, Span};
 
 #[derive(Clone)]
 struct SourceFile {
@@ -220,17 +220,11 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
     None
 }
 
-fn value_main(ast: &Ast) -> Option<Span> {
-    ast.items.iter().find_map(|item| match item {
-        Item::Def(def) if def.name == "main" && matches!(def.kind, DefKind::Value(_)) => Some(def.span),
-        _ => None,
-    })
-}
-
 /// A `main` in a directory that declares `library` is E206 (§59), whichever
-/// file of the directory it sits in.
+/// file of the directory it sits in. The prohibition does not depend on the
+/// shape of the definition, so any `def main` counts.
 fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<String>>) -> Option<Span> {
-    libraries.contains(directory).then(|| value_main(ast)).flatten()
+    libraries.contains(directory).then(|| crate::main_definition_span(ast)).flatten()
 }
 
 /// Directories that declare `library`, in file order (entry first, then relative path bytes).

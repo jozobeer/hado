@@ -44,10 +44,16 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
         }
     }
     let scope = Scope::default();
+    let mut handler_references = References::new();
     for item in &ast.items {
         if let Item::Handler(handler) = item {
-            collector.handler(handler, &scope, &mut used);
+            collector.handler(handler, &scope, &mut handler_references);
         }
+    }
+    // A handler is part of the program, so what its arms reach is used just like
+    // what `main` or a module reaches: close it transitively (§27).
+    for key in handler_references {
+        used.extend(transitive_references(&key, &graph));
     }
     let mut diagnostics: Vec<_> = ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;

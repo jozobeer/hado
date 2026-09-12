@@ -247,6 +247,16 @@ pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
         message: "build requires an entry file with main; check treats this directory as a library".into() }
 }
 
+/// The span of the `def main` of a file, whatever its form (§59). `Ast::main` is
+/// only the value definition used for lowering; an argument-taking or pattern
+/// `main` is still a declaration the entry check must anchor to.
+pub(crate) fn main_definition_span(ast: &parser::Ast) -> Option<parser::Span> {
+    ast.items.iter().find_map(|item| match item {
+        parser::Item::Def(def) if def.name == "main" => Some(def.span),
+        _ => None,
+    })
+}
+
 fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diagnostic> {
     if parsed.inspection == Inspection::Library {
         return Err(entry_required(path));
