@@ -7,6 +7,7 @@ pub enum Type {
     Bool,
     Char,
     String,
+    Bytes,
     Unit,
     Data(String, Vec<Type>),
     Abstract(String, Vec<Type>),
@@ -26,6 +27,7 @@ impl TryFrom<&Ty> for Type {
             Ty::Bool => Self::Bool,
             Ty::Char => Self::Char,
             Ty::String => Self::String,
+            Ty::Bytes => Self::Bytes,
             Ty::Unit => Self::Unit,
             Ty::Var(id) => return Err(UnresolvedType::Variable(*id)),
             Ty::Error => return Err(UnresolvedType::Invalid),
@@ -774,6 +776,7 @@ impl From<&Type> for Ty {
             Type::Bool => Self::Bool,
             Type::Char => Self::Char,
             Type::String => Self::String,
+            Type::Bytes => Self::Bytes,
             Type::Unit => Self::Unit,
             Type::Data(name, args) => {
                 Self::Adt(name.clone(), args.iter().map(Self::from).collect())

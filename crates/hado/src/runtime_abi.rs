@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiType {
     F64,
+    I8,
     I32,
     I64,
     Size,
@@ -25,6 +26,14 @@ pub enum RuntimeFunction {
     StringLength,
     StringConcat,
     StringCompare,
+    BytesLength,
+    BytesGet,
+    BytesIsUtf8,
+    BytesDisplay,
+    BytesOfString,
+    BytesToStringUnchecked,
+    BytesAlloc,
+    BytesFillUnchecked,
 }
 
 pub struct Declaration {
@@ -43,6 +52,14 @@ impl RuntimeFunction {
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
+            Self::BytesLength => Some("__bytes_length"),
+            Self::BytesGet => Some("__bytes_get"),
+            Self::BytesIsUtf8 => Some("__bytes_is_utf8"),
+            Self::BytesDisplay => Some("__bytes_display"),
+            Self::BytesOfString => Some("__bytes_of_string"),
+            Self::BytesToStringUnchecked => Some("__bytes_to_string_unchecked"),
+            Self::BytesAlloc => Some("__bytes_alloc"),
+            Self::BytesFillUnchecked => Some("__bytes_fill_unchecked"),
             Self::CanonicalFloat | Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::AbortError | Self::PrintChar | Self::PrintFloat => None,
         }
     }
@@ -66,11 +83,19 @@ impl RuntimeFunction {
             Self::StringLength => (vec![Type::String], Type::Int),
             Self::StringConcat => (vec![Type::String, Type::String], Type::String),
             Self::StringCompare => (vec![Type::String, Type::String], Type::Int),
+            Self::BytesLength => (vec![Type::Bytes], Type::Int),
+            Self::BytesGet => (vec![Type::Bytes, Type::Int], Type::Int),
+            Self::BytesIsUtf8 => (vec![Type::Bytes], Type::Bool),
+            Self::BytesDisplay => (vec![Type::Bytes], Type::String),
+            Self::BytesOfString => (vec![Type::String], Type::Bytes),
+            Self::BytesToStringUnchecked => (vec![Type::Bytes], Type::String),
+            Self::BytesAlloc => (vec![Type::Int], Type::Bytes),
+            Self::BytesFillUnchecked => (vec![Type::Bytes, Type::Int, Type::Int], Type::Bytes),
         };
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -121,6 +146,54 @@ impl RuntimeFunction {
                 symbol: "hado_print_int",
                 parameters: &[AbiType::I64],
                 result: None,
+                may_allocate: false,
+            },
+            Self::BytesLength => &Declaration {
+                symbol: "hado_bytes_length",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::BytesGet => &Declaration {
+                symbol: "hado_bytes_get",
+                parameters: &[AbiType::Pointer, AbiType::I64],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::BytesIsUtf8 => &Declaration {
+                symbol: "hado_bytes_is_utf8",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I8),
+                may_allocate: false,
+            },
+            Self::BytesDisplay => &Declaration {
+                symbol: "hado_bytes_display",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::BytesOfString => &Declaration {
+                symbol: "hado_bytes_of_string",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: false,
+            },
+            Self::BytesToStringUnchecked => &Declaration {
+                symbol: "hado_bytes_to_string_unchecked",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: false,
+            },
+            Self::BytesAlloc => &Declaration {
+                symbol: "hado_bytes_alloc",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::BytesFillUnchecked => &Declaration {
+                symbol: "hado_bytes_fill_unchecked",
+                parameters: &[AbiType::Pointer, AbiType::I64, AbiType::I64],
+                result: Some(AbiType::Pointer),
                 may_allocate: false,
             },
         }

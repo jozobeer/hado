@@ -157,3 +157,112 @@ void hado_abort_error(const HadoString *string) {
   hado_print_error_string(string);
   exit(1);
 }
+
+/* Bytes and String share the HadoString layout. Bytes.length is the byte
+   count, String.length the scalar count; RFC 3629's well-formedness is what
+   Bytes.to_string validates before the identity conversion runs. */
+int64_t hado_bytes_length(const HadoString *bytes) {
+  if (bytes->length > INT64_MAX) abort();
+  return (int64_t)bytes->length;
+}
+
+int64_t hado_bytes_get(const HadoString *bytes, int64_t index) {
+  return (int64_t)bytes->bytes[index];
+}
+
+static int well_formed_utf8(const unsigned char *bytes, size_t length) {
+  size_t i = 0;
+  while (i < length) {
+    unsigned char first = bytes[i];
+    size_t continuation;
+    uint32_t value;
+    uint32_t minimum;
+    if (first < 0x80) {
+      ++i;
+      continue;
+    } else if ((first & 0xe0) == 0xc0) {
+      continuation = 1;
+      value = first & 0x1f;
+      minimum = 0x80;
+    } else if ((first & 0xf0) == 0xe0) {
+      continuation = 2;
+      value = first & 0x0f;
+      minimum = 0x800;
+    } else if ((first & 0xf8) == 0xf0) {
+      continuation = 3;
+      value = first & 0x07;
+      minimum = 0x10000;
+    } else {
+      return 0;
+    }
+    if (i + continuation >= length) return 0;
+    for (size_t offset = 1; offset <= continuation; ++offset) {
+      unsigned char next = bytes[i + offset];
+      if ((next & 0xc0) != 0x80) return 0;
+      value = (value << 6) | (next & 0x3f);
+    }
+    if (value < minimum || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) return 0;
+    i += continuation + 1;
+  }
+  return 1;
+}
+
+int8_t hado_bytes_is_utf8(const HadoString *bytes) {
+  return well_formed_utf8(bytes->bytes, bytes->length) ? 1 : 0;
+}
+
+HadoString *hado_bytes_display(const HadoString *bytes) {
+  static const char prefix[] = "Bytes.of_list [";
+  size_t prefix_length = sizeof(prefix) - 1;
+  if (bytes->length > (SIZE_MAX - sizeof(HadoString) - prefix_length - 1) / 5) abort();
+  size_t capacity = prefix_length + bytes->length * 5 + 1;
+  HadoString *result = hado_alloc(sizeof(HadoString) + capacity);
+  if (result == NULL) abort();
+  size_t length = 0;
+  memcpy(result->bytes, prefix, prefix_length);
+  length += prefix_length;
+  for (size_t i = 0; i < bytes->length; ++i) {
+    if (i > 0) {
+      result->bytes[length++] = ',';
+      result->bytes[length++] = ' ';
+    }
+    unsigned value = bytes->bytes[i];
+    if (value >= 100) {
+      result->bytes[length++] = (unsigned char)('0' + value / 100);
+      value %= 100;
+      result->bytes[length++] = (unsigned char)('0' + value / 10);
+      result->bytes[length++] = (unsigned char)('0' + value % 10);
+    } else if (value >= 10) {
+      result->bytes[length++] = (unsigned char)('0' + value / 10);
+      result->bytes[length++] = (unsigned char)('0' + value % 10);
+    } else {
+      result->bytes[length++] = (unsigned char)('0' + value);
+    }
+  }
+  result->bytes[length++] = ']';
+  result->length = length;
+  return result;
+}
+
+HadoString *hado_bytes_of_string(const HadoString *value) {
+  return (HadoString *)value;
+}
+
+HadoString *hado_bytes_to_string_unchecked(const HadoString *bytes) {
+  return (HadoString *)bytes;
+}
+
+HadoString *hado_bytes_alloc(int64_t length) {
+  if (length < 0 || (uint64_t)length > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
+  if (result == NULL) abort();
+  result->length = (size_t)length;
+  return result;
+}
+
+/* Only Bytes.of_list calls this, on a buffer that has not escaped and is
+   filled in one pass; the byte is range-checked before the build starts. */
+HadoString *hado_bytes_fill_unchecked(HadoString *bytes, int64_t index, int64_t value) {
+  bytes->bytes[index] = (unsigned char)value;
+  return bytes;
+}

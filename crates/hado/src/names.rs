@@ -1,7 +1,7 @@
 use crate::parser::{Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) const BUILTIN_TYPES: &[&str] = &["Int", "Float", "Bool", "Char", "String", "Unit", "Fn"];
+pub(crate) const BUILTIN_TYPES: &[&str] = &["Int", "Float", "Bool", "Char", "String", "Bytes", "Unit", "Fn"];
 
 pub(crate) fn is_upper_reference(name: &str) -> bool {
     name.rsplit("::").next().is_some_and(|name| name.starts_with(char::is_uppercase))

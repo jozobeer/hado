@@ -1667,11 +1667,8 @@ impl Checker<'_> {
         }
         if self.type_arities.get(name) == Some(&args.len()) { return Ok(Ty::Adt(name.clone(), args)); }
         if !args.is_empty() { return Err(self.error(span, None, "type annotation is not implemented")); }
-        match name.as_str() {
-            "Int" => Ok(Ty::Int), "Float" => Ok(Ty::Float), "Bool" => Ok(Ty::Bool),
-            "Char" => Ok(Ty::Char), "String" => Ok(Ty::String), "Unit" => Ok(Ty::Unit),
-            _ => Err(self.error(annotation.name_span, Some("E204"), &format!("unknown type {name}"))),
-        }
+        crate::types::builtin_type(&name)
+            .ok_or_else(|| self.error(annotation.name_span, Some("E204"), &format!("unknown type {name}")))
     }
 
     fn default_numbers(&mut self) -> Result<(), Diagnostic> {

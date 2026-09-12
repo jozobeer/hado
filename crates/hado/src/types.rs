@@ -8,11 +8,28 @@ pub enum Ty {
     Bool,
     Char,
     String,
+    Bytes,
     Unit,
     Var(u32),
     Fn(Vec<Ty>, Box<Ty>, Box<Row>),
     Adt(String, Vec<Ty>),
     Abstract(String, Vec<Ty>),
+}
+
+/// The names of §36's primitive types that an annotation resolves without a
+/// user declaration. Shared by position annotations and `shared` realizations
+/// so the two cannot drift apart.
+pub fn builtin_type(name: &str) -> Option<Ty> {
+    Some(match name {
+        "Int" => Ty::Int,
+        "Float" => Ty::Float,
+        "Bool" => Ty::Bool,
+        "Char" => Ty::Char,
+        "String" => Ty::String,
+        "Bytes" => Ty::Bytes,
+        "Unit" => Ty::Unit,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -616,6 +633,7 @@ impl std::fmt::Display for Ty {
             Ty::Bool => write!(f, "Bool"),
             Ty::Char => write!(f, "Char"),
             Ty::String => write!(f, "String"),
+            Ty::Bytes => write!(f, "Bytes"),
             Ty::Unit => write!(f, "Unit"),
             Ty::Error => write!(f, "Error"),
             Ty::Adt(name, args) | Ty::Abstract(name, args) => {

@@ -15,7 +15,7 @@ pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String>
         Type::Float => MachineType::F64,
         Type::Bool => MachineType::I8,
         Type::Char => MachineType::I32,
-        Type::String | Type::Closure(..) => MachineType::Pointer,
+        Type::String | Type::Bytes | Type::Closure(..) => MachineType::Pointer,
         Type::Abstract(..) => return Err("abstract type needs its concrete representation".into()),
         Type::Data(name, _) if name == crate::mono::OUTCOME => MachineType::Pointer,
         Type::Data(name, _) if checked.records.contains_key(name) => MachineType::Pointer,

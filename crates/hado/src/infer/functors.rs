@@ -266,11 +266,7 @@ impl Checker<'_> {
         if self.type_arities.get(name) == Some(&args.len()) {
             return Some(Ty::Adt(name.to_owned(), args));
         }
-        match name {
-            "Int" => Some(Ty::Int), "Float" => Some(Ty::Float), "Bool" => Some(Ty::Bool),
-            "Char" => Some(Ty::Char), "String" => Some(Ty::String), "Unit" => Some(Ty::Unit),
-            _ => None,
-        }
+        crate::types::builtin_type(&name)
     }
 
     fn functor(&mut self, module: &ModuleImpl, signatures: &HashMap<String, &ModuleSig>) -> Result<(), Diagnostic> {
