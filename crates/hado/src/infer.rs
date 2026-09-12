@@ -1060,8 +1060,6 @@ impl Checker<'_> {
         let Ty::Fn(payload, result, _) = self.inference.instantiate(scheme) else {
             unreachable!()
         };
-        let payload: Vec<_> = payload.iter().map(|ty| self.reveal_shared(ty)).collect();
-        let result = self.reveal_shared(&result);
         for (name, ty) in names.iter().zip(&payload) {
             let value = &fields.iter().find(|(field, _)| &field.name == name).unwrap().1;
             self.branch_result(value, ty)?;
@@ -1160,7 +1158,7 @@ impl Checker<'_> {
             unreachable!()
         };
         self.unify(ty, &result, field.dot)?;
-        Ok(self.reveal_shared(&self.inference.resolve(&payload[index])))
+        Ok(self.inference.resolve(&payload[index]))
     }
 
     fn list(&mut self, items: &[Node], tail: Option<&Node>) -> Result<Ty, Diagnostic> {
@@ -1276,10 +1274,7 @@ impl Checker<'_> {
             .get(name)
             .cloned()
             .ok_or_else(|| self.error(span, Some("E204"), "unknown constructor"))?;
-        // The registered payload type may still hold a shared abstract type; the pattern
-        // binds its payload as a user expression type, so reveal it before matching.
         let ty = self.inference.instantiate(&scheme);
-        let ty = self.reveal_shared(&ty);
         if ty == Ty::Error {
             for pattern in args { self.pattern(pattern, &Ty::Error)?; }
             return Ok(());
@@ -1460,13 +1455,9 @@ impl Checker<'_> {
             return Ok(Ty::Error);
         }
         // Constructor schemes describe payloads internally; source expressions yield only data.
-        // The registered payload type may still hold a shared abstract type, so reveal it here.
         let (payloads, result) = match self.inference.instantiate(&scheme) {
-            Ty::Fn(payloads, result, _) => (
-                payloads.iter().map(|ty| self.reveal_shared(ty)).collect(),
-                self.reveal_shared(&result),
-            ),
-            result => (Vec::new(), self.reveal_shared(&result)),
+            Ty::Fn(payloads, result, _) => (payloads, result),
+            result => (Vec::new(), Box::new(result)),
         };
         if args.len() != payloads.len() {
             return Err(self.error(span, Some("E301"), "constructor arity mismatch"));
