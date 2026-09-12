@@ -7,11 +7,17 @@ def rec join
   | [head] => head
   | [head, ...tail] => String.concat head (String.concat " " (join tail))
 
+def count_fields name counts =>
+  if String.split counts "/"
+  | [passed, total] => [name, passed, total]
+  | raise { message = "InvalidLine" }
+
 module Report
 type T
 def empty: T Pure
 def add(tally: T, name: String, passed: Int, total: Int): T Pure
 def render(tally: T): String Pure
+def fields(line: String): String List {Error}
 
 implement Report as Report
 shared type T = Tally
@@ -28,3 +34,7 @@ def render tally =>
       (String.concat
         (Int.to_string tally.total)
         (String.concat " passed; red: " (join tally.red))))
+def fields line =>
+  if String.split line " PASSED: "
+  | [name, counts] => count_fields name counts
+  | raise { message = "InvalidLine" }
