@@ -207,3 +207,65 @@ fn shared_realization_cycles_are_rejected() {
     let mutual = "def main = StringMonoid.of \"a\"\nmodule Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\nimplement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left _ => left\ndef of value => value";
     assert_eq!(check_source(mutual, "t").err().unwrap().code.as_deref(), Some("E602"));
 }
+
+// --- 工程 2: functor の shared type T = M.T が適用結果に引き継がれる ---
+
+const FOLD_CONTRACTS: &str = "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\n\nmodule Fold\ntype T\ndef fold(values: T List): T Pure";
+const STRING_MONOID: &str = "implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"";
+
+fn make_fold(shared: &str) -> String {
+    format!("implement Fold as MakeFold(M: Monoid)\n{shared}type T = M.T\ndef fold values => List.fold values M.empty M.combine")
+}
+fn string_fold(shared: &str) -> String {
+    format!("{FOLD_CONTRACTS}\n\n{STRING_MONOID}\n\n{}\nimplement Fold as StringFold = MakeFold(StringMonoid)", make_fold(shared))
+}
+
+#[test]
+fn shared_functor_equation_reaches_the_application_result() {
+    let source = format!("def main = StringFold.fold [\"a\", \"b\"]\n{}", string_fold("shared "));
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn shared_functor_equation_follows_the_arguments_members() {
+    let source = format!("def main = StringFold.fold [StringMonoid.of \"a\", StringMonoid.of \"b\"]\n{}", string_fold("shared "));
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unmarked_functor_equation_keeps_the_application_type_distinct() {
+    let source = format!("def main = StringFold.fold [\"a\"]\n{}", string_fold(""));
+    let error = check_source(&source, "t").err().expect("an unmarked functor equation stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
+
+#[test]
+fn a_shared_functor_follows_an_unmarked_argument() {
+    let contracts = FOLD_CONTRACTS;
+    let functor = make_fold("shared ");
+    let opaque = "implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = \"\"";
+    // 印なしの引数の T は不透明なので main からは返せない（E705）。fold が
+    // OpaqueMonoid.T を受け取れていることは、E305 が出ないことで測る。
+    let positive = format!("def main = OpaqueFold.fold [OpaqueMonoid.of \"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
+    let error = check_source(&positive, "t").err().expect("returning the opaque argument type must be E705");
+    assert_eq!(error.code.as_deref(), Some("E705"), "{error}");
+    let negative = format!("def main = OpaqueFold.fold [\"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
+    let error = check_source(&negative, "t").err().expect("the argument's own type must still reject a String");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
+
+#[test]
+fn two_unmarked_applications_of_the_same_functor_are_distinct() {
+    let source = "def main = A.read (B.make 7)\nmodule Id\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\nmodule Box\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\nimplement Id as I\ntype T = Int\ndef make x => x\ndef read x => x\n\nimplement Id as J\ntype T = Int\ndef make x => x\ndef read x => x\n\nimplement Box as Make(Arg: Id)\ntype T = Arg.T\ndef make x => Arg.make x\ndef read x => Arg.read x\n\nimplement Box as A = Make(I)\nimplement Box as B = Make(J)";
+    let error = check_source(source, "t").err().expect("unmarked applications must keep distinct types");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
+
+#[test]
+fn a_parameter_type_stays_opaque_inside_the_functor_body() {
+    let source = "module Input\ntype T\ndef make(x: Int): T Pure\n\nmodule Output\ntype T\ndef run(x: Int): Int Pure\n\nimplement Input as Concrete\nshared type T = Int\ndef make x => x\n\nimplement Output as Make(Arg: Input)\nshared type T = Arg.T\ndef run x => Arg.make x + 1\n\nimplement Output as Applied = Make(Concrete)";
+    let error = check_source(source, "t").err().expect("the parameter type must stay opaque in the body");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
