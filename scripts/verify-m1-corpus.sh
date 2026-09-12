@@ -290,6 +290,31 @@ fi
 
 # --- check 6: header conventions and // needs: prelude ---
 c6_reasons=""
+prelude_members() {
+    python3 - "$1" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+section = re.search(r'^# 49\.[^\n]*\n(.*?)(?=^# |\Z)', Path(sys.argv[1]).read_text(), re.M | re.S)
+block = re.search(r'関数集合は次とする。\s*```text\n(.*?)```', section[1], re.S) if section else None
+if not block or not block[1].strip():
+    sys.exit('missing function set in §49')
+members = []
+for line in block[1].splitlines():
+    if not line.strip():
+        continue
+    names, functions = line.split(':', 1)
+    for name in re.split(r'\s*/\s*', names.strip()):
+        members.extend(f'{name}.{member}' for member in functions.split())
+if not members:
+    sys.exit('empty function set in §49')
+print('\n'.join(members))
+PY
+}
+if ! prelude_members "$SPEC" >"$TMPD/prelude-members.txt"; then
+    c6_reasons="$c6_reasons prelude-member-inventory-failed"
+fi
 total_hado=$(ls tests/accept/*/main.hd tests/reject/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
 if [ "${total_hado:-0}" -eq 0 ]; then
     c6_reasons="$c6_reasons no-hado-files"
@@ -313,11 +338,11 @@ for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
             nerror=$(grep -cE '^// error:' "$f" || true)
             [ $((nexpect + nexpect_err)) -eq 1 ] || c6_reasons="$c6_reasons $f:accept-expect-lines=$((nexpect + nexpect_err))"
             [ "$nerror" -eq 0 ] || c6_reasons="$c6_reasons $f:accept-has-error"
-            for m in 'List.map' 'List.filter' 'List.fold' 'List.length' 'List.reverse' 'List.append' 'List.sort' 'Option.map' 'Option.unwrap_or' 'Option.is_some' 'Option.ok_or' 'String.length' 'String.concat' 'Int.to_string' 'Float.to_string'; do
+            while IFS= read -r m; do
                 if grep -qF -- "$m" "$f"; then
                     grep -qE '^// needs: prelude$' "$f" || c6_reasons="$c6_reasons $f:uses-$m-without-needs-prelude"
                 fi
-            done
+            done <"$TMPD/prelude-members.txt"
             ;;
         tests/reject/*)
             nexpect=$(grep -cE '^// expect(-error)?:' "$f" || true)
