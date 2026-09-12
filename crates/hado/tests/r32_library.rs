@@ -16,7 +16,9 @@ impl Case {
         Self(dir)
     }
     fn write(&self, file: &str, source: &str) {
-        std::fs::write(self.0.join(file), source).unwrap();
+        let path = self.0.join(file);
+        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).unwrap(); }
+        std::fs::write(path, source).unwrap();
     }
     fn command(&self, command: &str, entry: &str) -> Output {
         Command::new(env!("CARGO_BIN_EXE_hado")).arg(command).arg(self.0.join(entry)).output().unwrap()
@@ -141,6 +143,21 @@ fn argument_main_reports_the_declaration_position_for_every_command() {
         assert!(stderr.starts_with(&format!("main.hd:{line}:1: error[E206]: ")), "{command}: {stderr}");
     }
     assert!(!case.0.join("main").exists());
+}
+
+#[test]
+fn paths_resolve_from_the_innermost_library_root() {
+    // §55, §59: a nested `library` makes its directory the root of its own
+    // subtree, so `leaf::L` is read from `inner/`, not from the outer `lib/`.
+    let case = Case::new();
+    case.write("app/main.hd", "def main = lib::inner::M.go 7");
+    case.write("app/lib/lib.hd", "library");
+    case.write("app/lib/inner/inner.hd", "library");
+    case.write("app/lib/inner/leaf/l.hdi", "module L\ndef go(x: Int): Int");
+    case.write("app/lib/inner/leaf/lm.hd", "implement L as LM\ndef go x => x + 3");
+    case.write("app/lib/inner/m.hd", "implement leaf::L as M\ndef go x => leaf::LM.go x");
+    let project = hado::project::Project::load(&case.0.join("app/main.hd")).unwrap();
+    project.check().unwrap();
 }
 
 #[test]

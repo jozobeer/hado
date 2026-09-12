@@ -196,6 +196,51 @@ expect_entry_error() {
     fi
 }
 
+build_prints() {
+    local label=$1 entry=$2 expected=$3
+    total=$((total + 1))
+    local artifact="${entry%.hd}" got status
+    if ! cargo run --offline -q -- check "$entry" >/dev/null 2>"$workdir/check-stderr"; then
+        echo "NG: $label (check failed: $(cat "$workdir/check-stderr"))"
+        return
+    fi
+    if ! cargo run --offline -q -- build "$entry" >/dev/null 2>"$workdir/build-stderr"; then
+        echo "NG: $label (build failed: $(cat "$workdir/build-stderr"))"
+        return
+    fi
+    got=$("$artifact" 2>"$workdir/run-stderr"); status=$?
+    if [ "$status" -eq 0 ] && [ "$got" = "$expected" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want '$expected' got status=$status '$got')"
+    fi
+}
+
+# 32-f: 埋め込み。印字する値は実行時に生成した整数をライブラリの def に埋め、
+# 期待値は判定器側で計算する（生成した値はスクリプトに定数として現れない）。
+payload_fa=$(( (RANDOM << 15) | RANDOM ))
+payload_fb=$(( 1 + RANDOM ))
+make_app() {
+    local base=$1
+    mkdir -p "$base/lib/store" "$base/lib/id"
+    printf 'library\n\ntype Found = { value: Int }\n' >"$base/lib/lib.hd"
+    printf 'module Store\ndef find(x: Int): Int\ndef wrap(f: Found): Int\n' >"$base/lib/store/store.hdi"
+    cat >"$base/lib/id/int_id.hd" <<EOF
+module IntId
+def value(x: Int): Int
+
+implement IntId as IntId
+def value x => x + $payload_fa
+EOF
+    cat >"$base/lib/store/memory.hd" <<EOF
+implement Store as Memory
+def find id => id::IntId.value id + $payload_fb
+def wrap f => f.value
+EOF
+    printf 'def main = lib::store::Memory.find 1\n' >"$base/main.hd"
+}
+
 # 32-a: main の無い .hd は check ではライブラリとして受理、build / dump-mono は E206 1:1。
 accept '32-a check (main 無しはライブラリとして受理)' "$workdir/32a/lib.hd"
 accept_print '32-a print-type (stdout も stderr も空)' "$workdir/32a/lib.hd"
@@ -301,6 +346,55 @@ accept '32-e (a.hd を消せば受理)' "$workdir/32e/lib.hd"
 expect_error '32-g def library' "$workdir/32g1/main.hd" main.hd E100 1 5
 expect_error '32-g def shared' "$workdir/32g2/main.hd" main.hd E100 1 5
 expect_error '32-g type shared' "$workdir/32g3/main.hd" main.hd E100 1 6
+
+# 32-f: 埋め込みの受理。ライブラリ根のファイルに外の型を置き、ライブラリの中の
+# パス（id::IntId と、ルートの Found）をライブラリ根から解く。
+make_app "$workdir/32f/app"
+build_prints '32-f (check → build → 実行、生成値)' "$workdir/32f/app/main.hd" "$((1 + payload_fa + payload_fb))"
+
+# 32-f (1): ライブラリの中から利用側の根の外の型を無修飾で参照すると E204。
+make_app "$workdir/32f1/app"
+printf 'type Config = { n: Int }\ndef main = lib::store::Memory.find 1\n' >"$workdir/32f1/app/main.hd"
+printf 'implement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap (f: Config) => f.n\n' "$payload_fb" >"$workdir/32f1/app/lib/store/memory.hd"
+expect_error '32-f (1) 利用側の根の外の型を無修飾参照' "$workdir/32f1/app/main.hd" lib/store/memory.hd E204 3 14
+
+# 32-f (2): ライブラリの中から兄弟ディレクトリを参照すると E204。
+make_app "$workdir/32f2/app"
+mkdir -p "$workdir/32f2/app/other"
+printf 'module OtherStore\ndef f(x: Int): Int\n' >"$workdir/32f2/app/other/other_store.hdi"
+printf 'implement OtherStore as Helper\ndef f x => x\n' >"$workdir/32f2/app/other/helper.hd"
+printf 'implement Store as Memory\ndef find id => other::Helper.f id + %s\ndef wrap f => f.value\n' "$payload_fb" >"$workdir/32f2/app/lib/store/memory.hd"
+expect_error '32-f (2) 兄弟ディレクトリの実装参照' "$workdir/32f2/app/main.hd" lib/store/memory.hd E204 2 16
+
+# 32-f (3): 入口検査でライブラリの中の未参照の実装は E513。
+make_app "$workdir/32f3/app"
+mkdir -p "$workdir/32f3/app/lib/extra"
+printf 'implement store::Store as Spare\ndef find x => x\ndef wrap f => f.value\n' >"$workdir/32f3/app/lib/extra/spare.hd"
+expect_error '32-f (3) ライブラリ内の未参照の実装' "$workdir/32f3/app/main.hd" lib/extra/spare.hd E513 1 1
+
+# 32-f 単体: ライブラリ根のファイルを単体で check すれば受理（パスはライブラリ根から解く）。
+make_app "$workdir/32funit/app"
+accept '32-f 単体 (ライブラリ根からパスを解く)' "$workdir/32funit/app/lib/lib.hd"
+
+# 32-f 埋め込みの main: ライブラリ根の別ファイルの def main は E206。
+make_app "$workdir/32fmain/app"
+printf 'def main = 1\n' >"$workdir/32fmain/app/lib/main.hd"
+expect_error '32-f 埋め込みの main (library ディレクトリの def main)' "$workdir/32fmain/app/main.hd" lib/main.hd E206 1 1
+
+# 32-d (4): 根でもライブラリ根でもないサブディレクトリのファイルの外の def は E100。
+make_app "$workdir/32d4b/app"
+printf 'def helper x => x\n\nimplement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap f => f.value\n' "$payload_fb" >"$workdir/32d4b/app/lib/store/memory.hd"
+expect_error '32-d (4) 根でもライブラリ根でもない外の def' "$workdir/32d4b/app/main.hd" lib/store/memory.hd E100 1 1
+
+# 32-d (3) 再確認: 外の def はファイル局所。別ファイルからは E204、同じファイルの
+# 実装からは受理。
+mkdir -p "$workdir/32d3b/lib/store" "$workdir/32d3c"
+printf 'library\n\ndef helper x => x + 1\n' >"$workdir/32d3b/lib/lib.hd"
+printf 'module Store\ndef find(x: Int): Int\n' >"$workdir/32d3b/lib/store/store.hdi"
+printf 'implement store::Store as Memory\ndef find id => helper id\n' >"$workdir/32d3b/lib/store/memory.hd"
+expect_error '32-d (3) 再確認 (外の def はファイル局所)' "$workdir/32d3b/lib/lib.hd" store/memory.hd E204 2 16
+printf 'library\n\ndef helper x => x + 1\n\nmodule Local\ndef run(x: Int): Int\n\nimplement Local as L\ndef run x => helper x\n' >"$workdir/32d3c/lib.hd"
+accept '32-d (3) 再確認 (同じファイルの実装から参照)' "$workdir/32d3c/lib.hd"
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
