@@ -604,7 +604,24 @@ def check_internal_parts(category, s):
                      value=value)
 
 
+def check_longer_parts(category, s):
+    suffixes = [('nul', '\0'),
+                ('utf8-1', chr(random.randint(0x61, 0x7a))),
+                ('utf8-2', chr(random.randint(0x80, 0x7ff))),
+                ('utf8-3', chr(random.randint(0x800, 0xd7ff))),
+                ('utf8-4', chr(random.randint(0x40000, 0x10ffff)))]
+    candidates = [(kind, s + char) for kind, char in suffixes]
+    candidates.append(('arbitrary', ''.join(random.choices('XYZ', k=len(s) + random.randint(2, 5)))))
+    for kind, part in candidates:
+        part.encode('utf-8')
+        assert len(part) > len(s), (category, kind, s, part)
+        string_probe(f'34-a(5,6) {category} longer {kind} expected [false, false]',
+                     f'[String.starts_with {quoted(s)} {quoted(part)}, String.contains {quoted(s)} {quoted(part)}]',
+                     value='[' + ', '.join(str(v).lower() for v in (s.startswith(part), part in s)) + ']')
+
+
 def check_predicates(category, s):
+    check_longer_parts(category, s)
     for length in sorted({0, 1, len(s), len(s) + 1}):
         prefix = (s + 'Z')[:length]
         candidates = [('matching', prefix), ('different', 'Z' * length)]
@@ -629,6 +646,7 @@ def check_predicates(category, s):
 
 # 😀 だけでは 4 バイト先頭の payload が 0 なので、マスクを 0 にする故障を検出できない。
 wide_scalar = chr(random.randint(0x40000, 0x10ffff))
+wide_scalar.encode('utf-8')
 strings = {
     'empty': '',
     'ascii': ''.join(random.sample('abcde', 2) + random.choices('abcde', k=random.randint(1, 7))),

@@ -130,8 +130,44 @@ for seed in range(64):
                   for candidate in re.findall(r'String\.' + operation + r' ".*?" "(.*?)"', sources[kind], re.S)
                   if len(candidate) == 1}}
         assert widths == {{1, 2, 3, 4}}, (seed, operation, widths)
+    for category, s in strings.items():
+        for operation in ('starts_with', 'contains'):
+            candidates = [candidate
+                          for kind, desc, mode in manifest if f' {{category}} ' in desc
+                          for candidate in re.findall(r'String\.' + operation + r' ".*?" "(.*?)"', sources[kind], re.S)
+                          if len(candidate) > len(s)]
+            suffixes = [candidate[len(s):] for candidate in candidates
+                        if candidate.startswith(s) and len(candidate) == len(s) + 1]
+            widths = {{len(char.encode('utf-8')) for char in suffixes}}
+            assert '\0' in suffixes, (seed, category, operation, 'missing NUL extension')
+            assert widths == {{1, 2, 3, 4}}, (seed, category, operation, widths)
+            assert any(len(candidate) > len(s) + 1 for candidate in candidates), (seed, category, operation)
     counts.add(len(manifest))
 assert len(counts) == 1, counts
+"#))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn string_generator_rejects_surrogates_before_generating_probes() {
+    let generator = include_str!("../../../scripts/verify-r34.sh")
+        .split_once("# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n")
+        .unwrap().1
+        .split_once("strings = {")
+        .unwrap().0;
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(r#"
+import random
+for scalar in (0xd800, 0xdbff, 0xdc00, 0xdfff):
+    random.randint = lambda lower, upper: scalar
+    try:
+        exec({generator:?})
+    except UnicodeEncodeError:
+        continue
+    raise AssertionError(f'generator accepted surrogate U+{{scalar:04X}}')
 "#))
         .output()
         .unwrap();
