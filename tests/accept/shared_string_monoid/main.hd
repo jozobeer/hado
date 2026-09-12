@@ -1,0 +1,13 @@
+// spec: §35
+// expect: ab
+// item: 型の共有
+// needs: prelude
+def main = StringMonoid.combine (StringMonoid.of "a") "b"
+module Monoid
+type T
+def combine(left: T, right: T): T Pure
+def of(value: String): T Pure
+implement Monoid as StringMonoid
+shared type T = String
+def combine left right => String.concat left right
+def of value => value

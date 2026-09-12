@@ -1,0 +1,10 @@
+// spec: §5
+// expect: 7
+// item: 型の共有
+def main = Store.find 1
+module Store
+type T
+def find(id: Int): T Pure
+implement Store as Store
+shared type T = Int
+def find _ => 7

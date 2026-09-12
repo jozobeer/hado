@@ -1,0 +1,12 @@
+// spec: §35
+// expect: alice
+// item: 型の共有
+def main = describe (UserStore.make "alice")
+def describe (t: UserStore.T) => t.name
+type User = { name: String }
+module UserStore
+type T
+def make(name: String): T Pure
+implement UserStore as UserStore
+shared type T = User
+def make name => { name = name }
