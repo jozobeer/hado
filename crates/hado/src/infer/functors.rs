@@ -67,6 +67,10 @@ impl Checker<'_> {
     // 実装本体の推論は行わない。等式の収集を登録より後に置くと、record schema と
     // 効果の操作型が不透明のまま登録され、消費側で E305 になる。
     pub(super) fn collect_shared_realizations(&mut self, ast: &Ast) {
+        let signatures: HashMap<&str, &ModuleSig> = ast.items.iter().filter_map(|item| match item {
+            Item::ModuleSig(signature) => Some((signature.name.as_str(), signature)),
+            _ => None,
+        }).collect();
         let mut templates: HashMap<String, (Vec<String>, HashMap<String, TypeRealization>)> = HashMap::new();
         let mut additions: HashMap<String, TypeRealization> = HashMap::new();
         for item in &ast.items {
@@ -77,10 +81,10 @@ impl Checker<'_> {
                     let internal: HashMap<String, String> = parameters.iter()
                         .map(|parameter| (parameter.name.clone(), format!("{}${}", module.name, parameter.name)))
                         .collect();
-                    let shared = self.module_shared_map(module, &internal);
+                    let shared = self.module_shared_map(module, &internal, &signatures);
                     templates.insert(module.name.clone(), (parameters.iter().map(|parameter| parameter.name.clone()).collect(), shared));
                 }
-                ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new())),
+                ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new(), &signatures)),
                 ImplementationForm::Application { .. } => {}
             }
         }
@@ -111,7 +115,16 @@ impl Checker<'_> {
         }
     }
 
-    fn module_shared_map(&mut self, module: &ModuleImpl, functor_params: &HashMap<String, String>) -> HashMap<String, TypeRealization> {
+    fn module_shared_map(&mut self, module: &ModuleImpl, functor_params: &HashMap<String, String>,
+        signatures: &HashMap<&str, &ModuleSig>) -> HashMap<String, TypeRealization> {
+        // 契約の抽象型の arity。abstract_types は functor の契約を本文処理まで持たないので、
+        // 契約の署名から取る（module_abstract_parameters と同じ出所）。
+        let contract_arity: HashMap<&str, usize> = signatures.get(module.sig.as_str()).map(|signature| {
+            signature.items.iter().filter_map(|item| match item {
+                Item::TypeDef(definition) => Some((definition.name.as_str(), definition.params.len())),
+                _ => None,
+            }).collect()
+        }).unwrap_or_default();
         let local: HashMap<String, &crate::parser::TypeDef> = module.items.iter().filter_map(|item| match item {
             Item::TypeDef(definition) => Some((definition.name.clone(), definition)),
             _ => None,
@@ -124,11 +137,10 @@ impl Checker<'_> {
             // 食い違う arity の等式を登録すると `Ty::reveal` から
             // `TypeRealization::apply` の個数 assert に到達して panic する
             // （§35: 数が違えば E602）。登録しなければ既存の E602 の経路が拒否する。
-            // functor の本文では契約が abstract_types に無いことがあるので、arity が
-            // 取れないときは登録しない側に倒す。
-            let qualified = format!("{}.{}", module.name, definition.name);
-            let Some((arity, _)) = self.abstract_types.get(&qualified) else { continue };
+            // 契約に無い型は arity が取れず、ここで登録しない（E204 は別の経路）。
+            let Some(arity) = contract_arity.get(definition.name.as_str()) else { continue };
             if *arity != definition.params.len() { continue; }
+            let qualified = format!("{}.{}", module.name, definition.name);
             let parameters: HashMap<String, Ty> = definition.params.iter()
                 .map(|parameter| (parameter.name.clone(), self.inference.fresh())).collect();
             let mut visiting = Vec::new();
