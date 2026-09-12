@@ -2242,3 +2242,49 @@ m0 の赤が m2 の 5・m3 の 9・m7 の 3・r23 の 23-c に連鎖した。
 **副作用。** `tools/gates/report/report.hd` の `Tally` が契約の抽象型 `T` になり、`main.hd` が `Report.T` の field を 1 箇所読む形になった（`shared` が無ければ E601 / E705 で書けない）。出力は `33/35 passed; red: m7` のまま変えていない。
 
 **次の一手:** R34（Bytes と String の 5 操作）。手順書は 27 節で、計画審査 2 巡（1 巡目は重大 3 件で不合格、`fields` の効果行・lock 更新の工程・String と Bytes の変換 intrinsic を直して 2 巡目で合格）を通してある。
+
+## R34 Bytes と String の操作（2026-09-13）
+
+24.1 の C2（Bytes）・C4（String の 5 操作）・C7（印字）・C8（関数集合）と C1（失敗の分類）を実装した。組み込み型 `Bytes` は `HadoString` を String と共有する不変のバイト列で、`String` の索引はスカラ値の単位である。失敗はすべて prelude の包み（hado 側）で `raise` に持ち上げ、Cranelift 直書きの経路は使っていないので handler で捕まえられる。**全門番のうち許容される赤以外が満点・終了コード 0、`cargo test --offline --no-fail-fast` が 0 failed。**
+
+指揮・計画は claude（fable-5.1 / opus-5）。**ラウンドの途中で実装と審査の割当を入れ替えた**（ユーザーの指示、工程 0 の審査 2 巡目から）。前半は実装 opencode（deepseek-v4.1-flash）・審査 codex（gpt-6-astra medium）、後半は実装 codex（gpt-6-astra high）・審査 opencode（deepseek-v4.1-flash）。計画審査（2 巡）は codex。
+
+| 判定 | 実測 |
+|---|---|
+| 34-a | `String.slice` `get` `split` `starts_with` `contains` を、文字列の分類（空 / ASCII のみ / 多バイトのみ / 混在 / `0x00` を含む。多バイトは 1〜4 バイトの全長と各長さの最大コードポイントを決定的に含む）× 索引の分類（`-1` / `0` / 中間 / `length - 1` / `length` / `length + 1`）で回し、期待値を python3 の同名操作で計算して一致。`split` はセパレータの位置（先頭 / 末尾 / 連続 / 中間 / 無い / 全体一致）× 種類（1 スカラ値の ASCII / 多バイト / 2 スカラ値以上）、`starts_with` は接頭辞の長さ（0 / 1 / 全体 / 全体 + 1 / `s` より長い / `s` 内の先頭でない部分列）、`contains` は部分列の位置 |
+| 34-b | 失敗: `slice` の無効な索引の組み合わせすべて、`get` の `-1` と `length` と `length + 1`、`split` の空セパレータが `IndexOutOfRange` / `EmptySeparator`。負の対照は各失敗形のすぐ隣の有効な形。handler で捕まえる形は §58 に従い body と腕の型を揃える。member の型は §49 と照合（引数型・戻り型・効果行） |
+| 34-c | `Bytes` の `of_string` → `length` がバイト数で `String.length` と異なる。`of_list` → `to_list` の往復（3 万要素の先頭・中間・末尾と要素数を含む）、`get` の各要素、`to_string` → `of_string` の往復。3 万要素の構築と `to_list` が build と実行を合わせて 2 秒以内（実測 76ms と 83ms）。失敗は `ByteOutOfRange`（範囲外の要素が先頭・中間・末尾のどこにあっても）、`InvalidUtf8`、`IndexOutOfRange` |
+| 34-c(4b) | UTF-8 の判定を**分類から生成**。受理は各長さの最短形・最長形・`0x00`・`0x7f` とその連結、拒否は overlong 2/3/4 バイト・surrogate・U+10FFFF 超過・先頭バイト不正・途切れ・継続バイトの位置に非継続バイト。各分類を単独 / 受理列の後ろ / 受理列の前の 3 形で測る。期待値は python3 の `bytes(seq).decode('utf-8')` |
+| 34-d | 印字。最上位の `Bytes.of_list [a, b, ...]`、入れ子（リストと record の field）、空の `Bytes.of_list []` |
+| 34-e | 比較。`==` `!=` `compare` が memcmp と同じ規則。同内容の別インスタンス、空列どうし、大小両方向、接頭辞の対（長さが違う）、`0x00` を含む共通接頭辞の後の差 |
+| 34-f | `type Bytes = \| A` が E205 で 2 回目の宣言の名前。`def f (b: Bytes) => b` の注釈は受理 |
+| 34-f2 | `shared type T = Bytes` の等式が型の登録より前に収集される（`Store` に構文的に依存しない未注釈の関数が record の field を読める）。`shared` を消した対照は E305 |
+| 34-g | `verify-m7.sh` の inventory が 94/94。残る赤は Array と `Int.parse` だけ |
+| 34-h | `verify-m1-corpus.sh` の検査 6 の member 一覧が §49 のブロックから導かれる（直書きが消えた）。`docs/spec.md` の写しに 1 行足すと一覧が増える |
+| 34-i | `Report.fields` を入力の分類から測る。受理は名前が ASCII / 多バイト / 空、数字が 1 桁 / 複数桁 / `0`。拒否は区切りが無い / 2 つ以上 / 空行 / 名前だけ / 数字だけで `InvalidLine` |
+| 34-j | 受理コーパス 9 本（`// item: Bytes` と `// item: String 操作`）、lock 200 行が `sha256sum --strict -c` で全件 OK |
+| prelude の操作 | サブディレクトリと 2 階層ネストとライブラリ根の実装が `raise` を使え、親から参照して実行できる。サブディレクトリで宣言した効果の操作は親から無修飾では見えない（E204） |
+| `verify-r34.sh` | `PASSED: 1360/1360`（3 回連続で同数） |
+| 全走 | 許容される赤（`verify-m1-corpus.sh` 6/7 の 3 pairs = 配列・`Int.parse`・Env と Io、`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖、`verify-m7.sh` 2/3 は Array と `Int.parse`）以外が満点。`verify-m4.sh` 123/123、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`cargo test --offline --no-fail-fast` 0 failed |
+
+
+**この版の最大の特徴は、実装に致命が 1 度も出なかったことである。** 工程 0 は審査 9 巡、工程 1 は 5 巡、いずれも致命 0 で、指摘 26 件はすべて判定器の穴だった。判定器 `verify-r34.sh` は 23 本から 1360 本に増えた。**測っていない入力の組み合わせが毎回 1〜4 件見つかる**状態が 8 巡続いたので、方針を変えた。
+
+**個別の探針をやめ、分類からの生成にした（27 節に明記、`8936122`）。** UTF-8 の不正列を例に取ると、受理側は各長さの最短形・最長形・`0x00`・`0x7f` とその連結、拒否側は overlong 2/3/4 バイト・surrogate・U+10FFFF 超過・先頭バイト不正・途切れ・継続バイトの位置に非継続バイトで、それぞれを単独・受理列の後ろ・受理列の前の 3 形で測る。期待値は python3 の `bytes(seq).decode('utf-8')` から導く（実装の写しではない独立した oracle）。これで判定器は 62 から 165 本になり、その回の審査は 17 種類の注入をすべて検出して合格した。
+
+**分類にも穴があった。** 工程 1 では (1) 文字列の分類に 2 バイト文字が 1 つも無く（3 バイトの `あ` と 4 バイトの `😀` だけ）、`hado_string_get` の 2 バイト用マスクを壊す注入が満点で通った。(2) 各長さの**最大コードポイント**が無く、マスクを**1 ビットだけ**狭める注入が通った。1 ビットの差はそのビットが立つコードポイントでしか観測できない。どちらも「境界値は乱数任せにせず決定的に含める」で塞ぎ、27 節に書いた（`eefd9fb` `10e0b83`）。
+
+**R32 由来の実装欠陥を 1 つ直した。** 工程 2 の builder が、`tools/gates/report/report.hd` の `fields` が `raise` を使うと親から参照したときに `unbound name raise`（E204）になることを見つけて中断した（単独の `check` は通る）。指揮者が独立に再現し、`namespaces.rs` が効果の操作をディレクトリごとに登録する一方、prelude をどこからでも見せる仕組み（`prelude` / `has_prelude`）が操作には無いことを特定した。§47・§57 の「prelude の操作はどこからでも書ける」に反する。E2 の `fields` は §49 で `{Error}` なので回避できないため、工程 2 のスコープを広げて `prelude_operations` を足した（`694c9ae`、8 行）。prelude 以外の効果の操作はディレクトリ単位のままである。
+
+**全走で門番の上限に当たった。** `verify-m3.sh` が 11/12 から 9/12 に落ち、チェック 8（暗記排除と HM のテスト）と 12（`extra-def`）が赤になった。判定の失敗ではなく、3 つのチェックが共有する `cargo test --no-fail-fast -- --nocapture --test-threads=1` の実測が 250.59 秒で、`run` の上限 180 秒を超えていた。`TimeoutExpired` が静かに `returncode 127`・stdout 空を返すので、時間切れと「条件を満たさなかった」が区別できなかった。R34 で受理コーパスが 9 本と `crates/hado/tests/r34_bytes.rs` が増えたためである。上限を 600 秒にし、**時間切れのときに `NG: timeout (<n>s): <コマンド>` を出す**ようにした（門番を強くする変更で、判定の条件は 1 文字も変えていない）。
+
+
+**builder の中断は 2 回とも正しかった。** 工程 1 では `crates/hado/tests/prelude.rs` が String・Int・Float の 3 ファイルしか連結せず、新しい `String` の契約が参照する `Error` が無い（E204）ことを見つけた。工程 2 では上の `raise` の件である。どちらも「触ってよい場所の外の欠陥に当たったら止める」という契約に従った判断で、指揮者がスコープを広げて引き継がせた。
+
+**所要（ログの首尾）:** builder / fixer が 18 本で合計 264 分（最長 48 分）、審査が 16 本で合計 361 分（最長 62 分）、計画審査が 1.5 分と 1.1 分。**審査の時間が実装を上回った版である。**
+
+**24.9 へ足す教訓。** (1) **入力の形が列挙できる判定は、手順書の段階で生成規則として書く。** 個別の値を審査に足させると 1 巡 1〜4 件で 9 巡かかった。(2) **境界値は乱数任せにせず決定的に含める。** 各長さの最大コードポイントを落とすと、マスクを 1 ビット狭める欠陥が偶然回避される。(3) **期待値は独立した oracle から導く。** UTF-8 は python3 の decoder、文字列操作は python3 の同名操作を使い、実装の写しを判定器に書かない。(4) **門番の時間切れは判定の失敗と区別する。** 静かに false になると、テストが増えただけで判定が消える。
+
+**副作用。** `namespaces.rs` に `prelude_operations` が入り、prelude の効果の操作が全階層から無修飾で見えるようになった（8 行）。`crates/hado/tests/prelude.rs` が `stdlib/error.hd` を連結するようになった。`scripts/verify-m3.sh` の `cargo test` の上限が 600 秒になり、時間切れが `NG: timeout` として出るようになった。
+
+**次の一手:** R35（配列）。手順書は未着手。R34 の教訓（分類からの生成、境界値の決定的な包含、独立した oracle）は配列の索引にそのまま効く。
