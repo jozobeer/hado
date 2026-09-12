@@ -72,6 +72,51 @@ int64_t hado_string_compare(const HadoString *left, const HadoString *right) {
   return (left->length > right->length) - (left->length < right->length);
 }
 
+static size_t string_byte_offset(const HadoString *string, int64_t index) {
+  size_t offset = 0;
+  while (index > 0) {
+    ++offset;
+    while (offset < string->length && (string->bytes[offset] & 0xc0) == 0x80) {
+      ++offset;
+    }
+    --index;
+  }
+  return offset;
+}
+
+HadoString *hado_string_slice(const HadoString *string, int64_t start, int64_t end) {
+  size_t first = string_byte_offset(string, start);
+  size_t length = string_byte_offset(string, end) - first;
+  if (length > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+  memcpy(result->bytes, string->bytes + first, length);
+  return result;
+}
+
+uint32_t hado_string_get(const HadoString *string, int64_t index) {
+  size_t offset = string_byte_offset(string, index);
+  uint32_t scalar = string->bytes[offset++];
+  if (scalar < 0x80) return scalar;
+  scalar &= scalar < 0xe0 ? 0x1f : scalar < 0xf0 ? 0x0f : 0x07;
+  while (offset < string->length && (string->bytes[offset] & 0xc0) == 0x80) {
+    scalar = (scalar << 6) | (string->bytes[offset++] & 0x3f);
+  }
+  return scalar;
+}
+
+int64_t hado_string_find(const HadoString *string, const HadoString *separator, int64_t from) {
+  size_t offset = string_byte_offset(string, from);
+  for (; offset < string->length; ++offset) {
+    if ((string->bytes[offset] & 0xc0) == 0x80) continue;
+    if (separator->length > string->length - offset) return -1;
+    if (memcmp(string->bytes + offset, separator->bytes, separator->length) == 0) return from;
+    ++from;
+  }
+  return -1;
+}
+
 void hado_print_string(const HadoString *string) {
   int wrote = fwrite(string->bytes, 1, string->length, stdout) == string->length
               && fputc('\n', stdout) != EOF;

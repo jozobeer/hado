@@ -26,6 +26,9 @@ pub enum RuntimeFunction {
     StringLength,
     StringConcat,
     StringCompare,
+    StringSlice,
+    StringGet,
+    StringFind,
     BytesLength,
     BytesGet,
     BytesIsUtf8,
@@ -52,6 +55,9 @@ impl RuntimeFunction {
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
+            Self::StringSlice => Some("__string_slice"),
+            Self::StringGet => Some("__string_get"),
+            Self::StringFind => Some("__string_find"),
             Self::BytesLength => Some("__bytes_length"),
             Self::BytesGet => Some("__bytes_get"),
             Self::BytesIsUtf8 => Some("__bytes_is_utf8"),
@@ -83,6 +89,9 @@ impl RuntimeFunction {
             Self::StringLength => (vec![Type::String], Type::Int),
             Self::StringConcat => (vec![Type::String, Type::String], Type::String),
             Self::StringCompare => (vec![Type::String, Type::String], Type::Int),
+            Self::StringSlice => (vec![Type::String, Type::Int, Type::Int], Type::String),
+            Self::StringGet => (vec![Type::String, Type::Int], Type::Char),
+            Self::StringFind => (vec![Type::String, Type::String, Type::Int], Type::Int),
             Self::BytesLength => (vec![Type::Bytes], Type::Int),
             Self::BytesGet => (vec![Type::Bytes, Type::Int], Type::Int),
             Self::BytesIsUtf8 => (vec![Type::Bytes], Type::Bool),
@@ -95,7 +104,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -126,6 +135,24 @@ impl RuntimeFunction {
                 parameters: &[AbiType::Pointer, AbiType::Pointer],
                 result: Some(AbiType::Pointer),
                 may_allocate: true,
+            },
+            Self::StringSlice => &Declaration {
+                symbol: "hado_string_slice",
+                parameters: &[AbiType::Pointer, AbiType::I64, AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::StringGet => &Declaration {
+                symbol: "hado_string_get",
+                parameters: &[AbiType::Pointer, AbiType::I64],
+                result: Some(AbiType::I32),
+                may_allocate: false,
+            },
+            Self::StringFind => &Declaration {
+                symbol: "hado_string_find",
+                parameters: &[AbiType::Pointer, AbiType::Pointer, AbiType::I64],
+                result: Some(AbiType::I64),
+                may_allocate: false,
             },
             Self::StringCompare => &Declaration {
                 symbol: "hado_string_compare",

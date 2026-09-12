@@ -12,6 +12,9 @@ void *hado_alloc(size_t size);
 int64_t hado_string_length(const HadoString *string);
 HadoString *hado_string_concat(const HadoString *left, const HadoString *right);
 int64_t hado_string_compare(const HadoString *left, const HadoString *right);
+HadoString *hado_string_slice(const HadoString *string, int64_t start, int64_t end);
+uint32_t hado_string_get(const HadoString *string, int64_t index);
+int64_t hado_string_find(const HadoString *string, const HadoString *separator, int64_t from);
 
 /* Bytes shares the HadoString layout with String. length counts bytes here,
    while hado_string_length counts Unicode scalar values. */
