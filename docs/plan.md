@@ -2453,6 +2453,8 @@ R32 の終了時に残ってよい赤は、24.8 のうち R33〜R37 に割り当
 - **印字。** `Display for Ty`（`types.rs:609-631`）は変えない。E305 の `cannot unify {a} with {b}` も、型が解けているので `String` と出る。`--print-type` は `checked.main` が解けた型なのでそのまま
 - **循環。** `check_realization_cycles`（`infer.rs:1732-1747`）の E602 は `shared` の有無によらず当てる（`shared type T = T`、`shared` の相互参照）
 - **codegen は変えない。** `Checked::for_codegen`（`lib.rs:82-100`）は全ての表現を展開してから mono に渡す。`shared` は型検査の性質であり、機械表現は既に解けた型で決まっている
+- **等式の収集は型と効果の登録より前に置く（工程 1 の審査 3 巡目で確定した訂正）。** 当初の決定は「`reveal_shared` を通す場所は 4 つ、5 箇所目が見つかったら中断せず通す」だったが、これは閉じなかった。原因は消費点の網羅ではなく順序である。`shared_realizations` が埋まるのは `infer.rs:579`（`checker.module()` の中、`inference_groups` のループ内）と `functors.rs:155` だが、`register_type`（`infer.rs:163` 付近）と `register_effects`（`:176`）はそのループより前に走る。よって `type Box = { value: Store.T }` の record schema と `capture send(value: Store.T)` の操作型は、`annotation_inner`（`:1672`）の展開を通っても等式が空のまま `Ty::Abstract` で登録される。実装より前のグループで推論される未注釈の定義（`def read box => box.value`）も、`resolve_projections(false)`（`:632` `:714`）の時点で等式が空である。**AST から `shared type T = body` を集める前処理を `register_type` の前に置き、消費点への展開は置かない。** 連鎖は固定点まで反復し、輪は E602（`functors.rs:154` の `introduces_cycle`）。`reveal_shared` の呼び出しとして残すのは入口（`:226` `:660` `:664` `:1672`）と E705 / E702 の検査（`:1805` `:1827`）だけで、消費点の展開を外しても判定器が緑であることを工程 1 の refactor コミットで測る
+
 - **E2 のソースは R33 で `Tally` を契約の抽象型にする。** `tools/gates/report/report.hd` の契約 `Report` に `type T` を足し、実装で `shared type T = Tally` とする。`main.hd` は `Report.T` の値を作って `render` する。`shared` が無ければ `main` が E601 / E705 で書けない形にし、`shared` の効きを E2 で測る
 
 ### 期待値の根拠
@@ -2532,5 +2534,101 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 **`types.rs:515-519` の単一化に `shared` の展開を足す必要があると分かったら、直さずに中断せよ。** 想定しているのは、`reveal_shared` を 4 箇所に通す変更で、単一化は名前比較のままである。
 
 **functor の `Template` に `shared` の集合を持たせても、適用の改名（`functors.rs:116-117`）で引数の実装名に届かないと分かったら、工程 2 を止めて報告せよ。** 工程 1 の成果はそのまま残す。
+
+それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
+
+## 27. R34 Bytes と String の操作の手順書（2026-09-12）
+
+24.1 の C2（Bytes）・C4（String の 5 操作）・C7（印字）・C8（関数集合）と C1（失敗の分類）を実装する。R35（配列）と R36（`Int.parse`）は別ラウンド。
+
+**読む順:** 本節 → 24.1 の C 表と 24.4 → `docs/spec.md` の §36・§49（関数集合、member の型、失敗の `message` の表）・§51・§45・§43 → `docs/corpus.md` の免除表（Bytes と String 操作は拒否コーパスを持たない）。
+
+**着手時点で赤の門番:** R33 の終了時の許容される赤（m1-corpus の pairs のうち Bytes・配列・String 操作・Int.parse・Env と Io、m7 の stdlib、m2 / m3 の連鎖）。R34 の入口で単独で測り直す。
+
+### 決定
+
+- **工程は 3 つ。Bytes の型と runtime（工程 0）、String の 5 操作（工程 1）、門番とコーパスと E2（工程 2）。** 工程ごとに指揮者が緑を実測してから次を発注する
+- **Bytes の機械表現は String と同じ `HadoString`（`runtime/hado_runtime.h:6-9`: `size_t length; unsigned char bytes[]`）。** String は UTF-8 を仮定した同じ構造で、`length` はバイト数である（`hado_string_length` `hado_runtime.c:45-54` がスカラ値を数える）。`Bytes.of_string` はポインタをそのまま返し（Pure、O(1)）、`Bytes.to_string` は UTF-8 の検証だけを行う。String と Bytes は型が違うので、同じポインタを別の型として返す変換の intrinsic を 2 本置く: `__bytes_of_string(s: String): Bytes`（恒等）と `__bytes_to_string_unchecked(b: Bytes): String`（恒等。prelude の `to_string` が `__bytes_is_utf8` で検証した後にだけ呼ぶ）。`mono::Type::Bytes`（`mono.rs:4-14`）は `repr.rs:12-45` で `Pointer`、`Ty::Bytes`（`types.rs:3-16`）、`names.rs:4` の `BUILTIN_TYPES` に `"Bytes"`、`infer.rs:1653-1656` の注釈の解決に `"Bytes" => Ty::Bytes`、`Display` に `Bytes`
+- **予約名。** `BUILTIN_TYPES` に `Bytes` を足すと、R32 の名前解決（利用側の根の宣言も prelude / 組み込みの名前と比べる）で `type Bytes = ...` が E205 になる見込み。判定 34-f で確かめ、ならなければ同じ場所に足す
+- **組み込みの失敗は prelude の包み（hado 側）で `raise` する（24.4）。** `stdlib/bytes.hd` と `stdlib/string.hd` の member は、前提条件（索引の範囲、空セパレータ、0..255、UTF-8 の妥当性）を hado で検査して `raise { message = "IndexOutOfRange" }` の形で `Error` を起こし、成立するときだけ intrinsic を呼ぶ。`Option.ok_or`（`stdlib/option.hd`）の `raise error` が手本。DivisionByZero（`emit.rs:662-707`）のような Cranelift 直書きの経路は**使わない**（handler で捕まえられないため）。`message` の綴りは §49 の表に固定: `"IndexOutOfRange"` `"EmptySeparator"` `"ByteOutOfRange"` `"InvalidUtf8"`
+- **intrinsic は最小にし、C は hado の ADT（List の cell）を触らない。** 足す intrinsic（`runtime_abi.rs` の 5 箇所 + `hado_runtime.c` + `hado_runtime.h`）: `__bytes_length`（バイト数）、`__bytes_get`（範囲内前提、Int を返す）、`__bytes_is_utf8`（Bool）、`__bytes_display`（`Bytes.of_list [72, 105]` の形の String を C で組む。印字用）、`__string_slice`（スカラ値の索引 `start`..`end`、範囲内前提）、`__string_get`（スカラ値の索引、Char）、`__string_find`（`sep` が `from` 以降に最初に現れるスカラ値の索引、無ければ -1）。`Bytes.of_list` / `to_list` と `String.split` は hado 側で書く（`to_list` は `__bytes_get` の再帰、`of_list` は下記、`split` は `__string_find` と `slice` の再帰）。`starts_with` と `contains` は §49 で `Pure` なので、`{Error}` の `slice` は呼ばず、Pure な intrinsic `__string_find` / `__string_slice` を直接呼んで書く（`Pure` の member の中で `{Error}` の member は呼べない）。`prefix` / `part` が空ならどちらも `true`（python と同じ。`__string_find` は空の `sep` で呼ばない）
+- **`Bytes.of_list` の構築。** hado は不変なので、素直に書くと 1 要素ごとに複製して O(n²) になる。許す形は 2 つ: (a) `__bytes_of_list_step`（既存の Bytes に 1 バイト足した新しい Bytes を返す）で O(n²) を受け入れる、(b) `__bytes_alloc n` と `__bytes_fill_unchecked b i v`（prelude の中でだけ使う、構築中の未公開の値への書き込み）で O(n)。builder が選び、判定 34-c(3) の 3 万要素が 2 秒以内に通ることを実測して報告する。(b) を選ぶなら、構築中の値が `of_list` の外に出ないことをコメントに書く。どちらでも、0..255 の範囲検査はリストを先に 1 周して済ませ、通ったら構築する（構築の途中で `raise` しない。O(n) を 2 回で単純にする）
+- **印字（C7、§51）。** `derive_scalar_printer`（`mono.rs:3036-3062`）と `display_value`（`mono.rs:3136-3201`）に `Type::Bytes => __bytes_display` を足す。最上位でも入れ子でも `Bytes.of_list [72, 105]`、空は `Bytes.of_list []`
+- **比較（§45）。** `emit.rs:447-455` の `string` フラグと `mono.rs:2560` の `matches!` に `Type::Bytes` を足し、`hado_string_compare`（memcmp）を共有する。`Bytes` の `==` `!=` `compare` は String と同じ規則
+- **`String.length` の意味は変えない**（スカラ値の個数）。`String.get` と `slice` の索引もスカラ値の単位（§49）。`split` の結果は `String List` で、`separator` が空なら `EmptySeparator`、見つからなければ元の文字列 1 つのリスト、先頭・末尾・連続の一致は空文字列を要素として残す（`"a,,b"` を `","` で割ると `["a", "", "b"]`、`",a"` は `["", "a"]`）
+- **stdlib の登録。** `lib.rs:145-151` の hard-coded なリストに `stdlib/bytes.hd` を足す（型宣言が無いので `:135-140` には足さない）。`trusted_start` は自動で続く
+- **門番の追随。** `verify-m1-corpus.sh:317-322` の `// needs: prelude` の member 一覧（15 個の直書き）を、`verify-m7.sh:22-32` と同じく §49 の「関数集合は次とする」のブロックから導く形にする。`verify-m7.sh` は既に §49 から導いているので触らない（20/39 → 31/39 になる見込み。Array と `Int.parse` は R35 / R36）
+- **E2 の集計部。** `tools/gates/report/report.hd` に `def fields(line: String): String List {Error}`（`"<名前> PASSED: <n>/<N>"` の 1 行を `[名前, n, N]` の 3 つの文字列に割る。`split` と `slice` は §49 で `{Error}` なので `fields` も `{Error}`。形が合わなければ `raise { message = "InvalidLine" }`）を足す。`Int.parse` が無いので整数への変換は R36。`main.hd` の出力は変えない。純粋な集計の受理を `tests/accept/`（`// item: String 操作`）に置く
+
+### 期待値の根拠
+
+| 形 | 導出 | 根拠 |
+|---|---|---|
+| `String.length "あ😀"` | `2`、`Bytes.length (Bytes.of_string "あ😀")` は `7` | §36、§49 |
+| `String.slice "héllo" 1 3` | `"él"`（スカラ値の単位） | §49 |
+| `String.slice s 0 (String.length s)` | `s` | §49 |
+| `String.slice s 2 1`、`String.slice s 0 (length + 1)`、`String.get s length`、`String.get s (-1)` | `Error`、`message` は `"IndexOutOfRange"` | §49 |
+| `String.split "a,,b" ","` | `["a", "", "b"]` | §49（本節の決定） |
+| `String.split "abc" ""` | `Error` `"EmptySeparator"` | §21、§49 |
+| `String.starts_with "héllo" "hé"`、`String.contains "héllo" "ll"` | `true`、`true` | §49 |
+| `String.starts_with s ""`、`String.contains s ""` | `true`、`true` | 本節の決定 |
+| `Bytes.of_list [72, 105]` を印字 | `Bytes.of_list [72, 105]`（最上位も入れ子も） | §51 |
+| `Bytes.of_list [256]`、`[-1]` | `Error` `"ByteOutOfRange"` | §49 |
+| `Bytes.to_string (Bytes.of_list [255])` | `Error` `"InvalidUtf8"` | §49 |
+| `Bytes.to_string (Bytes.of_string s)` | `s` | §49 |
+| `Bytes.get b (Bytes.length b)` | `Error` `"IndexOutOfRange"` | §49 |
+| `Bytes.of_list [1, 2] == Bytes.of_list [1, 2]`、`compare (Bytes.of_list [1]) (Bytes.of_list [2])` | `true`、`-1` | §45 |
+| `type Bytes = \| A` | E205、位置は 2 回目の宣言の名前 `Bytes` | 24.4、§50 |
+| `def main = Bytes.get (Bytes.of_string "x") 0` | `120` | §49 |
+
+**本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+### 成果物
+
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `types.rs` `mono.rs` `repr.rs` `emit.rs` `names.rs` `infer.rs` `lib.rs`）、`stdlib/bytes.hd`（新設）、`stdlib/string.hd`、`crates/hado/tests/r34_bytes.rs`（新設）、`scripts/verify-r34.sh`（新設）、`scripts/verify-m1-corpus.sh`（検査 6 の member 一覧）、`tests/accept/`（`// item: Bytes` と `// item: String 操作` の受理。`// expect-error:` の失敗形を含む）、`tests/corpus.sha256`、`tools/gates/`。
+
+### 工程
+
+- 工程 0: Bytes。型の配管（`Ty` `Type` `repr` `BUILTIN_TYPES` 注釈 `Display`）、intrinsic 4 本（`__bytes_length` `__bytes_get` `__bytes_is_utf8` `__bytes_display`）と変換 2 本と構築の intrinsic、`stdlib/bytes.hd` の 6 member と失敗、印字、比較、E205、**lock に `stdlib/bytes.hd` の 1 行を足す**（工程ごとに緑を保つため。他の行は変えない）。判定 34-c 34-d 34-e 34-f
+- 工程 1: String の 5 操作。intrinsic 3 本（`__string_slice` `__string_get` `__string_find`）、`stdlib/string.hd` の 5 member と失敗、**lock の `stdlib/string.hd` の 1 行を更新する**。判定 34-a 34-b
+- 工程 2: 門番とコーパスと E2。`verify-m1-corpus.sh` の検査 6、受理コーパス（Bytes 3 本以上、String 操作 3 本以上、失敗形を各 1 本以上）、lock（コーパスの行を足す）、`tools/gates/` の `fields`。判定 34-g 34-h 34-i 34-j
+
+### 判定
+
+判定 34-a: String の 5 操作。`slice` / `get` / `split` / `starts_with` / `contains` を、実行時に生成した文字列（ASCII と 2〜4 バイトのスカラ値を混ぜる）に適用し、期待値を判定器側で（python3 のスカラ値の索引で）計算して一致。`split` は `"a,,b"` `",a"` `"a,"` `","` の形と、見つからない形、セパレータが複数スカラ値の形を含む
+判定 34-b: String の失敗。`slice` の `start > end`、`end > length`、`start < 0`、`get` の `length` と `-1`、`split` の空セパレータが、stderr に `message` を出して終了コード 1（`// expect-error:` と同じ観測）。負の対照: 境界（`slice s 0 0`、`slice s length length`、`get s (length - 1)`）は受理
+判定 34-c: Bytes。(1) `of_string` → `length` がバイト数（`String.length` と異なる文字列で）。(2) `of_list` → `to_list` の往復、`get` の各要素、`to_string` → `of_string` の往復（実行時生成）。(3) 3 万要素の `of_list` → `length` と `get 29999` が 2 秒以内。(4) 失敗: `of_list [256]` `[-1]` が `ByteOutOfRange`、`to_string (of_list [255])` が `InvalidUtf8`、`get b (length b)` が `IndexOutOfRange`
+判定 34-d: 印字。最上位の `Bytes.of_list [<生成した Int 列>]`、入れ子（`[Bytes.of_list [1]]`、record の field）、空 `Bytes.of_list []`
+判定 34-e: 比較。`==` `!=` `compare` が String と同じ規則（生成した 2 列で判定器側で計算）
+判定 34-f: `type Bytes = | A` → E205 で 2 回目の宣言の名前（`Bytes`。§50 の E205 の位置）。`def f (b: Bytes) => b` の注釈は受理
+判定 34-g: `bash scripts/verify-m7.sh` の inventory が String と Bytes の全 member を OK にする（残る NG は Array と `Int.parse` だけ）
+判定 34-h: `verify-m1-corpus.sh` の検査 6 の member 一覧が §49 のブロックから導かれる（§49 に 1 行足した写しで一覧が増えることを判定器の側で確かめる。写しは一時ディレクトリで、本物の `docs/` は触らない）
+判定 34-i: E2。`Report.fields "<名前> PASSED: <n>/<N>"`（実行時生成）が `[名前, n, N]`。`tools/gates/main.hd` の出力は R33 と同じ
+判定 34-j: 受理コーパス（`// item: Bytes` 3 本以上、`// item: String 操作` 3 本以上、`// expect-error:` の失敗形を各 1 本以上）、lock 更新、`verify-m1-corpus.sh` の pairs から Bytes と String 操作が消える
+判定 34-k: `cargo test --offline --no-fail-fast` が 0 failed
+判定 34-l: 全門番を単独で走らせ、許容される赤（下記）以外が満点
+
+### 許容される赤
+
+- `verify-m1-corpus.sh` の 3 pairs（配列・Int.parse・Env と Io）と、その連鎖の m2 / m3
+- `verify-m7.sh` の inventory の Array と `Int.parse`
+
+### スコープ外
+
+- 配列（R35）、`Int.parse`（R36）、Env / Io（R37）
+- `U8` 型、文字列補間、多行文字列（24.3）
+- `String.length` の O(1) 化
+
+### 確認して報告（24.9 と本節の決定から）
+
+- `BUILTIN_TYPES` に足すだけで `type Bytes` が E205 になるか
+- `Bytes.of_list` の構築に選んだ形（(a) か (b)）と 3 万要素の所要
+- `split` の空セパレータ以外の縁（セパレータが文字列より長い、文字列が空）の実測
+
+### 中断の条件
+
+**C の runtime が hado の List の cell（`repr.rs:117-162` の配置）を読み書きする必要があると判断したら、直さずに中断せよ。** 想定しているのは、C は `HadoString` と Int / Bool / Char だけを扱い、リストの構築と走査は hado 側で書く形である。
+
+**`raise` を prelude の包みから起こす経路（`mono.rs:1419-1453` の `abort_raise` と handler がある場合の `abort_outcome`）が intrinsic の呼び出しの後ろで型を合わせられないと分かったら、工程 0 を止めて報告せよ。**
 
 それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
