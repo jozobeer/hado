@@ -525,7 +525,7 @@ def string_probe(label, expression, value=None, error=None, handler=None):
 
 
 def indices(s):
-    return sorted({-1, 0, random.randrange(len(s) + 1), len(s) - 1, len(s), len(s) + 1})
+    return sorted({-1, 0, (random.randrange(1, len(s) - 1) if len(s) > 2 else 0), len(s) - 1, len(s), len(s) + 1})
 
 
 def check_indices(category, s):
@@ -557,7 +557,7 @@ def check_split(category, s):
                   ('sequence', ''.join(random.choices('aあ😀', k=random.randint(2, 4)))),
                   ('nul', '\0')]
     for sep_kind, sep in separators:
-        middle = random.randrange(len(s) + 1)
+        middle = random.randrange(1, len(s)) if len(s) > 1 else 0
         shapes = {'leading': sep + s, 'trailing': s + sep, 'consecutive': s + sep + sep + s,
                   'middle': s[:middle] + sep + s[middle:], 'absent': s.replace(sep, ''),
                   'whole': sep, 'original': s, 'empty': ''}
@@ -582,13 +582,15 @@ def check_split(category, s):
 def check_predicates(category, s):
     for length in sorted({0, 1, len(s), len(s) + 1}):
         prefix = (s + 'Z')[:length]
-        for match_kind, candidate in [('matching', prefix), ('different', 'Z' * length)]:
+        for match_kind, candidate in [('matching', prefix), ('different', 'Z' * length),
+                                      ('different_tail', prefix[:-1] + 'Z' if prefix else '')]:
             string_probe(f'34-a(5) {category} prefix {length} {match_kind}',
                          f'String.starts_with {quoted(s)} {quoted(candidate)}',
                          value=str(s.startswith(candidate)).lower())
-    middle = random.randrange(len(s)) if s else 0
+    middle = random.randrange(1, len(s) - 1) if len(s) > 2 else 0
     parts = {'leading': s[:1], 'middle': s[middle:middle + 1], 'trailing': s[-1:],
-             'absent': 'Z', 'empty': '', 'whole': s, 'longer': s + 'Z'}
+             'absent': 'Z', 'empty': '', 'whole': s, 'longer': s + 'Z',
+             'reversed': s[::-1], 'repeated': s + s, 'subsequence': s[::2]}
     for position, part in parts.items():
         string_probe(f'34-a(6) {category} contains {position}',
                      f'String.contains {quoted(s)} {quoted(part)}', value=str(part in s).lower())
@@ -669,6 +671,46 @@ error_matches() {
     [ "$(wc -c <"$workdir/out-$kind")" -eq 0 ] || return 1
     cmp -s "$workdir/err-$kind" "$dir/expect_error"
 }
+
+output_controls() {
+    local compiler=true dir
+    dir=$(case_dir output-control)
+    mkdir -p "$dir"
+    cat >"$dir/main" <<'SH'
+#!/usr/bin/env bash
+cd "$(dirname "$0")"
+cat stdout
+cat stderr >&2
+exit "$(cat status)"
+SH
+    chmod +x "$dir/main"
+    printf 'value\n' >"$dir/expect"
+    printf 'error\n' >"$dir/expect_error"
+    cp "$dir/expect" "$dir/stdout"
+    : >"$dir/stderr"
+    echo 0 >"$dir/status"
+    prints_match output-control || return 1
+    printf 'different\n' >"$dir/stdout"
+    if prints_match output-control; then return 1; fi
+    : >"$dir/stdout"
+    if prints_match output-control; then return 1; fi
+    cp "$dir/expect" "$dir/stdout"
+    printf '\n' >"$dir/stderr"
+    if prints_match output-control; then return 1; fi
+    : >"$dir/stdout"
+    cp "$dir/expect_error" "$dir/stderr"
+    echo 1 >"$dir/status"
+    error_matches output-control || return 1
+    printf '\n' >"$dir/stdout"
+    if error_matches output-control; then return 1; fi
+    : >"$dir/stdout"
+    printf 'different\n' >"$dir/stderr"
+    if error_matches output-control; then return 1; fi
+    : >"$dir/stderr"
+    if error_matches output-control; then return 1; fi
+}
+
+check '34-a/34-b 出力照合の対照: 全件一致は受理、空・値違い・余分な改行は拒否' output_controls
 
 # build と実行を合わせて 1 つの期限で測る。build だけ遅い注入も落ちるよう、
 # build と実行の両方に timeout を掛け、経過時間の合計も seconds 以下を要求する。
