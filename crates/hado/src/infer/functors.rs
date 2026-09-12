@@ -35,7 +35,7 @@ fn owned<T: Clone>(entries: &HashMap<String, T>, module: &str) -> HashMap<String
 // reveal は名前の置き換えを再帰的に行うので、shared の等式が輪になっていると止まらない。
 // 適用の写しで輪を作る等式は shared_realizations に入れない。輪そのものは
 // abstract_representations に残るので check_realization_cycles が E602 で拒否する。
-fn introduces_cycle(base: &HashMap<String, TypeRealization>, additions: &HashMap<String, TypeRealization>) -> bool {
+pub(super) fn introduces_cycle(base: &HashMap<String, TypeRealization>, additions: &HashMap<String, TypeRealization>) -> bool {
     let mut graph: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
     for (name, realization) in base.iter().chain(additions.iter()) {
         let mut references = std::collections::BTreeSet::new();
@@ -60,6 +60,131 @@ impl Checker<'_> {
                 }
                 Ok(())
             },
+        }
+    }
+
+    // AST から `shared type T = body` の等式を、型と効果の登録より前に集める。
+    // 実装本体の推論は行わない。等式の収集を登録より後に置くと、record schema と
+    // 効果の操作型が不透明のまま登録され、消費側で E305 になる。
+    pub(super) fn collect_shared_realizations(&mut self, ast: &Ast) {
+        let mut templates: HashMap<String, (Vec<String>, HashMap<String, TypeRealization>)> = HashMap::new();
+        let mut additions: HashMap<String, TypeRealization> = HashMap::new();
+        for item in &ast.items {
+            let Item::ModuleImpl(module) = item else { continue };
+            if self.ambiguous_modules.contains(&module.name) { continue; }
+            match &module.form {
+                ImplementationForm::Functor(parameters) => {
+                    let internal: HashMap<String, String> = parameters.iter()
+                        .map(|parameter| (parameter.name.clone(), format!("{}${}", module.name, parameter.name)))
+                        .collect();
+                    let shared = self.module_shared_map(module, &internal);
+                    templates.insert(module.name.clone(), (parameters.iter().map(|parameter| parameter.name.clone()).collect(), shared));
+                }
+                ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new())),
+                ImplementationForm::Application { .. } => {}
+            }
+        }
+        for item in &ast.items {
+            let Item::ModuleImpl(module) = item else { continue };
+            let ImplementationForm::Application { functor, arguments } = &module.form else { continue };
+            if self.ambiguous_modules.contains(&module.name) { continue; }
+            let Some((parameters, shared)) = templates.get(&functor.name) else { continue };
+            if parameters.len() != arguments.len() { continue; }
+            let mut names = HashMap::from([(functor.name.clone(), module.name.clone())]);
+            for (parameter, argument) in parameters.iter().zip(arguments) {
+                names.insert(format!("{}${}", functor.name, parameter), argument.name.clone());
+            }
+            for (name, realization) in shared {
+                additions.insert(crate::functor_instances::rename(name, &names), TypeRealization {
+                    parameters: realization.parameters.clone(),
+                    body: realization.body.rename_modules(&names),
+                });
+            }
+        }
+        // 輪になる等式は入れない。reveal が停止しなくなるため。輪そのものは既存の
+        // E602 の経路（実体化の別名解決と check_realization_cycles）が拒否する。
+        for (name, realization) in additions {
+            let addition = HashMap::from([(name, realization)]);
+            if !introduces_cycle(&self.shared_realizations, &addition) {
+                self.shared_realizations.extend(addition);
+            }
+        }
+    }
+
+    fn module_shared_map(&mut self, module: &ModuleImpl, functor_params: &HashMap<String, String>) -> HashMap<String, TypeRealization> {
+        let local: HashMap<String, &crate::parser::TypeDef> = module.items.iter().filter_map(|item| match item {
+            Item::TypeDef(definition) => Some((definition.name.clone(), definition)),
+            _ => None,
+        }).collect();
+        let mut shared = HashMap::new();
+        for item in &module.items {
+            let Item::TypeDef(definition) = item else { continue };
+            if !definition.shared { continue; }
+            let Some(body) = &definition.ty else { continue };
+            let parameters: HashMap<String, Ty> = definition.params.iter()
+                .map(|parameter| (parameter.name.clone(), self.inference.fresh())).collect();
+            let mut visiting = Vec::new();
+            let Some(ty) = self.shared_body_type(body, &module.name, &local, &parameters, functor_params, &mut visiting) else { continue };
+            let ids = definition.params.iter().filter_map(|parameter| match parameters.get(&parameter.name) {
+                Some(Ty::Var(id)) => Some(*id),
+                _ => None,
+            }).collect();
+            shared.insert(format!("{}.{}", module.name, definition.name), TypeRealization { parameters: ids, body: ty });
+        }
+        shared
+    }
+
+    fn shared_body_type(
+        &mut self, expr: &TypeExpr, module: &str,
+        local: &HashMap<String, &crate::parser::TypeDef>,
+        parameters: &HashMap<String, Ty>, functor_params: &HashMap<String, String>,
+        visiting: &mut Vec<String>,
+    ) -> Option<Ty> {
+        let (name, arguments) = match &expr.kind {
+            TypeKind::Name(name) => (name.as_str(), &[][..]),
+            TypeKind::Apply(name, arguments) => (name.as_str(), arguments.as_slice()),
+            _ => return None,
+        };
+        let args: Vec<Ty> = arguments.iter()
+            .map(|argument| self.shared_body_type(argument, module, local, parameters, functor_params, visiting))
+            .collect::<Option<_>>()?;
+        // 実体化自身の型引数（`shared type A T = A List` の `A`）。
+        if let Some(ty) = parameters.get(name) {
+            return args.is_empty().then(|| ty.clone());
+        }
+        // functor 仮引数の抽象型（`shared type T = M.T` の `M.T`）。
+        if let Some((head, member)) = name.split_once('.') {
+            if let Some(internal) = functor_params.get(head) {
+                return Some(Ty::Abstract(format!("{internal}.{member}"), args));
+            }
+        }
+        // 実装内の局所型。ADT / record は実装名で修飾し、別名は本体を展開する。
+        if let Some(definition) = local.get(name) {
+            if definition.params.len() != args.len() { return None; }
+            let body = definition.ty.as_ref()?;
+            if matches!(body.kind, TypeKind::Record(_) | TypeKind::Adt(_)) {
+                return Some(Ty::Adt(format!("{module}.{name}"), args));
+            }
+            if visiting.iter().any(|seen| seen == name) { return None; }
+            let mut substituted = parameters.clone();
+            for (formal, argument) in definition.params.iter().zip(&args) {
+                substituted.insert(formal.name.clone(), argument.clone());
+            }
+            visiting.push(name.to_owned());
+            let result = self.shared_body_type(body, module, local, &substituted, functor_params, visiting);
+            visiting.pop();
+            return result;
+        }
+        if self.abstract_types.contains_key(name) {
+            return Some(Ty::Abstract(name.to_owned(), args));
+        }
+        if self.type_arities.get(name) == Some(&args.len()) {
+            return Some(Ty::Adt(name.to_owned(), args));
+        }
+        match name {
+            "Int" => Some(Ty::Int), "Float" => Some(Ty::Float), "Bool" => Some(Ty::Bool),
+            "Char" => Some(Ty::Char), "String" => Some(Ty::String), "Unit" => Some(Ty::Unit),
+            _ => None,
         }
     }
 

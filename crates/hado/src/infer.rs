@@ -155,6 +155,9 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
                 }
             }
         }
+        // 等式は型と効果の登録より前に集める。登録時に record schema と効果の操作型を
+        // 解けた型で作るため（26 節「等式の収集は型と効果の登録より前に置く」）。
+        checker.collect_shared_realizations(ast);
         let violations = crate::type_cycles::violations(ast, path);
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
