@@ -1,0 +1,5 @@
+def main =
+  let t0 = report::Report.add report::Report.empty "m0" 7 7 ->
+  let t1 = report::Report.add t0 "m7" 1 3 ->
+  let t2 = report::Report.add t1 "r31" 25 25 ->
+  report::Report.render t2

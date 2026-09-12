@@ -59,6 +59,53 @@ verify_library() {
     [ "$n" -ge 1 ]
 }
 
+# 32-j: E2 の要約プログラム。report.hd を単体で check し、実行時に生成した
+# 3 つ組で main.hd を書いて build → 実行。期待値は判定器側で計算する。
+verify_report() {
+    local rep="tools/gates/report/report.hd"
+    if ! cargo run --offline -q -- check "$rep" >"$workdir/rep-out" 2>"$workdir/rep-err"; then
+        echo "  report.hd rejected: $(cat "$workdir/rep-err")"
+        return 1
+    fi
+    if [ -s "$workdir/rep-out" ] || [ -s "$workdir/rep-err" ]; then
+        echo "  report.hd diagnostics"
+        return 1
+    fi
+    local base="$workdir/32j"
+    mkdir -p "$base"
+    cp -r tools/gates/report "$base/report"
+    local names=("a$RANDOM" "b$RANDOM" "c$RANDOM")
+    local totals passed i
+    totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
+    passed=("${totals[0]}" "$((RANDOM % totals[1]))" "$((RANDOM % (totals[2] + 1)))")
+    local red=()
+    for i in 0 1 2; do
+        if [ "${passed[$i]}" -lt "${totals[$i]}" ]; then red+=("${names[$i]}"); fi
+    done
+    local red_str="none"
+    if [ "${#red[@]}" -gt 0 ]; then red_str="${red[*]}"; fi
+    local sum_passed=$((passed[0] + passed[1] + passed[2]))
+    local sum_total=$((totals[0] + totals[1] + totals[2]))
+    local expected="$sum_passed/$sum_total passed; red: $red_str"
+    {
+        printf 'def main =\n'
+        printf '  let t0 = report::Report.add report::Report.empty "%s" %d %d ->\n' "${names[0]}" "${passed[0]}" "${totals[0]}"
+        printf '  let t1 = report::Report.add t0 "%s" %d %d ->\n' "${names[1]}" "${passed[1]}" "${totals[1]}"
+        printf '  let t2 = report::Report.add t1 "%s" %d %d ->\n' "${names[2]}" "${passed[2]}" "${totals[2]}"
+        printf '  report::Report.render t2\n'
+    } >"$base/main.hd"
+    if ! cargo run --offline -q -- build "$base/main.hd" >/dev/null 2>"$workdir/rep-build-err"; then
+        echo "  report build failed: $(cat "$workdir/rep-build-err")"
+        return 1
+    fi
+    local got status
+    got=$("$base/main" 2>"$workdir/rep-run-err"); status=$?
+    if [ "$status" -ne 0 ] || [ "$got" != "$expected" ]; then
+        echo "  report run want '$expected' got '$got' status=$status"
+        return 1
+    fi
+}
+
 mkdir -p "$workdir/32a" "$workdir/32b" "$workdir/32b2" "$workdir/32b3" "$workdir/32c1" "$workdir/32c2" "$workdir/32c3" \
     "$workdir/32d" "$workdir/32d1" "$workdir/32d2" "$workdir/32d3" "$workdir/32d4" "$workdir/32d5" "$workdir/32e" \
     "$workdir/32g1" "$workdir/32g2" "$workdir/32g3"
@@ -432,6 +479,9 @@ accept '32-d (3) 再確認 (同じファイルの実装から参照)' "$workdir/
 
 # 32-i: tests/library を代表ファイルから check して全件受理。
 check '32-i (tests/library 全件受理)' verify_library
+
+# 32-j: E2 の要約プログラムを check / build / 実行。
+check '32-j (E2 の要約を check / build / 実行)' verify_report
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
