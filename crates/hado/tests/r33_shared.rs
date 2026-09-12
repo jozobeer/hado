@@ -242,6 +242,18 @@ fn shared_functor_application_type_resolves_to_the_argument() {
 }
 
 #[test]
+fn a_shared_functor_application_type_is_known_before_its_owner_is_processed() {
+    // 適用結果 StringFold.T を参照する record schema は、適用 StringFold の処理より前に
+    // 登録される。前処理が適用結果の等式を先に置かないと field が不透明のまま E305 に
+    // なる。functor の契約 arity を署名から取って照合しないと、前処理の登録が落ちる。
+    let source = format!(
+        "def main = read ({{ value = StringFold.fold [\"a\"] }})\ndef read box => String.concat box.value \"!\"\ntype Box = {{ value: StringFold.T }}\n{FOLD_CONTRACTS}\n\n{STRING_MONOID}\n\n{}\nimplement Fold as StringFold = MakeFold(StringMonoid)",
+        make_fold("shared "));
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
 fn unmarked_functor_equation_keeps_the_application_type_distinct() {
     let source = format!("def main = StringFold.fold [\"a\"]\n{}", string_fold(""));
     let error = check_source(&source, "t").err().expect("an unmarked functor equation stays opaque");
