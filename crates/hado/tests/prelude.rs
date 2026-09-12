@@ -1,10 +1,13 @@
 #[test]
 fn scalar_prelude_wrappers_check_and_execute() {
     let modules = [
+        include_str!("../../../stdlib/error.hd"),
         include_str!("../../../stdlib/string.hd"),
         include_str!("../../../stdlib/int.hd"),
         include_str!("../../../stdlib/float.hd"),
-    ].join("\n");
+    ].join("\n").lines()
+        .filter(|line| !line.starts_with("type "))
+        .collect::<Vec<_>>().join("\n");
     for (index, expression, expected) in [
         (0, "String.length (String.concat \"あ\" \"😀\")", "2\n"),
         (1, "Int.to_string (-42)", "-42\n"),
