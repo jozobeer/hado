@@ -1,6 +1,14 @@
 use super::*;
 use crate::parser::{ImplementationForm, ModuleImpl, ModuleSig};
 
+// 前処理が functor 定義から集めた共有等式と、適用の契約名を照合するための情報。
+// 等式を適用結果へ登録する前に、結果契約と各引数の契約を照合するために持つ。
+struct FunctorShared {
+    result_contract: String,
+    parameters: Vec<(String, String)>,
+    shared: HashMap<String, TypeRealization>,
+}
+
 #[derive(Clone)]
 pub(super) struct Template {
     module: ModuleImpl,
@@ -80,7 +88,7 @@ impl Checker<'_> {
             Item::ModuleSig(signature) => Some((signature.name.as_str(), signature)),
             _ => None,
         }).collect();
-        let mut templates: HashMap<String, (Vec<String>, HashMap<String, TypeRealization>)> = HashMap::new();
+        let mut templates: HashMap<String, FunctorShared> = HashMap::new();
         let mut additions: HashMap<String, TypeRealization> = HashMap::new();
         for item in &ast.items {
             let Item::ModuleImpl(module) = item else { continue };
@@ -94,7 +102,11 @@ impl Checker<'_> {
                         .map(|parameter| (parameter.name.clone(), parameter.contract.clone()))
                         .collect();
                     let shared = self.module_shared_map(module, &internal, &contracts, &signatures);
-                    templates.insert(module.name.clone(), (parameters.iter().map(|parameter| parameter.name.clone()).collect(), shared));
+                    templates.insert(module.name.clone(), FunctorShared {
+                        result_contract: module.sig.clone(),
+                        parameters: parameters.iter().map(|parameter| (parameter.name.clone(), parameter.contract.clone())).collect(),
+                        shared,
+                    });
                 }
                 ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new(), &HashMap::new(), &signatures)),
                 ImplementationForm::Application { .. } => {}
@@ -104,13 +116,23 @@ impl Checker<'_> {
             let Item::ModuleImpl(module) = item else { continue };
             let ImplementationForm::Application { functor, arguments } = &module.form else { continue };
             if self.ambiguous_modules.contains(&module.name) { continue; }
-            let Some((parameters, shared)) = templates.get(&functor.name) else { continue };
-            if parameters.len() != arguments.len() { continue; }
+            let Some(template) = templates.get(&functor.name) else { continue };
+            // 等式を適用結果へ登録する前に契約名を照合する。食い違う適用の等式を登録すると、
+            // 適用結果と引数の実体化で抽象型の arity が食い違い `TypeRealization::apply` の
+            // assert に到達する。登録しなければ application() が E602 を出す。
+            if template.result_contract != module.sig { continue; }
+            if template.parameters.len() != arguments.len() { continue; }
+            let contracts_match = template.parameters.iter().zip(arguments).all(|((_, contract), argument)| {
+                self.source_modules.get(&argument.name)
+                    .filter(|actual| !matches!(actual.form, ImplementationForm::Functor(_)))
+                    .is_some_and(|actual| actual.sig == *contract)
+            });
+            if !contracts_match { continue; }
             let mut names = HashMap::from([(functor.name.clone(), module.name.clone())]);
-            for (parameter, argument) in parameters.iter().zip(arguments) {
-                names.insert(format!("{}${}", functor.name, parameter), argument.name.clone());
+            for (parameter, argument) in template.parameters.iter().zip(arguments) {
+                names.insert(format!("{}${}", functor.name, parameter.0), argument.name.clone());
             }
-            for (name, realization) in shared {
+            for (name, realization) in &template.shared {
                 additions.insert(crate::functor_instances::rename(name, &names), TypeRealization {
                     parameters: realization.parameters.clone(),
                     body: realization.body.rename_modules(&names),
