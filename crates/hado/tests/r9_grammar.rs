@@ -10,6 +10,7 @@ struct Generator {
     declarations: usize,
     allow_resume: bool,
     library_emitted: bool,
+    shared_emitted: bool,
 }
 
 impl Generator {
@@ -44,6 +45,7 @@ impl Generator {
     fn program(&mut self) -> String {
         self.declarations = 0;
         self.library_emitted = false;
+        self.shared_emitted = false;
         self.mark("program", 1, 0);
         let outer_count = self.choose("outer_item*", 3);
         let section_count = self.choose("section*", 3);
@@ -235,7 +237,13 @@ impl Generator {
             format!("{} : {}{sig_name}", g.name(true), g.path())
         }, " , ");
         self.declarations += 2;
-        (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) type {abstract_name} = Int", self.path()), sig_name, name)
+        let shared = if self.choose("functor_shared", 2) == 0 {
+            self.shared_emitted = true;
+            "shared "
+        } else {
+            ""
+        };
+        (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) {shared}type {abstract_name} = Int", self.path()), sig_name, name)
     }
 
     fn apply_section(&mut self) -> String {
@@ -250,12 +258,17 @@ impl Generator {
     }
 
     fn implement_item(&mut self, abstract_name: &str) -> String {
-        match self.choose("implement_item", 3) {
+        match self.choose("implement_item", 4) {
             0 => self.definition(),
             1 => self.type_definition(),
-            _ => {
+            2 => {
                 self.declarations += 1;
                 format!("type {abstract_name} = {}", self.type_expr(2))
+            }
+            _ => {
+                self.declarations += 1;
+                self.shared_emitted = true;
+                format!("shared type {abstract_name} = {}", self.type_expr(2))
             }
         }
     }
@@ -695,7 +708,7 @@ fn tokens(source: &str) -> Vec<&str> {
 enum Shape {
     Definition(String, bool, Option<Vec<Param>>, Option<TypeExpr>, Node),
     SignatureDefinition(String, Vec<String>, Vec<Param>, Option<TypeExpr>),
-    Type(String, Vec<String>, Option<TypeExpr>),
+    Type(String, Vec<String>, Option<TypeExpr>, bool),
     Signature(String, Vec<Shape>),
     Module(String, String, ImplementationShape, Vec<Shape>),
     Effect(String, Vec<String>, Vec<(String, String, Vec<Param>, Option<TypeExpr>)>),
@@ -730,7 +743,7 @@ fn shapes(items: &[Item]) -> Vec<Shape> {
             DefKind::Function { params, ret, body } => Shape::Definition(def.name.clone(), def.rec, Some(params.clone()), ret.clone(), body.clone()),
         },
         Item::SigDef(def) => Shape::SignatureDefinition(def.name.clone(), def.type_params.iter().map(|name| name.name.clone()).collect(), def.params.clone(), def.ret.clone()),
-        Item::TypeDef(def) => Shape::Type(def.name.clone(), def.params.iter().map(|name| name.name.clone()).collect(), def.ty.clone()),
+        Item::TypeDef(def) => Shape::Type(def.name.clone(), def.params.iter().map(|name| name.name.clone()).collect(), def.ty.clone(), def.shared),
         Item::ModuleSig(sig) => Shape::Signature(sig.name.clone(), shapes(&sig.items)),
         Item::ModuleImpl(module) => Shape::Module(module.name.clone(), module.sig.clone(), implementation_shape(&module.form), shapes(&module.items)),
         Item::Effect(effect) => Shape::Effect(
@@ -765,8 +778,10 @@ fn declaration_count(items: &[Item]) -> usize {
 fn grammar_generated_programs_preserve_every_declaration() {
     let mut generator = Generator { state: 0x4152_395f_4752_414d, ..Generator::default() };
     let mut library_seen = false;
+    let mut shared_seen = false;
     for sample in 0..1200 {
         let source = generator.program();
+        shared_seen |= generator.shared_emitted;
         let ast = parser::parse_source(&source, "generated-grammar.hd")
             .unwrap_or_else(|error| panic!("sample {sample}: {error}\n{source}"));
         library_seen |= ast.library.is_some();
@@ -782,6 +797,7 @@ fn grammar_generated_programs_preserve_every_declaration() {
         assert_eq!(canonical, parser::canonical_program(&restored));
     }
     assert!(library_seen, "generator never emitted library");
+    assert!(shared_seen, "generator never emitted shared");
     let spec = include_str!("../../../docs/spec.md");
     let grammar = spec.split("# 41.").nth(1).unwrap().split("# 42.").next().unwrap();
     let rules: BTreeSet<_> = grammar.lines().filter_map(|line| line.split_once(":=").map(|(name, _)| name.trim())).collect();
