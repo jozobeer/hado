@@ -2173,3 +2173,68 @@ m0 の赤が m2 の 5・m3 の 9・m7 の 3・r23 の 23-c に連鎖した。
 **24.9 の未確認のうち R32 で確定したもの。** `trusted_start` は行の閾値で、prelude を prelude 無しで検査する経路は `stdlib/` を渡したときだけ存在し、上の (2) のとおり通らない。外の `def` の E100 は単一ファイルの parse では決められず、`Project::load` の `role_error` で決めている（既にそうだった）。`library` を `.hdi` に置くと `role_error` の `interface` の枝で E100。ユーザーの `type Bytes` / `type Array` は今は受理される（R34 / R35 で E205）。不透明な抽象型どうしの `==` は受理して `true`。`types.rs:515-519` の `Abstract` の単一化は名前比較（R33 の前提）。
 
 **次の一手:** R33（型の共有）。手順書は 26 節。
+
+## R33 型の共有（2026-09-12）
+
+24.1 の B（B1〜B5）を実装した。`implement` の中でだけ `shared type T = <本体>` を受理し、契約の抽象型に等式を与える。等式は「解けた型への置き換え」で作り、不透明の機構（`types.rs:515-519` の名前比較による単一化）は触っていない。`shared` の型は単一化・E601・E705・印字のすべてで解けた型として振る舞い、印なしの `type T = ...` は今までどおり不透明のままである。**全門番のうち許容される赤（m1-corpus の pairs、m7、その連鎖）以外が満点・終了コード 0、`cargo test --offline --no-fail-fast` が 0 failed。**
+
+指揮・計画は claude（fable-5.1 / opus-5）、実装と修正は opencode（`opencode-go/deepseek-v4.1-flash`、`opencode run` の非対話、本リポジトリで直接作業）、計画審査（2 巡）と実装審査（工程ごと + 修正の再審査）は codex（gpt-6-astra medium、`codex exec`、使い捨てコピーで欠陥注入つき）。
+
+| 判定 | 実測 |
+|---|---|
+| 33-0 | `shared` を書かないライブラリの構文が受理（stdout / stderr 0 バイト）。`shared` に意味の無い工程では、印なしの `T` を `main` に残すと E705 になる |
+| 33-a | `shared type T = String` の `combine` が String に解けて実行値が一致。functor の `shared type T = M.T` は、引数が `shared` なら解け（`fold` が `String List` を取る）、印なしなら不透明のまま（公開関数で String に戻して実行値を測る）。適用結果の `StringFold.T` も引数の等式で解ける |
+| 33-b | 印なしは E305 で `StringMonoid.T` を出す。印なし functor の 2 適用は別の抽象型（`r21_functors.rs:109` の固定を保つ）。印なし functor を `shared` の引数に適用しても `T` は不透明 |
+| 33-c | `shared` + ADT 本体は E100（`\|` の位置）、record 本体は E100（`{` の位置）、契約に無い型は E204（型名の位置）、外・契約の中・`shared` の後の `def` は E100 |
+| 33-d | `shared` で E705 が緩和されて整数を印字。緩和なしは E705 で `def main` |
+| 33-e | `shared` で E601 が緩和されて field が読める。緩和なしは E601 で field の `.` |
+| 33-f | `--print-type` が `String` を出す。E305 の診断は `String` と `Int` で `.T` を含まない。functor の適用結果も `String` と印字 |
+| 33-g | 契約修飾型 `Id.T` が `shared` で `Int` に解ける。実装が 2 つなら E603。印なしの実装では `Int` を `Id.T` に渡せない |
+| 33-h | 型引数付き `shared type A T = A List` の `push` と注釈が通る |
+| 33-i | `shared type T = T`、`shared` の相互参照、functor 適用の輪がすべて E602 で止まる（core dump しない）。印なしの `type T = T` も E602 |
+| 33-j | `r9_grammar` が `shared` を生成し、`r23_syntax` と往復が緑 |
+| 33-k | `tools/gates/report/report.hd` が単体 `check` で受理。実物の `main.hd` が `Report.T` を fold して `render`。実行時生成の 3 つ組・全緑・空の 3 形が一致。`shared` を消した写しは E601 か E705 |
+| 33-l | 受理コーパス 4 本（`shared_string_monoid` `shared_functor` `shared_store_int` `shared_user_record`、`// item: 型の共有`）、lock 190 行が `sha256sum --strict -c` で全件 OK |
+| 前処理（設計変更） | 未注釈の関数が record の field を読む / record パターンの束縛 / 効果の操作の payload / handler の腕 / 関数型 / 効果行付きの関数型の 6 形が受理され、`shared` を消した対照はすべて型検査で落ちる |
+| arity と契約（panic 防止） | 左辺の個数不一致（多い・少ない）、右辺の参照先の arity 不一致、型引数過剰な右辺、functor 本文の仮引数の arity 不一致、functor 適用の結果契約・引数契約の不一致の 7 形が、**終了コード 101 でなく**対照と同じ診断で終了 1。正の対照（二段適用・複数抽象型・二型引数）は受理して実行値が一致 |
+| `verify-r33.sh` | `PASSED: 73/73` |
+| 単体 | `cargo test --offline --no-fail-fast` が 0 failed（`r33_shared` は 44 passed） |
+
+
+**設計を工程 1 の途中で変えた。これが R33 の最大の出来事である。** 当初の決定（26 節）は「`reveal_shared` を通す場所は 4 つ。`records` や効果の操作の型など 5 箇所目が見つかったら、中断せず報告して通す」だった。実際には 5 箇所目が出続けた。修正 1 で constructor の適用・record 構築・局所型名の修飾（審査の致命 3）、修正 2 でパターンの payload と field 射影（審査の致命 2）、修正 3 で named constructor の構築とパターン（builder 自身の棚卸し）。ここまでで消費点 12（`instantiate(` の命中: `infer.rs` 9 + `infer/named.rs` 2 + `infer/functors.rs` 1）のうち 5 箇所に展開を撒いた。それでもまとめ審査（3 巡目）が新規 4 件を出した。推論で型が決まる record、record パターン、効果の操作、handler の腕である。4 件とも指揮者が本物のリポジトリで再現した。
+
+**原因は消費点の網羅ではなく順序だった。** `shared_realizations` が埋まるのは `infer.rs:579`（`checker.module()` の中、`inference_groups` のループ内）と `functors.rs:155` だが、`register_type` と `register_effects`（`:176`）はそのループより前に走る。したがって `type Box = { value: Store.T }` の record schema と `capture send(value: Store.T)` の操作型は、`annotation_inner`（`:1672`）が `reveal_shared` を通っても、その時点で等式が空なので `Ty::Abstract` のまま登録される。実装より前のグループで推論される未注釈の定義も、`resolve_projections(false)`（`:632` `:714`）の時点で等式が空である。指揮者の判別実験: 同じ record・同じ field 射影でも、`main` に畳んで `Store` に構文的に依存させた形は `check` が終了 0 で通る。順序が効いていることの実測である。
+
+対応として 26 節の決定を訂正し（`1877907`）、AST から `shared type T = body` を集める前処理を型と効果の登録の前に置く設計変更に切り替えた（`40a7e50` `f451918` `d2f486f`）。消費点の展開は refactor コミットで 6 関数・10 呼び出し分を外し、判定器が緑のままであることを測った。`reveal_shared` として残るのは入口（`:229` `checked.main`、`:663` `:667` `signature_type` の公開面、`:1666` `annotation_inner`）と E705 / E702 の検査（`:1799` `:1821`）の 6 箇所だけである。判定器は 46/54 から 54/54 に増え、探針 10 本（審査 1 巡目の 3 本、2 巡目の 2 本、棚卸しの 1 本、3 巡目の 4 本）がすべて期待どおりになった。前処理の 1 行をコメントアウトする注入で 3 巡目の 4 探針が 4 本とも落ちることも実測している。
+
+**連鎖の固定点は反復せずに済んだ。** `A.T = B.T`、`B.T = String` のような連鎖は、前処理が等式を格納した後に `Ty::reveal` が再帰置換するので、前処理側でループを回さなくても実効的に固定点になる。前処理が保証するのは「輪を作らない」ことだけで、それは `functors.rs` の `introduces_cycle` に任せた。既存の挿入（`infer.rs:582` と functor 適用）は同じ鍵で後から上書きするので、前処理と矛盾しない。
+
+**前処理が本体を解けない等式は挿入しない。** 解ける条件は組み込み型、top-level 型の arity、実装内の局所型（`Impl.Name` に修飾し、局所別名は展開）、別モジュールの抽象型、functor の仮引数である。実装本体の推論は行わないので、中断の条件（本体の推論が要る）には当たらなかった。
+
+**設計変更の後、工程 1 の審査は 2 回とも致命 1 件で、指摘の質が変わった。** 1 回目は前処理の穴（下記）、2 回目は判定器の判定力（効果行付き関数型の正例で `parse` が `if input == "" => raise` の形になっており、乱数の入力が常に非空なので `raise` が実行されていなかった）。修正 6 は判定器だけを直し、`crates/hado/src/` に差分を出していない。**設計変更の前は毎回「別の消費点」が出ていたのに対し、後は 1 件ずつで、しかも実装の欠陥は 1 つだけだった。**
+
+**設計変更の後、審査は前処理の穴を 1 つ見つけた。** `shared_body_type` が `TypeKind` の `Name` と `Apply` だけを取り、関数型（`Fn` は `Apply("Fn", [Group([...]), 戻り])` の形）を落としていた。`shared type T = Fn(String => String)` は等式が入らず、`Store` に構文的に依存しない定義から呼ぶと E305 になった。修正 5 で `annotation_inner` と同じ形の枝を足し、`TypeKind` の全 variant の棚卸しを報告させた。**設計変更前と違い、指摘は 1 件で、消費点ではなく前処理の内部に閉じている。**
+
+**教訓（24.9 へ）:** 不透明型に等式を公開するときは、等式の収集を型と効果の登録より前に置く。等式を消費点に散らす方式は、消費点を数え上げても閉じない。原因が消費点の外（登録の順序）にあるからである。
+
+**builder が暴走の形を 1 つ捕まえた。** 工程 2 で `shared` の適用が循環する形（`shared type T = M.T` の相互参照）で `check` が core dump した。builder は E602 に固定した（`59b938a`）。v0.2.3 には無い形なので `docs/bug.md` 行きではない。
+
+**指揮者の期待値の誤りが 2 件、いずれも同じ罠だった。** 工程 0 の「33-0 は受理」と工程 2 の「33-a(1b) は受理して実行」で、どちらも「印なしの `T` は `main` に残せない」（§5、E705）を見落としていた。前者は `shared` に意味の無い工程だったので E705 が正しく、後者は公開関数 `show` で `String` に戻して測る形に変えた。R34 の手順書ではこの罠を計画審査の観点に明記した。
+
+**仕様への疑義:** 無し。単一化への unfold は要らず、中断の条件には当たらなかった。
+
+**所要（opencode / codex のログの首尾）:** 工程 0 が 12.8 分 + 修正 5.0 分、工程 1 が 13.8 分 + 修正 7 回（11.7 / 8.1 / 6.0 / 14.8 / 9.4 / 12.9 / 13.0 分）、工程 2 が 17.5 分 + 修正 12.9 分、工程 3 が 15.6 分。計画審査は 1.7 分と 0.9 分、実装審査は 4.4〜9.3 分（工程 1 の完成形の審査は 5 回）。**工程 1 だけで修正 7 回・審査 6 回を要し、R33 の時間の 7 割を占めた。**
+
+**審査モデルが 1 回止まった。** 工程 1 の最終審査で codex が `This content was flagged for possible cybersecurity risk` を返して 42 秒で終了し、判定行を出さなかった（判定は途中まで進んでおり、`verify-r33.sh 73/73` と 33-k の確認は出力済みだった）。フォールバックとして cursor（grok 4.6 xhigh、`-p`）に同じ依頼書で審査させ、合格を得た。cursor は完了時に一括出力するので、ログの静止を停止の根拠にしない。
+
+**最終審査（cursor）の軽微 3 点。** いずれも実装の欠陥ではなく、記述と診断コードの粒度である。(1) 表 A の `Ty::Adt` の 2 点は照合を外しても panic しない（assert は `Ty::Abstract` 専用なので、Adt の照合は panic 防止ではない）。(2) 表 B の書き込み `:147` の arity は、表が言う `shared_body_type` ではなく左辺の照合が実効である。(3) 右辺の型引数が過剰な形は E602 ではなくコード無しの `type annotation is not implemented`（`annotation_inner`）に落ちる。`shared` を外した対照も同じ診断なので、判定器は対照との本文一致で測っている。R33 では直さない。
+
+**101 の発火点は前処理の外だった。** cursor が stack を追い、`types.rs:697`（assert）← `types.rs:721`（`reveal`）← `infer.rs:671`（`reveal_shared`）← `infer.rs:1666`（`annotation_inner`）← `register_type` である。等式を書いたのは前処理だが、落ちるのは登録時の展開である。前処理の検査は「不正な等式を入れない」ことでしか panic を防げない。
+
+**24.9 の未確認のうち R33 で確定したもの。** `types.rs:515-519` の単一化（名前比較）は触らずに済み、中断の条件（単一化への unfold）には当たらなかった。`shared` の適用が循環する形は v0.2.3 に無い形で、E602 に固定した（`docs/bug.md` 行きではない）。前処理の等式は `Ty::reveal` の再帰置換で実効的に固定点になるので、収集側で反復する必要は無い。functor の契約の arity は `abstract_types` からは取れず、署名（`ModuleSig`）から取る。
+
+**24.9 へ足す教訓。** (1) 不透明型に等式を公開するときは、等式の収集を型と効果の登録より前に置く。等式を消費点に散らす方式は、消費点を数え上げても閉じない。(2) **同じ意味の型解決を 2 本持つと、片方の検査の写し落としが panic になる。** 前処理 `shared_body_type` は `annotation_inner` の別実装で、食い違いが審査 3 巡で 3 種（`Fn` の枝、arity の照合、契約名の照合）出た。次に同種の前処理を書くなら、`annotation_inner` を段階（登録前 / 後）で切り替えられる形にするか、構築点を 1 つの helper に寄せて assert の前で必ず照合する。(3) `TypeRealization::apply` の assert が、この 3 種の写し落としを 8 探針すべてで捕まえた。**panic する門番は、黙って誤った型を通す実装より安全である。**
+
+**副作用。** `tools/gates/report/report.hd` の `Tally` が契約の抽象型 `T` になり、`main.hd` が `Report.T` の field を 1 箇所読む形になった（`shared` が無ければ E601 / E705 で書けない）。出力は `33/35 passed; red: m7` のまま変えていない。
+
+**次の一手:** R34（Bytes と String の 5 操作）。手順書は 27 節で、計画審査 2 巡（1 巡目は重大 3 件で不合格、`fields` の効果行・lock 更新の工程・String と Bytes の変換 intrinsic を直して 2 巡目で合格）を通してある。
