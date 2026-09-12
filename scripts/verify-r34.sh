@@ -90,8 +90,8 @@ write(
 )
 add("c1", "34-c(1) of_string の length はバイト数で String.length と異なる", "print")
 
-# 34-c(2a): of_list → to_list の往復。
-payload = [random.randint(0, 255) for _ in range(random.randint(1, 9))]
+# 34-c(2a): of_list → to_list の往復。区切りの判定力を保つため 2 要素以上にする。
+payload = [random.randint(0, 255) for _ in range(random.randint(2, 9))]
 write("c2a", f"def main = Bytes.to_list (Bytes.of_list [{lit(payload)}])\n", expect=plist(payload) + "\n")
 add("c2a", "34-c(2a) of_list → to_list の往復", "print")
 write("c2a_empty", "def main = Bytes.to_list (Bytes.of_list [])\n", expect="[]\n")
