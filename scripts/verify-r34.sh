@@ -266,20 +266,47 @@ write(
 add("c4a_valid", f"34-c(4a) 負の対照 同じ長さの範囲内列 {plist(range_values)} は受理・値一致", "print")
 
 # 34-c(4b): 不正 UTF-8。
-write("c4b", "def main = Bytes.to_string (Bytes.of_list [255])\n", expect_error="InvalidUtf8")
-add("c4b", "34-c(4b) to_string 255 は InvalidUtf8", "error")
-for scalar in (0x10FFFF, 0x110000):
-    encoded = [0xF0 | (scalar >> 18)] + [
-        0x80 | ((scalar >> shift) & 0x3F) for shift in (12, 6, 0)
+def utf8_bytes(scalar, width):
+    if width == 1:
+        return [scalar]
+    return [((0xFF << (8 - width)) & 0xFF) | (scalar >> (6 * (width - 1)))] + [
+        0x80 | ((scalar >> shift) & 0x3F) for shift in range(6 * (width - 2), -1, -6)
     ]
-    kind = f"c4b_{scalar:x}"
-    source = f"def main = Bytes.to_string (Bytes.of_list [{lit(encoded)}])\n"
-    if scalar <= 0x10FFFF:
-        write(kind, source, expect=chr(scalar) + "\n")
-        add(kind, "34-c(4b) U+10FFFF は受理", "print")
-    else:
-        write(kind, source, expect_error="InvalidUtf8")
-        add(kind, "34-c(4b) U+110000 は InvalidUtf8", "error")
+
+
+invalid_utf8 = [
+    ("overlong3", utf8_bytes(0, 3)),
+    ("overlong4", utf8_bytes(0, 4)),
+    ("overlong2", utf8_bytes(0x2F, 2)),
+    ("surrogate", utf8_bytes(0xD800, 3)),
+    ("lone_continuation", [0x80]),
+    ("truncated1", utf8_bytes(0x3042, 3)[:1]),
+    ("truncated2", utf8_bytes(0x3042, 3)[:2]),
+    ("invalid_lead", [0xFF]),
+    ("five_bytes", utf8_bytes(0, 5)),
+    ("above_max", utf8_bytes(0x110000, 4)),
+]
+valid_utf8 = [(0x41, 1), (0x80, 2), (0x800, 3), (0x10000, 4), (0x10FFFF, 4)]
+for scalar, width in valid_utf8[:4]:
+    for position in range(1, width):
+        encoded = utf8_bytes(scalar, width)
+        encoded[position] = 0x41
+        invalid_utf8.append((f"bad_continuation{width}_{position}", encoded))
+
+for name, encoded in invalid_utf8:
+    kind = f"c4b_{name}"
+    write(kind, f"def main = Bytes.to_string (Bytes.of_list {plist(encoded)})\n",
+          expect_error="InvalidUtf8")
+    add(kind, f"34-c(4b) {name} {plist(encoded)} は InvalidUtf8", "error")
+
+for scalar, width in valid_utf8:
+    encoded = utf8_bytes(scalar, width)
+    assert bytes(encoded) == chr(scalar).encode("utf-8")
+    kind = f"c4b_valid_{scalar:x}"
+    write(kind,
+          f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
+          expect=f"Bytes.of_list {plist(encoded)}\n")
+    add(kind, f"34-c(4b) 負の対照 U+{scalar:04X} {plist(encoded)} は受理・往復一致", "print")
 
 # 34-c(4c): get の範囲外。
 write(

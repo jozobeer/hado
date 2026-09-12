@@ -83,6 +83,29 @@ fn bytes_is_utf8_and_display_at_the_c_level() {
 #include "hado_runtime.h"
 #include <assert.h>
 #include <string.h>
+typedef struct { size_t length; unsigned char bytes[5]; } Utf8Probe;
+
+static Utf8Probe utf8_bytes(uint32_t scalar, size_t width) {
+    Utf8Probe encoded = {width, {0}};
+    if (width == 1) {
+        encoded.bytes[0] = scalar;
+        return encoded;
+    }
+    encoded.bytes[0] = (0xff << (8 - width)) | (scalar >> (6 * (width - 1)));
+    for (size_t index = 1; index < width; ++index) {
+        encoded.bytes[index] = 0x80 | ((scalar >> (6 * (width - 1 - index))) & 0x3f);
+    }
+    return encoded;
+}
+
+static void assert_utf8_round_trip(const Utf8Probe *probe) {
+    const HadoString *original = (const HadoString *)probe;
+    assert(hado_bytes_is_utf8(original) == 1);
+    HadoString *result = hado_bytes_of_string(hado_bytes_to_string_unchecked(original));
+    assert(result->length == probe->length);
+    assert(memcmp(result->bytes, probe->bytes, probe->length) == 0);
+}
+
 int32_t hado_entry(void) {
     struct { size_t length; unsigned char bytes[3]; } valid = {3, {0xe3, 0x81, 0x82}};
     struct { size_t length; unsigned char bytes[1]; } invalid = {1, {0xff}};
@@ -105,14 +128,24 @@ int32_t hado_entry(void) {
     assert(hado_bytes_is_utf8((const HadoString *)&overlong) == 0);
     assert(hado_bytes_is_utf8((const HadoString *)&lone) == 0);
     assert(hado_bytes_is_utf8((const HadoString *)&surrogate) == 0);
+    for (size_t width = 3; width <= 5; ++width) {
+        Utf8Probe noncanonical = utf8_bytes(0, width);
+        assert(hado_bytes_is_utf8((const HadoString *)&noncanonical) == 0);
+    }
+    const uint32_t shortest[] = {0x41, 0x80, 0x800, 0x10000};
+    for (size_t index = 0; index < sizeof(shortest) / sizeof(shortest[0]); ++index) {
+        Utf8Probe encoded = utf8_bytes(shortest[index], index + 1);
+        assert_utf8_round_trip(&encoded);
+        for (size_t position = 1; position < encoded.length; ++position) {
+            Utf8Probe invalid_continuation = encoded;
+            invalid_continuation.bytes[position] = 0x41;
+            assert(hado_bytes_is_utf8((const HadoString *)&invalid_continuation) == 0);
+        }
+    }
     for (uint32_t scalar = 0x10ffff; scalar <= 0x110000; ++scalar) {
-        struct { size_t length; unsigned char bytes[4]; } boundary = {4, {
-            0xf0 | (scalar >> 18),
-            0x80 | ((scalar >> 12) & 0x3f),
-            0x80 | ((scalar >> 6) & 0x3f),
-            0x80 | (scalar & 0x3f)
-        }};
+        Utf8Probe boundary = utf8_bytes(scalar, 4);
         assert(hado_bytes_is_utf8((const HadoString *)&boundary) == (scalar <= 0x10ffff));
+        if (scalar <= 0x10ffff) assert_utf8_round_trip(&boundary);
     }
     assert(hado_bytes_length((const HadoString *)&two) == 2);
     assert(hado_bytes_get((const HadoString *)&two, 1) == 105);
