@@ -191,7 +191,7 @@ fn check_parsed_filtered(parsed: &ParsedSource, path: &str, reject_user_main_eff
     if let Err(error) = check::check_ast(ast, path) {
         diagnostics.push(error);
     }
-    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, path));
+    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, *inspection, path));
     // Why not keep E706 for --print-type: r24/r25 print `String {Ask}` on main.
     if !reject_user_main_effects {
         diagnostics.retain(|error| error.code.as_deref() != Some("E706"));

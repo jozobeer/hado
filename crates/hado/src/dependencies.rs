@@ -18,12 +18,30 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
     })
 }
 
-pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, other_entry_roots: &[String], path: &str) -> Vec<Diagnostic> {
+pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, other_entry_roots: &[String], inspection: crate::Inspection, path: &str) -> Vec<Diagnostic> {
     let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
     let graph = collector.graph(ast);
-    let mut used = transitive_references(&Key::Value("main".into()), &graph);
-    for name in other_entry_roots {
-        used.extend(transitive_references(&Key::Value(name.clone()), &graph));
+    let mut used = References::new();
+    match inspection {
+        crate::Inspection::Entry => {
+            used.extend(transitive_references(&Key::Value("main".into()), &graph));
+            for name in other_entry_roots {
+                used.extend(transitive_references(&Key::Value(name.clone()), &graph));
+            }
+        }
+        // A2: the public surface is the root. Outer `def`s are not roots, and
+        // prelude items keep their `.skip(prelude_items)` exemption (§49).
+        crate::Inspection::Library => {
+            for item in &ast.items {
+                let key = match item {
+                    Item::ModuleImpl(module) => Key::Module(module.name.clone()),
+                    Item::ModuleSig(contract) => Key::Signature(contract.name.clone()),
+                    Item::TypeDef(def) => Key::Type(def.name.clone()),
+                    _ => continue,
+                };
+                used.extend(transitive_references(&key, &graph));
+            }
+        }
     }
     let scope = Scope::default();
     for item in &ast.items {
@@ -34,6 +52,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     let mut diagnostics: Vec<_> = ast.items.iter().skip(prelude_items).filter_map(|item| {
         let (key, span) = declaration(item)?;
         let referenced = match &key {
+            Key::Signature(_) if inspection == crate::Inspection::Library => true,
             Key::Signature(name) => ast.items.iter().any(|item|
                 matches!(item, Item::ModuleImpl(module) if &module.sig == name && !matches!(module.form, ImplementationForm::Functor(_)))),
             _ => used.contains(&key),
