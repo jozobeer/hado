@@ -231,6 +231,10 @@ rand_ip="i${RANDOM}"
 rand_rp="q${RANDOM}"
 rand_eff="e${RANDOM}"
 rand_harm="h${RANDOM}"
+rand_fbody="f${RANDOM}"
+rand_fe_name="g${RANDOM}"
+rand_fe_prefix="p${RANDOM}"
+rand_fe_suffix="s${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
@@ -239,7 +243,8 @@ mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$wo
     "$workdir/33ident" "$workdir/33cyc" "$workdir/33pat" "$workdir/33patneg" "$workdir/33proj" "$workdir/33projneg" \
     "$workdir/33named" "$workdir/33namedneg" \
     "$workdir/33ip" "$workdir/33ipneg" "$workdir/33rp" "$workdir/33rpneg" \
-    "$workdir/33eff" "$workdir/33effneg" "$workdir/33harm" "$workdir/33harmneg"
+    "$workdir/33eff" "$workdir/33effneg" "$workdir/33harm" "$workdir/33harmneg" \
+    "$workdir/33fn" "$workdir/33fnneg" "$workdir/33fneff" "$workdir/33fneffneg"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -680,6 +685,39 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'handler Ask as Handle\ncapture get value => resume value\n'
 } >"$workdir/33harmneg/main.hd"
 
+# --- 工程 1 の修正 5: 関数型を本体とする shared の等式 ---
+# record schema の field の型が関数型の抽象型 Store.T のとき、record 登録より前に
+# 等式が解けていないと E305 になる。関数型と効果行も前処理で解く。
+
+# 正 1 (function-body): 未注釈の関数が record の field の関数を呼ぶ。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "!"\ntype Box = { value: Store.T }\n' "$rand_fbody"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n'
+} >"$workdir/33fn/main.hd"
+
+# 負 1: shared を外すと record schema の field は不透明のまま型検査が落ちる。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "!"\ntype Box = { value: Store.T }\n' "$rand_fbody"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n'
+} >"$workdir/33fnneg/main.hd"
+
+# 正 2 (function-with-effects): 効果行を持つ関数型。効果は実際に起きる形にする
+# (go は {Error} の parse を呼ぶ)。等式の効果行が解けていないと E301 / E305 になる。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\n' "$rand_fe_name" "$rand_fe_suffix"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\ndef make _ => go\n' "$rand_fe_prefix"
+} >"$workdir/33fneff/main.hd"
+
+# 負 2: shared を外すと効果行付きの field は不透明のまま型検査が落ちる。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\n' "$rand_fe_name" "$rand_fe_suffix"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\ndef make _ => go\n' "$rand_fe_prefix"
+} >"$workdir/33fneffneg/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
@@ -692,7 +730,8 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33pat/main.hd" "$workdir/33patneg/main.hd" "$workdir/33proj/main.hd" "$workdir/33projneg/main.hd" \
     "$workdir/33named/main.hd" "$workdir/33namedneg/main.hd" \
     "$workdir/33ip/main.hd" "$workdir/33ipneg/main.hd" "$workdir/33rp/main.hd" "$workdir/33rpneg/main.hd" \
-    "$workdir/33eff/main.hd" "$workdir/33effneg/main.hd" "$workdir/33harm/main.hd" "$workdir/33harmneg/main.hd"; do
+    "$workdir/33eff/main.hd" "$workdir/33effneg/main.hd" "$workdir/33harm/main.hd" "$workdir/33harmneg/main.hd" \
+    "$workdir/33fn/main.hd" "$workdir/33fnneg/main.hd" "$workdir/33fneff/main.hd" "$workdir/33fneffneg/main.hd"; do
     random_padding "$probe"
 done
 
@@ -758,6 +797,12 @@ accept_build_run '等式の前処理: 効果の操作 payload が解ける' "$wo
 expect_code_one_of '前処理の負 3: shared 無しの効果の操作 payload は型検査で落ちる' "$workdir/33effneg/main.hd" E305 E601 E705
 accept_build_run '等式の前処理: handler の腕で操作の結果型が解ける' "$workdir/33harm/main.hd" "$rand_harm"
 expect_code_one_of '前処理の負 4: shared 無しの handler の腕は型検査で落ちる' "$workdir/33harmneg/main.hd" E305 E601 E705
+
+# 工程 1 の修正 5: 関数型を本体とする shared の等式を前処理で解く。
+accept_build_run '前処理: 関数型の shared が record の field に届き呼べる' "$workdir/33fn/main.hd" "${rand_fbody}!"
+expect_code '前処理の負: 関数型の shared 無しは型検査で落ちる' "$workdir/33fnneg/main.hd" E305
+accept_build_run '前処理: 効果行付きの関数型の shared が record の field に届く' "$workdir/33fneff/main.hd" "${rand_fe_prefix}${rand_fe_suffix}"
+expect_code '前処理の負: 効果行付きの shared 無しは型検査で落ちる' "$workdir/33fneffneg/main.hd" E305
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
 grammar_and_keywords() {

@@ -392,3 +392,28 @@ fn unshared_named_constructor_payload_stays_abstract() {
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
+
+// --- 工程 1 の修正 5: 関数型を本体とする shared の等式 ---
+
+#[test]
+fn shared_function_realization_reaches_a_record_schema() {
+    // record schema の field の型が関数型の Store.T のとき、record 登録より前に等式が
+    // 解けていないと field は不透明のままになり、適用が E305 で落ちる。
+    let source = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_function_realization_stays_abstract() {
+    let source = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
+    let error = check_source(source, "t").err().expect("an unmarked function realization stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+}
+
+#[test]
+fn shared_function_realization_resolves_an_effect_row() {
+    let source = "def main = read ({ value = Store.make \"n\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = Fn(String => String {Error})\ndef go (suffix: String): String {Error} => String.concat \"hi\" (parse suffix)\ndef parse (input: String): String {Error} => if input == \"\" => raise { message = \"empty\" } | input\ndef make _ => go";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
