@@ -37,13 +37,13 @@ awk -F '|' '
     }
 ' "$TMPD/sec50.txt" >"$TMPD/codes.tsv"
 
-# --- shared: corpus item names (coverage column extraction, 2.2, 9.2, 11.2, 13.2 and 18.4 rows) ---
+# --- shared: corpus item names (coverage column extraction, 2.2, 9.2, 11.2, 13.2, 18.4 and 24.2 rows) ---
 awk -F '|' '
     {
         t=$2; name=$3
         gsub(/^ +| +$/, "", t)
         gsub(/^ +| +$/, "", name)
-        if (t != "2.2" && t != "9.2" && t != "11.2" && t != "13.2" && t != "18.4") next
+        if (t != "2.2" && t != "9.2" && t != "11.2" && t != "13.2" && t != "18.4" && t != "24.2") next
         if (name == "" || name == "項目名") next
         print name
     }
@@ -129,12 +129,12 @@ else
     fail 2 "sec39-examples:$c2_reasons"
 fi
 
-# --- check 3: accept covers all items of plan 2.2, 9.2, 11.2, 13.2 and 18.4; reject covers all but the exempt ---
+# --- check 3: accept covers all items of plan 2.2, 9.2, 11.2, 13.2, 18.4 and 24.2; reject covers all but the exempt ---
 c3_reasons=""
 n_items=$(wc -l <"$TMPD/items22.txt" | tr -d ' ')
 n_plan=$(awk -F '|' '
-    /^### 2\.2/ || /^### 9\.2/ || /^### 11\.2/ || /^### 13\.2/ || /^### 18\.4 仕様の項目/ { p=1; next }
-    /^### 2\.3/ || /^### 9\.3/ || /^### 11\.3/ || /^### 13\.3/ || /^### 18\.5/ { p=0 }
+    /^### 2\.2/ || /^### 9\.2/ || /^### 11\.2/ || /^### 13\.2/ || /^### 18\.4 仕様の項目/ || /^### 24\.2 仕様の項目/ { p=1; next }
+    /^### 2\.3/ || /^### 9\.3/ || /^### 11\.3/ || /^### 13\.3/ || /^### 18\.5/ || /^### 24\.3/ { p=0 }
     p {
         name=$2
         gsub(/^ +| +$/, "", name)
@@ -164,7 +164,15 @@ while IFS= read -r name || [ -n "$name" ]; do
     # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §48
     # - Unit payload: E509 (Ok(())) は Result と共に消え、§50 に拒否コードが無い。
     #   近くの拒否へ item: を寄せると被覆が嘘になる。
-    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ] && [ "$name" != "Unit payload" ]; then
+    # - 24.2 の runtime 失敗（Bytes・配列・String 操作・Int.parse・Env と Io）:
+    #   違反は実行時の Error で、拒否コーパスに当たるコンパイルコードが無い。
+    # - 複数の入口: 拒否形（main 無しの check）は A1 でライブラリ受理に変わった。
+    # - 型の共有: 違反は E100 / E204 で、そのコードは他の項目が使っている。
+    # - ライブラリ単位は R32 で E206 を拒否に使う。
+    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ] && [ "$name" != "Unit payload" ] \
+        && [ "$name" != "Bytes" ] && [ "$name" != "配列" ] && [ "$name" != "String 操作" ] \
+        && [ "$name" != "Int.parse" ] && [ "$name" != "Env と Io" ] \
+        && [ "$name" != "複数の入口" ] && [ "$name" != "型の共有" ]; then
         [ "$nr" -ge 1 ] || c3_reasons="$c3_reasons reject-missing:$name"
     fi
 done <"$TMPD/items22.txt"

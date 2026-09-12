@@ -1,4 +1,4 @@
-# 言語仕様案 v0.2
+# 言語仕様案 v0.3
 
 ## 1. 設計思想
 
@@ -164,13 +164,13 @@ let = local binding
 
 `let` の本体は `->` の右側に続く継続である。`let` は値を束縛するために使い、成功・失敗の伝播は行わない。
 
-プログラムの入口は、根のファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。
+プログラムの入口は、根のファイル（第54節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。渡したファイルに `main` が無いとき、`hado check` はそのディレクトリをライブラリとして検査し（第59節）、`hado build` は E206 とする。
 
-`main` に残ってよい効果は prelude の `Error` に限る。ユーザーが宣言した効果が `main` の型に残れば E706 とする。`main` の効果行は一般化せず、本体が持つ効果で閉じる。
+`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`。第49節、第57節）に限る。ユーザーが宣言した効果が `main` の型に残れば E706 とする。`main` の効果行は一般化せず、本体が持つ効果で閉じる。
 
-`main` の型は単相で、Fn と抽象型を含んではならない。`def main = []` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は不透明な `UserStore.T` を含み印字すれば中身が見えるため E705 とする。
+`main` の型は単相で、Fn と、`shared` で解けない抽象型を含んではならない。`def main = []` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は `shared` で解けない `UserStore.T` を含むため E705 とする。`shared` で具体型に解ける抽象型は E705 の対象外で、解けた型として印字してよい（第35節）。
 
-`main` の要求は実行ファイルという成果物の規則である。`main` が無い、または `main` が引数を持つプログラムは E206 とする。`main` の値の印字は第51節に従う。
+`main` の要求は実行ファイルという成果物の規則である。`main` が無いファイルを `hado build` に渡したとき、または `main` が引数を持つプログラムは E206 とする。`main` の値の印字は第51節に従う。
 
 ---
 
@@ -717,7 +717,7 @@ effect Error
 abort raise(error: Exception)
 ```
 
-境界は理由の有無である。値が無いだけで理由を持たないものは `Option`、理由を運ぶものは効果とする。`List` の探索は `Option` を返し、パースと I/O は効果を持つ。
+境界は理由の有無である。値が無いだけで理由を持たないものは `Option`、理由を運ぶものは効果とする。`List` の探索は `Option` を返し、パースと I/O と索引の範囲外は効果を持つ。
 
 理由に構造が要るなら、利用者が効果を宣言する（第57節）。
 
@@ -1007,7 +1007,9 @@ E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛し�
 
 引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 3 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => ()`、`def save(_: T): Unit {Error} => ()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）と、handler の腕（第58節。`abort raise _ => None`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
 
-未使用の判定は、外の `def` と `type`、契約、実装、functor、効果（第57節）、handler（第58節）、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第54節）ので、ファイルの中で数える。契約の抽象型の実体化（`type T = User` やconstructor付き本体）は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。functor の引数は E521（第56節）。型変数は E518（第10節）。`main` は例外である。prelude の定義は E513 の対象外である（第49節）。
+未使用の判定は、外の `def` と `type`、契約、実装、functor、効果（第57節）、handler（第58節）、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第54節）ので、ファイルの中で数える。契約の抽象型の実体化（`shared type T = User` やconstructor付き本体）は契約が使うので対象外である。`implement` 節の中の `def` は E514（第35節）。functor の引数は E521（第56節）。型変数は E518（第10節）。`main` は例外である。
+
+根に数えるものは検査の種類で分かれる。入口ファイルを渡した検査では `main` を根とし、渡さなかった入口ファイルの `main` も根に数える（第54節）。ライブラリ（第59節）では、通常の実装、functor の適用結果、未適用の functor、実装の無い契約、外の型、効果、handler を公開面として根にする。これらは参照されなくても E513 にならない。ライブラリの外の `def` はファイル内で数える（E513）。prelude の項目は公開面として根にする（第49節）。
 
 ---
 
@@ -1171,7 +1173,7 @@ def (A, B) map(value: A Option, f: Fn(A => B)): B Option
 
 宣言した型変数はその関数の型の中だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204、使われない型変数は E518 とする。
 
-契約の中の修飾型 `X.T` は、契約 `X` の抽象型 `T` を指す。契約は実装の名前を書かない。`X.T` が型として定まるのは、プログラムの中で契約 `X` を満たす実装がちょうど 1 つのときで、その実装の `T` である。実装が 0 か 2 つ以上なら E603 とし、その `X.T` を指す。functor の定義は実装に数えず、functor の適用結果は数える（第56節）。
+契約の中の修飾型 `X.T` は、契約 `X` の抽象型 `T` を指す。契約は実装の名前を書かない。`X.T` が型として定まるのは、プログラムの中で契約 `X` を満たす実装がちょうど 1 つのときで、その実装の `T` である。実装が 0 か 2 つ以上なら E603 とし、その `X.T` を指す。functor の定義は実装に数えず、functor の適用結果は数える（第56節）。`X.T` は、その実装の実体化が `shared` で解けるなら解けた型として扱う。印字と診断は `X.T` ではなく解けた型を出す。
 
 ```ocaml
 module UserStore
@@ -1187,7 +1189,7 @@ def = named definition
 
 で統一する。
 
-契約への参照は `implement` の見出しと、契約の中の `X.T` である。実装が 1 つも無い契約は E513 とする。
+契約への参照は `implement` の見出しと、契約の中の `X.T` である。実装が 1 つも無い契約は E513 とする（ライブラリ検査では公開面として根にする。第27節）。
 
 ---
 
@@ -1208,7 +1210,7 @@ def save user =>
 
 契約の member を満たす `def` は、使わない引数を `_` で受けられる（第27節）。
 
-型の参照 `Y.T` は、実装 `Y` の契約が宣言する抽象型 `T` を指し、外からは不透明である。`type T = User` の実体化は新しい名前を作らず、`Y.T` の中身を外に見せない。型引数付きの抽象型は、実体化の左辺でも型変数を名乗る。
+型の参照 `Y.T` は、実装 `Y` の契約が宣言する抽象型 `T` を指し、外からは不透明である。`type T = User` の実体化は新しい名前を作らず、`Y.T` の中身を外に見せない。`shared type T = User` の実体化は等式を外へ公開し、`Y.T` は `User` と同じ型になる。`shared` の右辺が別の抽象型（`shared type T = M.T`）なら、等式は抽象型どうしの同一性で、適用結果は引数の実体化に従う（第56節）。`shared` で解けた型は field 参照が許され、`def name (t: UserStore.T) => t.name` の E601 の対象外になる。`shared` は契約が宣言する抽象型の実体化にだけ前置でき、右辺が constructor 付き本体の形なら E100、契約に無い型に付ければ E204 とする。型引数付きの抽象型は、実体化の左辺でも型変数を名乗る。
 
 ```ocaml
 implement Stack as Stack
@@ -1261,11 +1263,12 @@ Int
 Float
 Char
 String
+Bytes
 ```
 
 Int は i64 とする。加減乗はオーバーフローで wrap する。`/` と `%` は `Int {Error}` を返す。除数 0 は `raise` し、`Exception` の `message` を `"DivisionByZero"` とする（第21節、第51節）。
 
-効果を持つのは Int の `/` と `%` に限る。
+Int の `/` と `%` は `{Error}`。String、Bytes、Array の範囲を要求する操作も `{Error}` とする（第49節）。§49 が `{Error}` と定める member 以外の組み込みは効果を持たない。
 
 除算の端は次とする。`i64::MIN / -1` は wrap して `i64::MIN`。`i64::MIN % -1` は `0`。
 
@@ -1273,7 +1276,7 @@ Float は f64 とする。Float の `/` は Float を返す。Float に `%` は�
 
 Bool は i8、Char は i32、Unit は i64 の 0 とする。Cranelift に i1 はない。
 
-Char は Unicode スカラ値とする。String は不変の UTF-8 とする。
+Char は Unicode スカラ値とする。String は不変の UTF-8 とする。Bytes は不変のバイト列とする。`String.length` はスカラ値の個数、`Bytes.length` はバイト数である。Array は要素型を 1 つ取る不変の列で、`get` は O(1)、`set` は新しい Array を返す。
 
 parameterized type：
 
@@ -1281,6 +1284,7 @@ parameterized type：
 T Option
 (K, V) Pair
 T List
+T Array
 ```
 
 ---
@@ -1565,13 +1569,14 @@ comment         := "//" 行末までの文字                   `--` と `#` は
 
 `_` 単独は wildcard であり名前ではない。`::` は名前空間の区切り（第55節）、`.` は member と field の区切りで、どちらも 1 つのトークンである。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
 
-キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `as` `not` `true` `false` と `Fn` `Pure` である。名前には使えない。
+キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `as` `library` `shared` `not` `true` `false` と `Fn` `Pure` である。名前には使えない。
 
 プログラム:
 
 ```text
 program         := outer_item* section*
-outer_item      := type_definition
+outer_item      := "library"
+                 | type_definition
                  | definition                                             根のファイルに限る（第54節）
 section         := module_section | implement_section | functor_section | apply_section
                  | effect_section | handler_section
@@ -1644,6 +1649,7 @@ impl_ref        := path? upper_name
 implement_item  := definition
                  | type_definition
                  | "type" type_vars? upper_name "=" type_expr             契約の抽象型の実体化に限る
+                 | "shared" "type" type_vars? upper_name "=" type_expr    等式を公開する実体化
 effect_section  := "effect" type_vars? upper_name effect_item*
 effect_item     := op_kind name "(" contract_param ("," contract_param)* ")" [":" result]
                  | op_kind name [":" result]                              引数を取らない操作
@@ -1654,7 +1660,7 @@ handler_item    := op_kind name param* "=>" expression
                  | "return" param "=>" expression
 ```
 
-契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書き、型変数は名前の前で宣言する（`def (A, B) map(...)`）。`as` はキーワードで、名前には使えない。`functor_section` と `apply_section` は第56節が定め、`apply_section` の後に `implement_item` を置くと E100 である。
+契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書き、型変数は名前の前で宣言する（`def (A, B) map(...)`）。`as` はキーワードで、名前には使えない。`shared` は実体化の等式を公開する印で、契約の抽象型にだけ前置できる（第35節）。`library` は外にだけ書け、そのディレクトリをライブラリ根にする（第59節）。1 ファイルに 1 つ、1 ディレクトリに 1 つで、2 つ目は E205 とする。`functor_section` と `apply_section` は第56節が定め、`apply_section` の後に `implement_item` を置くと E100 である。
 
 式（優先順位の低い方から）:
 
@@ -1825,7 +1831,7 @@ Unit は `()` とする。
 
 Fn を含む型への `==` `!=` は E703、`compare` は E704 とする。単相化時に判明する。
 
-`compare a b` は順序に応じて `-1`、`0`、`1` を返す。`compare` は値の空間の組み込みで、修飾なしで参照する（第47節）。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。
+`compare a b` は順序に応じて `-1`、`0`、`1` を返す。`compare` は値の空間の組み込みで、修飾なしで参照する（第47節）。FloatではNaN同士を同順位とし、NaNを他の全ての値より後に置く。`-0.0` と `+0.0` は同順位とする。Floatの `==`・`!=` はIEEE 754に従い、NaN同士の `==` はfalseである。Bytes の `==` `!=` と `compare` はバイト列の構造比較で、String と同じ規則による。Array の `==` `!=` と `compare` は要素型から派生する。要素型が Fn を含めば E703 / E704 とする。
 
 ---
 
@@ -1852,11 +1858,11 @@ def rec map values f =>
 
 # 47. 名前空間
 
-名前空間は型・契約・実装・constructor・値の 5 つとする。効果は契約の空間、handler は実装の空間、効果の操作は値の空間に入る（第57節、第58節）。型・契約・実装・constructor の 4 つはディレクトリごとに持ち、値の空間はファイルごとに持つ（第54節、第55節）。効果の操作は値の空間に入るが、ファイルごとではなくディレクトリごとに見え、書けるのは効果を宣言したディレクトリの中だけである（第57節）。値の空間でこの例外を持つのは操作だけである。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
+名前空間は型・契約・実装・constructor・値の 5 つとする。効果はこの 5 つとは別の空間、handler は実装の空間、効果の操作は値の空間に入る（第57節、第58節）。型・契約・実装・constructor の 4 つの名前空間と効果はディレクトリごとに持つ。値の空間はファイルごとに持つ（第54節、第55節）。効果の操作は値の空間に入るが、ファイルごとではなくディレクトリごとに見え、書けるのは効果を宣言したディレクトリの中だけである（第57節）。値の空間でこの例外を持つのは操作だけである。どの名前空間でも解決できない名前の参照は E204 とする。`T Option`（型）、`module Option`（契約）、`implement Option as Option`（実装）、`Option.map`（実装の値）は共存する。`implement` の直後の名前と functor の引数の契約は契約として解く。`.` の左の名前は、契約の中では契約（第34節の `X.T`）、それ以外では実装として解く。
 
 型と constructor は別の空間である。同じ名前空間内の同名宣言は E205 とする。`implement` 節の中の ADT と record とその constructor は、その実装だけの局所的な空間にあり、実装同士の同名は E205 にならない。外の型と同名なら E205 とし、実装の中の宣言を指す。契約の抽象型と同名のconstructor付き型定義は実体化であり、constructorを持たないrecord型定義は E205 である（第35節）。修飾した参照 `A.B` と `a::B` が解決できないときの E204 は、解決できない最初の名前を指す（`A` が契約や実装として解決できなければ `A`、`A` は解決して `B` が無ければ `B`）。束縛の shadowing（`Member(user) => user.name` の `user`）は許す。
 
-prelude の constructor `Some` `None` は修飾なしで参照できる。prelude の効果 `Error` は契約の空間にあり、その操作 `raise` は値の空間にあってどこからでも書ける（第57節）。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。`compare` は値の空間の組み込みで、修飾なしで参照できる（第45節）。
+prelude の constructor `Some` `None` は修飾なしで参照できる。prelude の効果 `Error` は効果の空間にあり、その操作 `raise` は値の空間にあってどこからでも書ける（第57節）。`Nil` `Cons` は名前空間にあるが、利用者のコードに書くと E510 か E516 になる（第46節）。`compare` は値の空間の組み込みで、修飾なしで参照できる（第45節）。prelude の効果 `Env` `Io` の操作も値の空間にあり、どこからでも書ける（第49節、第57節）。組み込み型の名前（`Int` `Float` `Bool` `Char` `String` `Bytes` `Array`）と prelude の `Option` `List` `Exception` は予約で、利用者が同じ名前を宣言すると E205 とする。prelude の効果名 `Error` `Env` `Io` も予約で、利用者の同名宣言は E205 とし、利用者の宣言を指す。
 
 `__` で始まる名前は呼び出し位置でしか参照できず、値化はファイルの場所によらず E203 とする。呼び出し位置では `stdlib/` のファイルでのみ解決し、ユーザーコードでは E202 とする。
 
@@ -1876,7 +1882,7 @@ prelude の constructor `Some` `None` は修飾なしで参照できる。prelud
 
 # 49. prelude
 
-言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Error` とする。`/` の戻り型、`let p? =` の対象、List リテラルの展開先、`main` に残せる効果に用いる。
+言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Error` `Env` `Io` とする。`/` の戻り型、`let p? =` の対象、List リテラルの展開先、`main` に残せる効果に用いる。
 
 prelude の各 module は、外の型と `module X` と `implement X as X` を 1 ファイルに置く形で書く。第34節と第35節の規則に従う。
 
@@ -1884,7 +1890,7 @@ prelude は組み込みを次の形で包む。
 
 ```ocaml
 module String
-def length(s: String): Int
+def length(s: String): Int Pure
 
 implement String as String
 def length s => __string_length s
@@ -1897,8 +1903,11 @@ M5 の extern 表の各項目は、hado 側の名前（`__string_length` 等）�
 ```text
 List: map filter fold length reverse append sort
 Option: map unwrap_or is_some ok_or
-String: length concat
-Int / Float: to_string
+String: length concat slice get split starts_with contains
+Bytes: length get of_list to_list to_string of_string
+Array: length get set of_list to_list
+Int: to_string parse
+Float: to_string
 ```
 
 `Option.ok_or` は値の不在を理由のある失敗へ持ち上げる。
@@ -1907,13 +1916,80 @@ Int / Float: to_string
 def A ok_or(value: A Option, error: Exception): A {Error}
 ```
 
-効果を持たない member は戻り型に `Pure` を書く（第37節）。`List.length` `reverse` `append`、`Option.unwrap_or` `is_some`、`String.length` `concat`、`Int.to_string`、`Float.to_string` の 9 本が対象である。`Fn` を引数に取る `List.map` `filter` `fold` `sort` と `Option.map` は効果多相なので書かない。
+効果を持たない member は戻り型に `Pure` を書く（第37節）。`List.length` `reverse` `append`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` `sort` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
 
 `sort` は比較関数を引数に取る merge sort とする。
 
 `String.length` は Unicode スカラ値の個数とする。
 
-prelude は全プログラムに連結され、E513 を除く全ての検査を受ける。
+member の型は次のとおりとする。`A` は要素型の型変数である。
+
+```ocaml
+module String
+def length(s: String): Int Pure
+def concat(left: String, right: String): String Pure
+def slice(s: String, start: Int, end: Int): String {Error}
+def get(s: String, index: Int): Char {Error}
+def split(s: String, separator: String): String List {Error}
+def starts_with(s: String, prefix: String): Bool Pure
+def contains(s: String, part: String): Bool Pure
+
+module Bytes
+def length(bytes: Bytes): Int Pure
+def get(bytes: Bytes, index: Int): Int {Error}
+def of_list(values: Int List): Bytes {Error}
+def to_list(bytes: Bytes): Int List Pure
+def to_string(bytes: Bytes): String {Error}
+def of_string(value: String): Bytes Pure
+
+module Array
+def A length(xs: A Array): Int Pure
+def A get(xs: A Array, index: Int): A {Error}
+def A set(xs: A Array, index: Int, value: A): A Array {Error}
+def A of_list(xs: A List): A Array Pure
+def A to_list(xs: A Array): A List Pure
+
+module Int
+def to_string(value: Int): String Pure
+def parse(value: String): Int {Error}
+```
+
+`String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
+
+prelude は効果 `Env` と `Io` を持ち、操作を値の空間に置く。操作は `reply` で、handler が無ければ runtime の既定実装が応える。既定実装は失敗を `Error` として raise する。利用者は `raise` と同じく無修飾で呼ぶ。
+
+```ocaml
+effect Env
+reply args: String List {Error}
+reply env(name: String): String Option {Error}
+reply cwd: String {Error}
+
+effect Io
+reply read_file(path: String): Bytes {Error}
+reply write_file(path: String, contents: Bytes): Unit {Error}
+reply read_dir(path: String): String List {Error}
+reply read_stdin: Bytes {Error}
+```
+
+操作の結果の効果行には、その操作が起こす追加の効果だけを書く（`Io` の操作なら `Error`）。`args` はプログラム名を除く引数である。`env` は未設定を `None` とする。非 UTF-8 の名前は `Error` を raise する。
+
+組み込みの失敗の `message` は次の綴りとする。
+
+| 失敗 | `message` |
+|---|---|
+| Int の `/` `%` の除数 0 | `"DivisionByZero"` |
+| String・Bytes・Array の索引の範囲外 | `"IndexOutOfRange"` |
+| `String.split` の空セパレータ | `"EmptySeparator"` |
+| `Bytes.of_list` の 0..255 の範囲外 | `"ByteOutOfRange"` |
+| `Bytes.to_string` の不正 UTF-8 | `"InvalidUtf8"` |
+| `Int.parse` の不正（桁溢れを含む） | `"InvalidInt"` |
+| argv・env・cwd・ディレクトリ名の非 UTF-8 | `"InvalidUtf8"` |
+| ファイルが無い | `"NotFound"` |
+| 権限が無い | `"PermissionDenied"` |
+| ディレクトリでない | `"NotADirectory"` |
+| その他の I/O の失敗 | `"IoFailure"` |
+
+prelude は全プログラムに連結され、全ての検査を受ける。prelude の項目は公開面として E513 の根にする（第27節）。
 
 ---
 
@@ -1944,8 +2020,8 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E202 | dunder-in-user | §47 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §47 | 名前解決 | `__` 名 |
 | E204 | unbound-name | §47 | 名前解決 | 名前 |
-| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節。名前空間の単位と、根との同名でサブディレクトリ側を指す規則は第55節 |
-| E206 | entry-form | §5 | 名前解決 | `def main`。無ければ 1:1 |
+| E205 | duplicate-name | §47 | 名前解決 | 2 回目の宣言の名前。ファイルをまたぐ順序は第54節。名前空間の単位と、根との同名でサブディレクトリ側を指す規則は第55節。`library` の重複は 2 回目の `library`（第59節） |
+| E206 | entry-form | §5 | 名前解決 | `def main`。`build` に `main` が無ければ 1:1。`library` を宣言したディレクトリの `main` はその `def`（第59節） |
 | E207 | rec-cycle-value | §4 | 名前解決 | 閉路に含まれる値定義の `def` |
 | E208 | missing-rec | §4 | 名前解決 | `rec` の無い `def` |
 | E301 | arity-mismatch | §8 | 型 | 適用の先頭 |
@@ -1992,7 +2068,7 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | E702 | main-contains-fn | §5 | 単相化 | `def main` |
 | E703 | eq-on-fn | §45 | 単相化 | 演算子 |
 | E704 | compare-on-fn | §45 | 単相化 | `compare` |
-| E705 | main-contains-abstract | §5 | 単相化 | `def main` |
+| E705 | main-contains-abstract | §5 | 単相化 | `shared` で解けない抽象型を含む `def main` |
 | E706 | main-user-effect | §5 | 単相化 | `def main` |
 
 関数・constructor の適用で、仮引数型と実引数型の単一化が E305 または E306 になる場合は、問題の実引数の先頭を指す。複数の引数は渡される順に照合する。パイプの左辺は第1引数として扱い、その元の式の位置を使う。例えば `add1 "hi"` は `"hi"`、`x x` の出現検査失敗は第2の `x` を指す。呼び出す値が関数でない場合は、その値の式の先頭を指す。E301 と E307 のアンカーは表の規則に従う。
@@ -2023,6 +2099,8 @@ prelude は全プログラムに連結され、E513 を除く全ての検査を�
 | Unit | 入れ子では `()` |
 | ADT | `Some(1)` `Guest` |
 | List | `[1, 2]` `[]`。`Cons` の形では出さない |
+| Bytes | `Bytes.of_list [72, 105]`。10 進の Int のリスト |
+| Array | `Array.of_list [1, 2]` |
 | record | `{ name = "a"; age = 3 }` |
 | 名前付きfieldのconstructor | `Payload { id = 3; name = "a" }`。fieldは宣言順 |
 
@@ -2083,23 +2161,23 @@ def classify score
 
 プログラムは、`hado build` か `hado check` に渡したファイルのディレクトリ（根）と、その下の全てのサブディレクトリにある `.hd` `.hdi`、および prelude からなる。設定ファイルと検索パスは無い。読んだファイルは参照の有無によらず全て検査を受ける。サブディレクトリは名前空間になる（第55節）。
 
-各ファイルは第41節の `program` の形で、プログラムはその和である。ファイルの中身は、最初の見出しより前の「外」と、見出しで始まる節の列である。外に置けるのは本体付きの型で、そのディレクトリの名前空間に入る。根のファイルの外にはさらに `def` を置ける。外の `def` はそのファイルの中だけで見え、同じファイルの節から参照できる。根以外のファイルの外に `def` があれば E100 とし、その `def` を指す。
+各ファイルは第41節の `program` の形で、プログラムはその和である。ファイルの中身は、最初の見出しより前の「外」と、見出しで始まる節の列である。外に置けるのは本体付きの型で、そのディレクトリの名前空間に入る。根のファイルの外にはさらに `def` を置ける。外の `def` はそのファイルの中だけで見え、同じファイルの節から参照できる。根以外のファイルの外に `def` があれば E100 とし、その `def` を指す。ライブラリ根（第59節）のディレクトリのファイルは、根のファイルと同じく外の `def` を置ける。
 
-`main` を持つ根のファイルが入口ファイルである。入口ファイルは 1 つのディレクトリに複数あってよく、渡したファイルの `main` が起点になる。渡したファイルに `main` が無ければ E206 とする。外の `def` はファイルごとの値の空間にあるので、複数のファイルが `main` を持っても E205 にならない。渡さなかった入口ファイルの `main` は、そのファイルの中で参照されなくても E513 にならない。`main` を持たない根のファイルも外の `def` を置け、その `def` はファイルの中で使われなければ E513 である。入口に渡せるのは `.hd` だけで、`.hdi` を渡すと CLI が拡張子で拒否する（診断ではない）。
+`main` を持つ根のファイルが入口ファイルである。入口ファイルは 1 つのディレクトリに複数あってよく、渡したファイルの `main` が起点になる。渡したファイルに `main` が無いとき、`hado check` はそのディレクトリをライブラリとして検査し（第59節）、`hado build` は E206 とする。外の `def` はファイルごとの値の空間にあるので、複数のファイルが `main` を持っても E205 にならない。渡さなかった入口ファイルの `main` は、入口検査では、そのファイルの中で参照されなくても E513 にならない（ライブラリ検査では第59節）。`main` を持たない根のファイルも外の `def` を置け、その `def` はファイルの中で使われなければ E513 である。入口に渡せるのは `.hd` だけで、`.hdi` を渡すと CLI が拡張子で拒否する（診断ではない）。
 
 `.hd` には `module` と `implement` の両方の節を置ける。`.hdi` には外の型と `module` の節だけを置け、`implement`（functor と適用を含む）があれば E100 とし、その `implement` を指す。`.hdi` は契約だけを置くファイルである。
 
 ファイル名は自由で、名前はディレクトリ名とソースの見出しだけで決まる。1 ファイルに 1 つの契約か実装を置き、ファイル名をその名前の snake_case にするのを慣習とする。
 
-全ての節はプログラム全体の top-level である。同じ名前空間の同名の宣言はファイルをまたいでも E205 とし、2 回目の宣言を指す。ファイルをまたぐ順序は、入口ファイルを先、残りを根からの相対パスのバイト順とする。第50節の「アンカー位置のソース順」は、ファイルの順序、行、列の辞書式で比べる。実装の無い契約と参照されない実装は E513 とする（第34節、第35節）。
+全ての節はプログラム全体の top-level である。同じ名前空間の同名の宣言はファイルをまたいでも E205 とし、2 回目の宣言を指す。ファイルをまたぐ順序は、入口ファイルを先、残りを根からの相対パスのバイト順とする。第50節の「アンカー位置のソース順」は、ファイルの順序、行、列の辞書式で比べる。実装の無い契約と参照されない実装は E513 とする（第34節、第35節）。ライブラリ検査では第27節の公開面の規則を当てる。
 
-`hado check` に入口以外のファイルを渡すと、そのファイルが入口として扱われ、ファイルの順序もそれを先頭に組み直す。渡したファイルに `main` が無ければ E206、サブディレクトリのファイルを渡すとそのディレクトリが根の別のプログラムになる。
+`hado check` に入口以外のファイルを渡すと、そのファイルが起点になり、`main` があれば入口ファイル、無ければライブラリ根（第59節）として扱う。ファイルの順序もそれを先頭に組み直す。サブディレクトリのファイルを渡すとそのディレクトリが根になる。
 
 ---
 
 # 55. ディレクトリと名前空間
 
-根のサブディレクトリ 1 つが名前空間 1 つである。名前はディレクトリ名そのままで、`name` の字句（小文字で始まる）でなければ CLI が拒否する（診断ではない）。入れ子のディレクトリは入れ子の名前空間になる。根は名前を持たない。
+根のサブディレクトリ 1 つが名前空間 1 つである。名前はディレクトリ名そのままで、`name` の字句（小文字で始まる）でなければ CLI が拒否する（診断ではない）。入れ子のディレクトリは入れ子の名前空間になる。根は名前を持たない。ライブラリ根（第59節）は独立した根である。ライブラリの中では、参照の綴りはライブラリ根から解く。外からライブラリを参照するときは、利用側の根からの絶対パスでライブラリのディレクトリを辿る。ライブラリの中から利用側の根と兄弟のライブラリは見えない。
 
 ```text
 app/
@@ -2114,7 +2192,7 @@ app/
     int_id.hd           実装 IntId       → id::IntId
 ```
 
-参照の綴りは 2 つに限る。自分のディレクトリの名前は無修飾、それ以外は根からの絶対パスである。親や兄弟のディレクトリの名前を無修飾で参照すると E204 になる。根の名前はどこからも無修飾で参照する。
+参照の綴りは 2 つに限る。自分のディレクトリの名前は無修飾、それ以外は最内の根（ライブラリの中ではライブラリ根、外では利用側の根）からの絶対パスである。親や兄弟のディレクトリの名前を無修飾で参照すると E204 になる。根の名前はどこからも無修飾で参照する。
 
 ```ocaml
 // store/memory_store.hd
@@ -2130,7 +2208,7 @@ def main = ... store::MemoryStore.find 1 ... store::NotFound ...
 
 `::` は名前空間の区切りにしか使わない。パスの後には契約か実装か型か constructor の大文字名が来る。値と抽象型は実装の後に `.` で続ける（`store::MemoryStore.find`、`Int store::Stack.T`）。パターンの constructor も同じ綴りで書く（`| store::NotFound => ...`）。
 
-型・契約・実装・constructor の 4 つの名前空間はディレクトリごとに持つ。E205 の「同じ名前空間の同名」はディレクトリの中で数える。`color/` と `light/` がそれぞれ `Red` を持ってもよい。根の名前はどこからも無修飾で見えるので、サブディレクトリの中の宣言が根の同じ名前空間の宣言（外の型、契約、実装、constructor、prelude の名前）と同名なら、そのディレクトリの中で無修飾の綴りが 2 つの候補を持つ。これは E205 とし、サブディレクトリ側の宣言を指す。`store/` の中に `type Option` や `type Error`（根に `Error` があるとき）は書けない。
+型・契約・実装・constructor の 4 つの名前空間はディレクトリごとに持つ。E205 の「同じ名前空間の同名」はディレクトリの中で数える。`color/` と `light/` がそれぞれ `Red` を持ってもよい。根の名前はどこからも無修飾で見えるので、サブディレクトリの中の宣言が根の同じ名前空間の宣言（外の型、契約、実装、constructor、prelude の名前）と同名なら、そのディレクトリの中で無修飾の綴りが 2 つの候補を持つ。これは E205 とし、サブディレクトリ側の宣言を指す。ライブラリ根の中では利用側の根の名前は見えないので、この規則は当たらない。`store/` の中に `type Option` や `type Error`（根に `Error` があるとき）は書けない。
 
 `.hdi` の規則は第54節と同じで、どのディレクトリにも置ける。prelude は根に連結され、`List.map` や `Some` はどこからも無修飾で参照する（第49節）。
 
@@ -2160,9 +2238,11 @@ implement Store as OffsetStore = MakeStore(OffsetId)
 
 同じ functor に同じ引数列（位置ごとに同じ実装名）を 2 回適用すると、2 回目の `implement` で E604 とする。同じ型が要るときは 1 つの適用結果を使う。
 
-functor は適用されて初めて実装になる。`MakeStore.create` のように functor を直接参照すると E204、一度も適用されない functor は E513 とする。適用結果は普通の実装と同じで、どこからも参照されなければ E513 である。契約 `X` の実装の数（第34節の `X.T`、実装の無い契約の E513）は適用結果で数え、functor の定義は数えない。
+functor は適用されて初めて実装になる。`MakeStore.create` のように functor を直接参照すると E204、一度も適用されない functor は E513 とする（ライブラリ検査では公開面として根にする。第27節）。適用結果は普通の実装と同じで、どこからも参照されなければ E513 である。契約 `X` の実装の数（第34節の `X.T`、実装の無い契約の E513）は適用結果で数え、functor の定義は数えない。
 
 functor の本文の `def` は契約の member を満たすので、使わない引数を `_` で受けられる（第27節）。
+
+本文の実体化が引数の抽象型を指すとき、`shared type T = M.T` と書くと等式が適用結果に引き継がれる。`MakeFold(StringMonoid)` の `T` は `StringMonoid.T` と同じ型になり、`StringMonoid.T` が `shared type T = String` なら `String` と同一になる。`shared` を書かない `type T = M.T` は適用ごとに別の抽象型を作る。`PlainStore.T` と `OffsetStore.T` が別の型である、はこの場合である。
 
 ---
 
@@ -2191,7 +2271,11 @@ reply ask: String
 
 `abort` は再開しないので戻り値が存在しない。戻り型を書くと E123 とする。呼び出し位置の式の型は、その位置が要求する型に合わせる。返らないので、どの型とも矛盾しない。`reply` と `capture` は契約の member と同じ形で書き、引数を取らない操作は `reply ask: String` の形とする。
 
-効果の操作は値の名前空間に無修飾で入る（第47節）。値の空間はファイルごとだが、操作はこの規則の唯一の例外で、効果を宣言したディレクトリの全てのファイルから書ける。書けるのはそのディレクトリの中だけである。値の修飾は `実装名.値` の形しか無く（第41節）、小文字の操作名を別のディレクトリから綴る手段が無いためである。同じディレクトリの別の効果が同じ操作名を宣言すると E205 とする。prelude の操作はどこからでも書ける。
+効果の操作は値の名前空間に無修飾で入る（第47節）。値の空間はファイルごとだが、操作はこの規則の唯一の例外で、効果を宣言したディレクトリの全てのファイルから書ける。書けるのはそのディレクトリの中だけである。値の修飾は `実装名.値` の形しか無く（第41節）、小文字の操作名を別のディレクトリから綴る手段が無いためである。同じディレクトリの別の効果が同じ操作名を宣言すると E205 とする。prelude の操作はどこからでも書ける。prelude の操作と同名のユーザーの宣言（外の `def`、実装の `def`、他の効果の操作）は、どのディレクトリでも E205 とする。prelude の効果の handler はどのディレクトリにも置ける。
+
+prelude の操作は、handler が無ければ `reply` なら runtime の既定実装で応え、`abort` なら `main` の入口で stderr と終了コード 1 になる（第51節）。`capture` は handler が要る。
+
+操作の結果の効果行には、その操作が起こす追加の効果だけを書く（第49節）。
 
 別のディレクトリの効果は、行に現れても操作を起こせない。その効果を持つ関数を呼ぶ形になる。
 
@@ -2209,7 +2293,7 @@ abort raise _ => None
 return value => Some(value)
 ```
 
-handler は処理する効果と同じディレクトリに置く。腕が操作名を綴るからである（第57節）。別のディレクトリに置くと E204 とする。
+handler は処理する効果と同じディレクトリに置く。腕が操作名を綴るからである（第57節）。別のディレクトリに置くと E204 とする。prelude の効果は除く。その handler はどのディレクトリにも置ける（第57節）。
 
 腕は効果の宣言と同じ種別で書き、その効果の全ての操作を過不足なく実装しなければならない。足りなければ、または効果に無い操作を書けば E605 とする。使わない引数は `_` で受ける（第27節）。
 
@@ -2252,3 +2336,27 @@ handler の腕は分岐ではないので第20節の E101 に当たらず、腕�
 `with H -> rest` は `rest` を `H` の下で評価する。`let` や `do` と同じ継続の形で、分岐ではないので第20節には触れない。`with` を入れ子にすれば handler を重ねられる。
 
 handler を宣言して一度も `with` に書かなければ E513 とする。
+
+---
+
+# 59. ライブラリ
+
+`main` を持たず、他のプログラムから使われることを意図したプログラムをライブラリと呼ぶ。`hado check` に `main` の無い `.hd` を渡すとライブラリとして検査し（第5節、第54節）、`hado build` は受け付けない（E206）。ライブラリの未使用の判定は公開面を根にする（第27節）。
+
+ライブラリであることは `library` 宣言で示す。ディレクトリの 1 つのファイルの外（最初の見出しより前）に `library` を書くと、そのディレクトリがライブラリ根になる。ライブラリ根は独立した根で、パス（第55節）はそこから解く。これにより、ライブラリは利用側の根の下のどの位置に置かれても、内部の参照と外の `def` の規則が変わらない。
+
+```ocaml
+library
+
+type Error = | NotFound
+
+module UserStore
+type T
+def find(id: Int): T Option
+```
+
+`library` は 1 ファイルに 1 つ、1 ディレクトリに 1 つである。2 つ目は E205 とする。`library` は `.hd` にだけ書ける。`.hdi` に書くと E100 とする。`library` を宣言したディレクトリのファイルに `main` を置くと E206 とする。ライブラリとして検査するとき、他のファイルの `main` は入口にならない。宣言の無いディレクトリでライブラリとして検査したときの `main` は普通の `def` として E513 の対象になる。外の `def` はライブラリ根のファイルにも置け、ファイルの中で使われなければ E513 である（第54節）。
+
+利用側は、ライブラリのディレクトリを使うプログラムの根の下に置く。ライブラリの中から利用側の根と兄弟のライブラリの名前は見えず、外からは利用側の根からの絶対パスで参照する（第55節）。依存するライブラリは、自分の下に入れ子にするか、利用側で束ねる。
+
+宣言の無いディレクトリは、埋め込みでは利用側の根の名前空間の一部として扱われる。単体で `hado check` に渡せばライブラリとして検査されるが、埋め込みで内部の絶対パスを使うには `library` の宣言が要る。利用側の入口検査では、ライブラリの参照されない実装は E513 の対象になる。使う実装は利用側から参照する。

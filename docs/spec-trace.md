@@ -1,15 +1,15 @@
-# 規範文の追跡表 v0.2
+# 規範文の追跡表 v0.3
 
 `docs/spec.md` の規範文（「〜とする」「〜でなければならない」「〜は E xxx」）が、どの検査段階で判定され、何が固定するか。エラーコードを持つ規範文は §50 の表と拒否コーパスが 1 対 1 で固定するので、ここにはコードを持たない規範文と、コードだけでは範囲が読めない規範文を置く。
 
-「固定するもの」の列は R9、R11〜R14、R16〜R26 で作る判定器を指す。`verify-r9.sh` の項目名は `docs/plan.md` 8 節の R9 に対応する。
+「固定するもの」の列は R9、R11〜R14、R16〜R26、R32〜R38 で作る判定器を指す。`verify-r9.sh` の項目名は `docs/plan.md` 8 節の R9 に対応し、`verify-r32.sh` 以降は同 24 節の R32〜R38 に対応する。
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
 | §2 | eta 展開の `def` は冗長としない | 冗長 | 受理 | `tests/accept/eta/main.hd` |
 | §3 | 引数の型注釈は括弧付き引数構文でのみ書ける | 構文 | E100 | EBNF 生成器（R9-1） |
 | §4 | E307 は再帰呼び出しの引数型と仮引数型の単一化が出現検査に失敗した場合 | 型 | E307 / E306 | `tests/reject/E307/main.hd`、`E306.hd` |
-| §5 | `main` の要求は実行ファイルの規則 | 名前解決 | E206 | `tests/reject/E206/main.hd` |
+| §5 | `main` の要求は実行ファイルの規則。`main` の無い `.hd` の `check` はライブラリ（第59節） | 名前解決 | E206 / 受理 | `tests/reject/E206/main.hd`（`library` のディレクトリの `main`、R32）、`verify-r32.sh` のプローブ |
 | §8 | constructor を先頭に置く並置は E106。`inc(1)` は通す | 構文 | E106 | `tests/reject/E106/main.hd`、R9-1 の判定器 |
 | §8 | constructor は関数値ではない。payload の数の不一致は E301 | 型 | E301 | R9-3 の判定器（0 個と arity+1 個） |
 | §12 | record は必ず名前を持つ | 構文 | E100 | EBNF 生成器 |
@@ -20,7 +20,7 @@
 | §23 | `do` の右辺は効果を持つ式か Option。純粋な値の破棄は E303。`?` の印は無い | 型 / 構文 | E303 / E100 | R9-2 の ill-typed 生成器、EBNF 生成器（`do?` `let?` は E100、R14） |
 | §25 | パイプの右辺に constructor は置けない | 構文 | E106 | R9-1 の判定器 |
 | §27 | E505 は pattern 束縛と引数に及ぶ | 冗長 | E505 | R9-4 の判定器 |
-| §27 | E513 は `type` `module` `implement` に及ぶ。prelude は免除 | 冗長 | E513 | R9-3 の判定器、R17 の判定器（未参照の契約と実装） |
+| §27 | E513 は `type` `module` `implement` に及ぶ。ライブラリは公開面（実装・適用結果・未適用 functor・実装の無い契約・外の型・効果・handler）を根にする | 冗長 | E513 | R9-3 の判定器、R17 の判定器（未参照の契約と実装）、`verify-r32.sh`（公開面と非公開 def） |
 | §34 | 契約の型名は実装の有無によらず解決される | 名前解決 | E204 | R9-3 の判定器 |
 | §34 | 契約の型は抽象型のみ | 構文 | E100 | EBNF 生成器 |
 | §35 | 実装は契約の全 member と型を持ち、型が一致し、十分に多相 | 型 | E602 | `tests/reject/E602/main.hd`、R9-3 の判定器（4 種類） |
@@ -33,7 +33,7 @@
 | §46 | パターンに List リテラルの糖衣は無い | 構文 | E100 | EBNF 生成器 |
 | §47 | shadowing は許す | 名前解決 | 受理 | `tests/accept/display/main.hd`（`Member(user) => user.name`） |
 | §48 | 末尾位置の呼び出しはスタックを消費しない（3 経路） | 実行 | 受理 | `tests/accept/tail_self/main.hd` `tail_mutual.hd` `tail_closure.hd` |
-| §49 | prelude は E513 を除く全ての検査を受ける | 全段階 | — | `stdlib/` が全プログラムに連結されて `check_source` を通ること。R9-3 で免除を E513 に閉じる |
+| §49 | prelude は全ての検査を公開面の根として受ける | 全段階 | — | `stdlib/` が全プログラムに連結されて `check_source` を通ること。`verify-r32.sh` |
 | §50 | 段階順で最初の 1 件を報告する | 全段階 | — | R9-2 の判定器（同居させた欠陥） |
 | §50 | 同一段階内はアンカー位置順 | 全段階 | — | R9-2 の判定器（位置の入れ替え） |
 | §50 | アンカーは表の列どおり | 全段階 | — | 位置の摂動プローブ（`-- error:` 行の直後に空行）を全コードに広げる |
@@ -65,16 +65,35 @@
 | §35 | 型引数付き抽象型の実体化は型引数の数が契約と一致 | 型 | E602 | R19 の判定器（19-b(1)） |
 | §37 | 関数型は `Fn(...)` で括弧必須 | 構文 | E100 | R18 の判定器（18-b(2)） |
 | §54 | 入口ファイルは複数置け、外の `def` はファイル局所 | 名前解決 / 冗長 | 受理 / E204 / E513 | `tests/accept/two_entries/`、R20 の判定器 |
-| §54 | 渡したファイルに `main` が無ければ E206 | 名前解決 | E206 | R20 の判定器（20-b(4)） |
+| §54 | 渡したファイルに `main` が無いとき、`check` はライブラリ、`build` は E206 | 名前解決 | E206 / 受理 | `verify-r32.sh`、`tests/library/` |
 | §55 | 自分のディレクトリは無修飾、他は根からの絶対パス | 名前解決 | 受理 / E204 | `tests/accept/namespaces/`、R22 の判定器（22-b(2)） |
 | §55 | 名前空間はディレクトリごと。根との同名は E205 | 名前解決 | E205 | R22 の判定器（22-b(3)） |
 | §56 | functor の本文は引数の契約だけで 1 回検査 | 型 | E602 / 受理 | `tests/accept/functor/`、R21 の判定器（21-b(1)(2)） |
 | §56 | 同じ引数列の再適用 | 型 | E604 | `tests/reject/E604/main.hd`、R21 の判定器（21-b(3)） |
 | §56 | 未適用の functor と未参照の引数 | 冗長 | E513 / E521 | `tests/reject/E521/main.hd`、R21 の判定器（21-b(4)） |
-| §5 | `main` の型に抽象型を含めない | 単相化 | E705 | `tests/reject/E705/main.hd`、R19 の判定器（19-b(4)） |
-| §5 | `main` に残ってよい効果は prelude の `Error` だけ | 単相化 | E706 | `tests/reject/E706/main.hd`、R26 の判定器 |
+| §5 | `main` の型に `shared` で解けない抽象型を含めない | 単相化 | E705 | `tests/reject/E705/main.hd`、`verify-r33.sh` |
+| §5 | `main` に残ってよい効果は prelude の効果 | 単相化 | E706 | `tests/reject/E706/main.hd`、`verify-r37.sh` |
 | §24 | 効果を持てるのは分岐の条件以外。scrutinee・引数・被演算子・record field は許す | 型 | E308 / 受理 | `tests/reject/E308/main.hd`、`tests/accept/effect_position/` |
 | §37 | 効果行の省略は推論、`Pure` は空、書いた行はちょうどそれだけ | 型 | E305 / 受理 | `tests/accept/effect_row/`、R24 の判定器 |
 | §48 | `capture` を経由しない呼び出しだけスタックを消費しない | 実行 | 受理 | `tests/accept/capture_loop/main.hd`、R26 の判定器 |
 | §57 | 操作は値の名前空間に無修飾で入り、書けるのはそのディレクトリだけ | 名前解決 | 受理 / E204 / E205 | `tests/accept/effect_forms/`、R23 の判定器 |
 | §58 | `return` の腕を書かなければ恒等。`with H -> rest` は継続の形 | 型 / 実行 | 受理 | `tests/accept/handler_forms/` `to_option/`、R26 の判定器 |
+| §59 | `library` は 1 ディレクトリに 1 つ。2 つ目は E205 | 名前解決 | E205 | `verify-r32.sh` |
+| §59 | `library` を宣言したディレクトリの `main` は E206 | 名前解決 | E206 | `tests/reject/E206/main.hd`、`verify-r32.sh` |
+| §59 | ライブラリは独立した根で、埋め込みで内部の絶対パスと外の `def` が変わらない | 名前解決 | 受理 | `tests/library/`、`verify-r32.sh` |
+| §55 | ライブラリの中から親と兄弟の名前は見えない | 名前解決 | E204 | `verify-r32.sh`（兄弟参照）、`tests/reject/E204/main.hd`（親の無修飾参照） |
+| §35 | `shared` は契約の抽象型の実体化にだけ前置できる | 構文 / 名前解決 | E100 / E204 | `verify-r33.sh` |
+| §35 | `shared` で解ける実体化は外と同一の型。印字は解けた型 | 型 / 単相化 | 受理 / E705 | `verify-r33.sh` |
+| §56 | `shared type T = M.T` は適用結果の `T` を引数の `T` と同一にする | 型 | 受理 | `verify-r33.sh`（24.7 の探針） |
+| §36 | `Bytes` と `Array` は組み込み型。利用者の同名宣言は E205 | 名前解決 | E205 | `verify-r34.sh` `verify-r35.sh` |
+| §49 | Bytes の長さ・変換・索引・of_list / to_list | 型 / 実行 | 受理 / E305 | `verify-r34.sh` |
+| §49 | String の slice / 索引 / split / starts_with / contains。範囲外と空セパレータは実行時 `Error` | 実行 | 受理 | `verify-r34.sh` |
+| §49 | Array の get / set / of_list / to_list。get と set の範囲外は実行時 `Error`、set は新配列 | 実行 | 受理 | `verify-r35.sh`（3 万要素） |
+| §49 | `Int.parse` の不正と桁溢れは実行時 `Error` | 実行 | 受理 | `verify-r36.sh` |
+| §49 | `Env` と `Io` の操作（無修飾、`{Error}`、handler 無しの既定実装） | 型 / 実行 | 受理 | `verify-r37.sh` |
+| §49 | Env と Io は handler で差し替えられる（操作の全実装を要求） | 型 | E605 / 受理 | `verify-r37.sh` |
+| §49 | 組み込みの失敗の `message` の綴り | 実行 | 受理 | R34〜R37 の判定器（`// expect-error:`） |
+| §27 | ライブラリでは top-level を公開面として根にする（functor と契約を含む） | 冗長 | 受理 | `verify-r32.sh` |
+| §5 | `main` に残せる効果に prelude の `Env` `Io` を足す | 単相化 | 受理 | `verify-r37.sh` |
+| §51 | Bytes は `Bytes.of_list [72, 105]`、Array は `Array.of_list [1, 2]` の形で印字 | 実行 | 受理 | `verify-r34.sh` `verify-r35.sh` の印字プローブ |
+| §45 | Bytes はバイト列、Array は要素型の構造比較 | 単相化 | E703 / E704 / 受理 | `verify-r34.sh` `verify-r35.sh` |

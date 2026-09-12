@@ -41,12 +41,12 @@ else
     fail 1 "deleted-headings=$del count-mismatch=$missing"
 fi
 
-# --- check 2: new sections 43..54 after 42 ---
+# --- check 2: new sections 43..59 after 42 ---
 line42=$(grep -nE '^# 42\.' "$SPEC" | head -n 1 | cut -d: -f1)
 line42=${line42:-0}
 ns_reasons=""
 n=43
-while [ "$n" -le 54 ]; do
+while [ "$n" -le 59 ]; do
     mapfile -t hits < <(grep -nE "^# ${n}\\." "$SPEC" || true)
     if [ "${#hits[@]}" -eq 0 ]; then
         ns_reasons="$ns_reasons missing-#$n"
@@ -133,7 +133,7 @@ else
     fail 3 "error-codes:$ec_reasons"
 fi
 
-# --- check 4: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2, 18.4) ---
+# --- check 4: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2, 18.4, 24.2) ---
 cov_reasons=""
 if [ ! -f "$COV" ]; then
     cov_reasons="$cov_reasons missing-file"
@@ -211,7 +211,17 @@ else
             if ($0 ~ /^\|/) print name
         }
     ' "$PLAN" >"$TMPD/plan184.txt"
-    cat "$TMPD/plan22.txt" "$TMPD/plan23.txt" "$TMPD/plan92.txt" "$TMPD/plan112.txt" "$TMPD/plan132.txt" "$TMPD/plan184.txt" >"$TMPD/plan_items.txt"
+    awk -F '|' '
+        /^### 24\.2 仕様の項目/ { p=1; next }
+        /^### 24\.3/ { p=0 }
+        p {
+            name=$2
+            gsub(/^ +| +$/, "", name)
+            if (name=="" || name=="項目" || name ~ /^-+$/) next
+            if ($0 ~ /^\|/) print name
+        }
+    ' "$PLAN" >"$TMPD/plan242.txt"
+    cat "$TMPD/plan22.txt" "$TMPD/plan23.txt" "$TMPD/plan92.txt" "$TMPD/plan112.txt" "$TMPD/plan132.txt" "$TMPD/plan184.txt" "$TMPD/plan242.txt" >"$TMPD/plan_items.txt"
     nrows=$(wc -l <"$TMPD/cov.tsv" | tr -d ' ')
     nplan=$(wc -l <"$TMPD/plan_items.txt" | tr -d ' ')
     if [ "$nrows" -ne "$nplan" ]; then
