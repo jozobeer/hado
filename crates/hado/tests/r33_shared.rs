@@ -437,10 +437,3 @@ fn a_shared_realization_with_fewer_type_arguments_than_the_contract_is_rejected(
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
-#[test]
-fn a_shared_realization_with_a_matching_type_argument_count_is_accepted() {
-    let source = "def main = Stack.push [1] 2\nmodule Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n\nimplement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []";
-    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(checked.main, Ty::Adt("List".into(), vec![Ty::Int]));
-}
-

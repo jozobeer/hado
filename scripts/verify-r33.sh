@@ -165,7 +165,7 @@ expect_code_not_panic() {
     err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
     if [ "$status" -eq 101 ]; then
         echo "NG: $label (panicked: status=101 stderr='$err')"
-    elif [ "$status" -ne 101 ] && [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]]; then
+    elif [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]]; then
         echo "OK: $label (status=$status, not 101)"
         passed=$((passed + 1))
     else

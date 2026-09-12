@@ -121,10 +121,9 @@ impl Checker<'_> {
             let Item::TypeDef(definition) = item else { continue };
             if !definition.shared { continue; }
             let Some(body) = &definition.ty else { continue };
-            // 契約の抽象型の arity と実体化の型引数の個数を照合する。食い違う等式を
-            // 登録すると `Ty::reveal` から `TypeRealization::apply` の個数 assert に
-            // 到達して panic する（§35: 数が違えば E602）。等式を登録しなければ、
-            // shared の無い場合と同じ既存の E602 の経路が拒否する。
+            // 食い違う arity の等式を登録すると `Ty::reveal` から
+            // `TypeRealization::apply` の個数 assert に到達して panic する
+            // （§35: 数が違えば E602）。登録しなければ既存の E602 の経路が拒否する。
             // functor の本文では契約が abstract_types に無いことがあるので、arity が
             // 取れないときは登録しない側に倒す。
             let qualified = format!("{}.{}", module.name, definition.name);
