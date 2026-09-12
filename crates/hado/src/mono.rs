@@ -2560,7 +2560,7 @@ impl Lowerer {
     }
 
     fn derive_comparison(&mut self, ty: Type) -> Result<(FunctionId, Signature), String> {
-        if matches!(ty, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::String) {
+        if matches!(ty, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::String | Type::Bytes) {
             return Ok(self.derive_scalar_compare(ty));
         }
         let Type::Data(name, _) = &ty else { return Err("compare derivation is not implemented for this type".into()); };
@@ -3043,6 +3043,7 @@ pub fn derive_scalar_printer(id: FunctionId, ty: Type) -> Result<Function, Strin
     let (runtime, argument) = match ty {
         Type::Int => (RuntimeFunction::PrintInt, value),
         Type::String => (RuntimeFunction::PrintString, value),
+        Type::Bytes => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::BytesDisplay, vec![value])?),
         Type::Char => (RuntimeFunction::PrintChar, value),
         Type::Float => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::CanonicalFloat, vec![value])?),
         Type::Bool => (RuntimeFunction::PrintString, branch(value, text("true"), text("false"))?),
@@ -3143,6 +3144,7 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
     let text = |s: &str| Expression::Constant(Constant::String(s.into()));
     let runtime = match value.ty() {
         Type::String => RuntimeFunction::QuoteString,
+        Type::Bytes => RuntimeFunction::BytesDisplay,
         Type::Int => RuntimeFunction::IntToString,
         Type::Float => RuntimeFunction::CanonicalFloat,
         Type::Char => RuntimeFunction::QuoteChar,

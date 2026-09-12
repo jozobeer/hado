@@ -447,7 +447,7 @@ fn build_mono_expr(
         Expression::Binary { op, left, right } => {
             let float = left.ty() == crate::mono::Type::Float;
             let signed = left.ty() == crate::mono::Type::Int;
-            let string = left.ty() == crate::mono::Type::String;
+            let string = left.ty() == crate::mono::Type::String || left.ty() == crate::mono::Type::Bytes;
             let left = build_mono_expr(builder, left, variables, checked)?;
             let right = build_mono_expr(builder, right, variables, checked)?;
             if string {
@@ -616,6 +616,7 @@ pub fn runtime_signature(function: crate::runtime_abi::RuntimeFunction, pointer:
     let declaration = function.declaration();
     let machine_type = |ty| match ty {
         crate::runtime_abi::AbiType::F64 => clif_types::F64,
+        crate::runtime_abi::AbiType::I8 => clif_types::I8,
         crate::runtime_abi::AbiType::I32 => clif_types::I32,
         crate::runtime_abi::AbiType::I64 => clif_types::I64,
         crate::runtime_abi::AbiType::Size | crate::runtime_abi::AbiType::Pointer => pointer,
