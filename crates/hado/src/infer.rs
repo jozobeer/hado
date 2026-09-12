@@ -60,7 +60,7 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
 }
 
 pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<Checked, Diagnostic> {
-    let inspection = if ast.main().is_some() { crate::Inspection::Entry } else { crate::Inspection::Library };
+    let inspection = if crate::has_main_definition(ast) { crate::Inspection::Entry } else { crate::Inspection::Library };
     let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start, inspection)?;
     match deferred.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),

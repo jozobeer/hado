@@ -177,7 +177,7 @@ struct Namespaces {
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
-    let inspection = if ast.main().is_some() { crate::Inspection::Entry } else { crate::Inspection::Library };
+    let inspection = if crate::has_main_definition(ast) { crate::Inspection::Entry } else { crate::Inspection::Library };
     resolve_with_prelude(ast, path, None, inspection)
 }
 

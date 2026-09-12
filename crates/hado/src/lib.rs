@@ -129,7 +129,7 @@ fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)],
 }
 
 fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
-    let inspection = if ast.main().is_some() { Inspection::Entry } else { Inspection::Library };
+    let inspection = if has_main_definition(&ast) { Inspection::Entry } else { Inspection::Library };
     let mut prelude = Vec::new();
     for (name, source) in [
         ("stdlib/list.hd", include_str!("../../../stdlib/list.hd")),
@@ -255,6 +255,12 @@ pub(crate) fn main_definition_span(ast: &parser::Ast) -> Option<parser::Span> {
         parser::Item::Def(def) if def.name == "main" => Some(def.span),
         _ => None,
     })
+}
+
+/// Whether an entry `main` exists, whatever its form. The inspection is decided
+/// by this: only a file without any `def main` is checked as a library (A1, §54).
+pub(crate) fn has_main_definition(ast: &parser::Ast) -> bool {
+    main_definition_span(ast).is_some()
 }
 
 fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diagnostic> {
