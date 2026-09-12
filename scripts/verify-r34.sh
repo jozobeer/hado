@@ -148,6 +148,18 @@ add("c4a_neg1", "34-c(4a) of_list [-1] は ByteOutOfRange", "error")
 # 34-c(4b): 不正 UTF-8。
 write("c4b", "def main = Bytes.to_string (Bytes.of_list [255])\n", expect_error="InvalidUtf8")
 add("c4b", "34-c(4b) to_string 255 は InvalidUtf8", "error")
+for scalar in (0x10FFFF, 0x110000):
+    encoded = [0xF0 | (scalar >> 18)] + [
+        0x80 | ((scalar >> shift) & 0x3F) for shift in (12, 6, 0)
+    ]
+    kind = f"c4b_{scalar:x}"
+    source = f"def main = Bytes.to_string (Bytes.of_list [{lit(encoded)}])\n"
+    if scalar <= 0x10FFFF:
+        write(kind, source, expect=chr(scalar) + "\n")
+        add(kind, "34-c(4b) U+10FFFF は受理", "print")
+    else:
+        write(kind, source, expect_error="InvalidUtf8")
+        add(kind, "34-c(4b) U+110000 は InvalidUtf8", "error")
 
 # 34-c(4c): get の範囲外。
 write(
@@ -236,6 +248,18 @@ write(
     expect="[0, 1, -1, 1]\n",
 )
 add("e_order", "34-e 大小両方向で compare の符号が逆", "print")
+sequence = [random.randint(0, 255) for _ in range(random.randint(2, 9))]
+for length in (0, random.randint(1, len(sequence) - 1)):
+    prefix = sequence[:length]
+    order = (prefix > sequence) - (prefix < sequence)
+    kind = f"e_prefix_{length}"
+    write(
+        kind,
+        f"def main = let x = Bytes.of_list [{lit(prefix)}] -> let y = Bytes.of_list [{lit(sequence)}] -> "
+        "[compare x y, compare y x]\n",
+        expect=plist([order, -order]) + "\n",
+    )
+    add(kind, f"34-e 長さ {length}/{len(sequence)} の接頭辞対は compare の両方向で符号が逆", "print")
 
 # 34-f: Bytes 注釈の関数は受理される。
 write(

@@ -94,12 +94,26 @@ int32_t hado_entry(void) {
     const HadoString *valid_string = (const HadoString *)&valid;
     const HadoString *empty_string = (const HadoString *)&empty;
     assert(hado_bytes_is_utf8(valid_string) == 1);
+    // 長さの外にも正しい継続バイトを置き、境界検査の削除が偶然のメモリ内容で隠れないようにする。
+    for (size_t length = 1; length < valid.length; ++length) {
+        struct { size_t length; unsigned char bytes[3]; } truncated = {length, {0xe3, 0x81, 0x82}};
+        assert(hado_bytes_is_utf8((const HadoString *)&truncated) == 0);
+    }
     assert(hado_bytes_is_utf8((const HadoString *)&two) == 1);
     assert(hado_bytes_is_utf8(empty_string) == 1);
     assert(hado_bytes_is_utf8((const HadoString *)&invalid) == 0);
     assert(hado_bytes_is_utf8((const HadoString *)&overlong) == 0);
     assert(hado_bytes_is_utf8((const HadoString *)&lone) == 0);
     assert(hado_bytes_is_utf8((const HadoString *)&surrogate) == 0);
+    for (uint32_t scalar = 0x10ffff; scalar <= 0x110000; ++scalar) {
+        struct { size_t length; unsigned char bytes[4]; } boundary = {4, {
+            0xf0 | (scalar >> 18),
+            0x80 | ((scalar >> 12) & 0x3f),
+            0x80 | ((scalar >> 6) & 0x3f),
+            0x80 | (scalar & 0x3f)
+        }};
+        assert(hado_bytes_is_utf8((const HadoString *)&boundary) == (scalar <= 0x10ffff));
+    }
     assert(hado_bytes_length((const HadoString *)&two) == 2);
     assert(hado_bytes_get((const HadoString *)&two, 1) == 105);
     HadoString *displayed = hado_bytes_display((const HadoString *)&two);
