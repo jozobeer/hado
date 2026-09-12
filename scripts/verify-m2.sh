@@ -11,7 +11,7 @@ fail() { echo "NG: $1 $2"; }
 
 TMPD="$(mktemp -d)"
 tar -cf "$TMPD/corpus.tar" tests/accept tests/reject
-find tests/accept tests/reject crates/hado/tests/corpus.rs -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/corpus.sha"
+find tests/accept tests/reject tests/library crates/hado/tests/corpus.rs -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/corpus.sha"
 find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 
 # Any exit path restores the corpus and drops probe files.

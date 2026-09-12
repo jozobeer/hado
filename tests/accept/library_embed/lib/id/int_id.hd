@@ -1,0 +1,5 @@
+module IntId
+def value(x: Int): Int
+
+implement IntId as IntId
+def value x => x + 10

@@ -1,0 +1,4 @@
+// spec: §59
+// item: ライブラリ単位
+// expect: 31
+def main = lib::store::Memory.find 1
