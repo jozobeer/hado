@@ -2307,7 +2307,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 **R33 の終了時（2026-09-12、`2133cae`）:** 赤は R32 と同じ 4 本で、内訳が縮んだ。`verify-m1-corpus.sh` 6/7 の 3 pairs は 5 項目（Bytes・配列・String 操作・`Int.parse`・Env と Io）になり、**「型の共有」が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖、`verify-m7.sh` 2/3 は stdlib の関数。受理コーパスが 4 本増えたので `verify-m4.sh` 114/114、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71（いずれも満点）。`cargo test --offline --no-fail-fast` は 0 failed。
 
-**R34 の終了時（2026-09-13、`e976c6f`）:** 赤は 4 本のまま、内訳がさらに縮んだ。`verify-m1-corpus.sh` 6/7 の 3 pairs は 3 項目（配列・`Int.parse`・Env と Io）になり、**Bytes と String 操作が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。`verify-m7.sh` 2/3 は inventory が 94/94 で、残る赤は Array と `Int.parse` の宣言だけ。`verify-m4.sh` 123/123、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`cargo test --offline --no-fail-fast` 0 failed。なお `verify-m3.sh` の `cargo test` の上限を 180 秒から 600 秒に延ばした（実測 250 秒。時間切れは `NG: timeout` として出るようにし、判定の条件は変えていない）。
+**R34 の終了時（2026-09-13、`e976c6f`）:** 赤は 4 本のまま、内訳がさらに縮んだ。`verify-m1-corpus.sh` 6/7 の 3 pairs は 3 項目（配列・`Int.parse`・Env と Io）になり、**Bytes と String 操作が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。`verify-m7.sh` 2/3 は `prelude inventory: 32/39` で、残る赤は Array の 6 項目（signature と 5 member）と `Int.parse` だけ（同じ門番の中の `PASSED: 94/94` は受理コーパスの本数を数える別の検査で、inventory ではない）。`verify-m4.sh` 123/123、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`cargo test --offline --no-fail-fast` 0 failed。なお `verify-m3.sh` の `cargo test` の上限を 180 秒から 600 秒に延ばした（実測 250 秒。時間切れは `NG: timeout` として出るようにし、判定の条件は変えていない）。
 
 ### 24.9 不確実性
 
@@ -2646,9 +2646,9 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 
 24.1 の C3（配列）と C7（印字）・C8（関数集合）・C1（失敗の分類）を実装する。`Int.parse`（R36）と Env / Io（R37）は別ラウンド。
 
-**読む順:** 本節 → 24.1 の C 表と 24.4 → `docs/spec.md` の §36（`get` は O(1)、`set` は新しい Array）・§37 の型の書き方（`T Array`）・§45（`==` `!=` `compare` は要素型から派生、Fn を含めば E703 / E704）・§49（関数集合、member の型、失敗の `message` の表）・§50・§51（`Array.of_list [1, 2]`）→ 27 節（R34 の手順書。Bytes の `__bytes_alloc` + `__bytes_fill_unchecked` が本節の手本）→ `docs/corpus.md` の免除表。
+**読む順:** 本節 → 24.1 の C 表と 24.4 → `docs/spec.md` の §36（`get` は O(1)、`set` は新しい Array、1287 行の `T Array`）・§10（型の書き方）・§45（`==` `!=` `compare` は要素型から派生、Fn を含めば E703 / E704）・§49（関数集合、member の型、失敗の `message` の表）・§50・§51（`Array.of_list [1, 2]`）→ 27 節（R34 の手順書。Bytes の `__bytes_alloc` + `__bytes_fill_unchecked` が本節の手本）→ `docs/corpus.md` の免除表。
 
-**着手時点で赤の門番:** R34 の終了時の許容される赤（`verify-m1-corpus.sh` 6/7 の 3 pairs は配列・`Int.parse`・Env と Io、その連鎖の `verify-m2.sh` 7/8 と `verify-m3.sh` 11/12、`verify-m7.sh` 2/3 で inventory は 94/94）。R35 の入口で単独で測り直す。
+**着手時点で赤の門番:** R34 の終了時の許容される赤（`verify-m1-corpus.sh` 6/7 の 3 pairs は配列・`Int.parse`・Env と Io、その連鎖の `verify-m2.sh` 7/8 と `verify-m3.sh` 11/12、`verify-m7.sh` 2/3 で `prelude inventory: 32/39`）。R35 の入口で単独で測り直す。
 
 ### 決定
 
@@ -2691,7 +2691,7 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 | `compare (Array.of_list [2]) (Array.of_list [1, 2])` | `1`（長さより要素が先） | §45 + 本節の決定 |
 | 要素型が Fn を含む Array の `==` / `compare` | E703 / E704 | §45 |
 | `type A Array = ...` を利用者が書く | E205、位置は 2 回目の宣言の名前 `Array` | §50、§1865 |
-| `def f (xs: Int Array) => xs` の注釈 | 受理 | §37 |
+| `def f (xs: Int Array) => xs` の注釈 | 受理 | §36（`docs/spec.md:1287` の `T Array`）、§10 |
 | 3 万要素の `of_list` → `length` と `get 29999` | 一致し、`build` → 実行が 2 秒以内 | 実測（同じ長さの List の 3 万段の再帰は build 0.13 秒・実行 0.01 秒） |
 
 **本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
@@ -2721,14 +2721,14 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 - **索引:** `-1` / `0` / 中間（乱数）/ `length - 1` / `length` / `length + 1`
 
 判定 35-a: 5 member の正常形。要素型 × 長さ × 有効な索引の積で、`length`・`get`・`to_list (of_list xs)` の往復・`set` の結果を、python3 のリスト操作で計算した期待値と照合する。**工程 0 では Array の印字がまだ無いので、観測は `Array` の値そのものではなく `Array.length` / `Array.get` / `Array.to_list` の結果で行う**（`set` の結果も `to_list` を通して観測する。計画審査 1 巡目の重大 3）。**空の Array は要素型が決まらず `main` が E701 になる**（`infer.rs:230`、`types.rs:208`）ので、`def f (xs: Int List) => Array.length (Array.of_list xs)` のように注釈で要素型を固定した関数を `f []` で呼ぶ形にする。要素型に `Int Array`（入れ子）を含む観測と、長さ 30000 の観測は工程 0 では `length` と `get` に限り、印字を伴う形は工程 1 の判定 35-d に寄せる
-判定 35-b: 失敗。`get` と `set` の無効な索引（`-1` / `length` / `length + 1`）を要素型 × 長さの全部で回し、stderr の `message` が `IndexOutOfRange`、終了コード 1。**負の対照**: すぐ隣の有効な形（`get xs (length - 1)`、`set xs 0 v` を長さ 1 以上で、`of_list []` の `length`）は受理して実行。**handler で捕まえる形は body と abort の腕の型を揃える**（§58。R34 で E305 を踏んだ罠。`Array.get` は `A` を返すので、腕も同じ型にするか `Int` の要素で測る）
+判定 35-b: 失敗。**35-a と同じく、工程 0 では `main` の型を印字できる型に保つこと。** `emit.rs:528` は `main` の型から無条件に printer を合成するので、`main` が `T Array` のまま（`Array.set` の結果や入れ子の `Array.get` を素直に書いた形）だと、Array の腕が無い `display_value` が generic な `Data` の腕に落ちて `unknown display type` で build が落ちる。`Array.length (Array.set xs i v)` のように包んで `main` を `Int` にする。`get` と `set` の無効な索引（`-1` / `length` / `length + 1`）を要素型 × 長さの全部で回し、stderr の `message` が `IndexOutOfRange`、終了コード 1。**負の対照**: すぐ隣の有効な形（`get xs (length - 1)`、`set xs 0 v` を長さ 1 以上で、`of_list []` の `length`）は受理して実行。**handler で捕まえる形は body と abort の腕の型を揃える**（§58。R34 で E305 を踏んだ罠。`Array.get` は `A` を返すので、腕も同じ型にするか `Int` の要素で測る）
 判定 35-c: 3 万要素。hado 側の生成器で `Int List` を作り（**リテラルで書かない**。3 万要素のリテラルは build でコンパイラのスタックが溢れる。R34 で実測）、`of_list` → `length` と `get 29999` と `get 0` を印字。`build` → 実行が 2 秒以内（`timeout 2` を build と実行の両方を含む 1 つの期限にする。R34 工程 0 の審査 1 の指摘）。**この判定で配列そのものを印字しない**（印字は索引の再帰 helper で 3 万段を使う。2 秒の期限を印字で汚さない）。`set` も 3 万要素で 1 回測り、SIGSEGV しないことを終了コードで確かめる
 判定 35-d: 印字。最上位（`Array.of_list [<生成した列>]`）、空（`Array.of_list []`）、入れ子（List の要素、record の field、Array の Array）を要素型の分類すべてで。期待値は python3 で組む
 判定 35-e: 比較。`==` `!=` `compare` を要素型 × (同内容の別インスタンス / 先頭が違う / 途中が違う / 末尾が違う / 一方が他方の接頭辞 / 空どうし / 空と非空) の積で回し、期待値は python3 のタプル比較から導く。**同内容の別インスタンスの `==` が `true`、`compare` が `0` になることを必ず含める**（R34 工程 0 の審査 1 が「同値の構造比較を確実に検査しない」を挙げた）。大小の両方向を測る
 判定 35-e2: 要素型が Fn を含む Array の `==` と `compare` が E703 / E704。**入れ子（`Int Array Array` の中の Fn、record の field の Fn を要素に持つ Array）も含める**（`contains_function` の型引数の再帰が 1 段で止まる欠陥を捕まえるため）。負の対照として Fn を含まない同じ形（`Int Array Array`）は受理
 判定 35-f: 利用者の `type A Array = ...` が E205 で、位置は 2 回目の宣言の名前（§50）。`def f (xs: Int Array) => xs` の注釈は受理
 判定 35-f2: `shared type T = Int Array` の等式が型の登録より前に収集される。R34 の判定 34-f2 を写す（`type Box = { value: Store.T }` の field を、`Store` に構文的に依存しない未注釈の関数が読み、`Array.length` で整数を印字して一致。`shared` を消した対照は E305）
-判定 35-g: `bash scripts/verify-m7.sh` の inventory が Array の 5 member を OK にする（残る NG は `Int.parse` だけ）
+判定 35-g: `bash scripts/verify-m7.sh` の `prelude inventory` が 32/39 から 38/39 になる（Array の signature と 5 member が OK になり、残る NG は `Int.parse` だけ）
 判定 35-h: 受理コーパス（`// item: 配列` 3 本以上、`// expect-error:` の失敗形を 1 本以上）、lock 更新、`verify-m1-corpus.sh` の pairs から「配列」が消える
 判定 35-i: `cargo test --offline --no-fail-fast` が 0 failed
 判定 35-j: 全門番を単独で走らせ、許容される赤（下記）以外が満点
