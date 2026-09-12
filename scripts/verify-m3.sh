@@ -107,14 +107,14 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
     report(7, 'outside-corpus', errors == 10)
 source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
-corpus = [p for folder in ['tests/accept', 'tests/reject'] for p in source_files(folder)]
+corpus = [p for folder in ['tests/accept', 'tests/reject', 'tests/library'] for p in source_files(folder)]
 lib = P('crates/hado/src/lib.rs').read_text()
 types = P('crates/hado/src/types.rs').read_text()
 names = P('crates/hado/src/names.rs').read_text()
 glue = all(word in lib for word in ['names::','types::']) and all('fn '+word in types for word in ['unify','generalize','occurs'])
 glue &= all(word in names.lower() for word in ['type','module','constructor','value'])
 glue &= not any('"'+(p.parent.name+'/'+p.name)+'"' in source or str(p) in source for p in corpus)
-for folder in ['tests/accept', 'tests/reject']:
+for folder in ['tests/accept', 'tests/reject', 'tests/library']:
     for case in P(folder).iterdir():
         if case.is_dir():
             glue &= not any('"'+p.relative_to(case).as_posix()+'"' in source
