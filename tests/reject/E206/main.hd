@@ -1,4 +1,4 @@
-// spec: §59
+// spec: §5
 // error: E206
 // item: ライブラリ単位
 def main = 1
