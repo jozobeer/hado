@@ -2659,15 +2659,17 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 - **予約名。** `names.rs` の `BUILTIN_TYPES` に `"Array"` を足す（§1865）。**現状 `type A Array = { ... }` は E205 にならず E513（未使用）である**（実測 2026-09-13）。R34 の Bytes と同じく、足すだけで E205 になる見込み。判定 35-f で確かめ、ならなければ `namespaces.rs` の同じ場所に足す
 - **`infer/functors.rs` の `shared_body_type` が `A Array` を受けること。** R34 の 27 節が警告した「組み込み型の match が 2 本ある」件がそのまま当てはまる。ここは `types::builtin_type`（nullary）とは別に、引数付きの型を解く経路が要る。落とすと `shared type T = Int Array` の等式が前処理で収集されず、R33 で直した順序の欠陥が Array に限って再発する。判定 35-f2 で固定する
 - **機械表現は `{ int64 count; slot[count] }` の 1 つの GC ブロック。stride は 8 バイト固定、slot は offset 8 から始まる。** 要素の機械型（`repr::machine_type`）は I8 / I32 / I64 / F64 / Pointer のいずれかで、どれも 8 バイトに収まり 8 バイト整列を満たす。リトルエンディアンなので、8 バイト slot の先頭から要素の幅で load / store すればよい（`repr::aggregate_layout` は使わない。Array は専用の配置である）。`hado_alloc` は `GC_malloc`（`hado_runtime.c:31`）で、返るブロックはゼロ埋めされ、保守的走査が slot の中のポインタを追う。**要素を跨ぐ拡縮ノードは要らない**
-- **intrinsic は 4 本。`value_signature`（`runtime_abi.rs:77`）には載せない。** `__array_length: A Array -> Int`、`__array_get: (A Array, Int) -> A`（範囲内前提）、`__array_alloc: Int -> A Array`（count 個の slot を確保。中身はゼロ）、`__array_fill_unchecked: (A Array, Int, A) -> A Array`（構築中の未公開の値への書き込み。prelude の中でだけ使う）。R34 の `__bytes_alloc` + `__bytes_fill_unchecked` と同じ形である。4 本とも型が多相なので `value_signature` の `mono::Signature` では書けない。`RuntimeFunction::is_polymorphic()` を足して、次の 3 箇所を分岐させる:
+- **intrinsic は 4 本。`value_signature`（`runtime_abi.rs:77`）には載せない。** `__array_length: A Array -> Int`、`__array_get: (A Array, Int) -> A`（範囲内前提）、`__array_alloc: Int -> A Array`（count 個の slot を確保。中身はゼロ）、`__array_fill_unchecked: (A Array, Int, A) -> A Array`（構築中の未公開の値への書き込み。prelude の中でだけ使う）。R34 の `__bytes_alloc` + `__bytes_fill_unchecked` と同じ形である。4 本とも型が多相なので `value_signature` の `mono::Signature` では書けない。`RuntimeFunction::is_polymorphic()` を足して、次の **4 箇所**を分岐させる:
+  - **name_resolution（`name_resolution.rs:167`）**: `__` で始まる名前は `from_intrinsic(name).and_then(|f| f.value_signature()).is_none()` なら E204 になる。**ここを直さないと `stdlib/array.hd` の中の 4 本すべてが E204 になり、prelude が壊れて工程 0 の最初の `check` から一切通らない**（計画審査 1 巡目の致命 1）。条件を `is_polymorphic() || value_signature().is_some()` にする
   - **infer（`infer.rs:1392-1395`）**: 固定署名の代わりに fresh な型変数 `a` を 1 本引いて `Ty` を組む（`__array_get` なら `Ty::fn_of(vec![Ty::Adt("Array", vec![a.clone()]), Ty::Int], a)`）。引数と結果で同じ変数を使うことが本質である
   - **mono（`mono.rs:1387-1389`）**: `Expression::call_runtime`（`mono.rs:193-199`）は引数型を固定署名と厳密比較するので通せない。結果型を実引数から導く別の構築関数を足す（`__array_get` は引数 0 の `Data("Array",[T])` から `T`、`__array_length` は `Int`、`__array_fill_unchecked` は引数 0 の型）
-  - **`__array_alloc` だけは結果しか多相でない。** 実引数からは要素型を導けない。**`composite_types` の span 地図から引く**（`infer.rs:945` が `Apply | Call | Pipe | List | Record | NamedConstructor | With` の span に結果型を記録し、`mono.rs:1394` の constructor が同じ地図を同じ鍵で引いている。intrinsic の呼び出しは `Call` / `Apply` なので記録される）。phantom の引数（`__array_alloc: (A List, Int) -> A Array` にして要素型を第 1 引数から導く）は採らない。`stdlib/array.hd` に嘘の引数を書かせないためである
-- **emit（`emit.rs:265` の `Expression::CallRuntime`）は 4 本を 2 通りに分ける。** `__array_length` と `__array_alloc` は C の関数呼び出し（`hado_array_length` は header の `count` を読む、`hado_array_alloc` は `hado_alloc(8 + 8 * count)` を呼んで `count` を書く。どちらも要素型を知らないので C で書ける）。`__array_get` と `__array_fill_unchecked` は **C を呼ばず emit がその場で load / store を出す**（`imul_imm(index, 8)` → `iadd` で base + 8 + index*8 を作り、`builder.ins().load(要素の clif 型, ...)` / `store`）。既存の `emit.rs:368` `:393` が定数 offset の load を出しているので、動的 offset を足すだけである。`allocate`（`emit.rs:630-636`）は size が `u32` の定数なので、動的な size を取る形が別に要る
+  - **`__array_alloc` だけは結果しか多相でない。** 実引数からは要素型を導けない。**`composite_types` の span 地図から引く**（`infer.rs:945` が `Apply | Call | Pipe | List | Record | NamedConstructor | With` の span に結果型を記録し、`mono.rs:1394` の constructor が同じ地図を同じ鍵で引いている。intrinsic の呼び出しは `Call` / `Apply` なので記録される）。**引いた `Ty` は `self.specialization.resolve` に通すこと**（`mono.rs:409` `:422` `:1363` と同じ理由。多相な `of_list` の中では要素型が推論変数のままである）。phantom の引数（`__array_alloc: (A List, Int) -> A Array` にして要素型を第 1 引数から導く）は採らない。`stdlib/array.hd` に嘘の引数を書かせないためである
+- **emit（`emit.rs:265` の `Expression::CallRuntime`）は 4 本を 2 通りに分ける。** `__array_length` と `__array_alloc` は C の関数呼び出し（`hado_array_length` は header の `count` を読む、`hado_array_alloc` は `hado_alloc(8 + 8 * count)` を呼んで `count` を書く。どちらも要素型を知らないので C で書ける）。**size の計算は C の中で閉じるので、`emit.rs:630-636` の `allocate`（size が `u32` の定数）は触らない。**`__array_get` と `__array_fill_unchecked` は **C を呼ばず emit がその場で load / store を出す**（`imul_imm(index, 8)` → `iadd` で base + 8 + index*8 を作り、`builder.ins().load(要素の clif 型, ...)` / `store`）。既存の `emit.rs:368` `:393` が定数 offset の load を出しているので、動的 offset を足すだけである
 - **`of_list` `to_list` `set` は hado で書く（`stdlib/array.hd`）。** `of_list` は `__array_alloc (List.length xs)` してから再帰で `__array_fill_unchecked` する（R34 の `Bytes.of_list` の写し。構築中の値が外に出ないことをコメントに書く）。`to_list` は `__array_get` の再帰。`set` は範囲を検査してから `to_list` → 索引の位置だけ差し替え → `of_list` で新しい Array を作る（O(n)。§36 は `set` に O(1) を求めていない）。**C は hado の List の cell を触らない**（R34 と同じ中断の条件）
 - **失敗は hado 側の包みで `raise`。** `Array.get` と `Array.set` の索引が `index < 0` または `index >= length` なら `raise { message = "IndexOutOfRange" }`（§49 の表）。member の型は §49 のとおり（`length` `of_list` `to_list` が `Pure`、`get` `set` が `{Error}`）
 - **印字（§51）。** `display_value`（`mono.rs:3141`）の `Type::Data(name, parameters) if name == "List"` の腕の隣に Array の腕を置き、`display_list_items`（`mono.rs` の再帰 helper）を写して、`Cons` の projection の代わりに索引を 1 増やす再帰 helper を合成する（終端は `index == __array_length`）。書式は `Array.of_list [1, 2]`、空は `Array.of_list []`。`derive_scalar_printer`（`mono.rs:3039`）はスカラ専用なので触らない
-- **比較（§45）。** `derive_comparison`（`mono.rs:2562`）と `structural_equality` に Array の腕を、`records` / `constructors` を見る前に置く。要素ごとに再帰し、長さが違えば短い方を先に置く（辞書順）。要素型が Fn を含めば既存の Fn の判定に落ちて E703 / E704 になる見込み。判定 35-e2 で確かめる
+- **比較（§45）。** `derive_comparison`（`mono.rs:2562`）と `structural_equality` に Array の腕を、`records` / `constructors` を見る前に置く。要素ごとに再帰し、共通部分がすべて等しいときだけ短い方を先に置く（python3 のリスト比較と同じ辞書順。長さを要素より先に見ない）。
+- **要素型が Fn を含む Array の E703 / E704 は、`infer.rs` の `contains_function` を直さないと出ない（計画審査 1 巡目の致命 2）。** `contains_function` は `let Ty::Adt(name, _) = ty else { return false }` の後、その名前を結果に持つ constructor / record の payload だけを辿る。`List` は `Cons` の payload で拾えるが、**Array は constructor を持たないので `Adt("Array", [Fn])` は常に false になる**。同じファイルの `contains_abstract` は `Ty::Adt(_, args) if args.iter().any(...)` の腕で型引数を再帰しているので、`contains_function` にも同じ腕を足す。落とすと `Array.of_list [fn(x => x)] == ...` が §45 に反して受理され、`build` で `derive_comparison` / `structural_equality` が Fn に達して内部エラーになる。判定 35-e2 で固定する
 - **stdlib の登録。** `lib.rs:145-151` のリストに `stdlib/array.hd` を足す（型宣言は組み込みなので `:135-140` には足さない）。`stdlib/array.hd` は `module Array` と `implement Array as Array` の形（`stdlib/string.hd` が手本）。**工程 0 だけ lock に `stdlib/array.hd` の 1 行を足すことを許す**（他の行は変えない）
 - **門番の追随。** `verify-m7.sh` の inventory は §49 から導く形になっている（R34）ので触らない。Array の 5 member が入れば残る NG は `Int.parse` だけになる見込み
 - **E2 の集計部。** `tools/gates/report/report.hd` は R35 では触らない（`Int.parse` が要るので R36）
@@ -2685,7 +2687,8 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 | `[Array.of_list [1], Array.of_list []]` を印字 | `[Array.of_list [1], Array.of_list []]` | §51 |
 | `Array.of_list [1, 2] == Array.of_list [1, 2]` | `true` | §45 |
 | `compare (Array.of_list [1, 2]) (Array.of_list [1, 3])` | `-1` | §45 |
-| `compare (Array.of_list [1]) (Array.of_list [1, 2])` | `-1`（短い方が先） | §45（本節の決定） |
+| `compare (Array.of_list [1]) (Array.of_list [1, 2])` | `-1`（共通部分が等しいので短い方が先） | §45 + 本節の決定（下記の疑義） |
+| `compare (Array.of_list [2]) (Array.of_list [1, 2])` | `1`（長さより要素が先） | §45 + 本節の決定 |
 | 要素型が Fn を含む Array の `==` / `compare` | E703 / E704 | §45 |
 | `type A Array = ...` を利用者が書く | E205、位置は 2 回目の宣言の名前 `Array` | §50、§1865 |
 | `def f (xs: Int Array) => xs` の注釈 | 受理 | §37 |
@@ -2693,13 +2696,17 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 
 **本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
 
+### 仕様への疑義（R38 で判断する）
+
+§45（`docs/spec.md:1834`）は Array の `compare` を「要素型から派生する」としか定めず、**長さが違う Array の順序を定めていない**。本節は python3 のリスト比較・`List` の辞書順に合わせて「共通部分がすべて等しいときだけ短い方を先」と決めた。仕様は変えない。R38 で §45 に 1 文足すかどうかを判断する。
+
 ### 成果物
 
-`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `mono.rs` `repr.rs` `emit.rs` `names.rs` `infer.rs` `infer/functors.rs` `lib.rs` `namespaces.rs`）、`stdlib/array.hd`（新設）、`crates/hado/tests/r35_array.rs`（新設）、`scripts/verify-r35.sh`（新設）、`tests/accept/`（`// item: 配列` の受理。`// expect-error:` の失敗形を含む）、`tests/corpus.sha256`、`docs/ledger.md`。
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `mono.rs` `repr.rs` `emit.rs` `names.rs` `infer.rs` `infer/functors.rs` `lib.rs` `namespaces.rs` `name_resolution.rs`）、`stdlib/array.hd`（新設）、`crates/hado/tests/r35_array.rs`（新設）、`scripts/verify-r35.sh`（新設）、`tests/accept/`（`// item: 配列` の受理。`// expect-error:` の失敗形を含む）、`tests/corpus.sha256`、`docs/ledger.md`。
 
 ### 工程
 
-- 工程 0: 型と機械表現と 4 つの intrinsic と `stdlib/array.hd`。`type_arities` の登録、`BUILTIN_TYPES`、`shared_body_type`、多相 intrinsic の 3 分岐、emit の load / store と動的 size の確保、C の 2 本、`stdlib/array.hd` の 5 member と失敗、**lock に `stdlib/array.hd` の 1 行を足す**。判定 35-a 35-b 35-c 35-f 35-f2
+- 工程 0: 型と機械表現と 4 つの intrinsic と `stdlib/array.hd`。`type_arities` の登録、`BUILTIN_TYPES`、`shared_body_type`、多相 intrinsic の 4 分岐（name_resolution を含む）、emit の load / store、C の 2 本、`stdlib/array.hd` の 5 member と失敗、**lock に `stdlib/array.hd` の 1 行を足す**。判定 35-a 35-b 35-c 35-f 35-f2
 - 工程 1: 印字と比較。`display_value` の Array の腕と索引の再帰 helper、`derive_comparison` と `structural_equality` の Array の腕、E703 / E704。判定 35-d 35-e 35-e2
 - 工程 2: 門番とコーパス。受理コーパス（`// item: 配列`）、lock、`verify-m7.sh` の inventory と `verify-m1-corpus.sh` の pairs。判定 35-g 35-h 35-i
 
@@ -2713,12 +2720,12 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 - **長さ:** `0` / `1` / 中間（乱数）/ `3` / `30000`
 - **索引:** `-1` / `0` / 中間（乱数）/ `length - 1` / `length` / `length + 1`
 
-判定 35-a: 5 member の正常形。要素型 × 長さ × 有効な索引の積で、`length`・`get`・`to_list (of_list xs)` の往復・`set` の結果を、python3 のリスト操作で計算した期待値と照合する
+判定 35-a: 5 member の正常形。要素型 × 長さ × 有効な索引の積で、`length`・`get`・`to_list (of_list xs)` の往復・`set` の結果を、python3 のリスト操作で計算した期待値と照合する。**工程 0 では Array の印字がまだ無いので、観測は `Array` の値そのものではなく `Array.length` / `Array.get` / `Array.to_list` の結果で行う**（`set` の結果も `to_list` を通して観測する。計画審査 1 巡目の重大 3）。**空の Array は要素型が決まらず `main` が E701 になる**（`infer.rs:230`、`types.rs:208`）ので、`def f (xs: Int List) => Array.length (Array.of_list xs)` のように注釈で要素型を固定した関数を `f []` で呼ぶ形にする。要素型に `Int Array`（入れ子）を含む観測と、長さ 30000 の観測は工程 0 では `length` と `get` に限り、印字を伴う形は工程 1 の判定 35-d に寄せる
 判定 35-b: 失敗。`get` と `set` の無効な索引（`-1` / `length` / `length + 1`）を要素型 × 長さの全部で回し、stderr の `message` が `IndexOutOfRange`、終了コード 1。**負の対照**: すぐ隣の有効な形（`get xs (length - 1)`、`set xs 0 v` を長さ 1 以上で、`of_list []` の `length`）は受理して実行。**handler で捕まえる形は body と abort の腕の型を揃える**（§58。R34 で E305 を踏んだ罠。`Array.get` は `A` を返すので、腕も同じ型にするか `Int` の要素で測る）
 判定 35-c: 3 万要素。hado 側の生成器で `Int List` を作り（**リテラルで書かない**。3 万要素のリテラルは build でコンパイラのスタックが溢れる。R34 で実測）、`of_list` → `length` と `get 29999` と `get 0` を印字。`build` → 実行が 2 秒以内（`timeout 2` を build と実行の両方を含む 1 つの期限にする。R34 工程 0 の審査 1 の指摘）。**この判定で配列そのものを印字しない**（印字は索引の再帰 helper で 3 万段を使う。2 秒の期限を印字で汚さない）。`set` も 3 万要素で 1 回測り、SIGSEGV しないことを終了コードで確かめる
 判定 35-d: 印字。最上位（`Array.of_list [<生成した列>]`）、空（`Array.of_list []`）、入れ子（List の要素、record の field、Array の Array）を要素型の分類すべてで。期待値は python3 で組む
 判定 35-e: 比較。`==` `!=` `compare` を要素型 × (同内容の別インスタンス / 先頭が違う / 途中が違う / 末尾が違う / 一方が他方の接頭辞 / 空どうし / 空と非空) の積で回し、期待値は python3 のタプル比較から導く。**同内容の別インスタンスの `==` が `true`、`compare` が `0` になることを必ず含める**（R34 工程 0 の審査 1 が「同値の構造比較を確実に検査しない」を挙げた）。大小の両方向を測る
-判定 35-e2: 要素型が Fn を含む Array の `==` と `compare` が E703 / E704
+判定 35-e2: 要素型が Fn を含む Array の `==` と `compare` が E703 / E704。**入れ子（`Int Array Array` の中の Fn、record の field の Fn を要素に持つ Array）も含める**（`contains_function` の型引数の再帰が 1 段で止まる欠陥を捕まえるため）。負の対照として Fn を含まない同じ形（`Int Array Array`）は受理
 判定 35-f: 利用者の `type A Array = ...` が E205 で、位置は 2 回目の宣言の名前（§50）。`def f (xs: Int Array) => xs` の注釈は受理
 判定 35-f2: `shared type T = Int Array` の等式が型の登録より前に収集される。R34 の判定 34-f2 を写す（`type Box = { value: Store.T }` の field を、`Store` に構文的に依存しない未注釈の関数が読み、`Array.length` で整数を印字して一致。`shared` を消した対照は E305）
 判定 35-g: `bash scripts/verify-m7.sh` の inventory が Array の 5 member を OK にする（残る NG は `Int.parse` だけ）
@@ -2746,7 +2753,7 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 - `BUILTIN_TYPES` に足すだけで `type A Array` が E205 になったか
 - `__array_alloc` の要素型が `composite_types` の span 地図から引けたか（引けなければ何が足りなかったか）
 - 3 万要素の `of_list` と `set` の所要（`time`）と、`to_list` の 3 万段の再帰が C スタックで通ったか
-- 要素型が Fn を含む Array の `==` が既存の判定で E703 になったか、それとも新しく足したか
+- `contains_function` に型引数の再帰を足して E703 / E704 が出るようになったか、`contains_abstract` の腕をそのまま写せたか、既存の `List` / record の E703 の判定が後退しないか
 
 ### 中断の条件
 
@@ -2754,6 +2761,6 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 
 **`composite_types` の span 地図から `__array_alloc` の要素型が引けず、かつ `infer.rs:945` の記録の条件を広げる以外に手が無いと分かったら、工程 0 を止めて報告せよ。** phantom の引数に切り替えるかどうかは指揮者が決める。
 
-**多相 intrinsic の 3 分岐（infer の fresh 変数、mono の結果型の導出、emit の load / store）のどれかが、既存の単相の intrinsic の経路を壊さずには通せないと分かったら、止めて報告せよ。** R34 で足した 11 本の Bytes / String の intrinsic が後退しないことが前提である。
+**多相 intrinsic の 4 分岐（name_resolution の E204 の門、infer の fresh 変数、mono の結果型の導出、emit の load / store）のどれかが、既存の単相の intrinsic の経路を壊さずには通せないと分かったら、止めて報告せよ。** R34 で足した 11 本の Bytes / String の intrinsic が後退しないことが前提である。
 
 それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
