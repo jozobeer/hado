@@ -108,17 +108,21 @@ fn corpus_counts() {
 
     // Parse/compile divergence (R3 コーパス外プローブ 4, docs/ledger.md): a non-E1xx
     // file that parses must not fail compilation at the syntax stage (a
-    // parse diagnostic); an E1xx file must fail compilation at parse.
-    let work = std::env::temp_dir().join(format!("hado-parse-{}", std::process::id()));
-    std::fs::create_dir_all(&work).unwrap();
+    // parse diagnostic); an E1xx file must fail compilation at parse. Reject
+    // cases are directories (corpus.md), so evaluate them the way
+    // `corpus.rs::try_reject` does (`Project::load`), not as one file.
     for rel in &rels {
         if rel.starts_with("tests/accept/") {
             continue;
         }
         let text = read_rel(&root, rel);
         let code = header_value(&text, "// error:").unwrap_or_default();
-        let obj = work.join(rel.replace('/', "_"));
-        match hado::compile_source_to_object(&text, rel, &obj) {
+        let checked = match hado::project::Project::load(&root.join(rel)) {
+            Ok(project) => project.check().map_err(|error| error.to_string()),
+            Err(hado::project::LoadError::Diagnostic(error)) => Err(error.to_string()),
+            Err(error) => panic!("{rel}: {error}"),
+        };
+        match checked {
             Err(msg) if is_e1xx(&code) => assert!(msg.contains(&format!("error[{code}]")), "{rel}: {msg}"),
             Err(msg) => {
                 assert!(
@@ -126,10 +130,9 @@ fn corpus_counts() {
                     "non-E1xx {rel} must not fail at the syntax stage, got: {msg}"
                 );
             }
-            Ok(()) => panic!("reject corpus compiled successfully: {rel}"),
+            Ok(_) => panic!("reject corpus compiled successfully: {rel}"),
         }
     }
-    std::fs::remove_dir_all(work).unwrap();
 
     let spec = read_rel(&root, "docs/spec.md");
     let codes: std::collections::BTreeSet<_> = spec.lines().filter_map(|line| {
