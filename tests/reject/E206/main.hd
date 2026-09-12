@@ -1,3 +1,4 @@
-// spec: §5
+// spec: §59
 // error: E206
-// item: 複数の入口
+// item: ライブラリ単位
+def main = 1

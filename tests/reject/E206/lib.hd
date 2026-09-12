@@ -1,0 +1,7 @@
+library
+
+module Store
+def read(value: Int): Int
+
+implement Store as MemoryStore
+def read value => value
