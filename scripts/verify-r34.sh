@@ -867,5 +867,48 @@ printf 'type Bytes = | A\ndef main = 1\n' >"$workdir/e205/main.hd"
 random_padding "$workdir/e205/main.hd"
 expect_error_at '34-f type Bytes は E205、2 回目の宣言の名前' "$workdir/e205/main.hd" E205 'Bytes = | A'
 
+# 34-h: 検査 6 と同じ導出関数を、仕様の写しで実行する。
+check '34-h §49 の追加・削除に member 一覧が追随し、空入力は拒否する' \
+    python3 - "$workdir" <<'PY'
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+source = Path('scripts/verify-m1-corpus.sh').read_text()
+function = re.search(r'^prelude_members\(\) \{\n.*?^\}', source, re.M | re.S)
+assert function, 'missing prelude_members function in check 6'
+assert re.search(r'prelude_members "\$SPEC"', source), 'check 6 must call the tested function'
+base = Path(sys.argv[1])
+spec = Path('docs/spec.md').read_text()
+
+
+def derive(text):
+    path = base / 'members-spec.md'
+    path.write_text(text)
+    return subprocess.run(['bash', '-c', function[0] + '\nprelude_members "$1"', 'bash', str(path)],
+                          capture_output=True)
+
+
+original = derive(spec)
+assert original.returncode == 0 and original.stdout and not original.stderr
+members = original.stdout.decode().splitlines()
+assert len(members) == len(set(members))
+added = spec.replace('関数集合は次とする。\n\n```text\n',
+                     '関数集合は次とする。\n\n```text\nFoo: bar\n', 1)
+assert added != spec
+changed = derive(added)
+assert changed.returncode == 0 and not changed.stderr
+assert set(changed.stdout.decode().splitlines()) == set(members) | {'Foo.bar'}
+assert len(changed.stdout.decode().splitlines()) == len(members) + 1
+removed = derive(added.replace('Foo: bar\n', ''))
+assert removed.returncode == 0 and removed.stdout == original.stdout and not removed.stderr
+for empty in ('', '# 49. prelude\n', '# 49. prelude\n関数集合は次とする。\n\n```text\n```\n'):
+    result = derive(empty)
+    assert result.returncode != 0 and not result.stdout, 'empty inventory accepted'
+print(f'   (member count: {len(members)} → {len(members) + 1} → {len(members)}; added Foo.bar)')
+print('   (対照: 同値・削除は追随、空の仕様・関数集合は拒否)')
+PY
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
