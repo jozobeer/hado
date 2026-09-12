@@ -1,0 +1,5 @@
+// spec: §49
+// item: String 操作
+// expect: [true, false, true, false, true, true]
+// needs: prelude
+def main = [String.starts_with "héあ😀" "hé", String.starts_with "héあ😀" "é", String.contains "héあ😀" "あ😀", String.contains "héあ😀" "😀あ", String.starts_with "" "", String.contains "" ""]

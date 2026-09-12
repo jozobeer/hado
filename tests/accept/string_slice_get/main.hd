@@ -1,0 +1,6 @@
+// spec: §49
+// item: String 操作
+// expect: { part = "éあ😀"; scalar = '😀' }
+// needs: prelude
+type Selection = { part: String; scalar: Char }
+def main = { part = String.slice "Aéあ😀Z" 1 4; scalar = String.get "Aéあ😀Z" 3 }

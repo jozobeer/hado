@@ -1,0 +1,5 @@
+// spec: §49
+// item: Bytes
+// expect: [7, 2, 0, 127, 255]
+// needs: prelude
+def main = [Bytes.length (Bytes.of_string "あ😀"), String.length "あ😀", ...Bytes.to_list (Bytes.of_list [0, 127, 255])]

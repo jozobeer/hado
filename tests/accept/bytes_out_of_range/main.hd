@@ -1,0 +1,5 @@
+// spec: §49
+// item: Bytes
+// expect-error: ByteOutOfRange
+// needs: prelude
+def main = Bytes.of_list [256]

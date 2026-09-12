@@ -1,0 +1,5 @@
+// spec: §51
+// item: Bytes
+// expect: [Bytes.of_list [72, 105], Bytes.of_list []]
+// needs: prelude
+def main = [Bytes.of_list [72, 105], Bytes.of_list []]

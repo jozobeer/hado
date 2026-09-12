@@ -1,0 +1,5 @@
+// spec: §49
+// item: String 操作
+// expect-error: EmptySeparator
+// needs: prelude
+def main = String.split "a" ""

@@ -1,0 +1,5 @@
+// spec: §49
+// item: String 操作
+// expect: ["", "a", "", "b", ""]
+// needs: prelude
+def main = String.split ",a,,b," ","
