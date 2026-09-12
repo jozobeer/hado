@@ -123,13 +123,16 @@ pub(crate) fn resolve(
                 .extend(effect.ops.iter().map(|op| op.name.clone()));
         }
     }
-    for ((item, directory), root) in ast.items.iter_mut().zip(&locations).zip(&roots) {
+    for (index, ((item, directory), root)) in ast.items.iter_mut().zip(&locations).zip(&roots).enumerate() {
         resolver.root = root.clone();
-        // §59: a declaration in a library subdirectory conflicts with the
-        // library root and the prelude, not with the user root.
-        if directory != root {
+        // §55, §59: a declaration conflicts with the names visible unqualified
+        // from its directory. The prelude is visible even at a library root, so
+        // its names are checked everywhere. The root's own names are compared
+        // only from a subdirectory: at the root the declaration is the root.
+        if index >= prelude_items {
             for (space, name, span) in declarations(item) {
-                if resolver.has(&resolver.root, space, name) || resolver.has_prelude(space, name) {
+                if (directory != root && resolver.has(&resolver.root, space, name))
+                    || resolver.has_prelude(space, name) {
                     resolver.error(span, "E205", "declaration conflicts with root name");
                 }
             }
