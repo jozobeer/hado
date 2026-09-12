@@ -283,3 +283,50 @@ fn cyclic_shared_functor_applications_are_rejected() {
     let error = check_source(source, "t").err().expect("a shared application cycle must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
+
+// --- 工程 1 の修正: ADT payload・別実装の局所型・局所 record ---
+
+#[test]
+fn shared_equation_reaches_a_constructor_payload() {
+    let source = "def main = Box(\"hi\")\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = String\ndef make name => name";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::Adt("Box".into(), vec![]));
+}
+
+#[test]
+fn unshared_constructor_payload_stays_abstract() {
+    let source = "def main = Box(\"hi\")\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let error = check_source(source, "t").err().expect("an unmarked payload stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("Store.T"), "{}", error.message);
+}
+
+#[test]
+fn local_types_of_two_implementations_stay_distinct() {
+    let source = "def main = A.read (B.make 7)\nmodule Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n\nimplement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id";
+    let error = check_source(source, "t").err().expect("two implementations must keep distinct local types");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("A.Hidden"), "{}", error.message);
+    assert!(error.message.contains("B.Hidden"), "{}", error.message);
+}
+
+#[test]
+fn a_local_type_can_be_used_through_its_own_implementation() {
+    let source = "def main = A.read (A.make 7)\nmodule Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::Int);
+}
+
+#[test]
+fn shared_local_record_allows_field_access() {
+    let source = "def main = name (Store.make \"hi\")\ndef name (t: Store.T) => t.name\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype Hidden = { name: String }\nshared type T = Hidden\ndef make name => { name = name }";
+    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_local_record_rejects_field_access() {
+    let source = "def main = name (Store.make \"hi\")\ndef name (t: Store.T) => t.name\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }";
+    let error = check_source(source, "t").err().expect("an unmarked local record keeps E601");
+    assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
+}

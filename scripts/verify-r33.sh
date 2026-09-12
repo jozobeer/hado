@@ -127,6 +127,27 @@ expect_code_absent() {
     fi
 }
 
+# code の診断が出て、needles を全て含み、forbidden を含まない。
+# 引数: label entry code forbidden needle...
+expect_code_contains() {
+    local label=$1 entry=$2 code=$3 forbidden=$4
+    shift 4
+    total=$((total + 1))
+    local err status ok=1 needle
+    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
+    [ "$status" -eq 1 ] && [[ "$err" == *"error[$code]:"* ]] || ok=0
+    for needle in "$@"; do
+        [[ "$err" == *"$needle"* ]] || ok=0
+    done
+    [ -z "$forbidden" ] || { [[ "$err" != *"$forbidden"* ]] || ok=0; }
+    if [ "$ok" -eq 1 ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want $code with '$*' without '$forbidden', got status=$status '$err')"
+    fi
+}
+
 # stdout / stderr が空であることは、ファイルに保存してバイト数で測る
 # （コマンド置換は末尾改行を落とすので使わない）。
 accept_quiet() {
@@ -193,10 +214,14 @@ rand_a="a${RANDOM}"
 rand_b="b${RANDOM}"
 rand_name="n${RANDOM}"
 rand_int=$(( (RANDOM << 15) | RANDOM ))
+rand_box="w${RANDOM}"
+rand_other=$(( (RANDOM << 15) | RANDOM ))
+rand_rec="r${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
-    "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept"
+    "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept" \
+    "$workdir/33wrap" "$workdir/33wrapneg" "$workdir/33dist" "$workdir/33distpos" "$workdir/33lrec" "$workdir/33lrecneg"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -446,13 +471,63 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Store as Store\ndef find id => id\n'
 } >"$workdir/33g3/main.hd"
 
+# --- 工程 1 の修正: ADT payload・別実装の局所型・局所 record ---
+
+# ADT payload の型を shared が展開する。外の ADT Box の constructor の payload が
+# 契約修飾型 Store.T で、唯一の実装が shared type T = String のとき Box に String を
+# 渡せる（探針 wrapper）。
+{
+    printf 'def main = Box("%s")\ntype Box = | Box(Store.T)\n' "$rand_box"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+} >"$workdir/33wrap/main.hd"
+
+# 負の対照: shared を外すと payload は不透明のまま E305。
+{
+    printf 'def main = Box("%s")\ntype Box = | Box(Store.T)\n' "$rand_box"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+} >"$workdir/33wrapneg/main.hd"
+
+# 別実装の局所型は混同されない。2 つの実装 A B が同名の局所型 Hidden を持ち、
+# どちらも shared type T = Hidden でも A.T と B.T は別の型（探針 distinct）。
+{
+    printf 'def main = A.read (B.make %s)\n' "$rand_other"
+    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\n'
+    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n\n'
+    printf 'implement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n'
+} >"$workdir/33dist/main.hd"
+
+# 正の対照: 同じ実装の中では局所型は一致するので受理して実行できる。
+{
+    printf 'def main = A.read (A.make %s)\n' "$rand_int"
+    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\n'
+    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n'
+} >"$workdir/33distpos/main.hd"
+
+# 局所 record への shared は field 参照を許す（探針 localrecord）。
+{
+    printf 'def main = name (Store.make "%s")\ndef name (t: Store.T) => t.name\n' "$rand_rec"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype Hidden = { name: String }\nshared type T = Hidden\ndef make name => { name = name }\n'
+} >"$workdir/33lrec/main.hd"
+
+# 負の対照: shared を外すと局所 record でも field 参照は E601。
+{
+    printf 'def main = name (Store.make "%s")\ndef name (t: Store.T) => t.name\n' "$rand_rec"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }\n'
+} >"$workdir/33lrecneg/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
     "$workdir/33e/main.hd" "$workdir/33eneg/main.hd" "$workdir/33f2/main.hd" "$workdir/33h/main.hd" \
     "$workdir/33i1/main.hd" "$workdir/33i2/main.hd" "$workdir/33i3/main.hd" "$workdir/33accept/main.hd" \
     "$workdir/33a1/main.hd" "$workdir/33a1c/main.hd" "$workdir/33a3/main.hd" "$workdir/33a1b/main.hd" "$workdir/33a1bneg/main.hd" \
-    "$workdir/33b1/main.hd" "$workdir/33b1b/main.hd" "$workdir/33g1/main.hd" "$workdir/33g2/main.hd" "$workdir/33g3/main.hd"; do
+    "$workdir/33b1/main.hd" "$workdir/33b1b/main.hd" "$workdir/33g1/main.hd" "$workdir/33g2/main.hd" "$workdir/33g3/main.hd" \
+    "$workdir/33wrap/main.hd" "$workdir/33wrapneg/main.hd" "$workdir/33dist/main.hd" "$workdir/33distpos/main.hd" \
+    "$workdir/33lrec/main.hd" "$workdir/33lrecneg/main.hd"; do
     random_padding "$probe"
 done
 
@@ -471,7 +546,7 @@ expect_error_at '33-d 緩和なしは E705 で def main' "$workdir/33dneg/main.h
 accept_build_run '33-e shared で E601 が緩和され field が読める' "$workdir/33e/main.hd" "$rand_name"
 expect_error_at '33-e 緩和なしは E601 で field の .' "$workdir/33eneg/main.hd" E601 '.name'
 print_type_is '33-f (1) --print-type が String を出す' "$workdir/33a2/main.hd" 'String'
-expect_code_absent '33-f (2) E305 の両辺に .T が現れない' "$workdir/33f2/main.hd" E305 '.T'
+expect_code_contains '33-f (2) E305 は cannot unify と String / Int を診断し .T を含まない' "$workdir/33f2/main.hd" E305 '.T' 'cannot unify' 'String' 'Int'
 accept_build_run '33-h 型引数付き shared で push と注釈が通る' "$workdir/33h/main.hd" '[2, 1]'
 expect_error_at '33-i (1) shared type T = T は E602' "$workdir/33i1/main.hd" E602 'implement'
 expect_error_at '33-i (2) shared の相互参照は E602' "$workdir/33i2/main.hd" E602 'implement'
@@ -489,6 +564,14 @@ accept_build_run '33-g(1) 契約修飾型 Id.T が shared で Int に解ける' 
 expect_error_at '33-g(2) Id.T の実装が 2 つなら E603' "$workdir/33g2/main.hd" E603 'Id.T'
 expect_code '33-g(3) 印なしの実装では Int を Id.T に渡せない' "$workdir/33g3/main.hd" E305
 print_type_is '33-f(3) shared functor の適用結果が String と印字' "$workdir/33a1/main.hd" 'String'
+
+# 工程 1 の修正: ADT payload・別実装の局所型・局所 record。
+accept_build_run 'shared が ADT payload を展開し Box(String) を印字' "$workdir/33wrap/main.hd" "Box(\"$rand_box\")"
+expect_code_message 'shared 無しの ADT payload は E305 で Store.T が出る' "$workdir/33wrapneg/main.hd" E305 'Store.T'
+expect_code_contains '別実装の局所型 A.Hidden と B.Hidden は単一化できない' "$workdir/33dist/main.hd" E305 '' 'cannot unify' 'A.Hidden' 'B.Hidden'
+accept_build_run '同じ実装の局所型は一致し整数を印字' "$workdir/33distpos/main.hd" "$rand_int"
+accept_build_run 'shared が局所 record を展開し field を読める' "$workdir/33lrec/main.hd" "$rand_rec"
+expect_code 'shared 無しの局所 record は E601' "$workdir/33lrecneg/main.hd" E601
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
 grammar_and_keywords() {
