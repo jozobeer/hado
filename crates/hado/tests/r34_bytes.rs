@@ -89,6 +89,55 @@ fn utf8_case_count_is_seed_independent() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 }
 
+#[test]
+fn string_probe_classes_cover_all_utf8_widths() {
+    let generator = include_str!("../../../scripts/verify-r34.sh")
+        .split_once("# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n")
+        .unwrap().1
+        .split_once("with open(os.path.join(base, \"manifest.tsv\"), \"w\")")
+        .unwrap().0;
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(r#"
+import random, re
+generator = {generator:?}
+counts = set()
+for seed in range(64):
+    random.seed(seed)
+    manifest = []
+    probes = {{}}
+    sources = {{}}
+    def write(kind, source, expect=None, expect_error=None):
+        probes[kind] = expect
+        sources[kind] = source
+    def add(kind, label, mode):
+        manifest.append((kind, label, mode))
+    exec(generator)
+    for category in ('multibyte', 'mixed'):
+        widths = {{len(char.encode('utf-8')) for char in strings[category]}}
+        assert widths == {{1, 2, 3, 4}}, (seed, category, widths)
+        for label in (f'34-a(3) {{category}} ', f'34-b(5) {{category}} handler get'):
+            widths = {{len(probes[kind][:-1].encode('utf-8'))
+                      for kind, desc, mode in manifest
+                      if desc.startswith(label) and mode == 'print'}}
+            assert widths == {{1, 2, 3, 4}}, (seed, label, widths)
+            assert any(ord(probes[kind][0]) >= 0x40000
+                       for kind, desc, mode in manifest
+                       if desc.startswith(label) and mode == 'print'), (seed, label, '4-byte leading payload')
+    for operation in ('split', 'starts_with', 'contains'):
+        widths = {{len(candidate.encode('utf-8'))
+                  for kind, desc, mode in manifest if ' empty ' in desc
+                  for candidate in re.findall(r'String\.' + operation + r' ".*?" "(.*?)"', sources[kind], re.S)
+                  if len(candidate) == 1}}
+        assert widths == {{1, 2, 3, 4}}, (seed, operation, widths)
+    counts.add(len(manifest))
+assert len(counts) == 1, counts
+"#))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
 fn write_utf8_cases(path: &std::path::Path) {
     // 分類と独立 oracle を二重管理しないため、CLI 判定器の生成器を共有する。
     let generator = include_str!("../../../scripts/verify-r34.sh")

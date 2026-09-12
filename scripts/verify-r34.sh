@@ -550,11 +550,20 @@ def check_indices(category, s):
     if s:
         string_probe(f'34-b(4) {category} last get',
                      f'String.get {quoted(s)} {len(s) - 1}', value=s[-1])
+    for width in sorted({len(char.encode('utf-8')) for char in s}):
+        index = next(i for i, char in enumerate(s) if len(char.encode('utf-8')) == width)
+        label = f'utf8-{width} get {index} expected {s[index]!r}'
+        string_probe(f'34-a(3) {category} {label}',
+                     f'String.get {quoted(s)} {index}', value=s[index])
+        string_probe(f'34-b(5) {category} handler get {label}',
+                     f'String.get {quoted(s)} {index}', value=s[index],
+                     handler='String.get e.message (String.length e.message - 1)')
 
 
 def check_split(category, s):
-    separators = [('ascii', random.choice(',;:')), ('multi', random.choice('あ😀')),
-                  ('sequence', ''.join(random.choices('aあ😀', k=random.randint(2, 4)))),
+    separators = [('ascii', random.choice(',;:')), ('utf8-2', random.choice('éΩ')),
+                  ('utf8-3', random.choice('あい')), ('utf8-4', '😀'),
+                  ('sequence', ''.join(random.choices('aéΩあ😀', k=random.randint(2, 4)))),
                   ('nul', '\0')]
     for sep_kind, sep in separators:
         middle = random.randrange(1, len(s)) if len(s) > 1 else 0
@@ -568,6 +577,9 @@ def check_split(category, s):
             value = '[' + ', '.join(map(quoted, text.split(sep))) + ']'
             string_probe(f'34-a(4) {category} {sep_kind} {position}',
                          f'String.split {quoted(text)} {quoted(sep)}', value=value)
+            string_probe(f'34-a(5,6) {category} {sep_kind} {position}',
+                         f'[String.starts_with {quoted(text)} {quoted(sep)}, String.contains {quoted(text)} {quoted(sep)}]',
+                         value='[' + ', '.join(str(v).lower() for v in (text.startswith(sep), sep in text)) + ']')
     string_probe(f'34-b(3) {category} empty separator',
                  f'String.split {quoted(s)} ""', error='EmptySeparator')
     string_probe(f'34-b(4) {category} split valid separator',
@@ -615,12 +627,14 @@ def check_predicates(category, s):
                      f'String.contains {quoted(s)} {quoted(part)}', value=str(part in s).lower())
 
 
+# 😀 だけでは 4 バイト先頭の payload が 0 なので、マスクを 0 にする故障を検出できない。
+wide_scalar = chr(random.randint(0x40000, 0x10ffff))
 strings = {
     'empty': '',
     'ascii': ''.join(random.sample('abcde', 2) + random.choices('abcde', k=random.randint(1, 7))),
-    'multibyte': 'あ😀' + ''.join(random.choices('あ😀', k=random.randint(1, 7))),
-    'mixed': 'aあ😀' + ''.join(random.choices('abcあ😀', k=random.randint(1, 7))),
-    'nul': '\0aあ😀' + ''.join(random.choices('aあ😀\0', k=random.randint(1, 7))) + '\0',
+    'multibyte': 'éあ' + wide_scalar + '😀a' + ''.join(random.choices('éΩあ😀', k=random.randint(1, 7))),
+    'mixed': 'aéあ' + wide_scalar + '😀' + ''.join(random.choices('abcéΩあ😀', k=random.randint(1, 7))),
+    'nul': '\0aéあ' + wide_scalar + '😀' + ''.join(random.choices('aéΩあ😀\0', k=random.randint(1, 7))) + '\0',
 }
 for category, s in strings.items():
     check_indices(category, s)
