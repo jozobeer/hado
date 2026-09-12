@@ -2598,8 +2598,10 @@ R33 の終了時に残ってよい赤は、R32 の終了時の許容される赤
 
 ### 判定
 
-判定 34-a: String の 5 操作。`slice` / `get` / `split` / `starts_with` / `contains` を、実行時に生成した文字列（ASCII と 2〜4 バイトのスカラ値を混ぜる）に適用し、期待値を判定器側で（python3 のスカラ値の索引で）計算して一致。`split` は `"a,,b"` `",a"` `"a,"` `","` の形と、見つからない形、セパレータが複数スカラ値の形を含む
+判定 34-a: String の 5 操作。**判定は個別の値ではなく分類から生成する。** 文字列の分類（空 / ASCII のみ / 多バイトのみ / 混在 / `0x00` を含む）× 索引の分類（`-1` / `0` / 中間 / `length - 1` / `length` / `length + 1`）を回し、`split` はセパレータの位置（先頭 / 末尾 / 連続 / 中間 / 無い / 全体一致）× 種類（1 スカラ値の ASCII / 1 スカラ値の多バイト / 2 スカラ値以上）、`starts_with` は接頭辞の長さ（0 / 1 / 全体 / 全体 + 1）、`contains` は部分列の位置で回す。期待値は判定器側の python3 の同名操作で導く（実装の写しを書かない）
 判定 34-b: String の失敗。`slice` の `start > end`、`end > length`、`start < 0`、`get` の `length` と `-1`、`split` の空セパレータが、stderr に `message` を出して終了コード 1（`// expect-error:` と同じ観測）。負の対照: 境界（`slice s 0 0`、`slice s length length`、`get s (length - 1)`）は受理
+**入力の形が列挙できる判定は、個別の値ではなく分類からの生成で書く。** 工程 0 では個別の探針で書いたため、審査が 8 巡で 15 件の穴を挙げた（UTF-8 の不正列、比較の接頭辞、範囲外の位置、0x00 の扱い）。分類の例は判定 34-a と 34-c(4b) を見よ。
+
 判定 34-c: Bytes。(1) `of_string` → `length` がバイト数（`String.length` と異なる文字列で）。(2) `of_list` → `to_list` の往復、`get` の各要素、`to_string` → `of_string` の往復（実行時生成）。(3) 3 万要素の `of_list` → `length` と `get 29999` が 2 秒以内。**リストはリテラルで書かず hado 側の生成器で作る**（3 万要素のリテラルは `build` でコンパイラのスタックが溢れる。`List.length [3 万個]` でも再現するので Bytes 固有ではない。リテラルの深さの限界は v0.3 の範囲外）。(4) 失敗: `of_list [256]` `[-1]` が `ByteOutOfRange`、`to_string (of_list [255])` が `InvalidUtf8`、`get b (length b)` が `IndexOutOfRange`。**(5) 失敗を handler で捕まえる形は、body と abort の腕の型を揃える**（§58 により abort の腕の型は `with` 全体の結果型に一致する。`with H -> Bytes.get b 99` は body が `Int`、`abort raise e => e.message` が `String` なので E305 になる。`Bytes.to_string` の `InvalidUtf8` のように String を返す member で測る）
 判定 34-d: 印字。最上位の `Bytes.of_list [<生成した Int 列>]`、入れ子（`[Bytes.of_list [1]]`、record の field）、空 `Bytes.of_list []`
 判定 34-e: 比較。`==` `!=` `compare` が String と同じ規則（生成した 2 列で判定器側で計算）
