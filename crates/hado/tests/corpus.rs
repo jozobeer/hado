@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use hado::parser::parse_source;
+
 /// Repository root: two levels above `CARGO_MANIFEST_DIR` (`crates/hado`).
 fn repo_root() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -120,6 +122,77 @@ fn corpus() {
             try_reject(rel, &text)
         };
         if let Err(error) = result { failures.push(format!("{rel}: {error}")); }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Every `.hd`/`.hdi` file under `directory`, recursively, sorted by path bytes.
+fn source_files(directory: &Path) -> Vec<PathBuf> {
+    fn walk(directory: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(directory) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(directory, &mut out);
+    out.sort();
+    out
+}
+
+/// Representative file of a `tests/library/` case (docs/corpus.md): the file
+/// that declares `library`, or the byte-first path when there is none.
+fn library_representative(case_directory: &Path) -> Option<PathBuf> {
+    let files = source_files(case_directory);
+    for file in &files {
+        if file.extension().and_then(|extension| extension.to_str()) != Some("hd") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(file) else { continue };
+        if let Ok(ast) = parse_source(&text, &file.to_string_lossy()) {
+            if ast.library.is_some() {
+                return Some(file.clone());
+            }
+        }
+    }
+    files.into_iter().next()
+}
+
+#[test]
+fn library_corpus() {
+    let root = repo_root();
+    let mut cases: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root.join("tests/library")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                cases.push(path);
+            }
+        }
+    }
+    cases.sort();
+    assert!(!cases.is_empty(), "tests/library has no cases");
+    let mut failures = Vec::new();
+    for case in &cases {
+        let rel = case.strip_prefix(&root).unwrap_or(case).display();
+        let Some(representative) = library_representative(case) else {
+            failures.push(format!("{rel}: no source files"));
+            continue;
+        };
+        match hado::project::Project::load(&representative) {
+            Ok(project) => {
+                if let Err(error) = project.check() {
+                    failures.push(format!("{rel}: {error}"));
+                }
+            }
+            Err(hado::project::LoadError::Diagnostic(error)) => failures.push(format!("{rel}: {error}")),
+            Err(error) => failures.push(format!("{rel}: {error}")),
+        }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

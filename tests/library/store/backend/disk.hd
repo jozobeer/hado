@@ -1,0 +1,2 @@
+implement Store as Disk
+def find x => x + 2

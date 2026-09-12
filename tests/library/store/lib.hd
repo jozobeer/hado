@@ -1,0 +1,11 @@
+// spec: §59
+// item: ライブラリ単位
+library
+
+type Found = { value: Int }
+
+module Store
+def find(x: Int): Int
+
+implement Store as Memory
+def find x => x + 1

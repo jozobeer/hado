@@ -1,0 +1,2 @@
+module Store
+def read(x: Int): Int

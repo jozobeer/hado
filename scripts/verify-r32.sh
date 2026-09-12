@@ -25,6 +25,40 @@ trap 'rm -rf "$workdir"' EXIT
 spaces() { printf '%*s' "$1" ''; }
 blank_lines() { local i; for ((i = 0; i < $1; i++)); do printf '\n'; done; }
 
+# ケースの代表ファイル（docs/corpus.md）: library を宣言したファイル。無ければ
+# パスのバイト順の先頭。ファイル名は判定器に書かない。
+library_rep() {
+    local dir=$1 rep
+    rep=$(grep -rlxE '[[:space:]]*library[[:space:]]*' --include='*.hd' "$dir" 2>/dev/null | LC_ALL=C sort | head -n1)
+    if [ -z "$rep" ]; then
+        rep=$(find "$dir" -type f \( -name '*.hd' -o -name '*.hdi' \) | LC_ALL=C sort | head -n1)
+    fi
+    printf '%s' "$rep"
+}
+
+# 32-i: tests/library の全ケースを代表ファイルから check して受理。
+verify_library() {
+    local dir rep n=0
+    for dir in tests/library/*/; do
+        [ -d "$dir" ] || continue
+        rep=$(library_rep "$dir")
+        if [ -z "$rep" ]; then
+            echo "  library no representative: $dir"
+            return 1
+        fi
+        if ! cargo run --offline -q -- check "$rep" >"$workdir/lib-out" 2>"$workdir/lib-err"; then
+            echo "  library rejected: $rep ($(cat "$workdir/lib-err"))"
+            return 1
+        fi
+        if [ -s "$workdir/lib-out" ] || [ -s "$workdir/lib-err" ]; then
+            echo "  library diagnostics: $rep"
+            return 1
+        fi
+        n=$((n + 1))
+    done
+    [ "$n" -ge 1 ]
+}
+
 mkdir -p "$workdir/32a" "$workdir/32b" "$workdir/32b2" "$workdir/32b3" "$workdir/32c1" "$workdir/32c2" "$workdir/32c3" \
     "$workdir/32d" "$workdir/32d1" "$workdir/32d2" "$workdir/32d3" "$workdir/32d4" "$workdir/32d5" "$workdir/32e" \
     "$workdir/32g1" "$workdir/32g2" "$workdir/32g3"
@@ -395,6 +429,9 @@ printf 'implement store::Store as Memory\ndef find id => helper id\n' >"$workdir
 expect_error '32-d (3) 再確認 (外の def はファイル局所)' "$workdir/32d3b/lib/lib.hd" store/memory.hd E204 2 16
 printf 'library\n\ndef helper x => x + 1\n\nmodule Local\ndef run(x: Int): Int\n\nimplement Local as L\ndef run x => helper x\n' >"$workdir/32d3c/lib.hd"
 accept '32-d (3) 再確認 (同じファイルの実装から参照)' "$workdir/32d3c/lib.hd"
+
+# 32-i: tests/library を代表ファイルから check して全件受理。
+check '32-i (tests/library 全件受理)' verify_library
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
