@@ -140,6 +140,23 @@ impl Checker<'_> {
         parameters: &HashMap<String, Ty>, functor_params: &HashMap<String, String>,
         visiting: &mut Vec<String>,
     ) -> Option<Ty> {
+        // `Fn(A, B => C {E})` は引数群（`Group`）・戻り型・効果行からなる。annotation_inner と
+        // 同じ形で解く。効果行は戻り型の `effects` にある。ここを落とすと record schema と
+        // 効果の操作型が登録される前に等式が確定せず、関数型の抽象型が不透明のまま残る。
+        if let TypeKind::Apply(name, arguments) = &expr.kind {
+            if name == "Fn" && arguments.len() == 2 {
+                let inputs = match &arguments[0].kind {
+                    TypeKind::Group(inputs) => inputs.as_slice(),
+                    _ => &arguments[..1],
+                };
+                let inputs = inputs.iter()
+                    .map(|input| self.shared_body_type(input, module, local, parameters, functor_params, visiting))
+                    .collect::<Option<_>>()?;
+                let output = self.shared_body_type(&arguments[1], module, local, parameters, functor_params, visiting)?;
+                let row = self.row_annotation(&arguments[1].effects).ok()?;
+                return Some(Ty::fn_with(inputs, output, row));
+            }
+        }
         let (name, arguments) = match &expr.kind {
             TypeKind::Name(name) => (name.as_str(), &[][..]),
             TypeKind::Apply(name, arguments) => (name.as_str(), arguments.as_slice()),
