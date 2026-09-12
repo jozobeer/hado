@@ -373,3 +373,22 @@ fn unshared_field_projection_stays_abstract() {
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
+
+// --- 工程 1 の修正 3: named constructor の構築とパターンへの shared の展開 ---
+
+const NAMED: &str = "def main = read (Box { value = Store.make \"hi\" })\ndef read\n| Box { value } => String.concat value \"!\"\ntype Box = | Box { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store";
+
+#[test]
+fn shared_equation_reaches_a_named_constructor_payload() {
+    let source = format!("{NAMED}\nshared type T = String\ndef make name => name");
+    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(checked.main, Ty::String);
+}
+
+#[test]
+fn unshared_named_constructor_payload_stays_abstract() {
+    let source = format!("{NAMED}\ntype T = String\ndef make name => name");
+    let error = check_source(&source, "t").err().expect("an unmarked named payload stays opaque");
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert!(error.message.contains("Store.T"), "{}", error.message);
+}

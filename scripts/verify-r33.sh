@@ -204,13 +204,15 @@ rand_box="w${RANDOM}"
 rand_other=$(( (RANDOM << 15) | RANDOM ))
 rand_rec="r${RANDOM}"
 rand_pat="p${RANDOM}"
+rand_named="m${RANDOM}"
 rand_proj="j${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
     "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept" \
     "$workdir/33wrap" "$workdir/33wrapneg" "$workdir/33dist" "$workdir/33distpos" "$workdir/33lrec" "$workdir/33lrecneg" \
-    "$workdir/33ident" "$workdir/33cyc" "$workdir/33pat" "$workdir/33patneg" "$workdir/33proj" "$workdir/33projneg"
+    "$workdir/33ident" "$workdir/33cyc" "$workdir/33pat" "$workdir/33patneg" "$workdir/33proj" "$workdir/33projneg" \
+    "$workdir/33named" "$workdir/33namedneg"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -563,6 +565,22 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
 } >"$workdir/33projneg/main.hd"
 
+# named constructor の構築とパターンの payload の型を shared が展開する。外の ADT Box の
+# 名前付き constructor の payload が契約修飾型 Store.T で、唯一の実装が shared type T =
+# String のとき、構築で String を渡せ、パターンで束縛した値を String として使える（探針 named）。
+{
+    printf 'def main = read (Box { value = Store.make "%s" })\ndef read\n| Box { value } => String.concat value "!"\ntype Box = | Box { value: Store.T }\n' "$rand_named"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+} >"$workdir/33named/main.hd"
+
+# 負の対照: shared を外すと named constructor の payload は不透明のまま E305。
+{
+    printf 'def main = read (Box { value = Store.make "%s" })\ndef read\n| Box { value } => String.concat value "!"\ntype Box = | Box { value: Store.T }\n' "$rand_named"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+} >"$workdir/33namedneg/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
@@ -572,7 +590,8 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33b1/main.hd" "$workdir/33b1b/main.hd" "$workdir/33g1/main.hd" "$workdir/33g2/main.hd" "$workdir/33g3/main.hd" \
     "$workdir/33wrap/main.hd" "$workdir/33wrapneg/main.hd" "$workdir/33dist/main.hd" "$workdir/33distpos/main.hd" \
     "$workdir/33lrec/main.hd" "$workdir/33lrecneg/main.hd" "$workdir/33ident/main.hd" "$workdir/33cyc/main.hd" \
-    "$workdir/33pat/main.hd" "$workdir/33patneg/main.hd" "$workdir/33proj/main.hd" "$workdir/33projneg/main.hd"; do
+    "$workdir/33pat/main.hd" "$workdir/33patneg/main.hd" "$workdir/33proj/main.hd" "$workdir/33projneg/main.hd" \
+    "$workdir/33named/main.hd" "$workdir/33namedneg/main.hd"; do
     random_padding "$probe"
 done
 
@@ -625,6 +644,9 @@ accept_build_run 'shared がパターン payload を展開し束縛値を String
 expect_code 'shared 無しのパターン payload は E305' "$workdir/33patneg/main.hd" E305
 accept_build_run 'shared が field 射影を展開し値を String に使える' "$workdir/33proj/main.hd" "${rand_proj}!"
 expect_code 'shared 無しの field 射影は E305' "$workdir/33projneg/main.hd" E305
+
+accept_build_run 'shared が named constructor の payload を展開し束縛値を String に使える' "$workdir/33named/main.hd" "${rand_named}!"
+expect_code 'shared 無しの named constructor の payload は E305' "$workdir/33namedneg/main.hd" E305
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
 grammar_and_keywords() {
