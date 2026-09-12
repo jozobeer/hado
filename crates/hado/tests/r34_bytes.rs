@@ -71,11 +71,48 @@ fn runtime_declarations_expose_bytes_symbols() {
     assert_eq!(RuntimeFunction::BytesIsUtf8.declaration().result, Some(AbiType::I8));
 }
 
+fn write_utf8_cases(path: &std::path::Path) {
+    // 分類と独立 oracle を二重管理しないため、CLI 判定器の生成器を共有する。
+    let generator = include_str!("../../../scripts/verify-r34.sh")
+        .split_once("# BEGIN UTF8 CASE GENERATOR\n")
+        .unwrap()
+        .1
+        .split_once("# END UTF8 CASE GENERATOR")
+        .unwrap()
+        .0;
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(
+            "{generator}\n{}",
+            r#"
+cases = utf8_cases(random.Random(34))
+assert cases and any(valid for _, _, valid in cases) and any(not valid for _, _, valid in cases)
+print("typedef struct { size_t length; unsigned char bytes[%d]; } Utf8Probe;" %
+      max(len(seq) for _, seq, _ in cases))
+print("static const struct { Utf8Probe value; int accepted; const char *name; } utf8_cases[] = {")
+for name, seq, accepted in cases:
+    print('  {{%d, {%s}}, %d, "%s"},' %
+          (len(seq), ", ".join(map(str, seq)) or "0", accepted, name))
+print("};")
+"#
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.stdout.is_empty());
+    std::fs::write(path, output.stdout).unwrap();
+}
+
 #[test]
 fn bytes_is_utf8_and_display_at_the_c_level() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir = std::env::temp_dir().join(format!("hado-bytes-runtime-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    write_utf8_cases(&dir.join("utf8_cases.h"));
     let source = dir.join("test.c");
     let object = dir.join("test.o");
     let executable = dir.join("test");
@@ -83,20 +120,8 @@ fn bytes_is_utf8_and_display_at_the_c_level() {
 #include "hado_runtime.h"
 #include <assert.h>
 #include <string.h>
-typedef struct { size_t length; unsigned char bytes[5]; } Utf8Probe;
-
-static Utf8Probe utf8_bytes(uint32_t scalar, size_t width) {
-    Utf8Probe encoded = {width, {0}};
-    if (width == 1) {
-        encoded.bytes[0] = scalar;
-        return encoded;
-    }
-    encoded.bytes[0] = (0xff << (8 - width)) | (scalar >> (6 * (width - 1)));
-    for (size_t index = 1; index < width; ++index) {
-        encoded.bytes[index] = 0x80 | ((scalar >> (6 * (width - 1 - index))) & 0x3f);
-    }
-    return encoded;
-}
+#include <stdio.h>
+#include "utf8_cases.h"
 
 static void assert_utf8_round_trip(const Utf8Probe *probe) {
     const HadoString *original = (const HadoString *)probe;
@@ -108,10 +133,6 @@ static void assert_utf8_round_trip(const Utf8Probe *probe) {
 
 int32_t hado_entry(void) {
     struct { size_t length; unsigned char bytes[3]; } valid = {3, {0xe3, 0x81, 0x82}};
-    struct { size_t length; unsigned char bytes[1]; } invalid = {1, {0xff}};
-    struct { size_t length; unsigned char bytes[2]; } overlong = {2, {0xc0, 0xaf}};
-    struct { size_t length; unsigned char bytes[1]; } lone = {1, {0x80}};
-    struct { size_t length; unsigned char bytes[3]; } surrogate = {3, {0xed, 0xa0, 0x80}};
     struct { size_t length; unsigned char bytes[2]; } two = {2, {72, 105}};
     struct { size_t length; } empty = {0};
     const HadoString *valid_string = (const HadoString *)&valid;
@@ -124,28 +145,15 @@ int32_t hado_entry(void) {
     }
     assert(hado_bytes_is_utf8((const HadoString *)&two) == 1);
     assert(hado_bytes_is_utf8(empty_string) == 1);
-    assert(hado_bytes_is_utf8((const HadoString *)&invalid) == 0);
-    assert(hado_bytes_is_utf8((const HadoString *)&overlong) == 0);
-    assert(hado_bytes_is_utf8((const HadoString *)&lone) == 0);
-    assert(hado_bytes_is_utf8((const HadoString *)&surrogate) == 0);
-    for (size_t width = 3; width <= 5; ++width) {
-        Utf8Probe noncanonical = utf8_bytes(0, width);
-        assert(hado_bytes_is_utf8((const HadoString *)&noncanonical) == 0);
-    }
-    const uint32_t shortest[] = {0x41, 0x80, 0x800, 0x10000};
-    for (size_t index = 0; index < sizeof(shortest) / sizeof(shortest[0]); ++index) {
-        Utf8Probe encoded = utf8_bytes(shortest[index], index + 1);
-        assert_utf8_round_trip(&encoded);
-        for (size_t position = 1; position < encoded.length; ++position) {
-            Utf8Probe invalid_continuation = encoded;
-            invalid_continuation.bytes[position] = 0x41;
-            assert(hado_bytes_is_utf8((const HadoString *)&invalid_continuation) == 0);
+    for (size_t index = 0; index < sizeof(utf8_cases) / sizeof(utf8_cases[0]); ++index) {
+        const Utf8Probe *probe = &utf8_cases[index].value;
+        int actual = hado_bytes_is_utf8((const HadoString *)probe);
+        if (actual != utf8_cases[index].accepted) {
+            fprintf(stderr, "UTF-8 %s: expected=%d actual=%d\n",
+                    utf8_cases[index].name, utf8_cases[index].accepted, actual);
         }
-    }
-    for (uint32_t scalar = 0x10ffff; scalar <= 0x110000; ++scalar) {
-        Utf8Probe boundary = utf8_bytes(scalar, 4);
-        assert(hado_bytes_is_utf8((const HadoString *)&boundary) == (scalar <= 0x10ffff));
-        if (scalar <= 0x10ffff) assert_utf8_round_trip(&boundary);
+        assert(actual == utf8_cases[index].accepted);
+        if (utf8_cases[index].accepted) assert_utf8_round_trip(probe);
     }
     assert(hado_bytes_length((const HadoString *)&two) == 2);
     assert(hado_bytes_get((const HadoString *)&two, 1) == 105);

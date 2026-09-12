@@ -270,7 +270,11 @@ write(
 )
 add("c4a_valid", f"34-c(4a) 負の対照 同じ長さの範囲内列 {plist(range_values)} は受理・値一致", "print")
 
-# 34-c(4b): 不正 UTF-8。
+# 34-c(4b): 分類から生成し、Python の strict decoder で期待値を導く。
+# BEGIN UTF8 CASE GENERATOR
+import random
+
+
 def utf8_bytes(scalar, width):
     if width == 1:
         return [scalar]
@@ -279,45 +283,68 @@ def utf8_bytes(scalar, width):
     ]
 
 
-invalid_utf8 = [
-    ("overlong3", utf8_bytes(0, 3)),
-    ("overlong4", utf8_bytes(0, 4)),
-    ("overlong2", utf8_bytes(0x2F, 2)),
-    ("surrogate", utf8_bytes(0xD800, 3)),
-    ("lone_continuation", [0x80]),
-    ("truncated1", utf8_bytes(0x3042, 3)[:1]),
-    ("truncated2", utf8_bytes(0x3042, 3)[:2]),
-    ("invalid_lead", [0xFF]),
-    ("five_bytes", utf8_bytes(0, 5)),
-    ("above_max", utf8_bytes(0x110000, 4)),
-]
-valid_utf8 = [(0x00, 1), (0x41, 1), (0x80, 2), (0x800, 3), (0x10000, 4), (0x10FFFF, 4)]
-for scalar, width in valid_utf8[:-1]:
-    for position in range(1, width):
-        encoded = utf8_bytes(scalar, width)
-        encoded[position] = 0x41
-        invalid_utf8.append((f"bad_continuation{width}_{position}", encoded))
+def accepts_utf8(seq):
+    try:
+        bytes(seq).decode("utf-8", errors="strict")
+        return True
+    except UnicodeDecodeError:
+        return False
 
-for name, encoded in invalid_utf8:
-    kind = f"c4b_{name}"
-    write(kind, f"def main = Bytes.to_string (Bytes.of_list {plist(encoded)})\n",
-          expect_error="InvalidUtf8")
-    add(kind, f"34-c(4b) {name} {plist(encoded)} は InvalidUtf8", "error")
 
-for scalar, width in valid_utf8:
-    encoded = utf8_bytes(scalar, width)
-    assert bytes(encoded) == chr(scalar).encode("utf-8")
-    kind = f"c4b_valid_{scalar:x}"
-    write(kind,
-          f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
-          expect=f"Bytes.of_list {plist(encoded)}\n")
-    add(kind, f"34-c(4b) 負の対照 U+{scalar:04X} {plist(encoded)} は受理・往復一致", "print")
+def invalid_utf8_classes(rng, boundaries):
+    for width, lower, upper in ((2, 0, 0x7F), (3, 0x80, 0x7FF), (4, 0x800, 0xD7FF)):
+        yield f"overlong{width}", utf8_bytes(rng.randint(lower, upper), width)
+    for scalar in (0xD800, rng.randint(0xD800, 0xDFFF), 0xDFFF):
+        yield f"surrogate_{scalar:x}", utf8_bytes(scalar, 3)
+    for scalar in (0x110000, rng.randint(0x110000, 0x1FFFFF)):
+        yield f"above_max_{scalar:x}", utf8_bytes(scalar, 4)
+    for lower, upper in ((0x80, 0xBF), (0xF8, 0xFF)):
+        for lead in sorted({lower, rng.randint(lower, upper), upper}):
+            yield f"invalid_lead_{lead:x}", [lead]
+    for scalar, width in boundaries:
+        for position in range(1, width):
+            encoded = utf8_bytes(scalar, width)
+            yield f"truncated_{scalar:x}_{position}", encoded[:position]
+            # 下位 6 bit を保存し、継続バイト検査の欠落を他の検査が隠さないようにする。
+            encoded[position] &= 0x7F
+            yield f"bad_continuation_{scalar:x}_{position}", encoded
 
-encoded = [0, 65]
-write("c4b_valid_nul_ascii",
-      f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
-      expect=f"Bytes.of_list {plist(encoded)}\n")
-add("c4b_valid_nul_ascii", f"34-c(4b) 負の対照 {plist(encoded)} は受理・往復一致", "print")
+
+def utf8_cases(rng):
+    boundaries = [(0, 1), (0x7F, 1), (0x80, 2), (0x7FF, 2),
+                  (0x800, 3), (0xFFFF, 3), (0x10000, 4), (0x10FFFF, 4)]
+    valid = [(f"boundary_{scalar:x}", list(chr(scalar).encode("utf-8")))
+             for scalar, _ in boundaries]
+    for count in (2, 3):
+        valid.append((f"concat{count}", sum([rng.choice(valid[:len(boundaries)])[1]
+                                           for _ in range(count)], [])))
+    valid.extend([("empty", []), ("nul_concat", [0] + valid[-1][1])])
+    cases = []
+    for name, seq in valid:
+        assert accepts_utf8(seq), ("invalid acceptance class", name, seq)
+        cases.append((name, seq, accepts_utf8(seq)))
+    for name, seq in invalid_utf8_classes(rng, boundaries):
+        for form, combined in (("alone", seq), ("valid_before", valid[-1][1] + seq),
+                               ("valid_after", seq + valid[-1][1])):
+            assert not accepts_utf8(combined), ("valid rejection class", name, form, combined)
+            cases.append((f"{name}_{form}", combined, accepts_utf8(combined)))
+    return cases
+# END UTF8 CASE GENERATOR
+
+utf8_probes = utf8_cases(random)
+print(f"   (UTF-8: {len(utf8_probes)} cases, "
+      f"{sum(valid for _, _, valid in utf8_probes)} accepted by Python strict decoder)")
+for index, (name, encoded, accepted) in enumerate(utf8_probes):
+    kind = f"c4b_{index}_{name}"
+    if accepted:
+        write(kind,
+              f"def main = Bytes.of_string (Bytes.to_string (Bytes.of_list {plist(encoded)}))\n",
+              expect=f"Bytes.of_list {plist(encoded)}\n")
+        add(kind, f"34-c(4b) {name} {plist(encoded)} は受理・往復一致", "print")
+    else:
+        write(kind, f"def main = Bytes.to_string (Bytes.of_list {plist(encoded)})\n",
+              expect_error="InvalidUtf8")
+        add(kind, f"34-c(4b) {name} {plist(encoded)} は InvalidUtf8", "error")
 
 # 34-c(4c): get の範囲外。
 write(
