@@ -867,6 +867,28 @@ printf 'type Bytes = | A\ndef main = 1\n' >"$workdir/e205/main.hd"
 random_padding "$workdir/e205/main.hd"
 expect_error_at '34-f type Bytes は E205、2 回目の宣言の名前' "$workdir/e205/main.hd" E205 'Bytes = | A'
 
+# 34-g: m7 全体は走らせず、既存の inventory の判定だけを実行する。
+check '34-g m7 inventory の String と Bytes の全 member が OK' python3 - <<'PY'
+from pathlib import Path
+import re
+import subprocess
+
+source = Path('scripts/verify-m7.sh').read_text()
+program = re.search(r"^python3 - <<'PY'\n(.*?)^PY$", source, re.M | re.S)
+assert program, 'm7 inventory program missing'
+result = subprocess.run(['python3', '-'], input=program[1], text=True, capture_output=True)
+assert result.returncode in (0, 1) and not result.stderr, result.stderr
+lines = result.stdout.splitlines()
+for module in ('String', 'Bytes'):
+    entries = [line for line in lines if re.match(rf'^(?:OK|NG): {module}(?:\.| )', line)]
+    assert len(entries) > 1 and all(line.startswith('OK: ') for line in entries), entries
+    print('\n'.join('   ' + line for line in entries))
+assert all(re.match(r'^NG: (?:Array(?:\.| )|Int\.parse )', line)
+           for line in lines if line.startswith('NG: ')), result.stdout
+assert re.fullmatch(r'prelude inventory: \d+/\d+', lines[-1]), result.stdout
+print('   ' + lines[-1])
+PY
+
 # 34-h: 検査 6 と同じ導出関数を、仕様の写しで実行する。
 check '34-h §49 の追加・削除に member 一覧が追随し、空入力は拒否する' \
     python3 - "$workdir" <<'PY'
@@ -944,6 +966,81 @@ changed[str(paths[0])] = '0' * 64
 assert changed != expected, 'wrong digest escaped'
 print(f'   (lock: {len(lines)} entries = {len(paths)} source files; missing/wrong digest rejected)')
 PY
+
+# 34-i: 名前の UTF-8 幅 × 数字の桁と大小関係から入力と期待値を生成する。
+if ! SEED=$(( (RANDOM << 15) | RANDOM )) python3 - "$workdir/cases" <<'PY'
+from pathlib import Path
+import os
+import random
+import shutil
+import sys
+
+base = Path(sys.argv[1])
+rng = random.Random(int(os.environ['SEED']))
+manifest = []
+
+
+def quoted(value):
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\t', '\\t') + '"'
+
+
+def strings(values):
+    return '[' + ', '.join(map(quoted, values)) + ']'
+
+
+def probe(label, lines, expected=None):
+    kind = f'fields_{len(manifest)}'
+    directory = base / kind
+    directory.mkdir()
+    shutil.copytree('tools/gates/report', directory / 'report')
+    expression = (f'List.map {strings(lines)} report::Report.fields' if expected is not None
+                  else f'report::Report.fields {quoted(lines[0])}')
+    header = '' if expected is not None else '// expect-error: InvalidLine\n'
+    (directory / 'main.hd').write_text(header + f'def main = {expression}\n')
+    if expected is None:
+        (directory / 'expect_error').write_bytes(b'InvalidLine\n')
+    else:
+        (directory / 'expect').write_bytes(('[' + ', '.join(map(strings, expected)) + ']\n').encode())
+    manifest.append(f'{kind}\t34-i {label}\t{"print" if expected is not None else "error"}\n')
+
+
+ascii_name = ''.join(rng.choices('abcdefghijklmnopqrstuvwxyz', k=7)) + chr(0x7f) + '/\\"\t\n\0'
+names = [('empty', ''), ('ascii-max', ascii_name)]
+for width, low, high in ((2, 0x80, 0x7ff), (3, 0xe000, 0xffff), (4, 0x10000, 0x10ffff)):
+    names.append((f'utf8-{width}-max', chr(rng.randint(low, high)) + chr(high)))
+names.append(('mixed', ''.join(name for _, name in names)))
+small, large = rng.randint(1, 8), rng.randint(100, 900)
+numbers = [('single-equal', small, small), ('single-less', small, small + 1),
+           ('multiple-equal', large, large), ('multiple-less', large, large + rng.randint(1, 99)),
+           ('zero-equal', 0, 0), ('zero-less', 0, large)]
+for category, name in names:
+    expected = [[name, str(n), str(total)] for _, n, total in numbers]
+    lines = [f'{name} PASSED: {n}/{total}' for _, n, total in numbers]
+    probe(category + ' × ' + ','.join(label for label, _, _ in numbers), lines, expected)
+    invalid = [('no-passed', f'{name} {small}/{large}'),
+               ('no-slash', f'{name} PASSED: {small}'),
+               ('empty-line', ''), ('name-only', name), ('digits-only', str(large))]
+    for repeats in (2, 3):
+        invalid.extend([(f'passed-{repeats}', name + ' PASSED: ' * repeats + f'{small}/{large}'),
+                        (f'slash-{repeats}', f'{name} PASSED: {small}' + '/' * repeats + str(large))])
+    for shape, line in invalid:
+        probe(category + '/' + shape, [line])
+probe('empty-input-list', [], [])
+assert manifest, 'empty fields manifest'
+(base / 'fields-manifest.tsv').write_text(''.join(manifest))
+print(f'   (fields: names={len(names)}, number classes={len(numbers)}, probes={len(manifest)}; UTF-8 maxima=U+007F/U+07FF/U+FFFF/U+10FFFF)')
+PY
+then
+    echo 'NG: 34-i generator failed'
+    exit 1
+fi
+while IFS=$'\t' read -r kind desc mode; do
+    case "$mode" in
+        print) check "$desc" prints_match "$kind" ;;
+        error) check "$desc" error_matches "$kind" ;;
+        *) echo "NG: 34-i invalid mode: $mode"; exit 1 ;;
+    esac
+done <"$workdir/cases/fields-manifest.tsv"
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
