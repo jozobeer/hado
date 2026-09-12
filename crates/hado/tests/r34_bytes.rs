@@ -172,3 +172,68 @@ int32_t hado_entry(void) {
     assert!(std::process::Command::new(executable).status().unwrap().success());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn string_intrinsics_use_scalar_indices_at_the_c_level() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("hado-string-operations-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("test.c");
+    std::fs::write(&source, string_operations_probe()).unwrap();
+    let object = dir.join("test.o");
+    let status = std::process::Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Werror", "-c"])
+        .arg(&source).arg("-I").arg(root.join("runtime"))
+        .arg("-o").arg(&object).status().unwrap();
+    assert!(status.success());
+    let executable = dir.join("test");
+    hado::link_executable(&object, &executable).unwrap();
+    assert!(std::process::Command::new(executable).status().unwrap().success());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn string_operations_probe() -> String {
+    let mut code = String::from("#include \"hado_runtime.h\"\n#include <assert.h>\n#include <string.h>\nint32_t hado_entry(void) {\n");
+    for text in ["", "ababa", "éあ😀あ", "a\0éあ😀\0a"] {
+        code.push_str("{\n");
+        code.push_str(&c_string_value("value", text));
+        let boundaries: Vec<_> = text.char_indices().map(|(offset, _)| offset)
+            .chain(std::iter::once(text.len())).collect();
+        for (index, scalar) in text.chars().enumerate() {
+            code.push_str(&format!("assert(hado_string_get(value, {index}) == {});\n", scalar as u32));
+        }
+        for start in 0..boundaries.len() {
+            for end in start..boundaries.len() {
+                code.push_str("{\n");
+                code.push_str(&c_string_value("expected", &text[boundaries[start]..boundaries[end]]));
+                code.push_str(&format!("HadoString *actual = hado_string_slice(value, {start}, {end});\n"));
+                code.push_str("assert(actual != value);\nassert(actual->length == expected->length);\nassert(memcmp(actual->bytes, expected->bytes, expected->length) == 0);\n}\n");
+            }
+        }
+        code.push_str(&string_find_assertions(text, &boundaries));
+        code.push_str("}\n");
+    }
+    code.push_str("return 0;\n}\n");
+    code
+}
+
+fn c_string_value(name: &str, text: &str) -> String {
+    let bytes = text.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
+    format!("struct {{ size_t length; unsigned char bytes[{}]; }} {name}_storage = {{{}, {{{}}}}};\nconst HadoString *{name} = (const HadoString *)&{name}_storage;\n",
+        text.len().max(1), text.len(), if text.is_empty() { "0" } else { &bytes })
+}
+
+fn string_find_assertions(text: &str, boundaries: &[usize]) -> String {
+    let mut code = String::new();
+    for separator in ["a", "aba", "é", "あ", "😀", "あ😀", "\0", "\0a", "Z", "longer than the input"] {
+        code.push_str("{\n");
+        code.push_str(&c_string_value("separator", separator));
+        for (from, byte) in boundaries.iter().enumerate() {
+            let expected = text[*byte..].find(separator)
+                .map(|offset| text[..byte + offset].chars().count() as i64).unwrap_or(-1);
+            code.push_str(&format!("assert(hado_string_find(value, separator, {from}) == {expected});\n"));
+        }
+        code.push_str("}\n");
+    }
+    code
+}

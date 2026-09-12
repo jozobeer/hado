@@ -27,11 +27,16 @@ compiler=$(readlink -f "$hado_target_dir/debug/hado")
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
-check '34-c(0) Bytes の member の引数型・戻り型・効果行は §49 と一致する' \
-    python3 - docs/spec.md stdlib/bytes.hd "$workdir" <<'PY'
+for module in Bytes String; do
+    label='34-c(0)'
+    [ "$module" != String ] || label='34-b(6)'
+    check "$label $module の member の引数型・戻り型・効果行は §49 と一致する" \
+        python3 - docs/spec.md "stdlib/${module,,}.hd" "$workdir" "$module" <<'PY'
 from pathlib import Path
 import re
 import sys
+
+module = sys.argv[4]
 
 
 def only_block(pattern, text):
@@ -53,8 +58,8 @@ def argument_type(argument):
     return " ".join(match[1].split())
 
 
-def bytes_members(source):
-    body = only_block(r"^module Bytes[ \t]*\n(.*?)(?=^(?:module|implement)\b|\Z)", source)
+def members_of(source):
+    body = only_block(rf"^module {module}[ \t]*\n(.*?)(?=^(?:module|implement)\b|\Z)", source)
     members = {}
     for line in body.splitlines():
         line = line.split("//", 1)[0].strip()
@@ -69,7 +74,7 @@ def bytes_members(source):
             re.sub(r"\s+", "", match[4]),
         )
     if not members:
-        raise ValueError("empty Bytes contract")
+        raise ValueError(f"empty {module} contract")
     return members
 
 
@@ -81,30 +86,30 @@ def differences(expected, actual):
 
 spec = Path(sys.argv[1]).read_text()
 block = member_block(spec)
-expected = bytes_members(block)
-assert not differences(expected, bytes_members(block)), "equal contracts must match"
-bytes_block = only_block(r"^(module Bytes[ \t]*\n.*?)(?=^module|\Z)", block)
+expected = members_of(block)
+assert not differences(expected, members_of(block)), "equal contracts must match"
+contract_block = only_block(rf"^(module {module}[ \t]*\n.*?)(?=^module|\Z)", block)
 
 # 仕様の写しを再読して照合する。期待値を被験側から取る判定では、この対照が落ちる。
-changed, count = re.subn(r"^(def length\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", bytes_block, flags=re.M)
-assert count == 1, "spec mutation must change Bytes.length exactly once"
+changed, count = re.subn(r"^(def length\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", contract_block, flags=re.M)
+assert count == 1, "spec mutation must change member length exactly once"
 copy = Path(sys.argv[3]) / "spec-effect.md"
-copy.write_text(spec.replace(bytes_block, changed, 1))
-changed_members = bytes_members(member_block(copy.read_text()))
+copy.write_text(spec.replace(contract_block, changed, 1))
+changed_members = members_of(member_block(copy.read_text()))
 assert set(differences(changed_members, expected)) == {"length"}, "spec effect mutation escaped"
-print("   (対照: §49 の写しの Bytes.length Pure → {Error} を検出)")
+print("   (対照: §49 の写しの member length Pure → {Error} を検出)")
 
 for pattern, replacement in (
     (r"^(def length\([^:]+: [^)]*)(\))", r"\1 List\2"),
     (r"^(def length\([^)]*\): \w+)", r"\1 List"),
 ):
-    changed, count = re.subn(pattern, replacement, bytes_block, flags=re.M)
-    assert count == 1, "type mutation must change Bytes.length exactly once"
-    assert set(differences(expected, bytes_members(changed))) == {"length"}, "type mutation escaped"
+    changed, count = re.subn(pattern, replacement, contract_block, flags=re.M)
+    assert count == 1, "type mutation must change member length exactly once"
+    assert set(differences(expected, members_of(changed))) == {"length"}, "type mutation escaped"
 
-for empty in ("", "module Bytes\n"):
+for empty in ("", f"module {module}\n"):
     try:
-        bytes_members(empty)
+        members_of(empty)
     except ValueError:
         pass
     else:
@@ -117,15 +122,16 @@ else:
     raise AssertionError("empty spec accepted")
 print("   (対照: 全件一致は受理、空の仕様・契約と引数型・戻り型の不一致は拒否)")
 
-actual = bytes_members(Path(sys.argv[2]).read_text())
+actual = members_of(Path(sys.argv[2]).read_text())
 mismatches = differences(expected, actual)
 for name in sorted(expected.keys() | actual.keys()):
     if name in mismatches:
-        print(f"   Bytes.{name}: expected={expected.get(name)}, actual={actual.get(name)}")
+        print(f"   {module}.{name}: expected={expected.get(name)}, actual={actual.get(name)}")
     else:
-        print(f"   Bytes.{name}: args={actual[name][0]}, result={actual[name][1]}, effect={actual[name][2]}")
+        print(f"   {module}.{name}: args={actual[name][0]}, result={actual[name][1]}, effect={actual[name][2]}")
 sys.exit(1 if mismatches else 0)
 PY
+done
 
 mkdir -p "$workdir/cases"
 
@@ -499,6 +505,126 @@ write(
     + "implement Store as Store\ntype T = Bytes\ndef make value => value\n",
 )
 add("f2_opaque", "34-f2 負の対照 shared 無しは E305", "code:E305")
+
+# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。
+def quoted(value):
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\t', '\\t') + '"'
+
+
+def string_probe(label, expression, value=None, error=None, handler=None):
+    kind = 'string_' + str(len(manifest))
+    source = f'def main = {expression}\n'
+    if handler is not None:
+        source = (f'def main = with H -> {expression}\n'
+                  'handler Error as H\n'
+                  f'abort raise e => {handler}\n')
+    if error is not None:
+        source = f'// expect-error: {error}\n' + source
+    write(kind, source, expect=None if error else value + '\n', expect_error=error)
+    add(kind, label, 'error' if error else 'print')
+
+
+def indices(s):
+    return sorted({-1, 0, random.randrange(len(s) + 1), len(s) - 1, len(s), len(s) + 1})
+
+
+def check_indices(category, s):
+    bounds = indices(s)
+    for start in bounds:
+        for end in bounds:
+            valid = 0 <= start <= end <= len(s)
+            string_probe(f'34-{ "a(1,2)" if valid else "b(1)"} {category} slice {start}:{end}',
+                         f'String.slice {quoted(s)} ({start}) ({end})',
+                         value=s[start:end] if valid else None,
+                         error=None if valid else 'IndexOutOfRange')
+    for index in bounds:
+        valid = 0 <= index < len(s)
+        string_probe(f'34-{ "a(3)" if valid else "b(2)"} {category} get {index}',
+                     f'String.get {quoted(s)} ({index})',
+                     value=s[index] if valid else None,
+                     error=None if valid else 'IndexOutOfRange')
+    # 各失敗のすぐ隣を、成功として独立に測る。
+    for index in (0, len(s)):
+        string_probe(f'34-b(4) {category} slice {index}:{index}',
+                     f'String.slice {quoted(s)} {index} {index}', value=s[index:index])
+    if s:
+        string_probe(f'34-b(4) {category} last get',
+                     f'String.get {quoted(s)} {len(s) - 1}', value=s[-1])
+
+
+def check_split(category, s):
+    separators = [('ascii', random.choice(',;:')), ('multi', random.choice('あ😀')),
+                  ('sequence', ''.join(random.choices('aあ😀', k=random.randint(2, 4)))),
+                  ('nul', '\0')]
+    for sep_kind, sep in separators:
+        middle = random.randrange(len(s) + 1)
+        shapes = {'leading': sep + s, 'trailing': s + sep, 'consecutive': s + sep + sep + s,
+                  'middle': s[:middle] + sep + s[middle:], 'absent': s.replace(sep, ''),
+                  'whole': sep, 'original': s, 'empty': ''}
+        # 重なり得るセパレータを消したあとに新しい一致ができても、oracle で答えを取る。
+        while sep in shapes['absent']:
+            shapes['absent'] = shapes['absent'].replace(sep, '')
+        for position, text in shapes.items():
+            value = '[' + ', '.join(map(quoted, text.split(sep))) + ']'
+            string_probe(f'34-a(4) {category} {sep_kind} {position}',
+                         f'String.split {quoted(text)} {quoted(sep)}', value=value)
+    string_probe(f'34-b(3) {category} empty separator',
+                 f'String.split {quoted(s)} ""', error='EmptySeparator')
+    string_probe(f'34-b(4) {category} split valid separator',
+                 f'String.split {quoted(s)} ","',
+                 value='[' + ', '.join(map(quoted, s.split(','))) + ']')
+    longer = s + 'Z'
+    string_probe(f'34-a(4) {category} separator longer than string',
+                 f'String.split {quoted(s)} {quoted(longer)}',
+                 value='[' + ', '.join(map(quoted, s.split(longer))) + ']')
+
+
+def check_predicates(category, s):
+    for length in sorted({0, 1, len(s), len(s) + 1}):
+        prefix = (s + 'Z')[:length]
+        for match_kind, candidate in [('matching', prefix), ('different', 'Z' * length)]:
+            string_probe(f'34-a(5) {category} prefix {length} {match_kind}',
+                         f'String.starts_with {quoted(s)} {quoted(candidate)}',
+                         value=str(s.startswith(candidate)).lower())
+    middle = random.randrange(len(s)) if s else 0
+    parts = {'leading': s[:1], 'middle': s[middle:middle + 1], 'trailing': s[-1:],
+             'absent': 'Z', 'empty': '', 'whole': s, 'longer': s + 'Z'}
+    for position, part in parts.items():
+        string_probe(f'34-a(6) {category} contains {position}',
+                     f'String.contains {quoted(s)} {quoted(part)}', value=str(part in s).lower())
+
+
+strings = {
+    'empty': '',
+    'ascii': ''.join(random.choices('abcde', k=random.randint(3, 9))),
+    'multibyte': 'あ😀' + ''.join(random.choices('あ😀', k=random.randint(1, 7))),
+    'mixed': 'aあ😀' + ''.join(random.choices('abcあ😀', k=random.randint(1, 7))),
+    'nul': '\0aあ😀' + ''.join(random.choices('aあ😀\0', k=random.randint(1, 7))) + '\0',
+}
+for category, s in strings.items():
+    check_indices(category, s)
+    check_split(category, s)
+    check_predicates(category, s)
+    string_probe(f'34-a length unchanged {category}', f'String.length {quoted(s)}', value=str(len(s)))
+    string_probe(f'34-b(5) {category} handler slice',
+                 f'String.slice {quoted(s)} 0 {len(s) + 1}',
+                 value='IndexOutOfRange', handler='e.message')
+    # get の abort の腕も Char。message の末尾は両エラーで異なる。
+    string_probe(f'34-b(5) {category} handler get',
+                 f'String.get {quoted(s)} {len(s)}',
+                 value='IndexOutOfRange'[-1],
+                 handler='String.get e.message (String.length e.message - 1)')
+    string_probe(f'34-b(5) {category} handler split',
+                 f'String.split {quoted(s)} ""',
+                 value='[' + quoted('EmptySeparator') + ']', handler='[e.message]')
+
+# 非重複の分割と、候補の部分一致のあとにある一致も回す。
+for sep in ['a' * random.randint(2, 4), 'あ😀あ']:
+    text = sep + sep[:-1] + sep + sep
+    string_probe('34-a(4) overlapping separator', f'String.split {quoted(text)} {quoted(sep)}',
+                 value='[' + ', '.join(map(quoted, text.split(sep))) + ']')
+print('   (String classes: ' + ', '.join(f'{name}={value!r}' for name, value in strings.items()) + ')')
+
 
 with open(os.path.join(base, "manifest.tsv"), "w") as handle:
     for kind, desc, mode in manifest:
