@@ -232,6 +232,41 @@ print_type_is() {
     fi
 }
 
+# 33-k: tools/gates の写しを base に置き、実行時に生成した 3 つ組
+# (name:passed:total) を List.fold で畳む main.hd を書いて build → 実行する。
+# 期待値は呼び出し側で計算して渡す。
+gates_case() {
+    local label=$1 base=$2 expected=$3 got status triple name p t first=1
+    shift 3
+    total=$((total + 1))
+    mkdir -p "$base"
+    cp -r tools/gates/report "$base/report"
+    {
+        printf 'type Gate = { name: String; passed: Int; total: Int }\n\n'
+        printf 'def main =\n  let gates = ['
+        for triple in "$@"; do
+            IFS=: read -r name p t <<<"$triple"
+            [ "$first" -eq 1 ] || printf ','
+            printf '\n    { name = "%s"; passed = %s; total = %s }' "$name" "$p" "$t"
+            first=0
+        done
+        printf '\n  ] ->\n'
+        printf '  report::Report.render\n'
+        printf '    (List.fold gates report::Report.empty fn(tally, gate => report::Report.add tally gate.name gate.passed gate.total))\n'
+    } >"$base/main.hd"
+    if ! cargo run --offline -q -- build "$base/main.hd" >/dev/null 2>"$workdir/gates-build-err"; then
+        echo "NG: $label (build failed: $(cat "$workdir/gates-build-err"))"
+        return
+    fi
+    got=$("$base/main" 2>"$workdir/gates-run-err"); status=$?
+    if [ "$status" -eq 0 ] && [ "$got" = "$expected" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want '$expected' got status=$status '$got')"
+    fi
+}
+
 # 共通の探針。契約 Monoid と実装 StringMonoid。
 monoid_contract() {
     printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n'
@@ -831,6 +866,65 @@ accept_build_run '前処理: 関数型の shared が record の field に届き�
 expect_code '前処理の負: 関数型の shared 無しは型検査で落ちる' "$workdir/33fnneg/main.hd" E305
 accept_build_run_quiet '前処理: 効果行付きの関数型の shared が record の field に届き効果が起きる' "$workdir/33fneff/main.hd" "${rand_fe_suffix}${rand_fe_message}"
 expect_code '前処理の負: 効果行付きの shared 無しは型検査で落ちる' "$workdir/33fneffneg/main.hd" E305
+
+# --- 33-k: E2。tools/gates の Report.T を shared で公開する。 ---
+
+# (1) report.hd を単体で check し、受理して診断を出さない。
+accept_quiet '33-k (1) report.hd を単体で check (受理、stdout/stderr 空)' tools/gates/report/report.hd
+
+# (2) 実物の main.hd を check → 写して build → 実行。main が Report.T の field を
+# 読むので shared が無ければ書けない形。壊れることは負の対照 (4) で測る。
+mkdir -p "$workdir/33k-real"
+cp tools/gates/main.hd "$workdir/33k-real/main.hd"
+cp -r tools/gates/report "$workdir/33k-real/report"
+accept_build_run '33-k (2) 実物の main.hd が Report.T を fold して render する' "$workdir/33k-real/main.hd" '33/35 passed; red: m7'
+
+# (3a) 実行時に生成した 3 つ組。少なくとも 1 つは赤になる。
+gate_random() {
+    local names=("a$RANDOM" "b$RANDOM" "c$RANDOM")
+    local totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
+    local hits=("${totals[0]}" "$((RANDOM % totals[1]))" "$((RANDOM % (totals[2] + 1)))")
+    local red=() red_str="none"
+    [ "${hits[0]}" -lt "${totals[0]}" ] && red+=("${names[0]}")
+    [ "${hits[1]}" -lt "${totals[1]}" ] && red+=("${names[1]}")
+    [ "${hits[2]}" -lt "${totals[2]}" ] && red+=("${names[2]}")
+    [ "${#red[@]}" -gt 0 ] && red_str="${red[*]}"
+    gates_case '33-k (3a) 実行時生成の 3 つ組 (赤あり)' "$workdir/33k-rand" \
+        "$((hits[0] + hits[1] + hits[2]))/$((totals[0] + totals[1] + totals[2])) passed; red: $red_str" \
+        "${names[0]}:${hits[0]}:${totals[0]}" \
+        "${names[1]}:${hits[1]}:${totals[1]}" \
+        "${names[2]}:${hits[2]}:${totals[2]}"
+}
+gate_random
+
+# (3b) 全緑。赤が無いときの `red: none`。
+gates_green() {
+    local totals=($((1 + RANDOM % 100)) $((1 + RANDOM % 100)) $((1 + RANDOM % 100)))
+    local sum=$((totals[0] + totals[1] + totals[2]))
+    gates_case '33-k (3b) 全緑は red: none' "$workdir/33k-green" "$sum/$sum passed; red: none" \
+        "g0:${totals[0]}:${totals[0]}" \
+        "g1:${totals[1]}:${totals[1]}" \
+        "g2:${totals[2]}:${totals[2]}"
+}
+gates_green
+
+# (3c) 空のリスト。`0/0 passed; red: none`。
+gates_empty() {
+    local base="$workdir/33k-empty"
+    mkdir -p "$base"
+    cp -r tools/gates/report "$base/report"
+    printf 'def main = report::Report.render report::Report.empty\n' >"$base/main.hd"
+    accept_build_run '33-k (3c) 空は 0/0 passed; red: none' "$base/main.hd" '0/0 passed; red: none'
+}
+gates_empty
+
+# (4) 負の対照: report.hd の shared を消した写しは、main の Report.T が不透明に
+# 戻るので E601 か E705 で落ちる。
+mkdir -p "$workdir/33k-neg/report"
+cp tools/gates/report/report.hd "$workdir/33k-neg/report/report.hd"
+cp tools/gates/main.hd "$workdir/33k-neg/main.hd"
+sed -i 's/^shared type T = Tally$/type T = Tally/' "$workdir/33k-neg/report/report.hd"
+expect_code_one_of '33-k (4) 負の対照: shared を消した写しは E601 か E705' "$workdir/33k-neg/main.hd" E601 E705
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
 grammar_and_keywords() {
