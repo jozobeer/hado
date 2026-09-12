@@ -32,6 +32,15 @@ fn owned<T: Clone>(entries: &HashMap<String, T>, module: &str) -> HashMap<String
     entries.iter().filter(|(name, _)| name.starts_with(&prefix)).map(|(name, value)| (name.clone(), value.clone())).collect()
 }
 
+// 前処理が `Ty::Abstract` を作る唯一の出口。参照先の契約の arity と型引数の個数が
+// 食い違う等式は登録しない。登録すると `Ty::reveal` から `TypeRealization::apply` の
+// 個数 assert に到達して panic する（§35: 数が違えば E602）。登録しなければ既存の経路
+// （annotation_inner の arity 照合、type_realizations の E204）が拒否する。
+fn shared_abstract_type(qualified: String, arity: Option<usize>, arguments: Vec<Ty>) -> Option<Ty> {
+    if arity != Some(arguments.len()) { return None; }
+    Some(Ty::Abstract(qualified, arguments))
+}
+
 // reveal は名前の置き換えを再帰的に行うので、shared の等式が輪になっていると止まらない。
 // 適用の写しで輪を作る等式は shared_realizations に入れない。輪そのものは
 // abstract_representations に残るので check_realization_cycles が E602 で拒否する。
@@ -81,10 +90,13 @@ impl Checker<'_> {
                     let internal: HashMap<String, String> = parameters.iter()
                         .map(|parameter| (parameter.name.clone(), format!("{}${}", module.name, parameter.name)))
                         .collect();
-                    let shared = self.module_shared_map(module, &internal, &signatures);
+                    let contracts: HashMap<String, String> = parameters.iter()
+                        .map(|parameter| (parameter.name.clone(), parameter.contract.clone()))
+                        .collect();
+                    let shared = self.module_shared_map(module, &internal, &contracts, &signatures);
                     templates.insert(module.name.clone(), (parameters.iter().map(|parameter| parameter.name.clone()).collect(), shared));
                 }
-                ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new(), &signatures)),
+                ImplementationForm::Ordinary => additions.extend(self.module_shared_map(module, &HashMap::new(), &HashMap::new(), &signatures)),
                 ImplementationForm::Application { .. } => {}
             }
         }
@@ -116,6 +128,7 @@ impl Checker<'_> {
     }
 
     fn module_shared_map(&mut self, module: &ModuleImpl, functor_params: &HashMap<String, String>,
+        functor_contracts: &HashMap<String, String>,
         signatures: &HashMap<&str, &ModuleSig>) -> HashMap<String, TypeRealization> {
         // 契約の抽象型の arity。abstract_types は functor の契約を本文処理まで持たないので、
         // 契約の署名から取る（module_abstract_parameters と同じ出所）。
@@ -125,6 +138,20 @@ impl Checker<'_> {
                 _ => None,
             }).collect()
         }).unwrap_or_default();
+        // functor 仮引数の抽象型（本文の `M.T`）を内部名 `Make$M.T` に写し、仮引数の
+        // 契約の署名から arity を取る。abstract_types は functor の契約を持たないため。
+        let functor_abstracts: HashMap<String, (String, usize)> = functor_contracts.iter().flat_map(|(name, contract)| {
+            let internal = functor_params.get(name);
+            let signature = signatures.get(contract.as_str());
+            match (internal, signature) {
+                (Some(internal), Some(signature)) => signature.items.iter().filter_map(|item| match item {
+                    Item::TypeDef(definition) => Some((format!("{name}.{}", definition.name),
+                        (format!("{internal}.{}", definition.name), definition.params.len()))),
+                    _ => None,
+                }).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            }
+        }).collect();
         let local: HashMap<String, &crate::parser::TypeDef> = module.items.iter().filter_map(|item| match item {
             Item::TypeDef(definition) => Some((definition.name.clone(), definition)),
             _ => None,
@@ -144,7 +171,7 @@ impl Checker<'_> {
             let parameters: HashMap<String, Ty> = definition.params.iter()
                 .map(|parameter| (parameter.name.clone(), self.inference.fresh())).collect();
             let mut visiting = Vec::new();
-            let Some(ty) = self.shared_body_type(body, &module.name, &local, &parameters, functor_params, &mut visiting) else { continue };
+            let Some(ty) = self.shared_body_type(body, &module.name, &local, &parameters, &functor_abstracts, &mut visiting) else { continue };
             let ids = definition.params.iter().filter_map(|parameter| match parameters.get(&parameter.name) {
                 Some(Ty::Var(id)) => Some(*id),
                 _ => None,
@@ -157,7 +184,7 @@ impl Checker<'_> {
     fn shared_body_type(
         &mut self, expr: &TypeExpr, module: &str,
         local: &HashMap<String, &crate::parser::TypeDef>,
-        parameters: &HashMap<String, Ty>, functor_params: &HashMap<String, String>,
+        parameters: &HashMap<String, Ty>, functor_abstracts: &HashMap<String, (String, usize)>,
         visiting: &mut Vec<String>,
     ) -> Option<Ty> {
         // `Fn(A, B => C {E})` は引数群（`Group`）・戻り型・効果行からなる。annotation_inner と
@@ -170,9 +197,9 @@ impl Checker<'_> {
                     _ => &arguments[..1],
                 };
                 let inputs = inputs.iter()
-                    .map(|input| self.shared_body_type(input, module, local, parameters, functor_params, visiting))
+                    .map(|input| self.shared_body_type(input, module, local, parameters, functor_abstracts, visiting))
                     .collect::<Option<_>>()?;
-                let output = self.shared_body_type(&arguments[1], module, local, parameters, functor_params, visiting)?;
+                let output = self.shared_body_type(&arguments[1], module, local, parameters, functor_abstracts, visiting)?;
                 let row = self.row_annotation(&arguments[1].effects).ok()?;
                 return Some(Ty::fn_with(inputs, output, row));
             }
@@ -183,17 +210,16 @@ impl Checker<'_> {
             _ => return None,
         };
         let args: Vec<Ty> = arguments.iter()
-            .map(|argument| self.shared_body_type(argument, module, local, parameters, functor_params, visiting))
+            .map(|argument| self.shared_body_type(argument, module, local, parameters, functor_abstracts, visiting))
             .collect::<Option<_>>()?;
         // 実体化自身の型引数（`shared type A T = A List` の `A`）。
         if let Some(ty) = parameters.get(name) {
             return args.is_empty().then(|| ty.clone());
         }
-        // functor 仮引数の抽象型（`shared type T = M.T` の `M.T`）。
-        if let Some((head, member)) = name.split_once('.') {
-            if let Some(internal) = functor_params.get(head) {
-                return Some(Ty::Abstract(format!("{internal}.{member}"), args));
-            }
+        // functor 仮引数の抽象型（`shared type T = M.T` の `M.T`）。仮引数の契約の
+        // 署名から取った arity と照合し、食い違えば等式を登録しない。
+        if let Some((qualified, arity)) = functor_abstracts.get(name) {
+            return shared_abstract_type(qualified.clone(), Some(*arity), args);
         }
         // 実装内の局所型。ADT / record は実装名で修飾し、別名は本体を展開する。
         if let Some(definition) = local.get(name) {
@@ -208,12 +234,12 @@ impl Checker<'_> {
                 substituted.insert(formal.name.clone(), argument.clone());
             }
             visiting.push(name.to_owned());
-            let result = self.shared_body_type(body, module, local, &substituted, functor_params, visiting);
+            let result = self.shared_body_type(body, module, local, &substituted, functor_abstracts, visiting);
             visiting.pop();
             return result;
         }
-        if self.abstract_types.contains_key(name) {
-            return Some(Ty::Abstract(name.to_owned(), args));
+        if let Some((arity, qualified)) = self.abstract_types.get(name) {
+            return shared_abstract_type(qualified.clone(), Some(*arity), args);
         }
         if self.type_arities.get(name) == Some(&args.len()) {
             return Some(Ty::Adt(name.to_owned(), args));
