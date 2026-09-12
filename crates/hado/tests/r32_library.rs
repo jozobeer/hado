@@ -126,3 +126,37 @@ fn library_and_shared_are_not_names() {
         assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
     }
 }
+
+#[test]
+fn argument_main_reports_the_declaration_position_for_every_command() {
+    // §50: check / build / dump-mono は同じアンカー（その `def main`）を指す。
+    let case = Case::new();
+    let source = "\n\ndef main x => x";
+    case.write("main.hd", source);
+    let line = source[..source.find("def main").unwrap()].matches('\n').count() + 1;
+    for command in ["check", "build", "dump-mono"] {
+        let output = case.command(command, "main.hd");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{command}: {stderr}");
+        assert!(stderr.starts_with(&format!("main.hd:{line}:1: error[E206]: ")), "{command}: {stderr}");
+    }
+    assert!(!case.0.join("main").exists());
+}
+
+#[test]
+fn library_directory_rejects_an_argument_main_in_a_separate_file() {
+    // §59: 禁止は定義の形によらない。値定義だけを探してはいけない。
+    let case = Case::new();
+    case.write("lib.hd", "library");
+    let source = "\n\ndef main x => x\n\nmodule S\ndef read(value: Int): Int\n\nimplement S as Memory\ndef read value => main value";
+    case.write("main.hd", source);
+    let line = source[..source.find("def main").unwrap()].matches('\n').count() + 1;
+    let error = match hado::project::Project::load(&case.0.join("lib.hd")) {
+        Ok(_) => panic!("expected E206"),
+        Err(hado::project::LoadError::Diagnostic(error)) => error,
+        Err(other) => panic!("unexpected load error: {other}"),
+    };
+    assert_eq!(error.code.as_deref(), Some("E206"), "{error}");
+    assert_eq!((error.line, error.col), (line, 1), "{error}");
+    assert_eq!(error.path, "main.hd", "{error}");
+}
