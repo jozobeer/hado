@@ -134,6 +134,27 @@ expect_code_contains() {
     fi
 }
 
+# code の診断が、許容コードのいずれかで出る（負の対照がどの欠陥コードで落ちるかは
+# 問わないが、終了 1 と型の診断であることは要求する）。
+expect_code_one_of() {
+    local label=$1 entry=$2
+    shift 2
+    total=$((total + 1))
+    local err status ok=0 code
+    err=$(cargo run --offline -q -- check "$entry" 2>&1 >/dev/null); status=$?
+    if [ "$status" -eq 1 ]; then
+        for code in "$@"; do
+            [[ "$err" == *"error[$code]:"* ]] && ok=1
+        done
+    fi
+    if [ "$ok" -eq 1 ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want one of $*, got status=$status '$err')"
+    fi
+}
+
 # stdout / stderr が空であることは、ファイルに保存してバイト数で測る
 # （コマンド置換は末尾改行を落とすので使わない）。
 accept_quiet() {
@@ -206,13 +227,19 @@ rand_rec="r${RANDOM}"
 rand_pat="p${RANDOM}"
 rand_named="m${RANDOM}"
 rand_proj="j${RANDOM}"
+rand_ip="i${RANDOM}"
+rand_rp="q${RANDOM}"
+rand_eff="e${RANDOM}"
+rand_harm="h${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
     "$workdir/33f2" "$workdir/33h" "$workdir/33i1" "$workdir/33i2" "$workdir/33i3" "$workdir/33accept" \
     "$workdir/33wrap" "$workdir/33wrapneg" "$workdir/33dist" "$workdir/33distpos" "$workdir/33lrec" "$workdir/33lrecneg" \
     "$workdir/33ident" "$workdir/33cyc" "$workdir/33pat" "$workdir/33patneg" "$workdir/33proj" "$workdir/33projneg" \
-    "$workdir/33named" "$workdir/33namedneg"
+    "$workdir/33named" "$workdir/33namedneg" \
+    "$workdir/33ip" "$workdir/33ipneg" "$workdir/33rp" "$workdir/33rpneg" \
+    "$workdir/33eff" "$workdir/33effneg" "$workdir/33harm" "$workdir/33harmneg"
 
 # 33-c (1): constructor 付き本体（ADT）への shared は E100、最初の | の位置。
 {
@@ -581,6 +608,78 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
 } >"$workdir/33namedneg/main.hd"
 
+# --- 工程 1 の修正 4: 等式の収集を型と効果の登録より前に置く 4 形 ---
+# いずれも「Store.T が型の位置に現れ、それを消費する定義が Store に構文的に依存しない」形。
+# shared の等式が register_type / register_effects より前に入っていないと、record schema と
+# 効果の操作型が不透明のまま登録され、推論・実行が通らない。
+
+# 正 1 (inferred-projection): 未注釈の関数が record の field を読む。record schema 登録時に
+# Store.T が解けていないと box.value が不透明のまま E305 になる（探針 inferred-projection）。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => String.concat box.value "!"\ntype Box = { value: Store.T }\n' "$rand_ip"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+} >"$workdir/33ip/main.hd"
+
+# 負 1: shared を外すと record schema の payload は不透明のまま型検査が落ちる。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read box => String.concat box.value "!"\ntype Box = { value: Store.T }\n' "$rand_ip"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+} >"$workdir/33ipneg/main.hd"
+
+# 正 2 (record-pattern): record パターンで束縛した値を String に使う。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read\n| { value = v } => String.concat v "!"\ntype Box = { value: Store.T }\n' "$rand_rp"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+} >"$workdir/33rp/main.hd"
+
+# 負 2: shared を外すとパターンで束縛した payload は不透明のまま型検査が落ちる。
+{
+    printf 'def main = read ({ value = Store.make "%s" })\ndef read\n| { value = v } => String.concat v "!"\ntype Box = { value: Store.T }\n' "$rand_rp"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+} >"$workdir/33rpneg/main.hd"
+
+# 正 3 (effect): 効果 Send の操作 send の payload が Store.T。register_effects の時点で
+# 等式が解けていないと payload が不透明になり、handler の腕の String.concat が E305。
+{
+    printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'effect Send\ncapture send(value: Store.T): String\n'
+    printf 'handler Send as Handle\ncapture send value => resume (String.concat value "!")\n'
+} >"$workdir/33eff/main.hd"
+
+# 負 3: shared を外すと操作型の payload は不透明のまま handler の腕で落ちる。
+{
+    printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'effect Send\ncapture send(value: Store.T): String\n'
+    printf 'handler Send as Handle\ncapture send value => resume (String.concat value "!")\n'
+} >"$workdir/33effneg/main.hd"
+
+# 正 4 (handler-arm): 効果 Ask の操作 get の結果型が Store.T。register_effects の時点で
+# 等式が解けていないと結果型が不透明になり、腕の resume value が E305。
+{
+    printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'effect Ask\ncapture get(value: String): Store.T\n'
+    printf 'handler Ask as Handle\ncapture get value => resume value\n'
+} >"$workdir/33harm/main.hd"
+
+# 負 4: shared を外すと操作の結果型は不透明のまま腕の resume で落ちる。
+{
+    printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'effect Ask\ncapture get(value: String): Store.T\n'
+    printf 'handler Ask as Handle\ncapture get value => resume value\n'
+} >"$workdir/33harmneg/main.hd"
+
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \
     "$workdir/33a2/main.hd" "$workdir/33b2/main.hd" "$workdir/33d/main.hd" "$workdir/33dneg/main.hd" \
@@ -591,7 +690,9 @@ for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main
     "$workdir/33wrap/main.hd" "$workdir/33wrapneg/main.hd" "$workdir/33dist/main.hd" "$workdir/33distpos/main.hd" \
     "$workdir/33lrec/main.hd" "$workdir/33lrecneg/main.hd" "$workdir/33ident/main.hd" "$workdir/33cyc/main.hd" \
     "$workdir/33pat/main.hd" "$workdir/33patneg/main.hd" "$workdir/33proj/main.hd" "$workdir/33projneg/main.hd" \
-    "$workdir/33named/main.hd" "$workdir/33namedneg/main.hd"; do
+    "$workdir/33named/main.hd" "$workdir/33namedneg/main.hd" \
+    "$workdir/33ip/main.hd" "$workdir/33ipneg/main.hd" "$workdir/33rp/main.hd" "$workdir/33rpneg/main.hd" \
+    "$workdir/33eff/main.hd" "$workdir/33effneg/main.hd" "$workdir/33harm/main.hd" "$workdir/33harmneg/main.hd"; do
     random_padding "$probe"
 done
 
@@ -647,6 +748,16 @@ expect_code 'shared 無しの field 射影は E305' "$workdir/33projneg/main.hd"
 
 accept_build_run 'shared が named constructor の payload を展開し束縛値を String に使える' "$workdir/33named/main.hd" "${rand_named}!"
 expect_code 'shared 無しの named constructor の payload は E305' "$workdir/33namedneg/main.hd" E305
+
+# 工程 1 の修正 4: 等式の収集が登録より前にあることを 4 形で測る。
+accept_build_run '等式の前処理: 未注釈関数が record の field を読める' "$workdir/33ip/main.hd" "${rand_ip}!"
+expect_code_one_of '前処理の負 1: shared 無しの record field は型検査で落ちる' "$workdir/33ipneg/main.hd" E305 E601 E705
+accept_build_run '等式の前処理: record パターンで束縛した値を使える' "$workdir/33rp/main.hd" "${rand_rp}!"
+expect_code_one_of '前処理の負 2: shared 無しの record パターンは型検査で落ちる' "$workdir/33rpneg/main.hd" E305 E601 E705
+accept_build_run '等式の前処理: 効果の操作 payload が解ける' "$workdir/33eff/main.hd" "${rand_eff}!"
+expect_code_one_of '前処理の負 3: shared 無しの効果の操作 payload は型検査で落ちる' "$workdir/33effneg/main.hd" E305 E601 E705
+accept_build_run '等式の前処理: handler の腕で操作の結果型が解ける' "$workdir/33harm/main.hd" "$rand_harm"
+expect_code_one_of '前処理の負 4: shared 無しの handler の腕は型検査で落ちる' "$workdir/33harmneg/main.hd" E305 E601 E705
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
 grammar_and_keywords() {
