@@ -276,3 +276,10 @@ fn a_parameter_type_stays_opaque_inside_the_functor_body() {
     let error = check_source(source, "t").err().expect("the parameter type must stay opaque in the body");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
+
+#[test]
+fn cyclic_shared_functor_applications_are_rejected() {
+    let source = "def main = A.read (A.make 7)\nmodule Id\ntype T\ndef make(n: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Id as I\nshared type T = Int\ndef make n => n\ndef read value => value\n\nimplement Id as Make(Arg: Id)\nshared type T = Arg.T\ndef make n => Arg.make n\ndef read value => Arg.read value\n\nimplement Id as A = Make(B)\nimplement Id as B = Make(A)";
+    let error = check_source(source, "t").err().expect("a shared application cycle must be rejected, not crash");
+    assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
+}
