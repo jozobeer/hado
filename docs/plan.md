@@ -2303,21 +2303,18 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 `m2` の 5 と `m3` の 9 は `m0` の連鎖で、独立の赤は 5 本（keywords、m1-spec の diff、24.2 のコーパス、stdlib の関数、それらの連鎖）である。
 
+**R32 の終了時（2026-09-12、`7c95f25`）:** 赤は `verify-m1-corpus.sh` 6/7（3 pairs の 6 項目）、`verify-m2.sh` 7/8、`verify-m3.sh` 11/12（どちらも m1-corpus の連鎖）、`verify-m7.sh` 2/3（stdlib の関数）の 4 本。`cargo test`、m0、m1-spec、r23 は緑に戻った。
+
 ### 24.9 不確実性
 
 - 確定: 前提（`v0.2.3`、`docs/bug.md` 空）、24.7 の探針、24.1 の決定、24.4 のレビュー対応
 - 推定: 版番号 v0.3、24.5 のラウンド分割と判定の柱、24.6 の追随
-- 未確認（レビューが見つけ、実装ラウンドで確認する）:
-  - `trusted_start` の意味と、prelude を prelude 無しで検査する経路の有無
-  - parser が効果の操作の戻り型の効果行を保持するか
-  - ファイル局所の `def args` と prelude の操作 `args` の解決順（影になるか E205 か）
-  - `types.rs:516` の `Abstract` 同士の単一化が名前比較か
-  - ユーザーの `type Bytes` が予約名として E205 になるか
-  - 全門番の `PASSED:` 書式の一致
-  - 不透明な抽象型への `==` の現行の振る舞い
-  - `library` を `.hdi` に置いたときの扱い（§54 の「外の型と module の節だけ」との関係）
-  - ライブラリ根の判定は他ファイルの `library` を要するので、外の `def` の E100 を単一ファイルの parse で決められるか
-  - `read_stdin` を 2 回呼んだときの 2 回目の値
+- R32 で確定（`docs/ledger.md` の R32）: `trusted_start` は行の閾値で、prelude 無しの検査は `stdlib/` を渡したときだけ存在し、E205 / E202 で通らない（門番は使っていない）。`types.rs:515-519` の `Abstract` の単一化は名前比較。ユーザーの `type Bytes` / `type Array` は今は受理（R34 / R35 で E205）。全門番の `PASSED: n/N` 書式は一致（`tools/gates` が集計できた）。不透明な抽象型どうしの `==` は受理して `true`。`.hdi` の `library` は `role_error` で E100。外の `def` の E100 は `Project::load` で決める（単一ファイルの parse では決められない）
+- 未確認（実装ラウンドで確認する）:
+  - parser が効果の操作の戻り型の効果行を保持するか（R37）
+  - ファイル局所の `def args` と prelude の操作 `args` の解決順（影になるか E205 か）（R37）
+  - `read_stdin` を 2 回呼んだときの 2 回目の値（R37）
+  - 効果が `dependencies.rs` の宣言に数えられておらず未使用の効果が E513 にならない件（§50 は効果にも当てる。R37 の D で当たったら `docs/bug.md` に置く）
 - R31 の台帳の未確認 3 件（型引数付き効果の重ね、`fn` の本体の `capture`、handler の値引数）は本版の範囲外で、D の設計で当たったら `docs/bug.md` に置く
 
 ## 25. R32 ライブラリ単位の手順書（2026-09-12）

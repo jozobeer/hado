@@ -2132,3 +2132,44 @@ m0 の赤が m2 の 5・m3 の 9・m7 の 3・r23 の 23-c に連鎖した。
 付け替え、門番の免除表として反映した。再走で `verify-m1-spec` は 4/5（見出しはコミットで解消）、
 `verify-m1-corpus` は 5/7（受け入れコーパスの不足は R32〜R37）。再確認（同モデル）で致命 1 は解消、残り 11・新規 14（致命なし）も
 反映した。新規の重大は E206 コーパスの形が計画・追跡表・手順書で食い違っていた件で、`library` のディレクトリの `main` に一本化した。
+
+## R32 ライブラリ単位（2026-09-12）
+
+24.1 の A（A1〜A8）を実装した。`library` と `shared` を予約語にし、`main` の無い `.hd` の `check` をライブラリ検査（公開面を E513 の根にする）にし、`build` と `dump-mono` は entry 向けの E206 のままにした。`library` を宣言したディレクトリはライブラリ根で、中のパスは最内のライブラリ根から解き、利用側の根と兄弟は見えない。`tests/library/` と `tools/gates/`（E2 の起票）を新設した。**全門番のうち許容される赤（m1-corpus の pairs、m7、その連鎖）以外が満点・終了コード 0、`cargo test --offline --no-fail-fast` が 0 failed。**
+
+指揮・計画は claude（fable-5.1）、実装と修正は opencode（`opencode-go/deepseek-v4.1-flash`、`opencode run` の非対話、本リポジトリで直接作業）、計画審査（2 巡）と実装審査（工程ごと + 修正の再審査）は codex（gpt-6-astra medium、`codex exec`、使い捨てコピーで欠陥注入つき）。フォールバック用に cursor（grok 4.6 xhigh、`-p`）の smoke を通しておいたが、使わなかった。
+
+| 判定 | 実測 |
+|---|---|
+| 32-a | `main` 無しの `check` が受理（stderr 0 バイト）、`--print-type` は stdout も 0 バイト、`build` / `dump-mono` は E206 1:1（`build requires an entry file with main; check treats this directory as a library`）で実行ファイルを作らない |
+| 32-b | `library` のディレクトリの `main` は、値定義でも引数付きでも pattern 腕でも、どのファイルにあっても E206 でその `def`。行:列は探針側で乱数の空白と空行から計算 |
+| 32-c | 同一ファイルの 2 つ目・別ファイルの 2 つ目が E205（2 つ目の位置）、`.hdi` の `library` が E100、見出しの後の `library` が E100、E205 と E206 が同時に当たるときはソース順 |
+| 32-d | 未参照の実装・functor・契約・外の型・効果・handler を置いたライブラリが受理。E514、実装局所 ADT の E513、外の `def` の E513、ライブラリ根でもないファイルの外の `def` の E100 はそのまま。handler の参照は推移的に閉じる |
+| 32-e | 宣言の無いディレクトリを `check` すると他ファイルの `main` は普通の `def`（E513） |
+| 32-f | 埋め込み（`app/lib/` を `lib::store::Memory.find` で参照、中は `id::IntId` をライブラリ根から解く）が実行時生成の整数で一致。利用側の根の型 → E204、兄弟 → E204、未参照の実装 → E513、埋め込みの `main` → E206、ライブラリ根自身と prelude の衝突 → E205、ライブラリ根と配下の衝突 → E205 |
+| 32-g | `def library` `def shared` `type shared` が E100。`keywords_cannot_be_names` が緑 |
+| 32-h | `r9_grammar` が `library` を生成し（生成の有無を集計）、往復が通る |
+| 32-i | `tests/library/` 2 ケース（`store` は `library` あり、`plain` は無し）を代表ファイルで `check`。代表ファイルの選択は字句（コメント除去）で runner と一致 |
+| 32-j | `tools/gates/report/report.hd` 単体 `check` 受理。実物の `main.hd`（3 つ組のリストの fold）が `33/35 passed; red: m7`。判定器は写しに実行時生成の 3 つ組を書いて一致、全緑と空も一致 |
+| 32-k | `cargo test --offline --no-fail-fast` 0 failed（全走の `cargo test --offline --no-fail-fast` で `test result: FAILED` が 0 行） |
+| 32-l | 全 32 門番（`verify-*.sh` 31 本 + `cargo test`）を直列に全走（12:39〜12:59、20 分）。赤は `verify-m1-corpus.sh` 6/7（3 pairs: 型の共有・Bytes・配列・String 操作・Int.parse・Env と Io の受理が無い）、`verify-m2.sh` 7/8（5 gates: m1-corpus の連鎖）、`verify-m3.sh` 11/12（9 gates: 同）、`verify-m7.sh` 2/3（stdlib の String の 5 操作・Bytes・Array・`Int.parse`）の 4 本で、すべて 25 節の「許容される赤」。全走では m1-corpus の検査 1 が `tests/reject/E206/main.hd` の `// spec: §59` と §50 の表の §5 の不一致で赤だったので、タグを §5 に直して lock を更新し（`7c95f25`）、単独で測り直して 6/7 を確認した |
+| 32-m | `tests/reject/E206` を `library` のディレクトリの `main` に差し替え、`tests/accept/library_embed`（`// item: ライブラリ単位`）、`tests/library/` 2 本、lock 186 行（`sha256sum --strict -c` 全件 OK） |
+| `verify-r32.sh` | `PASSED: 45/45` |
+
+**builder が手順書の漏れを 2 つ捕まえた。** 工程 0 では `parse_corpus.rs:121-129` が拒否コーパスの `main.hd` を単一ファイルとしてコンパイルしており、E206 の根拠が `lib.hd` にある新形と両立しなかった。builder は契約の「食い違ったら止める」に従って差し替えを未コミットで残して中断し、fixer が拒否の検査をディレクトリ単位（`Project::load`）に変えた。工程 3 では `verify-m3.sh:110` と `:141` の lock の期待に `tests/library` が無いことを報告し、指揮者が直した。
+
+**審査は判定器の穴を毎回突いた。** 実装審査 4 回はすべて 1 巡目が不合格（致命 2 / 4 / 1 / 2）で、fixer 1 回で全て合格した。指摘の半分は「判定器がこの欠陥を検出しない」で、行:列を定数 1 で書いていた、コマンド置換が末尾改行を落とす、必ず赤を含む入力しか無い、代表ファイルの選択が字句と食い違う、の 4 種。残りは仕様との食い違いで、見出しの後の `library` の受理、重複 E205 がソース順を破る、別ファイルの引数付き `main` の受理、handler の参照が推移的でない、引数付き `main` の `build` が位置を失う、埋め込み時だけ prelude との衝突を見逃す。欠陥注入は延べ 38 本で 30 本を検出した（審査の表から集計）。
+
+**検査の種類の判定は 3 箇所に散っていた。** `with_prelude` / `names::resolve` / `infer::check_ast_with_prelude` がそれぞれ `main` の有無を見ており、fixer が `lib.rs` の `has_main_definition` に寄せた。宣言表（`namespaces.rs`）は利用側の根からの絶対パスで索引されるので、ライブラリ根からの修飾パスは検証ではなく絶対パスへの書き換えで解いた。prelude は別表にし、どこからも無修飾で見える。
+
+**A6（prelude の根）は構造を変えなかった。** `.skip(prelude_items)` のままで振る舞いが同じなので、コメントを §49 に合わせただけである。
+
+**副作用。** 利用側の根で `type String` のような組み込み型名を宣言すると E205 になる（従来は素通り。§47 の名前空間の規則に沿う）。`dump-mono` の E206 メッセージは `build` と同文。
+
+**所要（opencode のログの首尾）:** 工程 0 が 10.5 分（中断）+ 5.4 分（fixer）+ 9.7 分（審査後の fixer）、工程 1 が 25.0 分 + 16.6 分、工程 2 が 12.3 分 + 8.1 分、工程 3 が 13.5 分 + 7.8 分。codex の計画審査は 1.2 分と 0.9 分、実装審査は 3.4〜7.1 分。指揮者の合間（審査の読み取りと次の発注書）は 2〜5 分。
+
+**仕様への疑義。** (1) 効果は `dependencies.rs` の宣言に数えられておらず、未使用の効果は E513 にならない。§50 は「効果（第57節）と handler（第58節）にも当てる」とする。R32 以前からの穴で、R32 では触っていない。R37 の D の設計で当たるので、そこで `docs/bug.md` に置くか決める。(2) stdlib のファイルを単体で `check` すると E205（prelude の型が重複）と E202（相対パスで `stdlib` の判定が落ちる）になる。A1 以前は E206 が隠していた潜在不整合で、門番は stdlib の単体 `check` をしていない。§49 は prelude を「全プログラムに連結され」と定めるので、単体検査の経路は仕様に無い。
+
+**24.9 の未確認のうち R32 で確定したもの。** `trusted_start` は行の閾値で、prelude を prelude 無しで検査する経路は `stdlib/` を渡したときだけ存在し、上の (2) のとおり通らない。外の `def` の E100 は単一ファイルの parse では決められず、`Project::load` の `role_error` で決めている（既にそうだった）。`library` を `.hdi` に置くと `role_error` の `interface` の枝で E100。ユーザーの `type Bytes` / `type Array` は今は受理される（R34 / R35 で E205）。不透明な抽象型どうしの `==` は受理して `true`。`types.rs:515-519` の `Abstract` の単一化は名前比較（R33 の前提）。
+
+**次の一手:** R33（型の共有）。手順書は 26 節。
