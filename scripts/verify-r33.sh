@@ -193,6 +193,30 @@ accept_build_run() {
     fi
 }
 
+# check 受理 → build → 実行。stdout が expected に一致し、終了 0、stderr が 0 バイト。
+# 効果が起きて handler が返した値だけを印字し、余計な診断を出さないことを測る。
+accept_build_run_quiet() {
+    local label=$1 entry=$2 expected=$3
+    total=$((total + 1))
+    local artifact="${entry%.hd}" out="$workdir/abrq-out" err="$workdir/abrq-err" status err_bytes
+    if ! cargo run --offline -q -- check "$entry" >/dev/null 2>"$workdir/abrq-check-err"; then
+        echo "NG: $label (check failed: $(cat "$workdir/abrq-check-err"))"
+        return
+    fi
+    if ! cargo run --offline -q -- build "$entry" >/dev/null 2>"$workdir/abrq-build-err"; then
+        echo "NG: $label (build failed: $(cat "$workdir/abrq-build-err"))"
+        return
+    fi
+    "$artifact" >"$out" 2>"$err"; status=$?
+    err_bytes=$(wc -c <"$err")
+    if [ "$status" -eq 0 ] && [ "$(cat "$out")" = "$expected" ] && [ "$err_bytes" -eq 0 ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want '$expected' got status=$status stdout='$(cat "$out")' stderr_bytes=$err_bytes)"
+    fi
+}
+
 # check --print-type の stdout が expected と一致し、抽象型の修飾名 `.T` を含まない。
 print_type_is() {
     local label=$1 entry=$2 expected=$3
@@ -234,6 +258,7 @@ rand_harm="h${RANDOM}"
 rand_fbody="f${RANDOM}"
 rand_fe_prefix="p${RANDOM}"
 rand_fe_suffix="s${RANDOM}"
+rand_fe_message="x${RANDOM}"
 
 mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$workdir/33c4" "$workdir/33c5" "$workdir/33c6" \
     "$workdir/33a2" "$workdir/33b2" "$workdir/33d" "$workdir/33dneg" "$workdir/33e" "$workdir/33eneg" \
@@ -703,12 +728,15 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 } >"$workdir/33fnneg/main.hd"
 
 # 正 2 (function-with-effects): 効果行を持つ関数型。go は {Error} の parse を呼び、
-# 効果が実際に起きる形にする。record schema の Store.T を登録より前に解くとき、
-# 効果行を落とすと field の型が合わず E301 / E305 になる。
+# parse は必ず raise する。main は handler で捕まえ、期待値は handler が返す
+# 実行時生成の message にする。raise が起きず普通の値を返す実装では別の値が出る。
+# record の構築で field の型が go と単一化されるので、Store.T の等式を登録より前に
+# 解いていなければ（効果行を落としていれば）field の型が合わず E301 / E305 になる。
 {
-    printf 'def main = read ({ value = go })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\n\n' "$rand_fe_suffix" "$rand_fe_prefix"
+    printf 'def main = with Catch -> go (read ({ value = go; tag = "%s" }))\ndef read box => box.tag\ntype Box = { value: Store.T; tag: String }\ndef go (suffix: String): String {Error} => parse suffix\ndef parse (input: String): String {Error} => raise { message = String.concat input "%s" }\n\n' "$rand_fe_suffix" "$rand_fe_message"
     printf 'module Store\ntype T\ndef touch(name: String): Unit Pure\n\n'
-    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n\n'
+    printf 'handler Error as Catch\nabort raise e => e.message\n'
 } >"$workdir/33fneff/main.hd"
 
 # 負 2: shared を外すと効果行付きの field は不透明のまま型検査が落ちる。
@@ -801,7 +829,7 @@ expect_code_one_of '前処理の負 4: shared 無しの handler の腕は型検�
 # 工程 1 の修正 5: 関数型を本体とする shared の等式を前処理で解く。
 accept_build_run '前処理: 関数型の shared が record の field に届き呼べる' "$workdir/33fn/main.hd" "${rand_fbody}!"
 expect_code '前処理の負: 関数型の shared 無しは型検査で落ちる' "$workdir/33fnneg/main.hd" E305
-accept_build_run '前処理: 効果行付きの関数型の shared が record の field に届く' "$workdir/33fneff/main.hd" "${rand_fe_prefix}${rand_fe_suffix}"
+accept_build_run_quiet '前処理: 効果行付きの関数型の shared が record の field に届き効果が起きる' "$workdir/33fneff/main.hd" "${rand_fe_suffix}${rand_fe_message}"
 expect_code '前処理の負: 効果行付きの shared 無しは型検査で落ちる' "$workdir/33fneffneg/main.hd" E305
 
 # 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
