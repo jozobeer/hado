@@ -558,6 +558,13 @@ def check_indices(category, s):
         string_probe(f'34-b(5) {category} handler get {label}',
                      f'String.get {quoted(s)} {index}', value=s[index],
                      handler='String.get e.message (String.length e.message - 1)')
+    if category in ('multibyte', 'mixed'):
+        for scalar_kind, char in scalar_classes:
+            index = s.index(char)
+            string_probe(f'34-a(3) {category} {scalar_kind} get {index}',
+                         f'String.get {quoted(s)} {index}', value=char)
+            string_probe(f'34-a(1,2) {category} {scalar_kind} slice {index}:{index + 1}',
+                         f'String.slice {quoted(s)} {index} {index + 1}', value=s[index:index + 1])
 
 
 def check_split(category, s):
@@ -565,6 +572,8 @@ def check_split(category, s):
                   ('utf8-3', random.choice('あい')), ('utf8-4', '😀'),
                   ('sequence', ''.join(random.choices('aéΩあ😀', k=random.randint(2, 4)))),
                   ('nul', '\0')]
+    if category in ('multibyte', 'mixed'):
+        separators.extend(scalar_classes)
     for sep_kind, sep in separators:
         middle = random.randrange(1, len(s)) if len(s) > 1 else 0
         shapes = {'leading': sep + s, 'trailing': s + sep, 'consecutive': s + sep + sep + s,
@@ -644,15 +653,20 @@ def check_predicates(category, s):
                      f'String.contains {quoted(s)} {quoted(part)}', value=str(part in s).lower())
 
 
-# 😀 だけでは 4 バイト先頭の payload が 0 なので、マスクを 0 にする故障を検出できない。
-wide_scalar = chr(random.randint(0x40000, 0x10ffff))
-wide_scalar.encode('utf-8')
+# 乱数だけでは先頭バイトの payload の上位ビットを落とす故障を見逃し得る。
+scalar_classes = [(f'utf8-{width}-maximum', chr(maximum))
+                  for width, maximum in enumerate((0x7f, 0x7ff, 0xffff, 0x10ffff), 1)]
+scalar_classes += [(f'utf8-{width}-upper', chr(random.randint(lower, maximum - 1)))
+                   for width, lower, maximum in ((2, 0x400, 0x7ff), (3, 0x8000, 0xd800),
+                                                 (4, 0x40000, 0x10ffff))]
+scalar_text = ''.join(char for _, char in scalar_classes)
+scalar_text.encode('utf-8')
 strings = {
     'empty': '',
     'ascii': ''.join(random.sample('abcde', 2) + random.choices('abcde', k=random.randint(1, 7))),
-    'multibyte': 'éあ' + wide_scalar + '😀a' + ''.join(random.choices('éΩあ😀', k=random.randint(1, 7))),
-    'mixed': 'aéあ' + wide_scalar + '😀' + ''.join(random.choices('abcéΩあ😀', k=random.randint(1, 7))),
-    'nul': '\0aéあ' + wide_scalar + '😀' + ''.join(random.choices('aéΩあ😀\0', k=random.randint(1, 7))) + '\0',
+    'multibyte': scalar_text + 'éあ😀a' + ''.join(random.choices('éΩあ😀', k=random.randint(1, 7))),
+    'mixed': 'a' + scalar_text + 'éあ😀' + ''.join(random.choices('abcéΩあ😀', k=random.randint(1, 7))),
+    'nul': '\0a' + scalar_text + 'éあ😀' + ''.join(random.choices('aéΩあ😀\0', k=random.randint(1, 7))) + '\0',
 }
 for category, s in strings.items():
     check_indices(category, s)

@@ -82,7 +82,15 @@ fn utf8_case_count_is_seed_independent() {
         .arg("-c")
         .arg(format!(
             "{generator}\n{}",
-            "counts = {len(utf8_cases(random.Random(seed))) for seed in range(256)}\nassert len(counts) == 1, counts\n"
+            r#"
+counts = set()
+for seed in range(256):
+    cases = utf8_cases(random.Random(seed))
+    accepted = {bytes(seq).decode('utf-8') for _, seq, valid in cases if valid}
+    assert {chr(cp) for cp in (0x7f, 0x7ff, 0xffff, 0x10ffff)} <= accepted, seed
+    counts.add(len(cases))
+assert len(counts) == 1, counts
+"#
         ))
         .output()
         .unwrap();
@@ -114,6 +122,22 @@ for seed in range(64):
         manifest.append((kind, label, mode))
     exec(generator)
     for category in ('multibyte', 'mixed'):
+        required = {{chr(cp) for cp in (0x7f, 0x7ff, 0xffff, 0x10ffff)}}
+        assert required <= set(strings[category]), (seed, category, 'missing maximum scalar')
+        for lower, upper in ((0x400, 0x7ff), (0x8000, 0xffff), (0x40000, 0x10ffff)):
+            upper_chars = {{char for char in strings[category] if lower <= ord(char) < upper}}
+            assert upper_chars, (seed, category, lower, 'missing upper-bit scalar')
+            required |= upper_chars
+        for operation in ('get', 'slice'):
+            values = {{probes[kind][:-1] for kind, desc, mode in manifest
+                      if f' {{category}} ' in desc and mode == 'print'
+                      and sources[kind].startswith('def main = String.' + operation + ' ')}}
+            assert required <= values, (seed, category, operation, required - values)
+        for operation in ('split', 'starts_with', 'contains'):
+            candidates = {{candidate
+                          for kind, desc, mode in manifest if f' {{category}} ' in desc
+                          for candidate in re.findall(r'String\.' + operation + r' ".*?" "(.*?)"', sources[kind], re.S)}}
+            assert required <= candidates, (seed, category, operation, required - candidates)
         widths = {{len(char.encode('utf-8')) for char in strings[category]}}
         assert widths == {{1, 2, 3, 4}}, (seed, category, widths)
         for label in (f'34-a(3) {{category}} ', f'34-b(5) {{category}} handler get'):
