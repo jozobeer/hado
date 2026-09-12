@@ -20,8 +20,19 @@ check() {
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
-mkdir -p "$workdir/32b" "$workdir/32c1" "$workdir/32c2" "$workdir/32c3" \
-    "$workdir/32g1" "$workdir/32g2" "$workdir/32g3" "$workdir/32neg"
+mkdir -p "$workdir/32a" "$workdir/32b" "$workdir/32c1" "$workdir/32c2" "$workdir/32c3" \
+    "$workdir/32d" "$workdir/32d1" "$workdir/32d2" "$workdir/32d3" "$workdir/32e" \
+    "$workdir/32g1" "$workdir/32g2" "$workdir/32g3"
+
+cat >"$workdir/32a/lib.hd" <<'EOF'
+def helper value => value + 1
+
+module Store
+def read(value: Int): Int
+
+implement Store as Memory
+def read value => helper value
+EOF
 
 cat >"$workdir/32b/lib.hd" <<'EOF'
 library
@@ -43,9 +54,73 @@ printf 'def library = 1\n' >"$workdir/32g1/main.hd"
 printf 'def shared = 1\n' >"$workdir/32g2/main.hd"
 printf 'type shared = | A\n' >"$workdir/32g3/main.hd"
 
-# 32-c 負の対照: library 1 つと契約・実装（main 無し）。
-# 工程 1 でライブラリ受理に変わる。この行は工程 1 で書き換える。
-cp "$workdir/32b/lib.hd" "$workdir/32neg/main.hd"
+cat >"$workdir/32d/lib.hd" <<'EOF'
+library
+
+type Outer = | Outer(Int)
+
+effect E
+abort fail
+
+module S
+def read(value: Int): Int
+
+module Empty
+def done(x: Int): Int
+
+implement S as Memory
+def read value => value
+
+implement S as Make(P: S)
+def read value => P.read value
+
+handler E as H
+abort fail => 0
+return x => x
+EOF
+
+cat >"$workdir/32d1/lib.hd" <<'EOF'
+library
+
+module S
+def read(value: Int): Int
+
+implement S as Memory
+def read value => value
+def extra x => x
+EOF
+
+cat >"$workdir/32d2/lib.hd" <<'EOF'
+library
+
+module S
+def read(value: Int): Int
+
+implement S as Memory
+type Local = | Local(Int)
+def read value => value
+EOF
+
+cat >"$workdir/32d3/lib.hd" <<'EOF'
+library
+
+def helper x => x
+
+module S
+def read(value: Int): Int
+
+implement S as Memory
+def read value => value
+EOF
+
+printf 'def main = 1\n' >"$workdir/32e/a.hd"
+cat >"$workdir/32e/lib.hd" <<'EOF'
+module Store
+def read(value: Int): Int
+
+implement Store as Memory
+def read value => value
+EOF
 
 expect_error() {
     local label=$1 entry=$2 file=$3 code=$4 line=$5 col=$6
@@ -76,15 +151,72 @@ expect_build_error() {
     fi
 }
 
+accept() {
+    local label=$1 entry=$2
+    total=$((total + 1))
+    local out err status
+    out=$(cargo run --offline -q -- check "$entry" 2>"$workdir/stderr"); status=$?
+    err=$(cat "$workdir/stderr")
+    if [ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (status=$status stdout='$out' stderr='$err')"
+    fi
+}
+
+accept_print() {
+    local label=$1 entry=$2
+    total=$((total + 1))
+    local out err status
+    out=$(cargo run --offline -q -- check --print-type "$entry" 2>"$workdir/stderr"); status=$?
+    err=$(cat "$workdir/stderr")
+    if [ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (status=$status stdout='$out' stderr='$err')"
+    fi
+}
+
+expect_entry_error() {
+    local label=$1 command=$2 entry=$3 file=$4
+    total=$((total + 1))
+    local err status
+    err=$(cargo run --offline -q -- "$command" "$entry" 2>&1 >/dev/null); status=$?
+    local prefix="$file:1:1: error[E206]: "
+    local artifact="${entry%.hd}"
+    if [ "$status" -eq 1 ] && [[ "$err" == "$prefix"* ]] \
+        && [[ "$err" == *"check"* ]] && [[ "$err" == *"library"* ]] && [ ! -e "$artifact" ]; then
+        echo "OK: $label"
+        passed=$((passed + 1))
+    else
+        echo "NG: $label (want entry-oriented E206 with check/library without artifact, got status=$status '$err')"
+    fi
+}
+
+# 32-a: main の無い .hd は check ではライブラリとして受理、build / dump-mono は E206 1:1。
+accept '32-a check (main 無しはライブラリとして受理)' "$workdir/32a/lib.hd"
+accept_print '32-a print-type (stdout も stderr も空)' "$workdir/32a/lib.hd"
+expect_entry_error '32-a build (E206 1:1、entry 向けメッセージ)' build "$workdir/32a/lib.hd" lib.hd
+expect_entry_error '32-a dump-mono (E206 1:1、entry 向けメッセージ)' dump-mono "$workdir/32a/lib.hd" lib.hd
+
 expect_error '32-b (check, library ディレクトリの main)' "$workdir/32b/main.hd" main.hd E206 1 1
 expect_build_error '32-b (build, library ディレクトリの main)' "$workdir/32b/main.hd" main.hd E206 1 1
+expect_error '32-b (check, lib.hd から他ファイルの main)' "$workdir/32b/lib.hd" main.hd E206 1 1
 expect_error '32-c (1) 同一ファイルの 2 つ目' "$workdir/32c1/main.hd" main.hd E205 2 1
 expect_error '32-c (2) 別ファイルの 2 つ目' "$workdir/32c2/a.hd" b.hd E205 1 1
 expect_error '32-c (3) .hdi の library' "$workdir/32c3/main.hd" sig.hdi E100 1 1
+accept '32-d (未参照の公開面でも受理)' "$workdir/32d/lib.hd"
+expect_error '32-d (1) 契約に無い実装の def' "$workdir/32d1/lib.hd" lib.hd E514 8 1
+expect_error '32-d (2) 実装局所の ADT が未使用' "$workdir/32d2/lib.hd" lib.hd E513 7 1
+expect_error '32-d (3) ライブラリ根の外の def が未使用' "$workdir/32d3/lib.hd" lib.hd E513 3 1
+expect_error '32-e (宣言の無い main は普通の def)' "$workdir/32e/lib.hd" a.hd E513 1 1
+rm "$workdir/32e/a.hd"
+accept '32-e (a.hd を消せば受理)' "$workdir/32e/lib.hd"
 expect_error '32-g def library' "$workdir/32g1/main.hd" main.hd E100 1 5
 expect_error '32-g def shared' "$workdir/32g2/main.hd" main.hd E100 1 5
 expect_error '32-g type shared' "$workdir/32g3/main.hd" main.hd E100 1 6
-expect_error '32-c 負の対照 (main 無しの library ディレクトリ)' "$workdir/32neg/main.hd" main.hd E206 1 1
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
