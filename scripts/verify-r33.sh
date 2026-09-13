@@ -994,7 +994,27 @@ accept_quiet '33-k (1) report.hd を単体で check (受理、stdout/stderr 空)
 mkdir -p "$workdir/33k-real"
 cp tools/gates/main.hd "$workdir/33k-real/main.hd"
 cp -r tools/gates/report "$workdir/33k-real/report"
-accept_build_run '33-k (2) 実物の main.hd が Report.T を fold して render する' "$workdir/33k-real/main.hd" '33/35 passed; red: m7'
+gates_real() {
+    local base="$workdir/33k-real"
+    mkdir "$base/logs"
+    local name n limit sum_passed=0 sum_total=0 red=()
+    for name in "a$RANDOM" "b$RANDOM" "c$RANDOM"; do
+        limit=$((1 + RANDOM % 100))
+        n=$((RANDOM % limit))
+        printf 'noise\nPASSED: %d/%d\n' "$n" "$limit" >"$base/logs/$name"
+        sum_passed=$((sum_passed + n))
+        sum_total=$((sum_total + limit))
+        red+=("$name")
+    done
+    printf '%d/%d passed; red: %s\n' "$sum_passed" "$sum_total" "${red[*]}" >"$base/expect"
+    cargo run --offline -q -- check "$base/main.hd" >"$base/out" 2>"$base/err" || return 1
+    [ "$(wc -c <"$base/out")" -eq 0 ] && [ "$(wc -c <"$base/err")" -eq 0 ] || return 1
+    cargo run --offline -q -- build "$base/main.hd" >"$base/build-out" 2>"$base/err" || return 1
+    "$base/main" "$base/logs" >"$base/out" 2>"$base/err" || return 1
+    cat "$base/out"
+    cmp -s "$base/expect" "$base/out" && [ "$(wc -c <"$base/err")" -eq 0 ]
+}
+check '33-k (2) 実物の main.hd が Report.T を fold して render する' gates_real
 
 # (3a) 実行時に生成した 3 つ組。少なくとも 1 つは赤になる。
 gate_random() {
