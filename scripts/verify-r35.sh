@@ -288,7 +288,6 @@ assert expected in actual, actual
 PY
 }
 while IFS=$'\t' read -r kind label mode; do
-    [[ "$label" == *"${FILTER:-}"* ]] || continue
     dir="$workdir/$kind"
     case "$mode" in
         print) check "$label" check_prints "$dir" ;;
