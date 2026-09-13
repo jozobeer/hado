@@ -53,6 +53,7 @@ struct Checker<'a> {
     handlers: HashMap<String, String>,
     handler_decls: HashMap<String, HandlerDecl>,
     operations: HashMap<String, OpKind>,
+    operation_result_rows: HashMap<String, Row>,
     resume_type: Option<Ty>,
 }
 
@@ -119,6 +120,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         handlers: HashMap::new(),
         handler_decls: HashMap::new(),
         operations: HashMap::new(),
+        operation_result_rows: HashMap::new(),
         resume_type: None,
     };
     checker.deferred.extend(functors::duplicate_applications(ast, path));
@@ -1869,6 +1871,11 @@ impl Checker<'_> {
                     None if op.kind == OpKind::Abort => self.inference.fresh(),
                     None => Ty::Unit,
                 };
+                let result_row = match &op.ret {
+                    Some(ty) if ty.effects.is_some() => self.row_annotation(&ty.effects)?,
+                    _ => Row::pure(),
+                };
+                self.operation_result_rows.insert(op.name.clone(), result_row);
                 let op_ty = if args.is_empty() { result } else { Ty::fn_of(args, result) };
                 let scheme = self.inference.generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
                 self.values.insert(op.name.clone(), scheme);
@@ -2040,7 +2047,7 @@ impl Checker<'_> {
         if !self.operations.contains_key(name) { return ty; }
         let Ty::Fn(mut args, effect, _) = ty else { return ty; };
         let Some(op_ty) = args.pop() else { return Ty::fn_of(vec![], *effect); };
-        let row = Row::Closed(vec![*effect]);
+        let row = self.inference.union_row(&Row::Closed(vec![*effect]), &self.operation_result_rows[name]);
         match op_ty {
             Ty::Fn(params, result, _) => Ty::fn_with(params, *result, row),
             result => {
