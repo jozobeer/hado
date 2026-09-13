@@ -146,6 +146,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
         for module in [
             include_str!("../../../stdlib/error.hd"),
             include_str!("../../../stdlib/env.hd"),
+            include_str!("../../../stdlib/io.hd"),
             include_str!("../../../stdlib/list.hd"),
             include_str!("../../../stdlib/option.hd"),
             include_str!("../../../stdlib/array.hd"),

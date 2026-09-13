@@ -1,0 +1,24 @@
+effect Io
+reply read_file(path: String): Bytes {Error}
+reply write_file(path: String, contents: Bytes): Unit {Error}
+reply read_dir(path: String): String List {Error}
+reply read_stdin: Bytes {Error}
+def io_failure_message
+  | 1 => "NotFound"
+  | 2 => "PermissionDenied"
+  | 3 => "NotADirectory"
+  | "IoFailure"
+def default_read_file path =>
+  let status = __io_read_file path ->
+  if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }
+def default_write_file path contents =>
+  let status = __io_write_file path contents ->
+  if status == 0 => () | raise { message = io_failure_message status }
+def default_read_dir path =>
+  let status = __io_read_dir path ->
+  if status == 0 => directory_elements 0 (__io_dir_count 0) | raise { message = io_failure_message status }
+def rec directory_elements (index: Int, count: Int): String List {Error} =>
+  if index >= count => [] | [Bytes.to_string (__io_dir_get index), ...directory_elements (index + 1) count]
+def default_read_stdin =
+  let status = __io_read_stdin 0 ->
+  if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }

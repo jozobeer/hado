@@ -44,6 +44,13 @@ pub enum RuntimeFunction {
     EnvHas,
     EnvGet,
     Cwd,
+    IoReadFile,
+    IoWriteFile,
+    IoReadDir,
+    IoReadStdin,
+    IoTakeBytes,
+    IoDirCount,
+    IoDirGet,
     ArrayLength,
     ArrayGet,
     ArrayAlloc,
@@ -65,6 +72,13 @@ impl RuntimeFunction {
             Self::EnvHas => Some("__env_has"),
             Self::EnvGet => Some("__env_get"),
             Self::Cwd => Some("__cwd"),
+            Self::IoReadFile => Some("__io_read_file"),
+            Self::IoWriteFile => Some("__io_write_file"),
+            Self::IoReadDir => Some("__io_read_dir"),
+            Self::IoReadStdin => Some("__io_read_stdin"),
+            Self::IoTakeBytes => Some("__io_take_bytes"),
+            Self::IoDirCount => Some("__io_dir_count"),
+            Self::IoDirGet => Some("__io_dir_get"),
             Self::ArrayLength => Some("__array_length"),
             Self::ArrayGet => Some("__array_get"),
             Self::ArrayAlloc => Some("__array_alloc"),
@@ -119,6 +133,13 @@ impl RuntimeFunction {
             Self::EnvHas => (vec![Type::String], Type::Bool),
             Self::EnvGet => (vec![Type::String], Type::Bytes),
             Self::Cwd => (vec![Type::Int], Type::Bytes),
+            Self::IoReadFile => (vec![Type::String], Type::Int),
+            Self::IoWriteFile => (vec![Type::String, Type::Bytes], Type::Int),
+            Self::IoReadDir => (vec![Type::String], Type::Int),
+            Self::IoReadStdin => (vec![Type::Int], Type::Int),
+            Self::IoTakeBytes => (vec![Type::Int], Type::Bytes),
+            Self::IoDirCount => (vec![Type::Int], Type::Int),
+            Self::IoDirGet => (vec![Type::Int], Type::Bytes),
             Self::StringLength => (vec![Type::String], Type::Int),
             Self::StringConcat => (vec![Type::String, Type::String], Type::String),
             Self::StringCompare => (vec![Type::String, Type::String], Type::Int),
@@ -137,7 +158,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::ArgvCount, Self::ArgvGet, Self::EnvHas, Self::EnvGet, Self::Cwd, Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
+    pub const ALL: &'static [Self] = &[Self::IoReadFile, Self::IoWriteFile, Self::IoReadDir, Self::IoReadStdin, Self::IoTakeBytes, Self::IoDirCount, Self::IoDirGet, Self::ArgvCount, Self::ArgvGet, Self::EnvHas, Self::EnvGet, Self::Cwd, Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -154,6 +175,13 @@ impl RuntimeFunction {
             Self::EnvHas => &Declaration { symbol: "hado_env_has", parameters: &[AbiType::Pointer], result: Some(AbiType::I8), may_allocate: true },
             Self::EnvGet => &Declaration { symbol: "hado_env_get", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
             Self::Cwd => &Declaration { symbol: "hado_cwd", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
+            Self::IoReadFile => &Declaration { symbol: "hado_io_read_file", parameters: &[AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
+            Self::IoWriteFile => &Declaration { symbol: "hado_io_write_file", parameters: &[AbiType::Pointer, AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
+            Self::IoReadDir => &Declaration { symbol: "hado_io_read_dir", parameters: &[AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
+            Self::IoReadStdin => &Declaration { symbol: "hado_io_read_stdin", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: true },
+            Self::IoTakeBytes => &Declaration { symbol: "hado_io_take_bytes", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: false },
+            Self::IoDirCount => &Declaration { symbol: "hado_io_dir_count", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: false },
+            Self::IoDirGet => &Declaration { symbol: "hado_io_dir_get", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: false },
             Self::ArrayGet | Self::ArrayFillUnchecked => unreachable!("array slot operations are emitted inline"),
             Self::ArrayLength => &Declaration {
                 symbol: "hado_array_length",
