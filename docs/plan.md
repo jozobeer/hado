@@ -2914,6 +2914,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
   - **`handler` を既定実装にする案は採らない（計画審査 3 巡目の致命）。** handler の腕は `with` で被せたときしか推論されない（`infer.rs:1969` の `handler_answer` は `with_handler` からしか呼ばれず、`infer.rs:175` `:186` と `dependencies.rs:17` は `Item::Handler` を無視する）。審査は `handler Foo as H` の `reply pick => "not an int"` が `reply pick: Int` の宣言と食い違っても `check` が終了 0 になることを実測した。腕が推論されないと mono は span の型（`composite_types`）を引けず、`missing list type` / `missing record type` / `missing abort result type` で落ちる。既定実装には argv の分類・`Bytes.to_string`・`raise { message = ... }` が必ず入るので確実に踏む。**E605（`infer.rs:1884-1891`）は腕名しか見ないので型の保証にはならない**
   - 普通の `def` なら推論は `Item::Def` の既存経路で済み、mono は通常の関数呼び出しになる。`with_params` も `rewriting_return` も `finish_handler` も触らない。既定の `def` の中の `raise` は普通の関数の中の `raise` で、利用者の `handler Error` に届くのは `tests/accept/nested_unrelated_abort` と同じ機構である
   - **既定の `def` の名前は `__` で始めない**（`name_resolution.rs:167` の intrinsic の門に当たる）。対応は名前の規約ではなく `register_effects` が prelude の範囲で `default_<op 名>` を探して `Checked` に載せる。**見つからなければ infer が診断を出す**（黙って mono で落とさない）
+  - **既定実装は `module <効果名>Default` と `implement <効果名>Default as <効果名>Default` の中に置く**（`stdlib/string.hd` が手本）。対応は `op 名 → <効果名>Default.<op 名>`。**工程 3 の全走で `verify-m3.sh` の検査 11（`stdlib-types`）が赤になって分かった**: この検査は `stdlib/*.hd` の最初の `module` / `implement` より前に `def` があると落ちる。素の `def` を並べる形がこれに当たる。**門番は変えない**（緩める形になるうえ、赤を出した側が門番を書き換えるのは判定者と作成者の分離に反する）。契約の宣言が効果の宣言の写しになるので、既定の効果行の検査が署名の照合としても書ける。helper は `implement` の中の `def` になり外に出ない（`stdlib/string.hd` の `split` の helper と同じ）。**`<効果名>Default` は契約名の空間に入るので `EnvDefault` と `IoDefault` を予約名に足す**
   - **既定の `def` の効果行が操作の宣言の効果行より広ければ infer が診断を出す。** 操作が `{Error}` で `def` が `Pure` なら通る（狭い方は広い方に含まれる）。逆は落とす。**この検査は `register_effects`（`infer.rs:179`）には置けない。** 既定の `def` の scheme は `definition_group`（`:180-190`）で推論されるので、**名前の対応は `register_effects`、効果と型の検査は推論の後**に置く
   - **E605 の代わりの保証:** `crates/hado/tests/r37_world.rs` に「`Checked` の prelude の `Reply` 操作すべてに既定の `def` の対応がある」を 1 本置く。対応が欠けた操作を prelude に足す注入で落ちること。判定 37-d(4) の「利用者の `handler Env` で 1 操作を落とすと E605」は既存機構なのでそのまま残る
 - **決定 2: C は scalar と Bytes だけを返し、`raise` は hado で書く。** R34 の `Bytes.of_list`・R36 の `Int.parse` の写しである。
@@ -2935,11 +2936,12 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 - **決定 8c: `scripts/verify-r36.sh` の 36-g を工程 3 で追随させる。** `verify-r36.sh:381-390` の `pairs_remaining` は `verify-m1-corpus.sh` が終了 1 で `NG: 3 pairs: accept-missing:Env と Io` と `PASSED: 6/7` を出すことに依存する。R37 が `// item: Env と Io` の受理を足すと 7/7 になってこの検査が落ちる。**残る pairs が 0 であること（`PASSED: 7/7`）を期待する形に直す。** 門番を緩める変更ではなく、R36 が「残り 1 項目」を測っていたものを「残り 0」に更新する追随である
 - **決定 9: `path` と env の `name` は libc に直接渡さない。** `HadoString` は NUL 終端でない（`runtime/hado_runtime.h:6-9`）。`fopen` `opendir` `getenv` `stat` に渡す前に `length + 1` の領域を確保して NUL を付ける。R36 は「写さない」が正解だったが、**R37 は逆で「写さないと越境する」**
 
-### 仕様への疑義（4 件。R38 で判断する。§49 が定めていない）
+### 仕様への疑義（5 件。R38 で判断する。§49 が定めていない）
 
 - **`read_dir` は名前だけを返し、`.` と `..` を除き、バイト順に整列する。** `readdir` の順序はファイルシステム依存なので、整列しないと判定器が期待値を持てない。**整列は決定ではなく判定可能性の要件である**
 - **`read_stdin` の 2 回目は空の `Bytes`**（EOF）。24.7 の未確定
 - **`env` の値が非 UTF-8 なら `"InvalidUtf8"` を raise する**（`None` ではない）。§49 の失敗の表（1980 行付近）は「argv・env・cwd・ディレクトリ名の非 UTF-8」を `"InvalidUtf8"` とするが、**env の「名前」と「値」のどちらを指すかが曖昧である**。本節は値にも当てる
+- **既定実装の契約名 `EnvDefault` と `IoDefault` を予約にする。** §47 の予約名の一覧（`docs/spec.md:1861-1873`）には無い。既定実装を `module` に入れる決定から出た副産物である
 - **E2 の空 argv は `raise { message = "MissingDirectory" }`。** `tools/gates/` は利用者のコードなので §49 の表の外でよい（R34 の `"InvalidLine"` が先例）
 
 **前提（疑義ではない）:** `args` はプログラム名を除く（§49 の `docs/spec.md:1974`）。`verify-m6.sh` が実行ファイル 1 つだけで起動する形では空リストになる。
