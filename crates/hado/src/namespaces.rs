@@ -321,14 +321,15 @@ impl Resolver<'_> {
                 let mut scope = local.clone();
                 scope.types.extend(handler.type_params.iter().map(|param| param.name.clone()));
                 self.reference(&mut handler.effect, handler.effect_span, Space::Contract, directory, local);
-                if declared_directory(&handler.effect) != directory {
+                let prelude_effect = self.has_prelude(Space::Contract, &handler.effect);
+                if !prelude_effect && declared_directory(&handler.effect) != directory {
                     self.unknown(handler.effect_span, handler.effect_span);
                 }
                 self.annotations(&mut handler.params, &mut None, directory, &scope);
                 for arm in &mut handler.arms {
                     match arm {
                         HandlerArm::Operation { name, params, body, .. } => {
-                            *name = operation_key(directory, name);
+                            if !prelude_effect { *name = operation_key(directory, name); }
                             for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) { self.ty(ty, directory, &scope); }
                             self.node(body, directory, local);
                         }
