@@ -65,6 +65,86 @@ fn launch(exe: &Path, work: &Path) -> std::io::Result<std::process::Output> {
         .wait_with_output()
 }
 
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!("hado-corpus-launch-{}-{nonce}", std::process::id()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn observe_launch(root: &Path) {
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        let contents = root.file_name().unwrap().as_encoded_bytes();
+        std::fs::write(work.join("fixture"), contents).unwrap();
+        let object = work.join("main.o");
+        hado::compile_source_to_object(
+            "type Observation = { stdin: Int; same: Bool }\n\
+             def main =\n\
+               let input = Bytes.length read_stdin ->\n\
+               let contents = read_file \"fixture\" ->\n\
+               do write_file \"written\" contents ->\n\
+               { stdin = input; same = read_file \"written\" == contents }\n",
+            "main.hd", &object,
+        ).unwrap();
+        let exe = work.join("main");
+        hado::link_executable(&object, &exe).unwrap();
+
+        let output = launch(&exe, &work).unwrap();
+
+        println!("launch: status={:?} stdout={:?} stderr={:?}", output.status.code(),
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty(), "{output:?}");
+        assert_eq!(output.stdout, b"{ stdin = 0; same = true }\n");
+        assert_eq!(std::fs::read(work.join("written")).unwrap(), contents);
+        assert!(!root.join("ambient/written").exists());
+    }
+
+    #[test]
+    fn isolates_work_and_stdin() {
+        const CHILD_ROOT: &str = "HADO_CORPUS_LAUNCH_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            observe_launch(Path::new(&root));
+            return;
+        }
+        let scratch = Scratch::new();
+        std::fs::create_dir(scratch.0.join("ambient")).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "launch_tests::isolates_work_and_stdin", "--nocapture"])
+            .env(CHILD_ROOT, &scratch.0)
+            .current_dir(scratch.0.join("ambient"))
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().unwrap();
+        child.stdin.take().unwrap().write_all(b"stdin-must-disturb\n").unwrap();
+        let output = child.wait_with_output().unwrap();
+        let path = scratch.0.clone();
+        drop(scratch);
+
+        assert!(!path.exists(), "scratch was not removed: {}", path.display());
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+        assert!(output.status.success(), "child: {:?}\n{}", output.status,
+            String::from_utf8_lossy(&output.stderr));
+    }
+}
+
 fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     let (status, stdout, stderr) = expected_output(text)?;
     let stem = rel.replace('/', "_");
