@@ -1,15 +1,19 @@
-type Gate = { name: String; passed: Int; total: Int }
+def last_passed lines =>
+  Option.ok_or
+    (List.fold lines None fn(selected, line =>
+      if String.starts_with line "PASSED: " => Some(line) | selected))
+    { message = "InvalidLine" }
 
-def choose (tally: report::Report.T): report::Report.T =>
-  if tally.passed >= 0 => tally
-  | report::Report.empty
+def read_report directory name =>
+  let path = String.concat directory (String.concat "/" name) ->
+  let line = last_passed (String.split (Bytes.to_string (read_file path)) "\n") ->
+  report::Report.parse_line (String.concat name (String.concat " " line))
+
+def summarize directory =>
+  List.fold (read_dir directory) report::Report.empty fn(tally, name =>
+    report::Report.merge tally (read_report directory name))
 
 def main =
-  let gates = [
-    { name = "m0"; passed = 7; total = 7 },
-    { name = "m7"; passed = 1; total = 3 },
-    { name = "r31"; passed = 25; total = 25 }
-  ] ->
-  report::Report.render
-    (choose
-      (List.fold gates report::Report.empty fn(tally, gate => report::Report.add tally gate.name gate.passed gate.total)))
+  if args
+  | [directory, ..._] => report::Report.render (summarize directory)
+  | [] => raise { message = "MissingDirectory" }

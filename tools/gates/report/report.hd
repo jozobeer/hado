@@ -16,6 +16,7 @@ module Report
 type T
 def empty: T Pure
 def add(tally: T, name: String, passed: Int, total: Int): T Pure
+def merge(left: T, right: T): T Pure
 def render(tally: T): String Pure
 def fields(line: String): String List {Error}
 def parse_line(line: String): T {Error}
@@ -27,6 +28,8 @@ def add tally name passed total =>
   if passed < total
   => { passed = tally.passed + passed; total = tally.total + total; red = List.append tally.red [name] }
   | { passed = tally.passed + passed; total = tally.total + total; red = tally.red }
+def merge left right =>
+  { passed = left.passed + right.passed; total = left.total + right.total; red = List.append left.red right.red }
 def render tally =>
   String.concat
     (Int.to_string tally.passed)
