@@ -2927,6 +2927,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 - **決定 6: C の `int main` だけを `int main(int argc, char **argv)` に変え、`argc` / `argv` をファイルスコープの static に退避する。** `hado_entry(void)` の宣言（`runtime/hado_runtime.c:11`）も `emit.rs:592-595` と `:64-70` の signature も**触らない**。これが最小の変更である。`scripts/verify-m0.sh:94-99` は `GC_INIT` `hado_entry` `hado_alloc` `GC_malloc` の綴りを `runtime/` に求めるだけなので緑のまま
 - **決定 7: `effect Io` の衝突を工程 0 で改名する。** `tests/accept/effect_row/main.hd`（コーパス。lock も更新する）と `crates/hado/tests/r24_effects.rs` の `Io` を `Log` にする。**`effect Io` の 8 箇所だけでなく、`{Io}` `{Ask, Io}` `{Io, Int Yield}` の型注釈と `print_type` の期待文字列を含む全出現を直す**（13 行・25 箇所。片方だけ直すと E205 か E204 になる）。`crates/hado/tests/r23_syntax.rs:135` `:137` は `roundtrip`（parse と canonical 印字の往復）なので触らない
 - **決定 8: 受理コーパスの起動条件を門番に固定する。** `scripts/verify-m6.sh:26` は cwd も stdin も固定していない。24.5 の R37 の行が「受理ケースは空 argv・閉じた stdin・ケース内の相対パスで起動する」と定めているので、**`cwd=str(case)` と `stdin=subprocess.DEVNULL` を足す**（門番を強くする変更で、判定の条件は変えない）。実行ファイルのパスは絶対なので cwd を変えても動く
+- **決定 8b: `scripts/verify-r32.sh` の 32-j(d) を工程 3 で追随させる。** `verify-r32.sh:169-184` の `report_case_real` は実物の `tools/gates/main.hd` をコピーして**引数なしで**実行し、`33/35 passed; red: m7` を期待する。E2 を argv 駆動にすると空 argv は `MissingDirectory` になるので終了コード 1 で落ちる。**判定器がディレクトリを作り、`PASSED:` の行を持つログを実行時に生成して、そのディレクトリを引数に渡す形に直す**（期待値は判定器側で計算する。固定文字列 `33/35 passed; red: m7` は消える）。門番を緩める変更ではなく、E2 の入口が変わったことへの追随である
 - **決定 9: `path` と env の `name` は libc に直接渡さない。** `HadoString` は NUL 終端でない（`runtime/hado_runtime.h:6-9`）。`fopen` `opendir` `getenv` `stat` に渡す前に `length + 1` の領域を確保して NUL を付ける。R36 は「写さない」が正解だったが、**R37 は逆で「写さないと越境する」**
 
 ### 仕様への疑義（R38 で判断する。§49 が定めていない）
@@ -2935,6 +2936,8 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 - **`read_stdin` の 2 回目は空の `Bytes`**（EOF）。24.7 の未確定
 - **`env` の値が非 UTF-8 なら `"InvalidUtf8"` を raise する**（`None` ではない）。§49（1974 行）の「非 UTF-8 の名前は `Error` を raise する」を値にも当てる
 - **E2 の空 argv は `raise { message = "MissingDirectory" }`。** `tools/gates/` は利用者のコードなので §49 の表の外でよい（R34 の `"InvalidLine"` が先例）
+
+**前提（疑義ではない）:** `args` はプログラム名を除く（§49 の `docs/spec.md:1974`）。`verify-m6.sh` が実行ファイル 1 つだけで起動する形では空リストになる。
 
 ### 期待値の根拠
 
@@ -2964,14 +2967,14 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 ### 成果物
 
-`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `mono.rs` `infer.rs` `types.rs` `lib.rs`）、`stdlib/env.hd`（新設）`stdlib/io.hd`（新設）、`tools/gates/main.hd` `tools/gates/report/report.hd`、`crates/hado/tests/r37_world.rs`（新設）、`crates/hado/tests/r24_effects.rs`（`Io` → `Log`）、`scripts/verify-r37.sh`（新設）、`scripts/verify-m6.sh`（決定 8）、`tests/accept/`（`// item: Env と Io` の受理と `effect_row` の改名）、`tests/corpus.sha256`、`docs/ledger.md`。
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `mono.rs` `infer.rs` `types.rs` `lib.rs`）、`stdlib/env.hd`（新設）`stdlib/io.hd`（新設）、`tools/gates/main.hd` `tools/gates/report/report.hd`、`crates/hado/tests/r37_world.rs`（新設）、`crates/hado/tests/r24_effects.rs`（`Io` → `Log`）、`scripts/verify-r37.sh`（新設）、`scripts/verify-m6.sh`（決定 8）、`scripts/verify-r32.sh`（決定 8b）、`crates/hado/src/namespaces.rs`（決定 4b・4c）、`tests/accept/`（`// item: Env と Io` の受理と `effect_row` の改名）、`tests/corpus.sha256`、`docs/ledger.md`。
 
 ### 工程
 
 - 工程 0: 地ならし。決定 7（`effect Io` の改名と lock 更新）、決定 3（操作の結果の効果行）、決定 4（`has_user_effect` の一般化）。**`Env` と `Io` はまだ入れない。** 判定 37-a 37-b
-- 工程 1: `Env`。`stdlib/env.hd`（効果 + 既定 handler）、C の `main(argc, argv)` と static（決定 6）、intrinsic（`__argv_count` `__argv_get` `__env_has` `__env_get` `__cwd`）、**mono の `Reply` の既定 handler へのフォールバック**（決定 1。新しい機構はここだけ）、lock。判定 37-c 37-d 37-e
+- 工程 1: `Env`。`stdlib/env.hd`（効果 + 既定 handler）、C の `main(argc, argv)` と static（決定 6）、intrinsic（`__argv_count` `__argv_get` `__env_has` `__env_get` `__cwd`）、**mono の `Reply` の既定 handler へのフォールバック**（決定 1。新しい機構はここだけ）、**決定 4b（prelude の操作と同名の宣言を E205）と決定 4c（prelude の効果の handler をどのディレクトリにも置ける）**、lock。判定 37-c 37-d 37-e
 - 工程 2: `Io`。`stdlib/io.hd`、C の 4 操作と status（決定 2）、lock。判定 37-f 37-g
-- 工程 3: E2 とコーパスと門番。`tools/gates/main.hd` を argv + `read_dir` + `read_file` に、決定 8（`verify-m6.sh` の cwd と stdin）、受理コーパス（`// item: Env と Io`）、lock。判定 37-h 37-i 37-j 37-k
+- 工程 3: E2 とコーパスと門番。`tools/gates/main.hd` を argv + `read_dir` + `read_file` に、決定 8（`verify-m6.sh` の cwd と stdin）、**決定 8b（`verify-r32.sh` の 32-j(d) の追随）**、受理コーパス（`// item: Env と Io`）、lock。判定 37-h 37-i 37-j 37-k
 
 ### 判定
 
@@ -2983,13 +2986,13 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 判定 37-b: `main` の効果の免除。利用者の効果が `main` に残れば E706、prelude の効果（工程 0 の時点では `Error` だけ）なら通る。**`has_user_effect` が集合との照合になっていることを、prelude の効果名を 1 つ増やした対照で測る**（工程 1 以降で `Env` `Io` を足す）
 判定 37-c: `Env` の 3 操作。argv の分類（空 / 1 個 / 複数 / 空文字列の引数 / 非 UTF-8）、`env` の分類（設定 / 未設定 / 値が空文字列 / 値が非 UTF-8 / 名前が非 UTF-8）、`cwd`。期待値は python3 から導く
 判定 37-d: 既定と差し替え。(1) handler 無しで `args` が既定実装で応える。(2) 利用者の `handler Env as MyEnv` を `with` で被せると利用者の腕が応える。(3) **`with H -> args`（`H` は `handler Error`）で argv が非 UTF-8 のとき `H` の腕が `message` を受け取る**（C が `hado_abort_error` を呼んでいないことの固定）。(4) `handler Env` で 3 操作のうち 1 つを落とすと E605
-判定 37-e: 予約名。利用者の `effect Env` の宣言が E205。`handler Env as X` はどのディレクトリにも置ける（§58）。**サブディレクトリからも `args` が無修飾で見える**（R34 の `prelude_operations` が `Env` にも効くことの固定）
+判定 37-e: 予約名と可視性。(1) 利用者の `effect Env` の宣言が E205。(2) **prelude の操作と同名の利用者の宣言が E205**（決定 4b。外の `def args`、実装の `def args`、他の効果の操作 `reply args`。**単一ファイルと複数ファイルの両方で測る**。今は複数ファイルで黙って影になる）。(3) **`handler Env as X` をサブディレクトリに置いても通る**（決定 4c。今は E204）。同じ形の `handler Error as X` も通ることを対照に置く。(4) サブディレクトリからも `args` が無修飾で見える（R34 の `prelude_operations` が `Env` にも効くことの固定）
 判定 37-f: `Io` の 4 操作。`read_file`（存在する / 空ファイル / バイナリ / 大きいファイル）、`write_file` → `read_file` の往復、`read_dir`（空 / 1 個 / 複数 / 名前が非 UTF-8 / `.` と `..` を除く / 整列）、`read_stdin`（閉じた stdin / 内容がある stdin / 2 回目）
 判定 37-g: `Io` の失敗の分類。**4 分類すべてに決定的な入力を置く。** `NotFound`（存在しないパス）、`NotADirectory`（通常ファイルを `read_dir`）、`IoFailure`（ディレクトリを `read_file`。EISDIR）、`PermissionDenied`（`chmod 000` のファイル）。**`PermissionDenied` は root では起きないので、`id -u` が 0 なら `NG: skipped-as-root` として失敗にする**（skip で緑にしない）。`write_file` の失敗（存在しないディレクトリ → `NotFound`、読み取り専用ディレクトリ → `PermissionDenied`）
-判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "\n"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**行の選び方は R38 のシェル側 oracle と同じ規則にする**（`scripts/run-gates.sh` が `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。E2 も `String.starts_with line "PASSED: "` で選び、名前はファイル名から作る）。空 argv は `MissingDirectory`
+判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "\n"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**`scripts/verify-r32.sh` の 32-j(d) を決定 8b の形に直し、実物の `main.hd` が実行時に生成したディレクトリを引数に受けて動くことを測る。** **行の選び方は R38 のシェル側 oracle と同じ規則にする**（`scripts/run-gates.sh` が `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。E2 も `String.starts_with line "PASSED: "` で選び、名前はファイル名から作る）。空 argv は `MissingDirectory`
 判定 37-i: 受理コーパス（`// item: Env と Io` 1 本以上。`// needs: prelude` 付き）、lock 更新、`verify-m1-corpus.sh` の pairs から `Env と Io` が消える。**受理コーパスは E2 とは別の小さな fixture 読みのケースにする**（E2 を受理コーパスに入れると、空 argv の既定と実行ファイルの `main` の混入を捌く必要が出る）
 判定 37-j: 決定 8。`verify-m6.sh` が cwd と stdin を固定する。**固定を外す注入で受理ケースが落ちること**を報告に書く
-判定 37-k: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、**すべて満点**（R37 の完了で許容される赤が無くなる見込み）
+判定 37-k: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、**すべて満点**（R37 の完了で許容される赤が無くなる見込み）。**判定 37-g の `PermissionDenied` は root では成立しないので、`verify-r37.sh` は root で失敗する。** これは環境の要件であって門番の緩めではない（実測: このマシンの `id -u` は 1000）
 
 Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作（`hado_argv_count` と static の退避、status の分類、NUL を付ける写し）と、`check_source` での E205・E605・E706 をテストする。
 
