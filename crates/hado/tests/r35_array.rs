@@ -102,3 +102,30 @@ fn polymorphic_allocation_specializes_and_slots_execute() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn array_comparisons_reject_function_elements_recursively() {
+    for (declaration, value) in [
+        ("", "Array.of_list [fn(x => x + 1)]"),
+        ("", "Array.of_list [Array.of_list [fn(x => x + 1)]]"),
+        ("type Cell = { value: Fn(Int => Int) }\n", "Array.of_list [{ value = fn(x => x + 1) }]"),
+    ] {
+        for (expression, code) in [("a == a", "E703"), ("a != a", "E703"), ("compare a a", "E704")] {
+            let source = format!("{declaration}def main = let a = {value} -> {expression}");
+            let error = check_source(&source, "t").err().unwrap_or_else(|| panic!("accepted {source}"));
+            assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
+        }
+    }
+}
+
+#[test]
+fn existing_list_record_and_opaque_function_equality_stays_rejected() {
+    for source in [
+        "def main = [fn(x => x + 1)] == [fn(x => x + 1)]",
+        "type Cell = { run: Fn(Int => Int) }\ndef main = { run = fn(x => x + 1) } == { run = fn(x => x + 1) }",
+        "def main = let a = Store.make 1 -> a == a\nmodule Store\ntype T\ndef make(x: Int): T Pure\nimplement Store as Store\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)",
+    ] {
+        let error = check_source(source, "t").err().unwrap_or_else(|| panic!("accepted {source}"));
+        assert_eq!(error.code.as_deref(), Some("E703"), "{source}: {error}");
+    }
+}

@@ -59,6 +59,7 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
     for length in lengths:
         prefix = 'type Cell = { value: Int }\n' if ty == 'Cell' else ''
         prefix += f'def make (xs: {ty} List) => Array.of_list xs\n'
+        base_prefix = prefix
         values = [item(ty, i) for i in range(length)]
         if length == 30000:
             prefix += generator(ty)
@@ -74,6 +75,46 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
         else:
             xs = show(ty, values)
         start = prefix + f'def main = let a = make {xs} -> '
+        printed = 'Array.of_list [' + ', '.join(
+            'Array.of_list ' + show('Int', v) if ty == 'Int Array' else literal(ty, v)
+            for v in values) + ']'
+        add(f'35-d {ty} length={length}', prefix + f'def main = make {xs}', printed)
+        if length == 1:
+            for shape, expression, expected in [
+                ('List', '[a, make []]', '[' + printed + ', Array.of_list []]'),
+                ('record', '{ a = a }', '{ a = ' + printed + ' }'),
+                ('Array', 'Array.of_list [a, make []]', 'Array.of_list [' + printed + ', Array.of_list []]')]:
+                declaration = f'type Box = {{ a: {ty} Array }}\n' if shape == 'record' else ''
+                add(f'35-d {ty} nested {shape}', declaration + start + expression, expected)
+        comparisons = [('separate equal instances', f'make {xs}', values.copy()),
+                       ('prefix', 'make (List.append (Array.to_list a) [' + literal(ty, item(ty, 23)) + '])', values + [item(ty, 23)]),
+                       ('empty', 'make []', [])]
+        if length:
+            for position, index in [('first', 0), ('middle', length // 2), ('last', length - 1)]:
+                replacement = not values[index] if ty == 'Bool' else item(ty, length + 91)
+                changed = values.copy()
+                changed[index] = replacement
+                comparisons.append((position, f'Array.set a {index} ({literal(ty, replacement)})', changed))
+            # A longer sequence with a lower first element must still sort first.
+            lower, higher = sorted([values[0], not values[0] if ty == 'Bool' else item(ty, length + 91)])
+            comparisons.append(('length versus first element',
+                'make [' + literal(ty, lower) + ', ' + literal(ty, lower) + ']', [lower, lower]))
+            left_values = [higher]
+        for relation, other, other_values in comparisons:
+            lhs = 'a'
+            lhs_values = left_values if relation == 'length versus first element' else values
+            result_type = 'type Orders = { equal: Bool; different: Bool; forward: Int; backward: Int; reverse_equal: Bool; reverse_different: Bool }\n'
+            expression = f'let b = {other} -> '
+            result = ('{ equal = ' + lhs + ' == b; different = ' + lhs + ' != b; forward = compare (' + lhs + ') b; '
+                      'backward = compare b (' + lhs + '); reverse_equal = b == ' + lhs + '; reverse_different = b != ' + lhs + ' }')
+            equal = lhs_values == other_values
+            order = (lhs_values > other_values) - (lhs_values < other_values)
+            expected = '{ equal = %s; different = %s; forward = %s; backward = %s; reverse_equal = %s; reverse_different = %s }' % (
+                str(equal).lower(), str(not equal).lower(), order, -order, str(equal).lower(), str(not equal).lower())
+            comparison_start = start
+            if relation == 'length versus first element':
+                comparison_start = base_prefix + 'def main = let a = make [' + literal(ty, higher) + '] -> '
+            add(f'35-e {ty} length={length} {relation}', result_type + comparison_start + expression + result, expected)
         label = f'35-a {ty} length={length}'
         add(label + ' length', start + 'Array.length a', str(len(values)))
         if ty != 'Int Array' and length != 30000:
@@ -127,6 +168,28 @@ shared = ('def main = read ({ value = Store.make (Array.of_list [3, 5, 7]) })\n'
           'implement Store as Store\nshared type T = Int Array\ndef make value => value')
 add('35-f2 shared Array before record registration', shared, '3')
 add('35-f2 opaque negative control', shared.replace('shared type', 'type'), 'error[E305]:', 'code:E305')
+for shape, declaration, bad, good in [
+    ('direct', '', 'Array.of_list [fn(x => x + 1)]', 'Array.of_list [1]'),
+    ('nested', '', 'Array.of_list [Array.of_list [fn(x => x + 1)]]', 'Array.of_list [Array.of_list [1]]'),
+    ('record', 'type Cell = { value: Fn(Int => Int) }\n', 'Array.of_list [{ value = fn(x => x + 1) }]', 'Array.of_list [{ value = 1 }]')]:
+    for op, code in [('==', 'E703'), ('!=', 'E703'), ('compare', 'E704')]:
+        blank, indent = (pad + len(manifest)) % 9 + 1, (pad + len(manifest)) % 13 + 1
+        prefix = '\n' * blank + declaration + ' ' * indent + 'def main = let a = ' + bad + ' -> '
+        expression = 'compare a a' if op == 'compare' else f'a {op} a'
+        token_prefix = '' if op == 'compare' else 'a '
+        line = prefix.count('\n') + 1
+        column = len(prefix.rsplit('\n', 1)[-1] + token_prefix) + 1
+        add(f'35-e2 {shape} {op} function rejected', prefix + expression, f':{line}:{column}: error[{code}]:', 'code:' + code)
+        source = declaration.replace('Fn(Int => Int)', 'Int') + 'def main = let a = ' + good + ' -> ' + expression
+        expected = '0' if op == 'compare' else str(op == '==').lower()
+        add(f'35-e2 {shape} {op} non-function control', source, expected)
+# IEEE equality must not be replaced by compare == 0 for Array elements.
+add('35-e Float NaN and signed zero',
+    'def main = let a = Array.of_list [0.0 / 0.0] -> let b = Array.of_list [0.0 / 0.0] -> '
+    '[(if a == b => 1 | 0), (if a != b => 1 | 0), compare a b, '
+    'compare a (Array.of_list [1.0]), compare (Array.of_list [1.0]) a, '
+    '(if Array.of_list [-0.0] == Array.of_list [0.0] => 1 | 0), compare (Array.of_list [-0.0]) (Array.of_list [0.0])]',
+    show('Int', [0, 1, 0, 1, -1, 1, 0]))
 assert manifest
 (base / 'manifest.tsv').write_text(''.join('\t'.join(row) + '\n' for row in manifest))
 print(f'seed={seed} types=7 lengths={lengths} probes={len(manifest)}')
@@ -148,7 +211,7 @@ for row in rows:
     kind, label, mode = row.split('\t')
     assert kind.isdecimal() and kind not in seen
     seen.add(kind)
-    assert mode in ('print', 'error', 'timeout', 'code:E205', 'code:E305')
+    assert mode in ('print', 'error', 'timeout', 'code:E205', 'code:E305', 'code:E703', 'code:E704')
     assert (base / kind / 'main.hd').is_file()
     assert (base / kind / 'expect').is_file()
 PY
@@ -225,6 +288,7 @@ assert expected in actual, actual
 PY
 }
 while IFS=$'\t' read -r kind label mode; do
+    [[ "$label" == *"${FILTER:-}"* ]] || continue
     dir="$workdir/$kind"
     case "$mode" in
         print) check "$label" check_prints "$dir" ;;
