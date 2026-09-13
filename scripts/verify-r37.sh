@@ -58,24 +58,24 @@ add('37-b2(4) unshadowed', 'def main = Int.to_string (raise { message = "x" })\n
 
 def quote(value):
     return json.dumps(value, ensure_ascii=False)
-def runtime(label, source, expected, arguments=(), environment=None, error=False):
+def runtime(label, source, expected, arguments=(), environment=None, error=False, oracle=None):
     directory = add(label, source, expected, 'error' if error else 'print')
-    (directory / 'run.json').write_text(json.dumps([arguments, environment or {}]))
+    (directory / 'run.json').write_text(json.dumps([arguments, environment or {}, oracle]))
     return directory
 bad = os.environ['R37_BAD']
 for shape, arguments in [('empty', []), ('one', ['one']), ('many', ['a', '日本語', str(rng.randrange(10000))]), ('empty-string', ['', 'tail']), ('invalid', [bad])]:
     runtime('37-c(1) '+shape, 'def main = args\n',
             'InvalidUtf8' if shape == 'invalid' else '[' + ', '.join(map(quote, arguments)) + ']',
-            arguments, error=shape == 'invalid')
+            arguments, error=shape == 'invalid', oracle=['args'])
 key = 'HADO_R37_' + str(rng.randrange(1000000))
 for shape, value in [('set', 'value日本語'), ('unset', None), ('empty', ''), ('invalid', bad)]:
     runtime('37-c(2) '+shape, f'def main = env {quote(key)}\n',
             'InvalidUtf8' if shape == 'invalid' else 'None' if value is None else 'Some(' + quote(value) + ')',
-            environment={key: value}, error=shape == 'invalid')
-runtime('37-c(2) invalid-name', 'def first | [head, ..._] => head | [] => ""\ndef main = env (first args)\n', 'InvalidUtf8', [bad], {bad: 'exists'}, True)
+            environment={key: value}, error=shape == 'invalid', oracle=['env', key])
+runtime('37-c(2) invalid-name', 'def first | [head, ..._] => head | [] => ""\ndef main = env (first args)\n', 'InvalidUtf8', [bad], {bad: 'exists'}, True, ['env', bad])
 directory = add('37-c(3) cwd', 'def main = cwd\n', '', 'print')
-(directory / 'expect').write_text(str(directory.resolve()) + '\n')
-add('37-b prelude', 'def main = args\n', 'String List {Env, Error}')
+(directory / 'run.json').write_text(json.dumps([[], {}, ['cwd']]))
+add('37-b prelude', 'def main = args\n', 'String List {Env, Error}', 'entry-type')
 handler = 'handler Env as MyEnv\nreply args => ["override"]\nreply env _ => Some("overridden")\nreply cwd => "virtual"\n'
 for operation, expected in [('args', '["override"]'), ('env "unused"', 'Some("overridden")'), ('cwd', 'virtual')]:
     runtime('37-d(2) override', handler + f'def main = with MyEnv -> {operation}\n', expected, ['native'])
@@ -126,6 +126,28 @@ directory = add('37-e(4) visible', 'def main = sub::M.value\n', '[]', 'print')
 for contract in ('List', 'Option', 'String'):
     reject('37-e(5) contract', f'handler {contract} as H\nreply invented => 0\n', 'E605', 'handler', True)
 
+(base / 'oracle.py').write_text('''import json, os, sys
+try:
+    kind = sys.argv[1]
+    if kind == 'args':
+        values = sys.argv[2:]
+        for value in values: value.encode('utf-8')
+        print(json.dumps(values, ensure_ascii=False))
+    elif kind == 'env':
+        name = sys.argv[2]
+        name.encode('utf-8')
+        value = os.environ.get(name)
+        if value is not None: value.encode('utf-8')
+        print('None' if value is None else 'Some(' + json.dumps(value, ensure_ascii=False) + ')')
+    elif kind == 'cwd':
+        value = os.getcwd()
+        value.encode('utf-8')
+        print(value)
+    else:
+        raise AssertionError(kind)
+except UnicodeError:
+    print('InvalidUtf8')
+''')
 assert manifest
 (base / 'manifest.tsv').write_text(''.join('\t'.join(row) + '\n' for row in manifest))
 print(f'seed={seed} probes={len(manifest)} values={values}')
@@ -164,7 +186,7 @@ def validate(rows):
         ('37-c(2) ' + shape, 'error' if shape.startswith('invalid') else 'print')
         for shape in ('set', 'unset', 'empty', 'invalid', 'invalid-name')
     } | {
-        ('37-c(3) cwd', 'print'), ('37-b prelude', 'type'), ('37-b user', 'reject'),
+        ('37-c(3) cwd', 'print'), ('37-b prelude', 'entry-type'), ('37-b user', 'reject'),
         ('37-d(2) override', 'print'), ('37-d(3) error-handler', 'print'), ('37-d(4) missing-arm', 'reject'),
         ('37-e(1) effect', 'reject'), ('37-e module', 'reject'),
         *[('37-e(2) ' + shape, 'reject') for shape in ('def', 'implementation', 'operation')],
@@ -235,7 +257,11 @@ actual = (base / 'err').read_text()
 assert re.match(re.escape(f'{path}:{line}:{col}: error[{code}]') + r': [^\n]+\n\Z', actual), actual
 PY
         return $?
-    elif [ "$mode" = type ]; then
+    elif [ "$mode" = type ] || [ "$mode" = entry-type ]; then
+        if [ "$mode" = entry-type ]; then
+            cargo run --offline -q -- check "$dir/main.hd" >"$dir/check.out" 2>"$dir/check.err" || { cat "$dir/check.err"; return 1; }
+            [ "$(wc -c <"$dir/check.out")" -eq 0 ] && [ "$(wc -c <"$dir/check.err")" -eq 0 ] || return 1
+        fi
         cargo run --offline -q -- check --print-type "$dir/main.hd" >"$dir/out" 2>"$dir/err" || status=$?
     else
         cargo run --offline -q -- build "$dir/main.hd" >"$dir/build.out" 2>"$dir/build.err" || { cat "$dir/build.err"; return 1; }
@@ -244,11 +270,16 @@ PY
 from pathlib import Path
 import json, os, subprocess, sys
 base = Path(sys.argv[1])
-arguments, overrides = json.loads((base / 'run.json').read_text()) if (base / 'run.json').exists() else ([], {})
+arguments, overrides, oracle = json.loads((base / 'run.json').read_text()) if (base / 'run.json').exists() else ([], {}, None)
 environment = dict(os.environ)
 for key, value in overrides.items():
     if value is None: environment.pop(key, None)
     else: environment[key] = value
+if oracle:
+    oracle_args = oracle + (arguments if oracle[0] == 'args' else [])
+    expected = subprocess.run([sys.executable, str(base.parent / 'oracle.py'), *oracle_args], cwd=base, env=environment, capture_output=True, timeout=30)
+    assert expected.returncode == 0 and not expected.stderr and expected.stdout, expected
+    (base / 'expect').write_bytes(expected.stdout)
 with (base / 'out').open('wb') as out, (base / 'err').open('wb') as err:
     result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=30)
 (base / 'status').write_text(str(result.returncode))
