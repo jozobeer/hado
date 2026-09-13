@@ -142,6 +142,11 @@ mod launch_tests {
         println!("{}", String::from_utf8_lossy(&output.stdout));
         assert!(output.status.success(), "child: {:?}\n{}", output.status,
             String::from_utf8_lossy(&output.stderr));
+        // libtest はフィルタが 0 件でも終了 0 を返す。子が launch を実際に通ったことを
+        // 印字で確かめないと、テスト名がずれた瞬間に固定が測られなくなる。
+        let printed = String::from_utf8_lossy(&output.stdout);
+        assert!(printed.contains("launch: status=Some(0)"), "child did not run launch:\n{printed}");
+        assert!(printed.contains("1 passed"), "child ran no test:\n{printed}");
     }
 }
 
