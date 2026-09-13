@@ -134,6 +134,7 @@ pub(crate) fn resolve(
         // its names are checked everywhere. The root's own names are compared
         // only from a subdirectory: at the root the declaration is the root.
         if index >= prelude_items {
+            resolver.check_prelude_operation_declarations(item, directory);
             for (space, name, span) in declarations(item) {
                 if (directory != root && resolver.has(&resolver.root, space, name))
                     || resolver.has_prelude(space, name) {
@@ -152,6 +153,28 @@ pub(crate) fn resolve(
 }
 
 impl Resolver<'_> {
+    fn check_prelude_operation_declarations(&mut self, item: &Item, directory: &[String]) {
+        match item {
+            Item::Def(def) => {
+                let bare = file_value(&def.name).unwrap_or(&def.name);
+                if self.prelude_operations.contains(bare) {
+                    self.error(def.name_span, "E205", "declaration conflicts with prelude operation");
+                }
+            }
+            Item::ModuleImpl(module) => {
+                for item in &module.items { self.check_prelude_operation_declarations(item, directory); }
+            }
+            Item::Effect(effect) if !directory.is_empty() => {
+                for op in &effect.ops {
+                    if self.prelude_operations.contains(&op.name) {
+                        self.error(op.name_span, "E205", "declaration conflicts with prelude operation");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn has(&self, directory: &[String], space: Space, name: &str) -> bool {
         self.symbols.get(&(directory.to_vec(), space)).is_some_and(|names| names.contains(name))
     }
