@@ -65,7 +65,10 @@ fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), S
     let result = (|| {
         compile(&obj)?;
         hado::link_executable(&obj, &exe)?;
-        let out = std::process::Command::new(&exe).output().map_err(|e| e.to_string())?;
+        let out = std::process::Command::new(&exe)
+            .current_dir(&work)
+            .stdin(std::process::Stdio::null())
+            .output().map_err(|e| e.to_string())?;
         if out.status.code() != Some(status) || out.stderr != stderr || out.stdout != stdout {
             return Err(format!("status={:?} stdout={:?} stderr={:?}", out.status, out.stdout, out.stderr));
         }

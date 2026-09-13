@@ -4,6 +4,6 @@
 // needs: prelude
 type Observation = { argv: String List; stdin: Int; same: Bool }
 def main =
-  let source = read_file "main.hd" ->
+  let source = Bytes.of_string "roundtrip" ->
   do write_file "fixture" source ->
   { argv = args; stdin = Bytes.length read_stdin; same = read_file "fixture" == source }
