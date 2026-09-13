@@ -18,6 +18,7 @@ def empty: T Pure
 def add(tally: T, name: String, passed: Int, total: Int): T Pure
 def render(tally: T): String Pure
 def fields(line: String): String List {Error}
+def parse_line(line: String): T {Error}
 
 implement Report as Report
 shared type T = Tally
@@ -37,4 +38,8 @@ def render tally =>
 def fields line =>
   if String.split line " PASSED: "
   | [name, counts] => count_fields name counts
+  | raise { message = "InvalidLine" }
+def parse_line line =>
+  if fields line
+  | [name, passed, total] => add empty name (Int.parse passed) (Int.parse total)
   | raise { message = "InvalidLine" }
