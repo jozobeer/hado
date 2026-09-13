@@ -189,14 +189,18 @@ for operation, path, message in failures:
     ]:
         group = '37-g(5)' if kind=='caught' else '37-g(4)' if kind=='success' else '37-g('+str({'read_file':1,'read_dir':2,'write_file':3}[operation])+')'
         directory = runtime(group+' '+operation+' '+path+' '+kind, source, expected, error=error)
-        if kind=='success' and operation=='write_file': (directory/'expect').write_bytes(b'')
+        if kind=='success' and operation=='write_file':
+            (directory/'expect').write_bytes(b'')
+            (directory/'unit-output').touch()  # Unit prints nothing at the top level (§51)
         (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
 io_arms = ['reply read_file _ => Bytes.of_string "virtual"', 'reply write_file _ _ => ()', 'reply read_dir _ => ["virtual"]', 'reply read_stdin => Bytes.of_string "virtual"']
 for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
     directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
-    if expected=='': (directory/'expect').write_bytes(b'')
+    if expected=='':
+        (directory/'expect').write_bytes(b'')
+        (directory/'unit-output').touch()  # Unit prints nothing at the top level (§51)
 for missing in range(len(io_arms)):
     reject('37-d Io missing-arm', 'handler Io as H\n'+'\n'.join(arm for i,arm in enumerate(io_arms) if i!=missing)+'\ndef main = 0\n', 'E605', 'handler Io')
 for sub in (False, True):
@@ -254,19 +258,28 @@ fi
 validate_manifest() {
     python3 - "$workdir" <<'PY'
 from pathlib import Path
-import sys
+import json, sys
 base = Path(sys.argv[1])
 def validate(rows):
     assert rows, 'empty manifest'
-    seen, coverage = set(), set()
+    seen, coverage, units = set(), set(), set()
     for row in rows:
         ident, label, mode = row.split('\t')
         assert ident.isdecimal() and ident not in seen
         seen.add(ident)
         coverage.add((' '.join(token.split('=')[0] for token in label.split()), mode))
         assert (base / ident / 'main.hd').stat().st_size > 0
-        assert (base / ident / 'expect').is_file()
+        run = base / ident / 'run.json'
+        oracle = json.loads(run.read_text())[2] if run.exists() else None
+        unit = (base / ident / 'unit-output').exists()
+        # An empty expect is allowed only when the oracle fills it at run time
+        # (the runner asserts the oracle produced non-empty stdout), or when the
+        # probe deliberately returns Unit, which prints nothing at the top level.
+        assert (base / ident / 'expect').stat().st_size > 0 or oracle or unit, ident
+        if unit: units.add(label)
     assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}
+    assert units == {'37-g(4) write_file missing/child success', '37-g(4) write_file readonly/child success',
+                     '37-g(4) write_file directory success', '37-d Io override'}, sorted(units)
     assert {item for item in coverage if not (item[0].startswith(('37-f', '37-g', '37-b Io', '37-d Io', '37-e Io')))} == {
         ('37-a(1) arity', 'type'), ('37-a(2) arity', 'type'), ('37-a(4) arity', 'type'),
         ('37-a(3) arity labels', 'type'), ('37-a(3) inferred arity labels', 'type'),

@@ -179,9 +179,9 @@ impl RuntimeFunction {
             Self::IoWriteFile => &Declaration { symbol: "hado_io_write_file", parameters: &[AbiType::Pointer, AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
             Self::IoReadDir => &Declaration { symbol: "hado_io_read_dir", parameters: &[AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
             Self::IoReadStdin => &Declaration { symbol: "hado_io_read_stdin", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: true },
-            Self::IoTakeBytes => &Declaration { symbol: "hado_io_take_bytes", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: false },
+            Self::IoTakeBytes => &Declaration { symbol: "hado_io_take_bytes", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::IoDirCount => &Declaration { symbol: "hado_io_dir_count", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: false },
-            Self::IoDirGet => &Declaration { symbol: "hado_io_dir_get", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: false },
+            Self::IoDirGet => &Declaration { symbol: "hado_io_dir_get", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::ArrayGet | Self::ArrayFillUnchecked => unreachable!("array slot operations are emitted inline"),
             Self::ArrayLength => &Declaration {
                 symbol: "hado_array_length",
