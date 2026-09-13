@@ -17,6 +17,11 @@ HadoArray *hado_array_alloc(int64_t count);
 int64_t hado_array_length(const HadoArray *array);
 
 void *hado_alloc(size_t size);
+int64_t hado_argv_count(int64_t ignored);
+HadoString *hado_argv_get(int64_t index);
+int8_t hado_env_has(const HadoString *name);
+HadoString *hado_env_get(const HadoString *name);
+HadoString *hado_cwd(int64_t ignored);
 int8_t hado_int_parse_is_valid(const HadoString *string);
 int64_t hado_int_parse_unchecked(const HadoString *string);
 int64_t hado_string_length(const HadoString *string);
