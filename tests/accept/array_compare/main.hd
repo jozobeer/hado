@@ -1,0 +1,5 @@
+// spec: §45
+// item: 配列
+// expect: [1, 1, -1, 0, 1]
+// needs: prelude
+def main = let left = Array.of_list [1, 2] -> let right = Array.of_list [1, 2] -> [if left == right => 1 | 0, if left != Array.of_list [1, 3] => 1 | 0, compare (Array.of_list [1]) right, compare left right, compare (Array.of_list [2]) right]
