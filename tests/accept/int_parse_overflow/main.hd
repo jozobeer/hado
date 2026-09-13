@@ -1,0 +1,5 @@
+// spec: §49
+// item: Int.parse
+// expect-error: InvalidInt
+// needs: prelude
+def main = Int.parse "9223372036854775808"

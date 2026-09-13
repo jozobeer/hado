@@ -1,0 +1,5 @@
+// spec: §49
+// item: Int.parse
+// expect: [42, -7, 0, 7, -7]
+// needs: prelude
+def main = List.map ["42", "-7", "0", "007", "-007"] Int.parse

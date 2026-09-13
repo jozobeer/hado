@@ -1,0 +1,5 @@
+// spec: §49
+// item: Int.parse
+// expect: [9223372036854775807, -9223372036854775808]
+// needs: prelude
+def main = List.map ["9223372036854775807", "-9223372036854775808"] Int.parse
