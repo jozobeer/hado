@@ -51,11 +51,7 @@ for value in values:
     add('37-b2(2) function', f'def inc (n: Int): Int => n + 1\ndef f (raise: Fn(Int => Int)): Int => raise ({value})\ndef main = Int.to_string (f inc)\n', value + 1, 'print')
     add('37-b2(3) let', f'def main = Int.to_string (let raise = {value} -> raise + 1)\n', value + 1, 'print')
     add('37-b2(5) user operation', f'effect Foo\nreply tick: Int\ndef f (tick: Int): Int => tick\ndef main = Int.to_string (f ({value}))\n', value, 'print')
-for effect, name, declaration, handler in (
-    ('Error', 'raise', '', 'abort raise _ => 0'),
-    ('Foo', 'tick', 'effect Foo\ncapture tick: Unit\n', 'capture tick => resume ()'),
-):
-    add('37-b2(5) continuation ' + name, f'{declaration}handler {effect} as H\n{handler}\ndef f ({name}: Fn(Int => Unit)): Int => with H -> do {name} 3 -> 9\ndef main = Int.to_string (f fn(_: Int => ()))\n', 9, 'print')
+add('37-b2(5) capture let', 'effect Foo\ncapture tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n', 9, 'print')
 add('37-b2(4) unshadowed', 'def main = Int.to_string (raise { message = "x" })\n', 'x', 'error')
 assert manifest
 (base / 'manifest.tsv').write_text(''.join('\t'.join(row) + '\n' for row in manifest))

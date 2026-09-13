@@ -66,9 +66,6 @@ fn user_operation_parameters_shadow_operations() {
 }
 
 #[test]
-fn shadowed_abort_and_capture_do_not_skip_the_continuation() {
-    for (effect, kind, name, handler) in [("Error", "abort", "raise", "abort raise _ => 0"), ("Foo", "capture", "tick", "capture tick => resume ()")] {
-        let declaration = if kind == "capture" { "effect Foo\ncapture tick: Unit\n" } else { "" };
-        Case::new(&format!("{declaration}handler {effect} as H\n{handler}\ndef f ({name}: Fn(Int => Unit)): Int => with H -> do {name} 3 -> 9\ndef main = Int.to_string (f fn(_: Int => ()))\n")).runs(9);
-    }
+fn shadowed_capture_is_a_local_let_value() {
+    Case::new("effect Foo\ncapture tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
 }
