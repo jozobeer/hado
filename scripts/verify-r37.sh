@@ -103,6 +103,8 @@ reject('37-b user', 'effect Foo\nreply pick: Int\ndef main = pick\n', 'E706', 'd
 reject('37-d(4) missing-arm', 'handler Env as H\nreply args => ["x"]\nreply env _ => None\ndef main = 0\n', 'E605', 'handler Env')
 reject('37-e(1) effect', 'effect Env\nreply custom: Int\ndef main = 0\n', 'E205', 'Env')
 reject('37-e module', 'module Env\ndef value: Int Pure\n', 'E205', 'Env')
+for name in ('EnvDefault', 'IoDefault'):
+    reject('37-e module '+name, f'module {name}\ndef value: Int Pure\n', 'E205', name)
 for sub in (False, True):
     for multiple in (False, True):
         for shape, source, anchor in [
@@ -334,6 +336,7 @@ def validate(rows):
         ('37-c(3) cwd', 'print'), ('37-b prelude', 'entry-type'), ('37-b user', 'reject'),
         ('37-d(2) override', 'print'), ('37-d(3) error-handler', 'print'), ('37-d(4) missing-arm', 'reject'),
         ('37-e(1) effect', 'reject'), ('37-e module', 'reject'),
+        *[('37-e module '+name, 'reject') for name in ('EnvDefault', 'IoDefault')],
         *[('37-e(2) ' + shape, 'reject') for shape in ('def', 'implementation', 'operation')],
         ('37-e(3) handler', 'print'), ('37-e(4) visible', 'print'), ('37-e(5) contract', 'reject'),
         *[('37-b2(6) ' + shape, 'print') for shape in ('parameter', 'function', 'let')],

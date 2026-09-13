@@ -79,24 +79,27 @@ fn prelude_reply_defaults_cover_every_operation() {
         .map(|(name, _)| name).collect();
     assert!(!replies.is_empty());
     assert_eq!(replies, checked.default_operations.keys().collect());
+    for operation in ["args", "env", "cwd"] {
+        assert_eq!(checked.default_operations[operation], format!("EnvDefault.{operation}"));
+    }
     for definition in checked.default_operations.values() {
-        assert!(checked.definitions.contains_key(definition), "{definition}");
+        assert!(checked.module_definitions.contains_key(definition), "{definition}");
     }
 }
 
 #[test]
 fn default_definitions_are_required_and_checked_after_inference() {
     let prefix = "effect Error\nabort raise(error: Exception)\neffect World\n";
-    for (operation, definition, expected) in [
-        ("reply pick: Int", "", Some("E204")),
-        ("reply pick: Int", "def default_pick = \"wrong\"", Some("E305")),
-        ("reply pick: Int", "def default_pick = raise { message = \"x\" }", Some("E305")),
-        ("reply pick: Int {Error}", "def default_pick = 11", None),
-        ("reply pick(n: Int): Int {Error}", "def default_pick n => n + 1", None),
-        ("reply pick(n: Int): Int", "def default_pick = 11", Some("E301")),
-        ("reply pick: Int", "def default_pick n => n + 1", Some("E301")),
+    for (operation, signature, definition, expected) in [
+        ("reply pick: Int", "", "", Some("E204")),
+        ("reply pick: Int", "def pick: String Pure", "def pick = \"wrong\"", Some("E305")),
+        ("reply pick: Int", "def pick: Int {Error}", "def pick = raise { message = \"x\" }", Some("E305")),
+        ("reply pick: Int {Error}", "def pick: Int Pure", "def pick = 11", None),
+        ("reply pick(n: Int): Int {Error}", "def pick(n: Int): Int Pure", "def pick n => n + 1", None),
+        ("reply pick(n: Int): Int", "def pick: Int Pure", "def pick = 11", Some("E301")),
+        ("reply pick: Int", "def pick(n: Int): Int Pure", "def pick n => n + 1", Some("E301")),
     ] {
-        let source = format!("{prefix}{operation}\n{definition}\ndef main = 0\n");
+        let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\nimplement WorldDefault as WorldDefault\n{definition}\n");
         let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");
         match expected {
             Some(code) => assert_eq!(result.err().expect(&source).code, Some(code.to_owned()), "{source}"),
@@ -152,7 +155,7 @@ fn io_is_a_prelude_effect_with_all_four_defaults() {
     Case::new("def main = [List.length args, Bytes.length read_stdin]\n").prints_type("Int List {Env, Error, Io}");
     let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
     for operation in ["read_file", "write_file", "read_dir", "read_stdin"] {
-        assert!(checked.default_operations.contains_key(operation), "{operation}");
+        assert_eq!(checked.default_operations[operation], format!("IoDefault.{operation}"));
     }
 }
 
