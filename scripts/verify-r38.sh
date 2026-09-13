@@ -256,5 +256,43 @@ while IFS=$'\t' read -r id label status mode; do
     check "$label" probe "$workdir/probes/$id" "$status" "$mode"
 done <"$workdir/probes/manifest.tsv"
 
+# 38-c coverage: each added rule belongs to the section named by its probes.
+check '38-c specification sentence coverage' python3 - "$workdir/probes/manifest.tsv" <<'PY'
+from pathlib import Path
+import re, sys
+rules = {
+    '38-c(1)': (45, r'^Array の `compare` は.*。$'),
+    '38-c(2)': (49, r'^`Int.parse` の受理文法は.*往復から導いた下限.*本節が決めた上限.*。$'),
+    '38-c(3)': (49, r'^`read_dir` は.*。$'),
+    '38-c(4)': (49, r'^`read_stdin` は.*。$'),
+    '38-c(5)': (49, r'^`env` の値が.*。$'),
+    '38-c(6)': (47, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は.*。$'),
+}
+def coverage(spec, manifest):
+    sections = dict(re.findall(r'^# (\d+)\.[^\n]*\n(.*?)(?=^# \d+\.|\Z)', spec, re.M | re.S))
+    probes = set(re.findall(r'\t(38-c\(\d+\)) §(\d+) ', manifest))
+    assert probes == {(key, str(section)) for key, (section, _) in rules.items()}, probes
+    for key, (section, pattern) in rules.items():
+        assert len(re.findall(pattern, sections[str(section)], re.M)) == 1, key
+spec = Path('docs/spec.md').read_text()
+manifest = Path(sys.argv[1]).read_text()
+coverage(spec, manifest)
+for key, (_, pattern) in rules.items():
+    try:
+        coverage(re.sub(pattern, '', spec, flags=re.M), manifest)
+    except AssertionError:
+        print(f'{key}: missing sentence detected')
+    else:
+        raise AssertionError(f'{key}: missing sentence accepted')
+for invalid in ['', manifest.replace('§45', '§49')]:
+    try:
+        coverage(spec, invalid)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('missing or mismatched coverage accepted')
+print('coverage: §45=1 §47=1 §49=4')
+PY
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
