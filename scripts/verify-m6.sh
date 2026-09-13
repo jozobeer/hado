@@ -23,7 +23,8 @@ def verify(name, copied, stdout, stderr=b"", status=0):
         if built.returncode:
             print(f"NG: {name}: {built.stderr.decode().strip()}")
             return False
-        run = subprocess.run([str(copied.with_suffix(""))], capture_output=True, timeout=60)
+        run = subprocess.run([str(copied.with_suffix(""))], cwd=str(case), stdin=subprocess.DEVNULL,
+                             capture_output=True, timeout=60)
         if run.returncode == status and run.stdout == stdout and run.stderr == stderr:
             print(f"OK: {name}")
             return True

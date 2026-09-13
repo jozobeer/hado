@@ -479,5 +479,34 @@ PY
 while IFS=$'\t' read -r ident label mode; do
     check "$label" probe "$mode" "$workdir/$ident"
 done <"$workdir/manifest.tsv"
+m6_launch_conditions() {
+    python3 - "$workdir" <<'PY'
+from pathlib import Path
+import ast, os, subprocess, sys
+base = Path(sys.argv[1]) / 'm6-launch'
+base.mkdir()
+case = base / 'case'
+case.mkdir()
+source = 'def main = [Bytes.length (read_file "main.hd"), Bytes.length read_stdin, List.length args]\n'
+(case / 'main.hd').write_text(source)
+compiler = base / 'compiler'
+compiler.write_text('#!/usr/bin/env bash\nexec cargo run --offline -q -- "$@"\n')
+compiler.chmod(0o755)
+script = Path('scripts/verify-m6.sh').read_text().split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+tree = ast.parse(script)
+function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'verify')
+runner = base / 'runner.py'
+runner.write_text('from pathlib import Path\nimport subprocess, sys\n'
+                  + f'compiler = {str(compiler)!r}\ncase = Path({str(case)!r})\n'
+                  + ast.unparse(function) + '\n'
+                  + f'sys.exit(0 if verify("launch fixture", case / "main.hd", {str([len(source.encode()), 0, 0]).encode() + bytes([10])!r}) else 1)\n')
+result = subprocess.run([sys.executable, str(runner)], input=b'stdin must not reach the case\n', capture_output=True, timeout=90)
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+assert result.returncode == 0 and not result.stderr, 'm6 must fix both cwd and stdin'
+PY
+}
+check '37-j actual m6 launch function: relative file, EOF and empty argv' m6_launch_conditions
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
