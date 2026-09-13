@@ -298,5 +298,6 @@ while IFS=$'\t' read -r kind label mode; do
         *) exit 1 ;;
     esac
 done <"$workdir/manifest.tsv"
+check '35-d/35-e selected probes are nonempty' [ "$total" -gt 1 ]
 echo "PASSED: $passed/$total"
 [ "$total" -gt 0 ] && [ "$passed" -eq "$total" ]
