@@ -164,7 +164,7 @@ impl Resolver<'_> {
                     let trusted = self.trusted_start.is_some_and(|line| node.span.line >= line)
                         || std::path::Path::new(self.path).components().any(|part| part.as_os_str() == "stdlib");
                     let code = if !called { Some("E203") } else if !trusted { Some("E202") }
-                        else if crate::runtime_abi::RuntimeFunction::from_intrinsic(name).and_then(|function| function.value_signature()).is_none() { Some("E204") }
+                        else if !crate::runtime_abi::RuntimeFunction::from_intrinsic(name).is_some_and(|function| function.is_polymorphic() || function.value_signature().is_some()) { Some("E204") }
                         else { None };
                     if let Some(code) = code { self.report(node.span, code, name); }
                 } else if !scope.values.contains(name) && !scope.constructors.contains(name) {

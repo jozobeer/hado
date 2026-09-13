@@ -1391,6 +1391,18 @@ impl Checker<'_> {
                 }
                 let function = crate::runtime_abi::RuntimeFunction::from_intrinsic(name)
                     .ok_or_else(|| self.error(node.span, Some("E204"), "unknown intrinsic"))?;
+                if function.is_polymorphic() {
+                    use crate::runtime_abi::RuntimeFunction;
+                    let element = self.inference.fresh();
+                    let array = Ty::Adt(crate::mono::ARRAY.into(), vec![element.clone()]);
+                    return Ok(match function {
+                        RuntimeFunction::ArrayLength => Ty::fn_of(vec![array], Ty::Int),
+                        RuntimeFunction::ArrayGet => Ty::fn_of(vec![array, Ty::Int], element),
+                        RuntimeFunction::ArrayAlloc => Ty::fn_of(vec![Ty::Int], array),
+                        RuntimeFunction::ArrayFillUnchecked => Ty::fn_of(vec![array.clone(), Ty::Int, element], array),
+                        _ => unreachable!(),
+                    });
+                }
                 let signature = function.value_signature().ok_or_else(|| self.error(node.span, Some("E204"), "intrinsic has no value signature"))?;
                 return Ok(Ty::fn_of(signature.parameters.iter().map(Ty::from).collect(), Ty::from(&signature.result)));
             }

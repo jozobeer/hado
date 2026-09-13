@@ -191,6 +191,29 @@ pub enum Expression {
 }
 
 impl Expression {
+    pub fn call_array(function: crate::runtime_abi::RuntimeFunction, arguments: Vec<Expression>, allocation: Option<Type>) -> Result<Self, String> {
+        use crate::runtime_abi::RuntimeFunction;
+        let array = if function == RuntimeFunction::ArrayAlloc {
+            allocation.ok_or("array allocation needs its concrete result type")?
+        } else {
+            arguments.first().ok_or("array intrinsic needs an array")?.ty()
+        };
+        let Type::Data(name, elements) = &array else { return Err("expected array type".into()); };
+        if name != ARRAY || elements.len() != 1 { return Err("expected one array element type".into()); }
+        let element = elements[0].clone();
+        let (parameters, result) = match function {
+            RuntimeFunction::ArrayLength => (vec![array], Type::Int),
+            RuntimeFunction::ArrayGet => (vec![array, Type::Int], element),
+            RuntimeFunction::ArrayAlloc => (vec![Type::Int], array),
+            RuntimeFunction::ArrayFillUnchecked => (vec![array.clone(), Type::Int, element], array),
+            _ => return Err("expected polymorphic array intrinsic".into()),
+        };
+        if arguments.iter().map(Expression::ty).collect::<Vec<_>>() != parameters {
+            return Err("array intrinsic argument type mismatch".into());
+        }
+        Ok(Self::CallRuntime { function, arguments, result })
+    }
+
     pub fn call_runtime(function: crate::runtime_abi::RuntimeFunction, arguments: Vec<Expression>) -> Result<Self, String> {
         let signature = function.value_signature().ok_or("runtime function has no value-level signature")?;
         if arguments.iter().map(Expression::ty).collect::<Vec<_>>() != signature.parameters {
@@ -1386,6 +1409,15 @@ impl Lowerer {
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
             if let Some(function) = crate::runtime_abi::RuntimeFunction::from_intrinsic(name) {
+                if function.is_polymorphic() {
+                    let allocation = if function == crate::runtime_abi::RuntimeFunction::ArrayAlloc {
+                        let ty = self.composite_types.get(&(node.span.line, node.span.col))
+                            .ok_or("missing array allocation result type")?;
+                        Some(Type::try_from(&self.specialization.resolve(ty))
+                            .map_err(|_| "array allocation result type is not concrete")?)
+                    } else { None };
+                    return Expression::call_array(function, arguments, allocation);
+                }
                 return Expression::call_runtime(function, arguments);
             }
         }

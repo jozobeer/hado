@@ -262,6 +262,9 @@ fn build_mono_expr(
     use crate::mono::{Constant, Expression};
     use crate::parser::BinOp;
     Ok(match expression {
+        Expression::CallRuntime { function, arguments, result } if function.is_polymorphic() => {
+            build_array_intrinsic(builder, *function, arguments, result, variables, checked)?
+        }
         Expression::CallRuntime { function, arguments, .. } => {
             let pointer = builder.func.signature.params[0].value_type;
             let callee = import_function(builder, 1, function.id(), runtime_signature(*function, pointer));
@@ -625,6 +628,43 @@ pub fn runtime_signature(function: crate::runtime_abi::RuntimeFunction, pointer:
     signature.params.extend(declaration.parameters.iter().map(|ty| AbiParam::new(machine_type(*ty))));
     signature.returns.extend(declaration.result.map(|ty| AbiParam::new(machine_type(ty))));
     signature
+}
+
+fn build_array_intrinsic(
+    builder: &mut FunctionBuilder<'_>,
+    function: crate::runtime_abi::RuntimeFunction,
+    arguments: &[crate::mono::Expression],
+    result: &crate::mono::Type,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let mut values = Vec::new();
+    for argument in arguments {
+        values.push(build_mono_expr(builder, argument, variables, checked)?);
+    }
+    use crate::runtime_abi::RuntimeFunction;
+    match function {
+        RuntimeFunction::ArrayLength | RuntimeFunction::ArrayAlloc => {
+            let pointer = builder.func.signature.params[0].value_type;
+            let callee = import_function(builder, 1, function.id(), runtime_signature(function, pointer));
+            let call = builder.ins().call(callee, &values);
+            Ok(builder.inst_results(call)[0])
+        }
+        RuntimeFunction::ArrayGet | RuntimeFunction::ArrayFillUnchecked => {
+            let stride = builder.ins().iconst(clif_types::I64, 8);
+            let offset = builder.ins().imul(values[1], stride);
+            let address = builder.ins().iadd(values[0], offset);
+            if function == RuntimeFunction::ArrayFillUnchecked {
+                builder.ins().store(cranelift_codegen::ir::MemFlagsData::new(), values[2], address, 8);
+                Ok(values[0])
+            } else {
+                let pointer = builder.func.signature.params[0].value_type;
+                let signature = mono_signature(&crate::mono::Signature { parameters: vec![], result: result.clone() }, checked, pointer)?;
+                Ok(builder.ins().load(signature.returns[0].value_type, cranelift_codegen::ir::MemFlagsData::new(), address, 8))
+            }
+        }
+        _ => Err("expected array intrinsic".into()),
+    }
 }
 
 fn allocate(builder: &mut FunctionBuilder<'_>, size: u32) -> Result<cranelift_codegen::ir::Value, String> {

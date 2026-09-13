@@ -37,6 +37,10 @@ pub enum RuntimeFunction {
     BytesToStringUnchecked,
     BytesAlloc,
     BytesFillUnchecked,
+    ArrayLength,
+    ArrayGet,
+    ArrayAlloc,
+    ArrayFillUnchecked,
 }
 
 pub struct Declaration {
@@ -49,6 +53,10 @@ pub struct Declaration {
 impl RuntimeFunction {
     pub fn intrinsic_name(self) -> Option<&'static str> {
         match self {
+            Self::ArrayLength => Some("__array_length"),
+            Self::ArrayGet => Some("__array_get"),
+            Self::ArrayAlloc => Some("__array_alloc"),
+            Self::ArrayFillUnchecked => Some("__array_fill_unchecked"),
             Self::CharToString => Some("__char_to_string"),
             Self::FloatToString => Some("__float_to_string"),
             Self::IntToString => Some("__int_to_string"),
@@ -74,10 +82,14 @@ impl RuntimeFunction {
         Self::ALL.iter().copied().find(|function| function.intrinsic_name() == Some(name))
     }
 
+    pub fn is_polymorphic(self) -> bool {
+        matches!(self, Self::ArrayLength | Self::ArrayGet | Self::ArrayAlloc | Self::ArrayFillUnchecked)
+    }
+
     pub fn value_signature(self) -> Option<crate::mono::Signature> {
         use crate::mono::{Signature, Type};
         let (parameters, result) = match self {
-            Self::Alloc => return None,
+            Self::Alloc | Self::ArrayLength | Self::ArrayGet | Self::ArrayAlloc | Self::ArrayFillUnchecked => return None,
             Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
             Self::QuoteString => (vec![Type::String], Type::String),
             Self::FloatToString | Self::CanonicalFloat => (vec![Type::Float], Type::String),
@@ -104,7 +116,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -116,6 +128,19 @@ impl RuntimeFunction {
 
     pub fn declaration(self) -> &'static Declaration {
         match self {
+            Self::ArrayGet | Self::ArrayFillUnchecked => unreachable!("array slot operations are emitted inline"),
+            Self::ArrayLength => &Declaration {
+                symbol: "hado_array_length",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::ArrayAlloc => &Declaration {
+                symbol: "hado_array_alloc",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
             Self::CanonicalFloat => &Declaration { symbol: "hado_canonical_float", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::QuoteString => &Declaration { symbol: "hado_quote_string", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
             Self::QuoteChar => &Declaration { symbol: "hado_quote_char", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },

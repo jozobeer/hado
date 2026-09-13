@@ -8,6 +8,14 @@ typedef struct {
   unsigned char bytes[];
 } HadoString;
 
+typedef struct {
+  int64_t count;
+  uint64_t slots[];
+} HadoArray;
+
+HadoArray *hado_array_alloc(int64_t count);
+int64_t hado_array_length(const HadoArray *array);
+
 void *hado_alloc(size_t size);
 int64_t hado_string_length(const HadoString *string);
 HadoString *hado_string_concat(const HadoString *left, const HadoString *right);

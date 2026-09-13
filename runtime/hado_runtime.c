@@ -30,6 +30,20 @@ static void check_stdout(int wrote) {
 
 void *hado_alloc(size_t size) { return GC_malloc(size); }
 
+HadoArray *hado_array_alloc(int64_t count) {
+  if (count < 0 || (uint64_t)count > (SIZE_MAX - 8) / 8) {
+    abort();
+  }
+  HadoArray *array = hado_alloc(8 + 8 * (size_t)count);
+  if (!array) {
+    abort();
+  }
+  array->count = count;
+  return array;
+}
+
+int64_t hado_array_length(const HadoArray *array) { return array->count; }
+
 void hado_print_int(int64_t v) {
   check_stdout(printf("%lld\n", (long long)v) >= 0);
 }
