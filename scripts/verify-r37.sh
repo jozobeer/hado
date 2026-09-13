@@ -72,7 +72,7 @@ for shape, value in [('set', 'value日本語'), ('unset', None), ('empty', ''), 
     runtime('37-c(2) '+shape, f'def main = env {quote(key)}\n',
             'InvalidUtf8' if shape == 'invalid' else 'None' if value is None else 'Some(' + quote(value) + ')',
             environment={key: value}, error=shape == 'invalid')
-runtime('37-c(2) invalid-name', 'def first values => if values | [head, ..._] => head | [] => ""\ndef main = env (first args)\n', 'InvalidUtf8', [bad], {bad: 'exists'}, True)
+runtime('37-c(2) invalid-name', 'def first | [head, ..._] => head | [] => ""\ndef main = env (first args)\n', 'InvalidUtf8', [bad], {bad: 'exists'}, True)
 directory = add('37-c(3) cwd', 'def main = cwd\n', '', 'print')
 (directory / 'expect').write_text(str(directory.resolve()) + '\n')
 add('37-b prelude', 'def main = args\n', 'String List {Env, Error}')
@@ -87,7 +87,7 @@ for name in ('args', 'env', 'cwd'):
         add('37-b2(6) let', f'def main = let {name} = {value} -> {name} + 1\n', value+1, 'print')
 def reject(label, source, code, anchor, sub=False, multiple=False):
     blank, indent = rng.randrange(1, 8), rng.randrange(1, 8)
-    if sub and source.startswith('def '): source = 'library\n' + source
+    if sub and source.startswith('def '): source = 'library\n' + source.replace('def main = 0\n', '')
     source = '\n' * blank + '\n'.join(' ' * indent + line for line in source.splitlines()) + '\n'
     line = next(i for i, text in enumerate(source.splitlines(), 1) if anchor in text)
     col = source.splitlines()[line-1].index(anchor) + 1
