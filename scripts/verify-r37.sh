@@ -19,7 +19,7 @@ trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
 if ! R37_BAD=$'\xff' SEED=${SEED:-$(( (RANDOM << 15) | RANDOM ))} python3 - "$workdir" <<'PY'
 from pathlib import Path
-import json, os, random, sys
+import json, os, random, shutil, sys
 base = Path(sys.argv[1])
 seed = int(os.environ['SEED'])
 rng = random.Random(seed)
@@ -247,6 +247,43 @@ try:
 except UnicodeError:
     print('InvalidUtf8')
 ''')
+# Exercise the actual E2 entry against independently generated log files.
+e2_shapes = ('empty', 'one-green', 'one-red', 'many-green', 'many-red', 'last-line', 'zero')
+def e2_case(shape, expected='', arguments=('logs',), error=False):
+    directory = runtime('37-h '+shape, Path('tools/gates/main.hd').read_text(), expected, arguments, error=error)
+    shutil.copytree('tools/gates/report', directory / 'report')
+    return directory
+for shape in e2_shapes:
+    directory = e2_case(shape)
+    logs = directory / 'logs'
+    logs.mkdir()
+    count = 0 if shape == 'empty' else rng.randrange(3, 8) if shape.startswith('many') else 1
+    for index in reversed(range(count)):
+        name = f'{index:02d}-門番 {rng.randrange(100000)}.log'
+        total = 0 if shape == 'zero' else rng.randrange(1, 100)
+        passed = rng.randrange(total) if 'red' in shape and index % 2 == 0 else total
+        earlier = f'PASSED: {total + 1}/{total + 3}\n' if shape == 'last-line' else ''
+        (logs / name).write_text(f'noise\n PASSED: 99/99\n{earlier}PASSED: {passed}/{total}\nfinished\n')
+    # Match the shell oracle's last anchored PASSED line, then sum in Python.
+    counts = []
+    import subprocess
+    for log in sorted(logs.iterdir(), key=lambda path: os.fsencode(path.name)):
+        lines = subprocess.run(['grep', '-E', '^PASSED:', str(log)], capture_output=True, check=True).stdout.splitlines()
+        passed, total = map(int, lines[-1].removeprefix(b'PASSED: ').split(b'/'))
+        counts.append((log.name, passed, total))
+    red = ' '.join(name for name, passed, total in counts if passed < total) or 'none'
+    expected = f'{sum(p for _, p, _ in counts)}/{sum(t for _, _, t in counts)} passed; red: {red}\n'
+    (directory / 'expect').write_text(expected)
+e2_case('missing-argv', 'MissingDirectory', (), True)
+e2_case('not-found', 'NotFound', ('missing',), True)
+directory = e2_case('not-directory', 'NotADirectory', ('file',), True)
+(directory / 'file').touch()
+for shape, data, expected in [('no-passed', b'noise\n PASSED: 9/9\n', 'InvalidLine'),
+                              ('empty-log', b'', 'InvalidLine'),
+                              ('invalid-utf8', b'PASSED: 1/1\n\xff', 'InvalidUtf8')]:
+    directory = e2_case(shape, expected, error=True)
+    (directory / 'logs').mkdir()
+    (directory / 'logs' / 'entry.log').write_bytes(data)
 assert manifest
 (base / 'manifest.tsv').write_text(''.join('\t'.join(row) + '\n' for row in manifest))
 print(f'seed={seed} probes={len(manifest)} values={values}')
@@ -280,7 +317,7 @@ def validate(rows):
     assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}
     assert units == {'37-g(4) write_file missing/child success', '37-g(4) write_file readonly/child success',
                      '37-g(4) write_file directory success', '37-d Io override'}, sorted(units)
-    assert {item for item in coverage if not (item[0].startswith(('37-f', '37-g', '37-b Io', '37-d Io', '37-e Io')))} == {
+    assert {item for item in coverage if not (item[0].startswith(('37-f', '37-g', '37-b Io', '37-d Io', '37-e Io', '37-h')))} == {
         ('37-a(1) arity', 'type'), ('37-a(2) arity', 'type'), ('37-a(4) arity', 'type'),
         ('37-a(3) arity labels', 'type'), ('37-a(3) inferred arity labels', 'type'),
         ('37-a(5) abort', 'print'), ('37-a(5) capture', 'print'),
@@ -316,6 +353,11 @@ def validate(rows):
             for kind, group, mode in [('failure','37-g('+str({'read_file':1,'read_dir':2,'write_file':3}[operation])+')','error'), ('success','37-g(4)','print'), ('caught','37-g(5)','print')]:
                 expected_io.add((group+' '+operation+' '+path+' '+kind,mode))
     assert io_coverage == expected_io, (io_coverage ^ expected_io)
+    e2_coverage = {item for item in coverage if item[0].startswith('37-h')}
+    assert e2_coverage == {
+        *[('37-h '+shape, 'print') for shape in ('empty','one-green','one-red','many-green','many-red','last-line','zero')],
+        *[('37-h '+shape, 'error') for shape in ('missing-argv','not-found','not-directory','no-passed','empty-log','invalid-utf8')],
+    }, e2_coverage
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
 def without(shape):
@@ -323,7 +365,7 @@ def without(shape):
             if ' '.join(t.split('=')[0] for t in row.split('\t')[1].split()) != shape]
 missing = [without(shape) for shape in
            ('37-a(5) abort', '37-a(5) capture', '37-b2(5) capture let', '37-b2(2) function',
-            '37-a(3) inferred arity labels')]
+            '37-a(3) inferred arity labels', '37-h last-line', '37-h empty', '37-h missing-argv')]
 for bad in ([], rows[1:], [row for row in rows if not row.endswith('\terror')], rows + rows[:1], *missing):
     try:
         validate(bad)
