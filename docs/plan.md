@@ -2886,3 +2886,138 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 **`raise` を prelude の包みから起こす経路が intrinsic の呼び出しの後ろで型を合わせられないと分かったら、止めて報告せよ。**
 
 それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
+
+## 30. R37 世界との境界（Env と Io）の手順書（2026-09-13）
+
+24.1 の D 表（D1〜D6）を実装する。prelude が効果 `Env` と `Io` を持ち、操作は `reply` で、handler が無ければ runtime の既定実装が応える。E2（`tools/gates/`）が argv とファイルを読んで完成する。仕上げと tag は R38。
+
+**読む順:** 本節 → 24.1 の D 表と 24.4 → `docs/spec.md` の §5（167〜173 行。`main` の形と E706 の免除）・§47（1861〜1873 行。名前空間と `__` の解決）・§49（1959〜1994 行。`Env` と `Io` の宣言と失敗の `message` の表）・§51（2078〜2110 行）・§57（2261〜2284 行。操作の可視性、handler 無しの既定実装、E513）・§58（2296〜2298 行。handler の置き場と E605）→ 27 節（R34。`Bytes` と `is_utf8` の形）と 29 節（R36。C の走査と hado 側の `raise` の形）→ `docs/corpus.md` の 40〜60 行と 93〜95 行。
+
+**着手時点で赤の門番:** R36 の終了時（`verify-m1-corpus.sh` 6/7 の 1 pair = Env と Io、その連鎖の `verify-m2.sh` 7/8 と `verify-m3.sh` 11/12）。R37 の入口で単独で測り直す。**R37 が完了すると全門番が満点になる見込みで、R38 の入口がそこである。**
+
+### 手順書を書く前の実測（2026-09-13、指揮者）
+
+| 測ったこと | 結果 |
+|---|---|
+| 引数を取る `reply`（`reply greet(name: String): String`）が check・build・実行を通るか | **通る。** `hi x` を印字して終了 0。コーパスに例が無いだけだった |
+| 操作の宣言の効果行（`reply pick: Int {Error}`）が呼び出し位置に届くか | **届かない。** 腕が `raise` しない形で `main` の型を測ると、`{Error}` 付きの宣言でも効果行なしの宣言でも同じ `String` になる。**parser は保持するが infer が捨てている** |
+| `effect Io` を書いている既存の場所 | `tests/accept/effect_row/main.hd:6`（コーパス。lock の対象）と `crates/hado/tests/r24_effects.rs` の 8 箇所。`crates/hado/tests/r23_syntax.rs:135` `:137` の `{Io}` は `roundtrip`（parse と canonical 印字の往復だけ。check も prelude も通さない）なので**触らなくてよい** |
+| 受理コーパスを実行する門番 | **`scripts/verify-m6.sh:26` の 1 箇所だけ**（`subprocess.run([str(copied.with_suffix(""))], capture_output=True, timeout=60)`）。**cwd も stdin も固定していない**ので、cwd は門番のシェルのもの（リポジトリの根）を継ぎ、stdin も継ぐ |
+
+### 決定
+
+- **工程は 4 つ。地ならし（工程 0）、`Env`（工程 1）、`Io`（工程 2）、E2 とコーパスと門番（工程 3）。** 工程ごとに指揮者が緑を実測してから次を発注する
+- **決定 1: 既定実装は prelude の `handler` 宣言そのものにする。** `stdlib/env.hd` に `effect Env` の宣言と `handler Env as EnvDefault` を並べ、腕を hado で書く。`stdlib/io.hd` も同じ。mono は `OpKind::Reply` で `handler_for(name)`（`mono.rs:1682-1688`。`handler_stack` を逆順に走査する）が `None` のとき、**その操作の効果に対する prelude の handler を `handler_decls` から引いて、`handled_operation`（`mono.rs:1570-1591`）と同じ形で腕を inline する**。今は `None` で `Err("unhandled operation {name}")` になる（`mono.rs:1573-1577`）。この道を選ぶ理由は 3 つ。
+  - `def __default_args` のような名前の規約が要らない（`__` は `name_resolution.rs:167` で intrinsic として解決される）
+  - **E605（`infer.rs:1879-1892`）が既定 handler に全操作の実装を強制する。** `Io` の 4 操作を 1 つ落とすと check で止まる
+  - 利用者の `with MyEnv -> ...` が差し替えになるのは既存の `handler_for` の経路そのままで、D2 に合う
+  - **罠:** `checked.operations`（`infer.rs:1875`）は `op 名 → OpKind` しか持たず効果名を運ばない。`op 名 → 効果名` の対応を `register_effects`（`infer.rs:1866-1873`）で作って `Checked` に載せる 1 本が要る
+- **決定 2: C は scalar と Bytes だけを返し、`raise` は hado で書く。** R34 の `Bytes.of_list`・R36 の `Int.parse` の写しである。
+  - **argv・env・cwd・ディレクトリの名前は `Bytes` で返し、hado 側が `Bytes.to_string` に通す。** 非 UTF-8 の `"InvalidUtf8"` は R34 の機構がそのまま出すので、**C は UTF-8 を一切見ない**
+  - `args` は `__argv_count: Int` + `__argv_get(Int): Bytes` の再帰で組む（`stdlib/bytes.hd` の `elements` が手本）。`env` は `__env_has(String): Bool` + `__env_get(String): Bytes`
+  - **C は `hado_abort_error` を絶対に呼ばない。** 呼ぶと利用者の `handler Error` を飛び越える。失敗は必ず hado 側の `raise { message = ... }` から起こす
+  - **I/O の失敗の分類は status を Int で返し、payload は別の intrinsic で取る。** `__io_read_file(path): Int`（0 成功 / 1 NotFound / 2 PermissionDenied / 3 NotADirectory / 4 IoFailure。syscall はここで 1 回だけ）→ 0 なら `__io_take_bytes(): Bytes`。`is_valid` + `unchecked` の 2 回 syscall にしない（2 回の間に状態が変わると失敗の分類がずれる）。`read_dir` も同じ形（`__io_read_dir(path): Int` → `__io_dir_count(): Int` + `__io_dir_get(Int): Bytes`）。status → `message` の対応は hado 側の 1 本の関数に書く
+- **決定 3: 操作の結果の効果行を infer で通す。** 実測のとおり `reply pick: Int {Error}` の `{Error}` は呼び出し位置に届かない。`payload_type`（`infer.rs:892-899`）→ `annotation_inner`（`infer.rs:1627-`）は `Fn` の枝でしか `.effects` を読まず、`unwrap_operation`（`infer.rs:2039-2051`）が `Row::Closed(vec![*effect])` で効果 1 つに固定する。**`register_effects` で `op.ret` の効果行を op ごとに保存し、`unwrap_operation` でその行と合併する。**
+- **決定 4: `main` の効果の免除を prelude の効果の集合に一般化する。** `types.rs:76-78` の `has_user_effect` は `effect_ctor(ty) != "Error"` の直書きである。`Env` と `Io` を直書きで足すと次に増えたとき同じ穴になるので、**prelude の効果名の集合との照合に変える**。§5（`docs/spec.md:169`）の「`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`）に限る」がそのまま出る
+- **決定 5: `main` は引数を取らない（E206 のまま）。** argv は `Env.args` で取る。`names.rs:419-426` の `entry_form` は触らない
+- **決定 6: C の `int main` だけを `int main(int argc, char **argv)` に変え、`argc` / `argv` をファイルスコープの static に退避する。** `hado_entry(void)` の宣言（`runtime/hado_runtime.c:11`）も `emit.rs:592-595` と `:64-70` の signature も**触らない**。これが最小の変更である。`scripts/verify-m0.sh:94-99` は `GC_INIT` `hado_entry` `hado_alloc` `GC_malloc` の綴りを `runtime/` に求めるだけなので緑のまま
+- **決定 7: `effect Io` の衝突を工程 0 で改名する。** `tests/accept/effect_row/main.hd`（コーパス。lock も更新する）と `crates/hado/tests/r24_effects.rs` の 8 箇所の `Io` を `Log` にする。`crates/hado/tests/r23_syntax.rs:135` `:137` は `roundtrip`（parse と canonical 印字の往復）なので触らない
+- **決定 8: 受理コーパスの起動条件を門番に固定する。** `scripts/verify-m6.sh:26` は cwd も stdin も固定していない。24.5 の R37 の行が「受理ケースは空 argv・閉じた stdin・ケース内の相対パスで起動する」と定めているので、**`cwd=str(case)` と `stdin=subprocess.DEVNULL` を足す**（門番を強くする変更で、判定の条件は変えない）。実行ファイルのパスは絶対なので cwd を変えても動く
+- **決定 9: `path` と env の `name` は libc に直接渡さない。** `HadoString` は NUL 終端でない（`runtime/hado_runtime.h:6-9`）。`fopen` `opendir` `getenv` `stat` に渡す前に `length + 1` の領域を確保して NUL を付ける。R36 は「写さない」が正解だったが、**R37 は逆で「写さないと越境する」**
+
+### 仕様への疑義（R38 で判断する。§49 が定めていない）
+
+- **`read_dir` は名前だけを返し、`.` と `..` を除き、バイト順に整列する。** `readdir` の順序はファイルシステム依存なので、整列しないと判定器が期待値を持てない。**整列は決定ではなく判定可能性の要件である**
+- **`read_stdin` の 2 回目は空の `Bytes`**（EOF）。24.7 の未確定
+- **`env` の値が非 UTF-8 なら `"InvalidUtf8"` を raise する**（`None` ではない）。§49（1974 行）の「非 UTF-8 の名前は `Error` を raise する」を値にも当てる
+- **E2 の空 argv は `raise { message = "MissingDirectory" }`。** `tools/gates/` は利用者のコードなので §49 の表の外でよい（R34 の `"InvalidLine"` が先例）
+- **`args` はプログラム名を除く**（§49 の 1974 行にある）ので、`verify-m6.sh` が実行ファイル 1 つだけで起動する形では空リストになる
+
+### 期待値の根拠
+
+| 形 | 導出 | 根拠 |
+|---|---|---|
+| `Env.args` を引数なしで起動 | `[]` | §49（1974 行）、決定 8 |
+| `Env.args` を引数 3 つで起動 | その 3 つの String List | §49 |
+| argv に非 UTF-8 のバイトを含めて起動して `args` | `Error` `"InvalidUtf8"` | §49 の表（1980 行付近） |
+| `Env.env "<設定した名前>"`、`Env.env "<未設定の名前>"` | `Some("<値>")`、`None` | §49（1974 行） |
+| `Env.cwd` | プロセスの cwd の String | §49 |
+| `Io.read_file "<存在するファイル>"` → `Bytes.to_string` | ファイルの中身 | §49 |
+| `Io.read_file "<存在しないパス>"` | `Error` `"NotFound"` | §49 の表 |
+| `Io.read_file "<ディレクトリ>"` | `Error` `"IoFailure"`（EISDIR） | 本節の決定 |
+| `Io.read_dir "<通常ファイル>"` | `Error` `"NotADirectory"`（ENOTDIR） | §49 の表 |
+| `Io.read_dir "<ディレクトリ>"` | 名前だけを整列した String List（`.` と `..` を除く） | 本節の決定（疑義） |
+| `Io.write_file` → `read_file` の往復 | 書いた `Bytes` と一致 | §49 |
+| `Io.read_stdin` を閉じた stdin で | 空の `Bytes` | 本節の決定（疑義）と決定 8 |
+| `Io.read_stdin` の 2 回目 | 空の `Bytes` | 本節の決定（疑義） |
+| 利用者の `handler Env as MyEnv` を `with` で被せる | 既定ではなく利用者の腕が応える | §58、D2 |
+| `with H -> args`（`H` は `handler Error`）で argv が非 UTF-8 | `H` の腕が `message` を受け取る | 決定 2（C が `hado_abort_error` を呼ばないことの固定） |
+| `main` の型が `{Env, Error, Io}` | E706 にならない | §5（169 行）、決定 4 |
+| 利用者の `effect Env` / `effect Io` の宣言 | E205 | §47（1865 行）、D6 |
+| `reply pick: Int {Error}` の呼び出し位置 | `{Foo, Error}` | 決定 3 |
+| `handler Io as X` で 4 操作のうち 1 つを落とす | E605 | §58（2298 行） |
+
+**本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+### 成果物
+
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/`（`runtime_abi.rs` `mono.rs` `infer.rs` `types.rs` `lib.rs`）、`stdlib/env.hd`（新設）`stdlib/io.hd`（新設）、`tools/gates/main.hd` `tools/gates/report/report.hd`、`crates/hado/tests/r37_world.rs`（新設）、`crates/hado/tests/r24_effects.rs`（`Io` → `Log`）、`scripts/verify-r37.sh`（新設）、`scripts/verify-m6.sh`（決定 8）、`tests/accept/`（`// item: Env と Io` の受理と `effect_row` の改名）、`tests/corpus.sha256`、`docs/ledger.md`。
+
+### 工程
+
+- 工程 0: 地ならし。決定 7（`effect Io` の改名と lock 更新）、決定 3（操作の結果の効果行）、決定 4（`has_user_effect` の一般化）。**`Env` と `Io` はまだ入れない。** 判定 37-a 37-b
+- 工程 1: `Env`。`stdlib/env.hd`（効果 + 既定 handler）、C の `main(argc, argv)` と static（決定 6）、intrinsic（`__argv_count` `__argv_get` `__env_has` `__env_get` `__cwd`）、**mono の `Reply` の既定 handler へのフォールバック**（決定 1。新しい機構はここだけ）、lock。判定 37-c 37-d 37-e
+- 工程 2: `Io`。`stdlib/io.hd`、C の 4 操作と status（決定 2）、lock。判定 37-f 37-g
+- 工程 3: E2 とコーパスと門番。`tools/gates/main.hd` を argv + `read_dir` + `read_file` に、決定 8（`verify-m6.sh` の cwd と stdin）、受理コーパス（`// item: Env と Io`）、lock。判定 37-h 37-i 37-j 37-k
+
+### 判定
+
+`scripts/verify-r37.sh` を新設する。構造は `scripts/verify-r36.sh` に倣う。**入力の形が列挙できる判定は分類から生成する。境界値は乱数任せにせず決定的に含める。期待値は独立した oracle（python3 の `sorted(os.listdir(...))`、`os.environ`、`open(p, 'rb').read()`）から導く。** 生成器自身の失敗と manifest の欠落・空を非ゼロ終了にし、成功時の stderr と失敗時の stdout が空であることを `wc -c` で測る。探針を絞り込める環境変数を置かない。
+
+**fixture は判定器が `mktemp -d` に作り、判定器が cwd をその中に移して実行ファイルを起動する**（受理コーパスと同じ条件にする）。非 UTF-8 は bash の `$'\xff'` で argv・env の値・ファイル名の 3 箇所に決定的に入れる。**`main` の値は印字できる型に包む**（R35・R36 と同じ罠。`String List` は印字できるが、`Bytes` は `Bytes.of_list [...]` の形で出る）。
+
+判定 37-a: 操作の結果の効果行。`reply pick: Int {Error}` の呼び出し位置が `{Foo, Error}` になる（`--print-type` で測る）。**腕が `raise` しない形で測る**（腕の `raise` から来る `{Error}` と区別するため。指揮者の実測ではこれで区別できた）。効果行なしの宣言との対照、効果行が 2 つ以上の形、`abort` の操作（戻り型を書けないので効果行も無い）の対照
+判定 37-b: `main` の効果の免除。利用者の効果が `main` に残れば E706、prelude の効果（工程 0 の時点では `Error` だけ）なら通る。**`has_user_effect` が集合との照合になっていることを、prelude の効果名を 1 つ増やした対照で測る**（工程 1 以降で `Env` `Io` を足す）
+判定 37-c: `Env` の 3 操作。argv の分類（空 / 1 個 / 複数 / 空文字列の引数 / 非 UTF-8）、`env` の分類（設定 / 未設定 / 値が空文字列 / 値が非 UTF-8 / 名前が非 UTF-8）、`cwd`。期待値は python3 から導く
+判定 37-d: 既定と差し替え。(1) handler 無しで `args` が既定実装で応える。(2) 利用者の `handler Env as MyEnv` を `with` で被せると利用者の腕が応える。(3) **`with H -> args`（`H` は `handler Error`）で argv が非 UTF-8 のとき `H` の腕が `message` を受け取る**（C が `hado_abort_error` を呼んでいないことの固定）。(4) `handler Env` で 3 操作のうち 1 つを落とすと E605
+判定 37-e: 予約名。利用者の `effect Env` の宣言が E205。`handler Env as X` はどのディレクトリにも置ける（§58）。**サブディレクトリからも `args` が無修飾で見える**（R34 の `prelude_operations` が `Env` にも効くことの固定）
+判定 37-f: `Io` の 4 操作。`read_file`（存在する / 空ファイル / バイナリ / 大きいファイル）、`write_file` → `read_file` の往復、`read_dir`（空 / 1 個 / 複数 / 名前が非 UTF-8 / `.` と `..` を除く / 整列）、`read_stdin`（閉じた stdin / 内容がある stdin / 2 回目）
+判定 37-g: `Io` の失敗の分類。**4 分類すべてに決定的な入力を置く。** `NotFound`（存在しないパス）、`NotADirectory`（通常ファイルを `read_dir`）、`IoFailure`（ディレクトリを `read_file`。EISDIR）、`PermissionDenied`（`chmod 000` のファイル）。**`PermissionDenied` は root では起きないので、`id -u` が 0 なら `NG: skipped-as-root` として失敗にする**（skip で緑にしない）。`write_file` の失敗（存在しないディレクトリ → `NotFound`、読み取り専用ディレクトリ → `PermissionDenied`）
+判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "\n"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**行の選び方は R38 のシェル側 oracle と同じ規則にする**（`scripts/run-gates.sh` が `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。E2 も `String.starts_with line "PASSED: "` で選び、名前はファイル名から作る）。空 argv は `MissingDirectory`
+判定 37-i: 受理コーパス（`// item: Env と Io` 1 本以上。`// needs: prelude` 付き）、lock 更新、`verify-m1-corpus.sh` の pairs から `Env と Io` が消える。**受理コーパスは E2 とは別の小さな fixture 読みのケースにする**（E2 を受理コーパスに入れると、空 argv の既定と実行ファイルの `main` の混入を捌く必要が出る）
+判定 37-j: 決定 8。`verify-m6.sh` が cwd と stdin を固定する。**固定を外す注入で受理ケースが落ちること**を報告に書く
+判定 37-k: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、**すべて満点**（R37 の完了で許容される赤が無くなる見込み）
+
+Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作（`hado_argv_count` と static の退避、status の分類、NUL を付ける写し）と、`check_source` での E205・E605・E706 をテストする。
+
+### 許容される赤
+
+**無い見込みである。** R37 の完了で `verify-m1-corpus.sh` が 7/7、`verify-m2.sh` が 8/8、`verify-m3.sh` が 12/12 になり、全門番が満点になるはずである。ならなければ、残った赤の理由を報告する。
+
+### スコープ外
+
+- 仕上げと tag（R38）。`docs/spec.md` への追記（疑義は R38 で判断する）
+- `Float.parse`、`Io` の追加操作（`append_file` `remove` `mkdir` 等）、`Env.set`
+- 効果が E513 の対象外である件（`dependencies.rs:17` `:177` `:247`）。当たったら `docs/bug.md` に書いて報告する
+- `Space::Contract` に効果名が入っている件（`namespaces.rs:80`）。§47 は効果を別空間と言う。**利用者の `effect Env` が E205 になることだけ判定 37-e で固定し、`module Env`（契約）がどうなるかは「確認して報告」に置く**
+
+### 確認して報告（24.9 と本節の決定から）
+
+- 決定 1 の mono の経路（`handler_stack` に無い prelude の handler の腕を inline する形）が成立したか、`op 名 → 効果名` の対応をどこに載せたか
+- 決定 3 で `register_effects` と `unwrap_operation` のどちらをどう直したか、`abort` の操作（戻り型を書けない）に影響が無いか
+- `module Env`（契約）を利用者が書くとどうなるか（E205 か、通るか）
+- 効果を宣言して使わないと E513 になるか（`dependencies.rs` が効果をスキップしている件）
+- `read_stdin` を 2 回呼んだときの 2 回目の値の実測
+- C で NUL を付けて写した箇所（`fopen` `opendir` `getenv` `stat` に渡す前）
+
+### 中断の条件
+
+**決定 1 の「prelude の handler の腕を handler_stack の外から inline する」が、既存の `with` の経路（`handler_for` と `finish_handler` と `abort_outcome`）を壊さずには通せないと分かったら、止めて報告せよ。** 代案（操作名 → `def` 名の対応表を持ち `definition_reference` で呼ぶ）に切り替えるかどうかは指揮者が決める。
+
+**C が `hado_abort_error` を呼ばないと失敗を起こせないと分かったら、止めて報告せよ。** 呼ぶと利用者の `handler Error` を飛び越えるので、その形は採らない。
+
+**ADT（`String List` や `String Option`）を C から直接返さないと通せないと分かったら、止めて報告せよ。** `value_signature`（`runtime_abi.rs:93-124`）の戻り型はスカラと `String` / `Bytes` だけで、ADT を返す項目は 1 つも無い。組み立ては hado 側で書く。
+
+**C の runtime が hado の List の cell（`repr.rs:117-162` の配置）を読み書きする必要があると判断したら、直さずに中断せよ。**
+
+それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
