@@ -144,6 +144,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
         trusted_start = Some(line + 1);
         for module in [
             include_str!("../../../stdlib/error.hd"),
+            include_str!("../../../stdlib/env.hd"),
             include_str!("../../../stdlib/list.hd"),
             include_str!("../../../stdlib/option.hd"),
             include_str!("../../../stdlib/array.hd"),
