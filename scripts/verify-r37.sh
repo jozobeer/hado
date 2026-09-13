@@ -74,21 +74,34 @@ def validate(rows):
         ident, label, mode = row.split('\t')
         assert ident.isdecimal() and ident not in seen
         seen.add(ident)
-        coverage.add((label.split()[0], mode))
+        coverage.add((' '.join(token.split('=')[0] for token in label.split()), mode))
         assert (base / ident / 'main.hd').stat().st_size > 0
         assert (base / ident / 'expect').stat().st_size > 0
     assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}
-    assert coverage == {(f'37-a({i})', 'type') for i in range(1, 5)} | {('37-a(5)', 'print')} | {(f'37-b2({i})', 'error' if i == 4 else 'print') for i in range(1, 6)}
+    assert coverage == {
+        ('37-a(1) arity', 'type'), ('37-a(2) arity', 'type'), ('37-a(4) arity', 'type'),
+        ('37-a(3) arity labels', 'type'), ('37-a(3) inferred arity labels', 'type'),
+        ('37-a(5) abort', 'print'), ('37-a(5) capture', 'print'),
+        ('37-b2(1) parameter', 'print'), ('37-b2(2) function', 'print'),
+        ('37-b2(3) let', 'print'), ('37-b2(5) user operation', 'print'),
+        ('37-b2(5) capture let', 'print'), ('37-b2(4) unshadowed', 'error'),
+    }, sorted(coverage)
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
-for bad in ([], rows[1:], [row for row in rows if not row.endswith('\terror')], rows + rows[:1]):
+def without(shape):
+    return [row for row in rows
+            if ' '.join(t.split('=')[0] for t in row.split('\t')[1].split()) != shape]
+missing = [without(shape) for shape in
+           ('37-a(5) abort', '37-a(5) capture', '37-b2(5) capture let', '37-b2(2) function',
+            '37-a(3) inferred arity labels')]
+for bad in ([], rows[1:], [row for row in rows if not row.endswith('\terror')], rows + rows[:1], *missing):
     try:
         validate(bad)
     except AssertionError:
         pass
     else:
         raise AssertionError('incomplete or duplicate manifest accepted')
-print('manifest controls: complete accepted; empty, all-success, duplicate rejected')
+print('manifest controls: complete accepted; empty, all-success, duplicate, missing-sibling rejected')
 PY
 }
 validate_manifest || exit 1
