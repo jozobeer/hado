@@ -128,9 +128,6 @@ for contract in ('List', 'Option', 'String'):
 
 
 # Io fixtures stay beside their own entry and are read independently by Python.
-def byte_summary(data):
-    indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
-    return [len(data)] + [data[i] for i in indices]
 def summary(body, data):
     indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
     return 'def main = let bytes = ' + body + ' -> [Bytes.length bytes' + ''.join(f', Bytes.get bytes {i}' for i in indices) + ']\n'
