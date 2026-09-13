@@ -315,6 +315,7 @@ struct Lowerer {
     specialization: crate::types::Inference,
     composite_types: std::collections::HashMap<(usize, usize), Ty>,
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
+    default_operations: std::collections::HashMap<String, String>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
     handler_stack: Vec<crate::parser::HandlerDecl>,
     handler_answers: Vec<Option<Type>>,
@@ -706,6 +707,7 @@ pub fn lower_program(
         value_types: checked.value_types.clone(),
         composite_types: checked.composite_types.clone(),
         operations: checked.operations.clone(),
+        default_operations: checked.default_operations.clone(),
         handlers: ast
             .items
             .iter()
@@ -1521,7 +1523,13 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         match kind {
             crate::parser::OpKind::Capture => self.capture_operation(node, name, arguments, None),
-            crate::parser::OpKind::Reply => self.handled_operation(name, arguments),
+            crate::parser::OpKind::Reply => {
+                if self.handler_for(name).is_some() {
+                    self.handled_operation(name, arguments)
+                } else {
+                    self.default_operation(node, name, arguments)
+                }
+            },
             crate::parser::OpKind::Abort => match self.handler_for(name).map(|handler| handler.effect.clone()) {
                 Some(effect) => self.abort_outcome(node, arguments, &effect),
                 None => self.abort_raise(node, arguments),
@@ -1569,6 +1577,26 @@ impl Lowerer {
             self.capture_answers.pop();
         }
         value
+    }
+
+    fn default_operation(
+        &mut self,
+        node: &crate::parser::Node,
+        name: &str,
+        arguments: Vec<Expression>,
+    ) -> Result<Expression, String> {
+        let definition = self.default_operations.get(name)
+            .cloned().ok_or_else(|| format!("unhandled operation {name}"))?;
+        if arguments.is_empty() {
+            return self.definition_reference(&definition, node.span);
+        }
+        let expected = self.composite_types.get(&(node.span.line, node.span.col))
+            .ok_or("missing default operation result type")?;
+        let expected = Type::try_from(&self.specialization.resolve(expected))
+            .map_err(|_| "default operation result type is not concrete")?;
+        let parameters = arguments.iter().map(Expression::ty).collect();
+        let (id, signature) = self.specialize_function(&definition, parameters, Some(&expected))?;
+        Expression::call_direct(id, &signature, arguments)
     }
 
     fn handled_operation(

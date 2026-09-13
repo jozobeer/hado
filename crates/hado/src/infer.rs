@@ -54,6 +54,7 @@ struct Checker<'a> {
     handlers: HashMap<String, String>,
     handler_decls: HashMap<String, HandlerDecl>,
     operations: HashMap<String, OpKind>,
+    default_operations: HashMap<String, String>,
     operation_result_rows: HashMap<String, Row>,
     resume_type: Option<Ty>,
 }
@@ -125,6 +126,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         handlers: HashMap::new(),
         handler_decls: HashMap::new(),
         operations: HashMap::new(),
+        default_operations: HashMap::new(),
         operation_result_rows: HashMap::new(),
         resume_type: None,
     };
@@ -183,7 +185,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
                 _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
             }
         }
-        checker.register_effects(&ast.items)?;
+        checker.register_effects(&ast.items, prelude_items)?;
         for group in crate::dependencies::inference_groups(ast) {
             let mut functions = Vec::new();
             for item in group {
@@ -195,6 +197,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             }
             if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
         }
+        checker.check_operation_defaults(&ast.items[..prelude_items])?;
         checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
         checker.check_ambiguous_modules(&ast.items, &signatures);
         checker.resolve_projections(true)?;
@@ -273,6 +276,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         effects: checker.inference.resolve_row(&checker.main_effects),
         definitions: definitions.keys().map(|name| (name.clone(), checker.values[name].clone())).collect(),
         operations: checker.operations.clone(),
+        default_operations: checker.default_operations.clone(),
     }, checker.deferred))
 }
 
@@ -1858,7 +1862,30 @@ impl Checker<'_> {
         }
     }
 
-    fn register_effects(&mut self, items: &[Item]) -> Result<(), Diagnostic> {
+    fn check_operation_defaults(&mut self, items: &[Item]) -> Result<(), Diagnostic> {
+        for item in items {
+            let Item::Effect(effect) = item else { continue };
+            for op in &effect.ops {
+                if op.kind != OpKind::Reply { continue; }
+                let definition = &self.default_operations[&op.name];
+                let actual = self.inference.instantiate(&self.values[definition]);
+                let Ty::Fn(args, result, row) = actual else {
+                    return Err(self.error(op.name_span, Some("E305"), "default operation requires a definition"));
+                };
+                let wrapped = self.inference.instantiate(&self.values[&op.name]);
+                let Ty::Fn(mut payload, _, _) = wrapped else { unreachable!("operation scheme") };
+                let expected = payload.remove(0);
+                let expected = if op.params.is_empty() { Ty::fn_of(vec![], expected) } else { expected };
+                self.unify(&Ty::fn_of(args, *result), &expected, op.name_span)?;
+                if !self.inference.row_within(&row, &self.operation_result_rows[&op.name]) {
+                    return Err(self.error(op.name_span, Some("E305"), "default operation exceeds declared effects"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn register_effects(&mut self, items: &[Item], prelude_items: usize) -> Result<(), Diagnostic> {
         for item in items {
             let Item::Effect(effect) = item else { continue };
             let parameters: HashMap<_, _> = effect.type_params.iter()
@@ -1888,6 +1915,18 @@ impl Checker<'_> {
                 ops.push((op.kind, op.name.clone()));
             }
             self.effects.insert(effect.name.clone(), ops);
+        }
+        for item in &items[..prelude_items] {
+            let Item::Effect(effect) = item else { continue };
+            for op in &effect.ops {
+                if op.kind != OpKind::Reply { continue; }
+                let default_name = format!("default_{}", op.name);
+                let definition = items[..prelude_items].iter().find_map(|item| match item {
+                    Item::Def(def) if def.name.rsplit('$').next() == Some(default_name.as_str()) => Some(def.name.clone()),
+                    _ => None,
+                }).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude reply has no default definition"))?;
+                self.default_operations.insert(op.name.clone(), definition);
+            }
         }
         for item in items {
             let Item::Handler(handler) = item else { continue };

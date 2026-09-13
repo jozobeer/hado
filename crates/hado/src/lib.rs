@@ -75,6 +75,7 @@ pub struct Checked {
     pub main: types::Ty,
     pub effects: types::Row,
     pub definitions: std::collections::HashMap<String, types::Scheme>,
+    pub default_operations: std::collections::HashMap<String, String>,
     pub operations: std::collections::HashMap<String, parser::OpKind>,
 }
 
