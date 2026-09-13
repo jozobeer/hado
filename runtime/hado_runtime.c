@@ -1,5 +1,7 @@
 #include "hado_runtime.h"
 #include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <gc.h>
 #include <signal.h>
 #include <stdint.h>
@@ -107,6 +109,132 @@ HadoString *hado_cwd(int64_t ignored) {
     capacity *= 2;
   }
 }
+
+static HadoString *io_bytes;
+static HadoString **io_names;
+static int64_t io_name_count;
+
+static int64_t io_status_from_errno(int error) {
+  switch (error) {
+    case ENOENT: return 1;
+    case EACCES: case EPERM: return 2;
+    case ENOTDIR: return 3;
+    default: return 4;
+  }
+}
+
+static HadoString *grow_io_bytes(HadoString *bytes, size_t capacity) {
+  if (capacity > INT64_MAX || capacity > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *grown = GC_realloc(bytes, sizeof(HadoString) + capacity);
+  if (grown == NULL) abort();
+  return grown;
+}
+
+static int64_t read_io_stream(FILE *stream) {
+  size_t capacity = 8192;
+  HadoString *bytes = hado_bytes_alloc((int64_t)capacity);
+  bytes->length = 0;
+  for (;;) {
+    errno = 0;
+    bytes->length += fread(bytes->bytes + bytes->length, 1, capacity - bytes->length, stream);
+    if (ferror(stream)) return io_status_from_errno(errno);
+    if (feof(stream)) break;
+    if (capacity > SIZE_MAX / 2) abort();
+    capacity *= 2;
+    bytes = grow_io_bytes(bytes, capacity);
+  }
+  io_bytes = bytes;
+  return 0;
+}
+
+int64_t hado_io_read_file(const HadoString *path) {
+  io_bytes = NULL;
+  FILE *stream = fopen(nul_terminated_name(path), "rb");
+  if (stream == NULL) return io_status_from_errno(errno);
+  int64_t status = read_io_stream(stream);
+  if (fclose(stream) != 0 && status == 0) status = io_status_from_errno(errno);
+  if (status != 0) io_bytes = NULL;
+  return status;
+}
+
+int64_t hado_io_write_file(const HadoString *path, const HadoString *contents) {
+  FILE *stream = fopen(nul_terminated_name(path), "wb");
+  if (stream == NULL) return io_status_from_errno(errno);
+  errno = 0;
+  int64_t status = fwrite(contents->bytes, 1, contents->length, stream) == contents->length
+    ? 0 : io_status_from_errno(errno);
+  if (fclose(stream) != 0 && status == 0) status = io_status_from_errno(errno);
+  return status;
+}
+
+int64_t hado_io_read_stdin(int64_t ignored) {
+  /* Intrinsic applications require a dummy argument; stdin is the only input. */
+  (void)ignored;
+  io_bytes = NULL;
+  if (fcntl(STDIN_FILENO, F_GETFD) == -1 && errno == EBADF) {
+    io_bytes = hado_bytes_alloc(0);
+    return 0;
+  }
+  return read_io_stream(stdin);
+}
+
+HadoString *hado_io_take_bytes(int64_t ignored) {
+  /* Only a successful read may consume the payload; the dummy is unused. */
+  (void)ignored;
+  HadoString *bytes = io_bytes;
+  if (bytes == NULL) abort();
+  io_bytes = NULL;
+  return bytes;
+}
+
+static void append_io_name(const char *name, size_t *capacity) {
+  if ((size_t)io_name_count == *capacity) {
+    if (*capacity > SIZE_MAX / 2 / sizeof(HadoString *)) abort();
+    *capacity = *capacity == 0 ? 16 : *capacity * 2;
+    io_names = GC_realloc(io_names, *capacity * sizeof(HadoString *));
+    if (io_names == NULL) abort();
+  }
+  io_names[io_name_count++] = bytes_from_c_string(name);
+}
+
+static int compare_io_names(const void *left, const void *right) {
+  return (int)hado_string_compare(*(HadoString *const *)left, *(HadoString *const *)right);
+}
+
+static int64_t collect_io_names(DIR *directory) {
+  size_t capacity = 0;
+  for (;;) {
+    errno = 0;
+    struct dirent *entry = readdir(directory);
+    if (entry == NULL) return errno == 0 ? 0 : io_status_from_errno(errno);
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    append_io_name(entry->d_name, &capacity);
+  }
+}
+
+int64_t hado_io_read_dir(const HadoString *path) {
+  io_names = NULL;
+  io_name_count = 0;
+  DIR *directory = opendir(nul_terminated_name(path));
+  if (directory == NULL) return io_status_from_errno(errno);
+  int64_t status = collect_io_names(directory);
+  if (closedir(directory) != 0 && status == 0) status = io_status_from_errno(errno);
+  if (status != 0) {
+    io_names = NULL;
+    io_name_count = 0;
+    return status;
+  }
+  if (io_name_count > 1) qsort(io_names, (size_t)io_name_count, sizeof(HadoString *), compare_io_names);
+  return 0;
+}
+
+int64_t hado_io_dir_count(int64_t ignored) {
+  /* Intrinsic applications require an argument; the dummy has no meaning. */
+  (void)ignored;
+  return io_name_count;
+}
+
+HadoString *hado_io_dir_get(int64_t index) { return io_names[index]; }
 
 int64_t hado_string_length(const HadoString *string) {
   int64_t count = 0;
