@@ -2309,6 +2309,8 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 **R34 の終了時（2026-09-13、`e976c6f`）:** 赤は 4 本のまま、内訳がさらに縮んだ。`verify-m1-corpus.sh` 6/7 の 3 pairs は 3 項目（配列・`Int.parse`・Env と Io）になり、**Bytes と String 操作が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。`verify-m7.sh` 2/3 は `prelude inventory: 32/39` で、残る赤は Array の 6 項目（signature と 5 member）と `Int.parse` だけ（同じ門番の中の `PASSED: 94/94` は受理コーパスの本数を数える別の検査で、inventory ではない）。`verify-m4.sh` 123/123、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`cargo test --offline --no-fail-fast` 0 failed。なお `verify-m3.sh` の `cargo test` の上限を 180 秒から 600 秒に延ばした（実測 250 秒。時間切れは `NG: timeout` として出るようにし、判定の条件は変えていない）。
 
+**R35 の終了時（2026-09-13、`9450261`）:** 赤は 4 本のまま、内訳がさらに縮んだ。`verify-m1-corpus.sh` 6/7 の pairs は 2 項目（`Int.parse`・Env と Io）になり、**配列が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。`verify-m7.sh` 2/3 は `prelude inventory: 38/39` で、残る NG は `Int.parse` だけ。`verify-m4.sh` 128/128、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`cargo test --offline --no-fail-fast` 0 failed。
+
 ### 24.9 不確実性
 
 - 確定: 前提（`v0.2.3`、`docs/bug.md` 空）、24.7 の探針、24.1 の決定、24.4 のレビュー対応
@@ -2316,7 +2318,10 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 - R32 で確定（`docs/ledger.md` の R32）: `trusted_start` は行の閾値で、prelude 無しの検査は `stdlib/` を渡したときだけ存在し、E205 / E202 で通らない（門番は使っていない）。`types.rs:515-519` の `Abstract` の単一化は名前比較。ユーザーの `type Bytes` / `type Array` は今は受理（R34 / R35 で E205）。全門番の `PASSED: n/N` 書式は一致（`tools/gates` が集計できた）。不透明な抽象型どうしの `==` は受理して `true`。`.hdi` の `library` は `role_error` で E100。外の `def` の E100 は `Project::load` で決める（単一ファイルの parse では決められない）
 - R33 で確定（`docs/ledger.md` の R33）: `types.rs:515-519` の単一化（名前比較）は触らずに済んだ。`shared` の適用の循環は E602（v0.2.3 に無い形なので `bug.md` 行きではない）。functor の契約の arity は `abstract_types` からは取れず署名（`ModuleSig`）から取る。前処理の等式は `Ty::reveal` の再帰置換で実効的に固定点になる。**教訓 2 つ:** 不透明型に等式を公開するときは等式の収集を型と効果の登録より前に置く（消費点に散らすと閉じない）。同じ意味の型解決を 2 本持つと片方の検査の写し落としが panic になる（`shared_body_type` は `annotation_inner` の別実装で、`Fn` の枝・arity・契約名の 3 種を写し落とした）
 - R34 で確定（`docs/ledger.md` の R34）: `BUILTIN_TYPES` に足すだけで `type Bytes` は E205（位置は 2 回目の宣言の名前）。`Bytes.of_list` は確保 + 充填で 3 万要素が 76ms。組み込み型の解決は `types::builtin_type` の 1 本に寄せた。**prelude の効果の操作がサブディレクトリから見えない R32 由来の欠陥を直した**（`namespaces.rs` の `prelude_operations`、§47・§57）。**教訓 4 つ:** 入力の形が列挙できる判定は手順書の段階で生成規則として書く。境界値は乱数任せにせず決定的に含める。期待値は独立した oracle（python3 の decoder や同名操作）から導く。門番の時間切れは判定の失敗と区別する
+- R35 で確定（`docs/ledger.md` の R35）: emit は cranelift なので、要素の load 型を `repr::machine_type` から決められ、C の ABI の幅問題は存在しない。`type A Arr = A Box` の別名は parser が拒否する（`expected a record or a leading | for an ADT`）。`type_arities` に名前を直接登録するだけで引数付きの注釈が通り、`infer.rs` の「引数付きは未実装」の門の手前で解決できる。`BUILTIN_TYPES` に足すだけで E205 になる（Bytes と同じ）。`infer/functors.rs` の `shared_body_type` は既存の arity 参照で引数付きの組み込み型を通すので、Array では写し落としが起きなかった。`composite_types` の span 地図（`infer.rs:945` が Apply / Call を記録）は結果しか多相でない intrinsic の要素型を運べる（`specialization.resolve` が要る）。**教訓 1 つ:** R34 の教訓（分類からの生成・決定的な境界値・独立した oracle）を手順書の段階で書くと、判定器が 1 巡目から穴を持たない。R34 は審査 14 巡・指摘 26 件だったが、R35 は 3 工程とも 1 巡で合格し、注入 27 件をすべて検出した
 - 未確認（実装ラウンドで確認する）:
+  - `%` を使う未注釈の再帰生成器が E306 になる（R35 の工程 0 で踏んだ。原因未調査。R38 で判断する）
+  - 長さが違う Array の `compare` の順序を §45 が定めていない（R35 は python3 のリスト比較に合わせた。R38 で §45 に 1 文足すか判断する）
   - parser が効果の操作の戻り型の効果行を保持するか（R37）
   - ファイル局所の `def args` と prelude の操作 `args` の解決順（影になるか E205 か）（R37）
   - `read_stdin` を 2 回呼んだときの 2 回目の値（R37）
