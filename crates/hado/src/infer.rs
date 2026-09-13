@@ -1868,7 +1868,9 @@ impl Checker<'_> {
             for op in &effect.ops {
                 if op.kind != OpKind::Reply { continue; }
                 let definition = &self.default_operations[&op.name];
-                let actual = self.inference.instantiate(&self.values[definition]);
+                let scheme = self.module_definitions.get(definition)
+                    .ok_or_else(|| self.error(op.name_span, Some("E305"), "default operation requires a definition"))?;
+                let actual = self.inference.instantiate(scheme);
                 let Ty::Fn(args, result, row) = actual else {
                     return Err(self.error(op.name_span, Some("E305"), "default operation requires a definition"));
                 };
@@ -1920,11 +1922,15 @@ impl Checker<'_> {
             let Item::Effect(effect) = item else { continue };
             for op in &effect.ops {
                 if op.kind != OpKind::Reply { continue; }
-                let default_name = format!("default_{}", op.name);
-                let definition = items[..prelude_items].iter().find_map(|item| match item {
-                    Item::Def(def) if def.name.rsplit('$').next() == Some(default_name.as_str()) => Some(def.name.clone()),
+                let module_name = format!("{}Default", effect.name);
+                let module = items[..prelude_items].iter().find_map(|item| match item {
+                    Item::ModuleImpl(module) if module.name == module_name => Some(module),
                     _ => None,
-                }).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude reply has no default definition"))?;
+                });
+                let definition = module.and_then(|module| module.items.iter().find_map(|item| match item {
+                    Item::Def(def) if def.name == op.name => Some(format!("{}.{}", module.name, def.name)),
+                    _ => None,
+                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude reply has no default definition"))?;
                 self.default_operations.insert(op.name.clone(), definition);
             }
         }
