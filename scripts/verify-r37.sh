@@ -130,10 +130,14 @@ for contract in ('List', 'Option', 'String'):
 # Io fixtures stay beside their own entry and are read independently by Python.
 def summary(body, data):
     indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
-    return 'def main = let bytes = ' + body + ' -> [Bytes.length bytes' + ''.join(f', Bytes.get bytes {i}' for i in indices) + ']\n'
+    if not indices: return 'def main = [Bytes.length (' + body + ')]\n'
+    return ('def first | [] => -1 | [head, ..._] => head\ndef rest | [] => [] | [_, ...tail] => tail\ndef rec at values index => if index == 0 => first values | at (rest values) (index - 1)\n'
+            + 'def main = let bytes = ' + body + ' -> let values = Bytes.to_list bytes -> [Bytes.length bytes'
+            + ''.join(f', at values {i}' for i in indices) + ']\n')
 def file_case(shape, data, name='input'):
     directory = runtime('37-f(1) '+shape, summary('read_file '+quote(name), data), '', oracle=['file', name])
     (directory / name).write_bytes(data)
+    if len(data) >= 1024: (directory / 'large-list').touch()
     if len(data) < 1024:
         directory = runtime('37-f(1) bytes-'+shape, f'def main = Bytes.to_list (read_file {quote(name)})\n', '', oracle=['file-list', name])
         (directory / name).write_bytes(data)
@@ -162,6 +166,7 @@ for shape, names in [('empty', []), ('one', ['single']), ('many', ['z','b','a'])
 for shape, data in [('closed', b''), ('empty', b''), ('content', b'stdin '+rng.randbytes(41)), ('large', rng.randbytes(1024*1024+97))]:
     directory = runtime('37-f(4) '+shape, summary('read_stdin', data), '', oracle=['file', 'stdin'])
     (directory / 'stdin').write_bytes(data)
+    if len(data) >= 1024: (directory / 'large-list').touch()
     if shape == 'closed': (directory / 'closed-stdin').touch()
 data = b'twice '+rng.randbytes(39)
 directory = runtime('37-f(5) second', 'def main = let first = read_stdin -> let second = read_stdin -> [Bytes.length first, Bytes.length second]\n', str([len(data), 0]))
@@ -394,12 +399,18 @@ if oracle:
     assert expected.returncode == 0 and not expected.stderr and expected.stdout, expected
     (base / 'expect').write_bytes(expected.stdout)
 with (base / 'out').open('wb') as out, (base / 'err').open('wb') as err:
-    def close_stdin(): os.close(0)
+    def prepare_process():
+        if (base / 'closed-stdin').exists(): os.close(0)
+        if (base / 'large-list').exists():
+            # Bytes.to_list recursively builds a million cells for the independent list sample.
+            import resource
+            soft, hard = resource.getrlimit(resource.RLIMIT_STACK)
+            resource.setrlimit(resource.RLIMIT_STACK, (max(soft, 128 * 1024 * 1024), hard))
     data = (base / 'stdin').read_bytes() if (base / 'stdin').exists() else b''
     if (base / 'closed-stdin').exists():
-        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, preexec_fn=close_stdin, stdout=out, stderr=err, timeout=30)
+        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, preexec_fn=prepare_process, stdout=out, stderr=err, timeout=30)
     else:
-        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, input=data, stdout=out, stderr=err, timeout=30)
+        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, input=data, preexec_fn=prepare_process, stdout=out, stderr=err, timeout=30)
 if (base / 'written.json').exists():
     assert (base / 'output').read_bytes() == bytes(json.loads((base / 'written.json').read_text()))
 (base / 'status').write_text(str(result.returncode))
