@@ -126,6 +126,92 @@ directory = add('37-e(4) visible', 'def main = sub::M.value\n', '[]', 'print')
 for contract in ('List', 'Option', 'String'):
     reject('37-e(5) contract', f'handler {contract} as H\nreply invented => 0\n', 'E605', 'handler', True)
 
+
+# Io fixtures stay beside their own entry and are read independently by Python.
+def byte_summary(data):
+    indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
+    return [len(data)] + [data[i] for i in indices]
+def summary(body, data):
+    indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
+    return 'def main = let bytes = ' + body + ' -> [Bytes.length bytes' + ''.join(f', Bytes.get bytes {i}' for i in indices) + ']\n'
+def file_case(shape, data, name='input'):
+    directory = runtime('37-f(1) '+shape, summary('read_file '+quote(name), data), '', oracle=['file', name])
+    (directory / name).write_bytes(data)
+    if len(data) < 1024:
+        directory = runtime('37-f(1) bytes-'+shape, f'def main = Bytes.to_list (read_file {quote(name)})\n', '', oracle=['file-list', name])
+        (directory / name).write_bytes(data)
+    try: data.decode('utf-8')
+    except UnicodeError: return
+    if len(data) < 1024:
+        directory = runtime('37-f(1) text-'+shape, f'def main = Bytes.to_string (read_file {quote(name)})\n', '', oracle=['file-text', name])
+        (directory / name).write_bytes(data)
+for shape, data, name in [
+    ('existing', f'hello {rng.randrange(100000)}\n'.encode(), 'input'), ('empty', b'', 'input'),
+    ('binary', bytes([0,255,128,10])+rng.randbytes(37), 'input'),
+    ('large', rng.randbytes(1024*1024+73), 'input'), ('unicode', '日本語\n'.encode(), '資料'),
+]: file_case(shape, data, name)
+for shape, data in [('empty', b''), ('ascii', b'write '+str(rng.randrange(10000)).encode()), ('binary', bytes([0,255,128,10])), ('overwrite', b'short')]:
+    source = f'def main = do write_file "output" (Bytes.of_list {list(data)}) -> Bytes.to_list (read_file "output")\n'
+    directory = runtime('37-f(2) '+shape, source, str(list(data)))
+    (directory / 'written.json').write_text(json.dumps(list(data)))
+    if shape == 'overwrite': (directory / 'output').write_bytes(b'old contents that must be truncated')
+for shape, names in [('empty', []), ('one', ['single']), ('many', ['z','b','a']), ('unicode', ['語','é','a']), ('invalid', [bad]), ('subdir', ['z','folder','a']), ('hidden', ['z','.hidden','a'])]:
+    directory = runtime('37-f(3) '+shape, 'def main = read_dir "entries"\n', '', error=shape=='invalid', oracle=['dir', 'entries'])
+    (directory / 'entries').mkdir()
+    for name in names:
+        target = directory / 'entries' / name
+        if name == 'folder': target.mkdir()
+        else: target.touch()
+for shape, data in [('closed', b''), ('empty', b''), ('content', b'stdin '+rng.randbytes(41)), ('large', rng.randbytes(1024*1024+97))]:
+    directory = runtime('37-f(4) '+shape, summary('read_stdin', data), '', oracle=['file', 'stdin'])
+    (directory / 'stdin').write_bytes(data)
+    if shape == 'closed': (directory / 'closed-stdin').touch()
+data = b'twice '+rng.randbytes(39)
+directory = runtime('37-f(5) second', 'def main = let first = read_stdin -> let second = read_stdin -> [Bytes.length first, Bytes.length second]\n', str([len(data), 0]))
+(directory / 'stdin').write_bytes(data)
+failures = [
+    ('read_file', 'missing', 'NotFound'), ('read_file', 'file/child', 'NotADirectory'),
+    ('read_file', 'directory', 'IoFailure'), ('read_file', 'denied-file', 'PermissionDenied'),
+    ('read_dir', 'missing', 'NotFound'), ('read_dir', 'file', 'NotADirectory'),
+    ('read_dir', 'denied-dir', 'PermissionDenied'), ('write_file', 'missing/child', 'NotFound'),
+    ('write_file', 'readonly/child', 'PermissionDenied'), ('write_file', 'directory', 'IoFailure'),
+]
+for operation, path, message in failures:
+    call = operation + ' ' + quote(path) + (' (Bytes.of_string "new")' if operation=='write_file' else '')
+    ok_path = 'directory' if operation=='read_dir' else 'file'
+    ok_call = operation + ' ' + quote(ok_path) + (' (Bytes.of_string "new")' if operation=='write_file' else '')
+    for kind, source, expected, error in [
+        ('failure', 'def main = '+call+'\n', message, True),
+        ('success', 'def main = '+ok_call+'\n', '[]' if operation=='read_dir' else '' if operation=='write_file' else 'Bytes.of_list [111, 107]', False),
+        ('caught', 'handler Error as H\nabort raise e => e.message\nreturn _ => "success"\ndef main = with H -> '+call+'\n', message, False),
+    ]:
+        group = '37-g(5)' if kind=='caught' else '37-g(4)' if kind=='success' else '37-g('+str({'read_file':1,'read_dir':2,'write_file':3}[operation])+')'
+        directory = runtime(group+' '+operation+' '+path+' '+kind, source, expected, error=error)
+        if kind=='success' and operation=='write_file': (directory/'expect').write_bytes(b'')
+        (directory/'file').write_bytes(b'ok')
+        (directory/'directory').mkdir()
+        (directory/'denied-file').write_bytes(b'denied')
+        (directory/'denied-file').chmod(0)
+        (directory/'denied-dir').mkdir(mode=0)
+        (directory/'readonly').mkdir(mode=0o500)
+        if message=='PermissionDenied': (directory/'requires-user').touch()
+add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
+io_arms = ['reply read_file _ => Bytes.of_string "virtual"', 'reply write_file _ _ => ()', 'reply read_dir _ => ["virtual"]', 'reply read_stdin => Bytes.of_string "virtual"']
+for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
+    directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
+    if expected=='': (directory/'expect').write_bytes(b'')
+for missing in range(len(io_arms)):
+    reject('37-d Io missing-arm', 'handler Io as H\n'+'\n'.join(arm for i,arm in enumerate(io_arms) if i!=missing)+'\ndef main = 0\n', 'E605', 'handler Io')
+for sub in (False, True):
+    reject('37-e Io effect', 'effect Io\nreply custom: Int\ndef main = 0\n', 'E205', 'Io', sub)
+    for name in ('read_file','write_file','read_dir','read_stdin'):
+        for shape, source, anchor in [
+            ('def', f'def {name} = 1\n', name),
+            ('implementation', f'module M\ndef {name}: Int Pure\nimplement M as M\ndef {name} = 1\n', name+' ='),
+            ('operation', f'effect Foo\nreply {name}: Int\n', name),
+        ]:
+            reject('37-e Io '+shape, source+'def main = 0\n', 'E205', anchor, sub, True)
+
 (base / 'oracle.py').write_text('''import json, os, sys
 try:
     kind = sys.argv[1]
@@ -139,6 +225,18 @@ try:
         value = os.environ.get(name)
         if value is not None: value.encode('utf-8')
         print('None' if value is None else 'Some(' + json.dumps(value, ensure_ascii=False) + ')')
+    elif kind.startswith('file'):
+        data = open(sys.argv[2], 'rb').read()
+        if kind == 'file-text': print(data.decode('utf-8'))
+        elif kind == 'file-list': print(list(data))
+        else:
+            indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
+            print([len(data)] + [data[i] for i in indices])
+    elif kind == 'dir':
+        names = sorted(os.listdir(sys.argv[2]))
+        assert '.' not in names and '..' not in names
+        for name in names: name.encode('utf-8')
+        print(json.dumps(names, ensure_ascii=False))
     elif kind == 'cwd':
         value = os.getcwd()
         value.encode('utf-8')
@@ -170,9 +268,9 @@ def validate(rows):
         seen.add(ident)
         coverage.add((' '.join(token.split('=')[0] for token in label.split()), mode))
         assert (base / ident / 'main.hd').stat().st_size > 0
-        assert (base / ident / 'expect').stat().st_size > 0
+        assert (base / ident / 'expect').is_file()
     assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}
-    assert coverage == {
+    assert {item for item in coverage if not (item[0].startswith(('37-f', '37-g', '37-b Io', '37-d Io', '37-e Io')))} == {
         ('37-a(1) arity', 'type'), ('37-a(2) arity', 'type'), ('37-a(4) arity', 'type'),
         ('37-a(3) arity labels', 'type'), ('37-a(3) inferred arity labels', 'type'),
         ('37-a(5) abort', 'print'), ('37-a(5) capture', 'print'),
@@ -193,6 +291,21 @@ def validate(rows):
         ('37-e(3) handler', 'print'), ('37-e(4) visible', 'print'), ('37-e(5) contract', 'reject'),
         *[('37-b2(6) ' + shape, 'print') for shape in ('parameter', 'function', 'let')],
     }, sorted(coverage)
+    io_coverage = {item for item in coverage if item[0].startswith(('37-f', '37-g', '37-b Io', '37-d Io', '37-e Io'))}
+    expected_io = {
+        *[('37-f(1) '+shape, 'print') for shape in ('existing','empty','binary','large','unicode','bytes-existing','bytes-empty','bytes-binary','bytes-unicode','text-existing','text-empty','text-unicode')],
+        *[('37-f(2) '+shape, 'print') for shape in ('empty','ascii','binary','overwrite')],
+        *[('37-f(3) '+shape, 'error' if shape=='invalid' else 'print') for shape in ('empty','one','many','unicode','invalid','subdir','hidden')],
+        *[('37-f(4) '+shape, 'print') for shape in ('closed','empty','content','large')],
+        ('37-f(5) second', 'print'), ('37-b Io','entry-type'),
+        ('37-d Io override','print'), ('37-d Io missing-arm','reject'),
+        *[('37-e Io '+shape,'reject') for shape in ('effect','def','implementation','operation')],
+    }
+    for operation, paths in [('read_file', ('missing','file/child','directory','denied-file')), ('read_dir', ('missing','file','denied-dir')), ('write_file', ('missing/child','readonly/child','directory'))]:
+        for path in paths:
+            for kind, group, mode in [('failure','37-g('+str({'read_file':1,'read_dir':2,'write_file':3}[operation])+')','error'), ('success','37-g(4)','print'), ('caught','37-g(5)','print')]:
+                expected_io.add((group+' '+operation+' '+path+' '+kind,mode))
+    assert io_coverage == expected_io, (io_coverage ^ expected_io)
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
 def without(shape):
@@ -243,6 +356,7 @@ output_controls() {
 check 'output controls: equal, empty, different, newline, status' output_controls
 probe() {
     local mode="$1" dir="$2" status=0
+    if [ -e "$dir/requires-user" ] && [ "$(id -u)" -eq 0 ]; then echo 'NG: skipped-as-root'; return 1; fi
     if [ "$mode" = reject ]; then
         cargo run --offline -q -- check "$dir/main.hd" >"$dir/out" 2>"$dir/err" || status=$?
         cat "$dir/err"
@@ -281,7 +395,14 @@ if oracle:
     assert expected.returncode == 0 and not expected.stderr and expected.stdout, expected
     (base / 'expect').write_bytes(expected.stdout)
 with (base / 'out').open('wb') as out, (base / 'err').open('wb') as err:
-    result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=30)
+    def close_stdin(): os.close(0)
+    data = (base / 'stdin').read_bytes() if (base / 'stdin').exists() else b''
+    if (base / 'closed-stdin').exists():
+        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, preexec_fn=close_stdin, stdout=out, stderr=err, timeout=30)
+    else:
+        result = subprocess.run([str(base / 'main'), *arguments], cwd=base, env=environment, input=data, stdout=out, stderr=err, timeout=30)
+if (base / 'written.json').exists():
+    assert (base / 'output').read_bytes() == bytes(json.loads((base / 'written.json').read_text()))
 (base / 'status').write_text(str(result.returncode))
 PY
         [ "$?" -eq 0 ] || return 1

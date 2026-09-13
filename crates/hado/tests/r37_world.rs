@@ -146,3 +146,59 @@ int32_t hado_entry(void) {
     assert!(output.status.success(), "{output:?}");
     assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
 }
+
+#[test]
+fn io_is_a_prelude_effect_with_all_four_defaults() {
+    Case::new("def main = [List.length args, Bytes.length read_stdin]\n").prints_type("Int List {Env, Error, Io}");
+    let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
+    for operation in ["read_file", "write_file", "read_dir", "read_stdin"] {
+        assert!(checked.default_operations.contains_key(operation), "{operation}");
+    }
+}
+
+#[test]
+fn io_runtime_classifies_errno_and_copies_sorts_and_filters_directory_names() {
+    let case = Case::new("def main = 0\n");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let source = case.0.join("io_probe.c");
+    let executable = case.0.join("io_probe");
+    std::fs::create_dir(case.0.join("entries")).unwrap();
+    for name in ["z", "m", "a", ".hidden", "日本語"] {
+        std::fs::write(case.0.join("entries").join(name), b"data").unwrap();
+    }
+    std::fs::write(case.0.join("file"), b"data").unwrap();
+    std::fs::write(&source, r#"
+#include "hado_runtime.c"
+#include <assert.h>
+int32_t hado_entry(void) {
+    assert(io_status_from_errno(ENOENT) == 1);
+    assert(io_status_from_errno(EACCES) == 2);
+    assert(io_status_from_errno(ENOTDIR) == 3);
+    assert(io_status_from_errno(EISDIR) == 4);
+    assert(io_status_from_errno(EIO) == 4);
+    struct { size_t length; unsigned char bytes[10]; } path = {7, "entriesXX"};
+    assert(hado_io_read_dir((const HadoString *)&path) == 0);
+    assert(hado_io_dir_count(0) == 5);
+    const char *expected[] = {".hidden", "a", "m", "z", "日本語"};
+    for (int i = 0; i < 5; i++) {
+        HadoString *name = hado_io_dir_get(i);
+        assert(name->length == strlen(expected[i]));
+        assert(memcmp(name->bytes, expected[i], name->length) == 0);
+    }
+    path.length = 4;
+    memcpy(path.bytes, "fileXX", 6);
+    assert(hado_io_read_file((const HadoString *)&path) == 0);
+    HadoString *bytes = hado_io_take_bytes(0);
+    assert(bytes->length == 4 && memcmp(bytes->bytes, "data", 4) == 0);
+    assert(hado_io_write_file((const HadoString *)&path, bytes) == 0);
+    assert(hado_io_read_dir((const HadoString *)&path) == 3);
+    return 0;
+}
+"#).unwrap();
+    let compiled = Command::new("cc").args(["-std=c11", "-Wall", "-Werror"])
+        .arg(&source).arg("-I").arg(root.join("runtime")).arg("-lgc").arg("-o").arg(&executable).output().unwrap();
+    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+    let output = Command::new(executable).current_dir(&case.0).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
+}
