@@ -2371,3 +2371,41 @@ m0 の赤が m2 の 5・m3 の 9・m7 の 3・r23 の 23-c に連鎖した。
 **仕様への疑義:** §49 は `Int.parse` が何を受理するかを定めていない。本ラウンドは往復から下限を導き、字種の上限と先行ゼロの扱いを決定した。R38 で §49 に 1 文足すかどうかを判断する。R35 の「長さが違う Array の `compare` の順序」と同じ扱いである。
 
 **所要（ログの首尾）:** builder が 2 本で 46 分（20 / 26）、審査が 2 本で 96 分（21 / 75）、計画審査が 3 本で 15 分。全走は 54 分。
+
+## R37 世界との境界（2026-09-14）
+
+24.1 の D 表（D1〜D6）を実装した。prelude が効果 `Env` と `Io` を持ち、操作は `reply`、handler が無ければ prelude の既定の `def` が応える。argv / env / cwd / stdin / ファイル / ディレクトリが hado から読めるようになり、E2（`tools/gates/`）が argv でディレクトリを受けて集計を印字する形で完成した。**全門番が満点になり、v0.3 の入口の赤が消えた。**
+
+指揮・計画は claude（opus-5）。実装は codex（gpt-6-astra high）、審査は opencode（deepseek-v4.1-flash）と、落ちた後の再送が cursor（grok-4.6-xhigh）。**計画審査は 6 巡かかり、致命を 4 件捕まえた。**
+
+| 判定 | 実測 |
+|---|---|
+| 37-a | 効果の宣言（`reply` の結果の効果行 `{Error}`）が parser を通り、呼び出し位置の行が `{Error, Foo}` になる（印字は整列順） |
+| 37-b | 既定の `def` の効果行が操作の宣言より広ければ推論の後に診断。ローカル束縛が prelude の操作名を影にできる（`Int` 型と `Fn` 型の両方で） |
+| 37-c | argv / env / cwd の往復。非 UTF-8 は `"InvalidUtf8"` |
+| 37-d | (1) handler 無しで既定の `def` が応える。(2) 利用者の `handler Env as MyEnv` が優先する。(3) `handler Error` が非 UTF-8 の `message` を受け取る。(4) 1 操作を落とすと E605。(5) prelude の `Reply` 操作すべてに既定の対応がある（`r37_world.rs` が `Checked` を直接見る） |
+| 37-e | 利用者の `effect Env` / `module Env` / 同名の宣言が E205。サブディレクトリでも同じ。**`module EnvDefault` / `IoDefault` も E205**（既定実装の契約名） |
+| 37-f | ファイルの読み書き、`read_dir`（整列・`.` と `..` を除く）、`read_stdin`（閉じた stdin は空、2 回目も空） |
+| 37-g | I/O の失敗の分類（`ENOENT` → 1、`EACCES`/`EPERM` → 2、`ENOTDIR` → 3、その他 → 4）が `message` に写る |
+| 37-h | E2 が実行時に生成したディレクトリを argv で受け、`PASSED: ` に一致する**最後の**行を選んで集計する。空 argv は `MissingDirectory` |
+| 37-i | 受理コーパス `env_io_roundtrip`、lock、`verify-m1-corpus.sh` の pairs から `Env と Io` が消えた |
+| `verify-r37.sh` | `PASSED: 254/254` |
+| 全走 | **赤ゼロ**（04:23:56 → 05:56:51、93 分）。m0 7/7、m1-corpus 7/7、m1-spec 5/5、m2 8/8、**m3 12/12**、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9〜r37 の 24 本すべて満点（r34 1360/1360、r35 714/714、r36 388/388、r37 254/254）、`cargo test --offline --no-fail-fast` 0 failed |
+
+**既定実装は `handler` ではなく普通の `def` にした。計画審査 3 巡目の致命がそれを決めた。** 当初の設計は「prelude に `handler Env as EnvDefault` を置き、mono が handler の無い `Reply` でそれを被せる」だった。審査は **handler の腕が `with` で被せたときしか推論されない**ことを実測で示した（`infer.rs:1969` の `handler_answer` は `with_handler` からしか呼ばれず、`infer.rs:175` `:186` と `dependencies.rs:17` は `Item::Handler` を無視する）。`handler Foo as H` の `reply pick => "not an int"` は `reply pick: Int` の宣言と食い違っても `check` が終了 0 になる。腕が推論されないと mono は span の型（`composite_types`）を引けず、既定実装に必ず入る argv の分類・`Bytes.to_string`・`raise` で `missing list type` などに落ちる。**E605（`infer.rs:1884-1891`）は腕名しか見ないので型の保証にはならない。**
+
+**同名の影の欠陥は mono と infer の両方にあり、直す層を 2 度間違えた。** 24.9 に「ローカル束縛が prelude 操作名を shadow すると昇格が崩れる」として R38 に回していた穴である。計画審査 3 巡目が `def f (raise: Int): Int => raise` が `check` を通って build 後に落ちることを実測し、4 巡目が**直す場所は `namespaces.rs` ではなく mono である**ことを実測で特定した（`namespaces.rs` の `operation` は bare 名に対して恒等変換なので、束縛の集合を渡しても効かない。実際に操作として扱っているのは `mono.rs:482-485` と `:1424-1427` が `operations` を `scope` より先に見ているところ）。5 巡目が**infer 側にも影がある**ことを示し（`unwrap_operation` が `Fn` 型のローカルを操作として解釈して E305）、6 巡目が「外側の `Fn` の結果が登録済みの効果 ADT であることを確かめる」4 行の直しをコピーで実測して合格にした。**判定 37-b2 に `Fn` 型のローカルを必ず含めることになったのは、`Int` 型のローカルでは `unwrap_operation` が素通しするからである。**
+
+**builder が工程 3 で 2 度「中断」を返し、2 度とも正しかった。** 1 度目は「`verify-r33.sh:997`（33-k(2)）が E2 を引数なしで起動して固定文字列を期待している」「`:1044`（33-k(4)）が集計の join の移動で空虚になっている」「`crates/hado/tests/corpus.rs:68` も受理ケースの実行ファイルを cwd と stdin を固定せずに起動する」の 3 点。**指揮者の「受理ケースを起動するのは `verify-m6.sh` だけ」という前提が誤りだった**（`scripts/` しか grep していなかった）。2 度目は「受理ケース `env_io_roundtrip` が `read_file "main.hd"` を読むが、`corpus.rs` は本文から素の一時ディレクトリに書き出してビルドするのでケースの木が無い」。どちらも指揮者が直した。
+
+**工程 3 の後の全走で `verify-m3.sh` の検査 11（`stdlib-types`）が赤になり、門番ではなく `stdlib` の形を直した。** この検査は `stdlib/*.hd` の最初の `module` / `implement` より前に `def` があると落ちる。既定実装を素の `def` として並べる形がこれに当たった。**利用者から既定の `def` が見えないことは実測している**（`default_args` の呼び出しは E204、利用者の `def default_args` は衝突しない）が、**それは `file_scopes.rs` が top-level の `def` を `file{N}$name` に改名する副作用であって、単一ファイルの経路では走らないので設計の保証ではない**。門番を「効果を宣言するファイルは免除」に変えると、免除の範囲が R37 が書いた 2 ファイルにちょうど合う形になり、AGENTS.md が名指ししている「門番を緩めて green にする」そのものになる。**赤を出した側（指揮者）が門番を書き換えるのは判定者と作成者の分離にも反する。** `stdlib/env.hd` と `stdlib/io.hd` を `module EnvDefault` / `implement EnvDefault as EnvDefault` の形に直し、対応を `op 名 → <効果名>Default.<op 名>` に変えた。module member は `values` ではなく `module_definitions` に入る（実測: `values["String.length"]` は false、`module_definitions["String.length"]` は true）。予約は自動で効き（`module EnvDefault` が既存経路で E205）、`namespaces.rs` は無変更で済んだ。
+
+**審査の割当を 1 度切り替えた。** opencode（deepseek-v4.1-flash）が工程 2 と工程 3 で判定行を出さずに落ちた。工程 2 は作業ディレクトリの外（`/usr/include/gc/gc.h`）の読みを拒否されて停止し、前置きを足して再送したら通った。工程 3 は 100 分走ってから `runtime/hado_runtime.c` の読みの途中で落ち、**注入を戻さないまま止まっていた**（指揮者が `git checkout -- .` で復元）。ユーザー指定のフォールバック先である cursor（grok-4.6-xhigh）へ、前任が実測した門番 14 本の結果と検出済みの注入 4 件、未着手の注入 5 件を引き継いで再送した。**落ちた委譲先の線を回収しないと、次の担当が同じ浅い注入から始めることになる。**
+
+**C は UTF-8 を一切見ない。** argv・env・cwd・ディレクトリ名は `Bytes` で返し、hado 側が `Bytes.to_string` に通す。非 UTF-8 の `"InvalidUtf8"` は R34 の機構がそのまま出す。C が返すのはスカラと `Bytes` だけで、`raise` は hado にある。I/O の失敗は状態の `Int` と、payload を取る別の intrinsic に分けた。**intrinsic はすべて引数を 1 つ以上取る**（`__argv_count` のような bare の `__` 名は E203 になるので、ダミーの `Int` `0` を足した）。
+
+**仕様への疑義（5 件。R38 で判断する）:** `read_dir` の整列と `.`/`..` の除外、`read_stdin` の 2 回目、`env` の**値**の非 UTF-8、E2 の空 argv の `MissingDirectory`、そして**既定実装の契約名 `EnvDefault` / `IoDefault` の予約**（§47 の予約名の一覧に無い。既定実装を `module` に入れる決定から出た副産物）。
+
+**24.9 の未確認から 2 件が解けた:** サブディレクトリの中の `handler Error` が E204 になる件（工程 1 で決定 4c として直した）と、ローカル束縛が prelude 操作名を影にする件（工程 0 で決定 4a として直した）。
+
+**所要（ログの首尾）:** builder が 6 本で 197 分、実装審査が 4 本、計画審査が 6 本で 62 分。全走は 93 分。

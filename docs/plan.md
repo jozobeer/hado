@@ -2313,6 +2313,10 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 **R36 の終了時（2026-09-13、`fa8fddf`）:** 赤は 3 本に減った。`verify-m1-corpus.sh` 6/7 の pairs は 1 項目（Env と Io）だけになり、**`Int.parse` が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。**`verify-m7.sh` が 3/3 で満点に戻った**（`prelude inventory: 39/39`。§49 の関数集合をすべて満たした）。`verify-m4.sh` 131/131、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`cargo test --offline --no-fail-fast` 0 failed。
 
+**R37 の終了時（2026-09-14、全走 04:23:56→05:56:51 の 93 分）: 赤はゼロ。全門番が満点になった。** `verify-m1-corpus.sh` が **7/7**（pairs から Env と Io が消えた）、`verify-m2.sh` が **8/8**、`verify-m3.sh` が **12/12**。m0 7/7、m1-spec 5/5、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9〜r37 の 24 本すべて満点（`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254）、`cargo test --offline --no-fail-fast` 0 failed。**24.5 が R38 の入口に置いた「全門番が満点」がここで成立した。**
+
+**`verify-m3.sh` の検査 11（`stdlib-types`）が一度赤になった。門番ではなく `stdlib` の形を直した。** この検査は `stdlib/*.hd` の最初の `module` / `implement` より前に `def` があると落ちる。既定実装を素の `def` として並べる形がこれに当たった。`stdlib/env.hd` と `stdlib/io.hd` を `module EnvDefault` / `implement EnvDefault as EnvDefault` の形に直して解消した（台帳の R37 に理由）。
+
 ### 24.9 不確実性
 
 - 確定: 前提（`v0.2.3`、`docs/bug.md` 空）、24.7 の探針、24.1 の決定、24.4 のレビュー対応
@@ -2322,13 +2326,10 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 - R34 で確定（`docs/ledger.md` の R34）: `BUILTIN_TYPES` に足すだけで `type Bytes` は E205（位置は 2 回目の宣言の名前）。`Bytes.of_list` は確保 + 充填で 3 万要素が 76ms。組み込み型の解決は `types::builtin_type` の 1 本に寄せた。**prelude の効果の操作がサブディレクトリから見えない R32 由来の欠陥を直した**（`namespaces.rs` の `prelude_operations`、§47・§57）。**教訓 4 つ:** 入力の形が列挙できる判定は手順書の段階で生成規則として書く。境界値は乱数任せにせず決定的に含める。期待値は独立した oracle（python3 の decoder や同名操作）から導く。門番の時間切れは判定の失敗と区別する
 - R35 で確定（`docs/ledger.md` の R35）: emit は cranelift なので、要素の load 型を `repr::machine_type` から決められ、C の ABI の幅問題は存在しない。`type A Arr = A Box` の別名は parser が拒否する（`expected a record or a leading | for an ADT`）。`type_arities` に名前を直接登録するだけで引数付きの注釈が通り、`infer.rs` の「引数付きは未実装」の門の手前で解決できる。`BUILTIN_TYPES` に足すだけで E205 になる（Bytes と同じ）。`infer/functors.rs` の `shared_body_type` は既存の arity 参照で引数付きの組み込み型を通すので、Array では写し落としが起きなかった。`composite_types` の span 地図（`infer.rs:945` が Apply / Call を記録）は結果しか多相でない intrinsic の要素型を運べる（`specialization.resolve` が要る）。**教訓 1 つ:** R34 の教訓（分類からの生成・決定的な境界値・独立した oracle）を手順書の段階で書くと、判定器が 1 巡目から穴を持たない。R34 は審査 14 巡・指摘 26 件だったが、R35 は 3 工程とも 1 巡で合格し、注入 35 件をすべて検出した
 - R36 で確定（`docs/ledger.md` の R36）: 単相の intrinsic は `runtime_abi.rs` の 5 箇所（enum / `intrinsic_name` / `value_signature` / `ALL` / `declaration`）に足すだけで通り、R35 の `is_polymorphic()` の 4 分岐を触らずに済む。`HadoString` は NUL 終端でないので `strtoll` に渡せず、先行ゼロを無制限に受理する決定があると固定長のバッファにも写せない（直接走査になる）。C の整数除算は 0 方向に切り捨てるので、負の値では `ceil` になり `acc < (INT64_MIN + digit) / 10` がちょうど境界を表す。**教訓 1 つ:** 数値の境界は、式を自分で展開することと審査に出すことの両方が要る。R36 の致命（正の入力で符号を戻す段の溢れ）は、指揮者が式を展開して見つけたのと、審査が算法を C に書いて実測したのとで、独立に同じ結論に達した
+- R37 で確定（`docs/ledger.md` の R37）: handler の腕は `with` で被せたときしか推論されない（`infer.rs:1969` の `handler_answer` は `with_handler` からしか呼ばれず、`dependencies.rs:17` と `infer.rs:175` `:186` は `Item::Handler` を無視する）ので、**handler を既定実装には使えない**。E605 は腕名しか見ないので型の保証にならない。既定実装は普通の `def` にし、`module <効果名>Default` / `implement` の中に置く（`stdlib/*.hd` は最初の `module` / `implement` より前に `def` を置けない。`verify-m3.sh` の検査 11）。module member は `values` ではなく `module_definitions` に入る。prelude の契約名は自動で E205 になるので `namespaces.rs` に足す必要は無い。ローカル束縛の影は mono（`operations` を `scope` より先に見る 4 箇所）と infer（`unwrap_operation`）の両方にあり、infer 側は「外側の `Fn` の結果が登録済みの効果 ADT か」を見る 4 行で足りる。**教訓 2 つ:** 直す層は、症状の出る層ではなく実測で特定する（`namespaces.rs` → mono → infer と 2 度外した）。受理ケースを起動する経路は `scripts/` だけでなく `crates/hado/tests/corpus.rs` にもある（grep の範囲を先に確かめる）
 - 未確認（実装ラウンドで確認する）:
-  - サブディレクトリの中の `handler Error` が E204 になる（R36 の工程 1 で builder が注入の試作で踏んだ。原因未調査。R38 で判断する）
   - `%` を使う未注釈の再帰生成器が E306 になる（R35 の工程 0 で踏んだ。原因未調査。R38 で判断する）
   - 長さが違う Array の `compare` の順序を §45 が定めていない（R35 は python3 のリスト比較に合わせた。R38 で §45 に 1 文足すか判断する）
-  - parser が効果の操作の戻り型の効果行を保持するか（R37）
-  - ファイル局所の `def args` と prelude の操作 `args` の解決順（影になるか E205 か）（R37）
-  - `read_stdin` を 2 回呼んだときの 2 回目の値（R37）
   - 効果が `dependencies.rs` の宣言に数えられておらず未使用の効果が E513 にならない件（§50 は効果にも当てる。R37 の D で当たったら `docs/bug.md` に置く）
 - R31 の台帳の未確認 3 件（型引数付き効果の重ね、`fn` の本体の `capture`、handler の値引数）は本版の範囲外で、D の設計で当たったら `docs/bug.md` に置く
 
