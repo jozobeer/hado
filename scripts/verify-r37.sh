@@ -556,5 +556,49 @@ PY
 }
 check '37-j actual m6 launch function: relative file, EOF and empty argv' m6_launch_conditions
 
+full_gate() {
+    local gate="$1" status=0
+    bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
+    tail -n 4 "$workdir/$gate.log"
+    [ "$status" -eq 0 ] || { cat "$workdir/$gate.log"; return 1; }
+    python3 - "$workdir/$gate.log" <<'PY'
+from pathlib import Path
+import re, sys
+
+def complete(source):
+    lines = source.splitlines()
+    match = re.fullmatch(r'PASSED: (\d+)/(\d+)', lines[-1]) if lines else None
+    return bool(match and int(match[1]) > 0 and match[1] == match[2]
+                and not any(line.startswith('NG:') for line in lines))
+assert complete('PASSED: 1/1\n')
+assert not any(map(complete, ('', 'PASSED: 0/0\n', 'PASSED: 1/2\n', 'NG: failed\nPASSED: 1/1\n')))
+assert complete(Path(sys.argv[1]).read_text()), 'missing or non-full gate result'
+PY
+}
+check '37-i corpus pairs and regressions' full_gate m1-corpus
+check '37-i no missing pairs' grep -qxF 'OK: 3 pairs' "$workdir/m1-corpus.log"
+check '37-k prelude corpus and cargo tests' full_gate m7
+check '37-k cargo tests executed without failures' python3 - "$workdir/m7.log" <<'PY'
+from pathlib import Path
+import re, sys
+
+def passed_tests(source):
+    results = re.findall(r'^test result: (\w+)\. (\d+) passed; (\d+) failed;', source, re.M)
+    assert results and sum(int(passed) for _, passed, _ in results) > 0
+    assert all(state == 'ok' and int(failed) == 0 for state, _, failed in results)
+    return sum(int(passed) for _, passed, _ in results)
+assert passed_tests('test result: ok. 1 passed; 0 failed;') == 1
+for source in ('', 'test result: ok. 0 passed; 0 failed;',
+               'test result: FAILED. 1 passed; 1 failed;',
+               'test result: ok. 1 passed; 0 failed;\ntest result: FAILED. 0 passed; 1 failed;'):
+    try:
+        passed_tests(source)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('cargo summary mutation escaped')
+print(f'cargo test: {passed_tests(Path(sys.argv[1]).read_text())} passed; 0 failed')
+PY
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
