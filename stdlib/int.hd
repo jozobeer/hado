@@ -1,4 +1,9 @@
 module Int
 def to_string(value: Int): String Pure
+def parse(value: String): Int {Error}
 implement Int as Int
 def to_string value => __int_to_string value
+def parse value =>
+  if __int_parse_is_valid value
+    => __int_parse_unchecked value
+    | raise { message = "InvalidInt" }
