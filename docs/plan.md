@@ -2911,17 +2911,21 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
   - `def __default_args` のような名前の規約が要らない（`__` は `name_resolution.rs:167` で intrinsic として解決される）
   - **E605（`infer.rs:1879-1892`）が既定 handler に全操作の実装を強制する。** `Io` の 4 操作を 1 つ落とすと check で止まる
   - 利用者の `with MyEnv -> ...` が差し替えになるのは既存の `handler_for` の経路そのままで、D2 に合う
-  - **罠:** `checked.operations`（`infer.rs:1875`）は `op 名 → OpKind` しか持たず効果名を運ばない。`op 名 → 効果名` の対応を `register_effects`（`infer.rs:1866-1873`）で作って `Checked` に載せる 1 本が要る
+  - **罠 1:** `checked.operations`（`infer.rs:1875`）は `op 名 → OpKind` しか持たず効果名を運ばない。`op 名 → 効果名` の対応を `register_effects`（`infer.rs:1866-1873`）で作って `Checked` に載せる
+  - **罠 2:** `mono.rs:707-714` の `self.handlers` は AST 由来なので **prelude の handler と利用者の handler を両方含む**。効果名から handler を引くと、同じ効果に利用者の handler があるとき HashMap の順で非決定になる。**`Checked` に「効果 → 既定 handler の名前」も載せ、prelude の範囲（`lib.rs` の `prelude_items`）で決める。** 対応は 2 本（`op 名 → 効果名` と `効果名 → 既定 handler 名`）で、どちらも prelude の範囲から作る
 - **決定 2: C は scalar と Bytes だけを返し、`raise` は hado で書く。** R34 の `Bytes.of_list`・R36 の `Int.parse` の写しである。
   - **argv・env・cwd・ディレクトリの名前は `Bytes` で返し、hado 側が `Bytes.to_string` に通す。** 非 UTF-8 の `"InvalidUtf8"` は R34 の機構がそのまま出すので、**C は UTF-8 を一切見ない**
-  - `args` は `__argv_count: Int` + `__argv_get(Int): Bytes` の再帰で組む（`stdlib/bytes.hd` の `elements` が手本）。`env` は `__env_has(String): Bool` + `__env_get(String): Bytes`
+  - **すべての intrinsic は少なくとも 1 引数を取る。引数のない intrinsic は今の構文で呼べない。** `name_resolution.rs:163-169` は呼び出し位置にない `__` 名を E203 にし、parser の application は引数 1 個以上でしか `Apply` を作らない。**引数が要らないものは無視する `Int` のダミーを 1 つ取り、`0` を渡す**（`__argv_count(ignored: Int): Int` を `__argv_count 0` と呼ぶ）。C 側は引数を使わないことをコメントに書く
+  - `args` は `__argv_count 0` + `__argv_get(Int): Bytes` の再帰で組む（`stdlib/bytes.hd` の `elements` が手本）。`env` は `__env_has(String): Bool` + `__env_get(String): Bytes`
   - **C は `hado_abort_error` を絶対に呼ばない。** 呼ぶと利用者の `handler Error` を飛び越える。失敗は必ず hado 側の `raise { message = ... }` から起こす
-  - **I/O の失敗の分類は status を Int で返し、payload は別の intrinsic で取る。** `__io_read_file(path): Int`（0 成功 / 1 NotFound / 2 PermissionDenied / 3 NotADirectory / 4 IoFailure。syscall はここで 1 回だけ）→ 0 なら `__io_take_bytes(): Bytes`。`is_valid` + `unchecked` の 2 回 syscall にしない（2 回の間に状態が変わると失敗の分類がずれる）。`read_dir` も同じ形（`__io_read_dir(path): Int` → `__io_dir_count(): Int` + `__io_dir_get(Int): Bytes`）。status → `message` の対応は hado 側の 1 本の関数に書く
+  - **I/O の失敗の分類は status を Int で返し、payload は別の intrinsic で取る。** `__io_read_file(path): Int`（0 成功 / 1 NotFound / 2 PermissionDenied / 3 NotADirectory / 4 IoFailure。syscall はここで 1 回だけ）→ 0 なら `__io_take_bytes 0`。`is_valid` + `unchecked` の 2 回 syscall にしない（2 回の間に状態が変わると失敗の分類がずれる）。`read_dir` も同じ形（`__io_read_dir(path): Int` → `__io_dir_count 0` + `__io_dir_get(Int): Bytes`）。status → `message` の対応は hado 側の 1 本の関数に書く
 - **決定 3: 操作の結果の効果行を infer で通す。** 実測のとおり `reply pick: Int {Error}` の `{Error}` は呼び出し位置に届かない。`payload_type`（`infer.rs:892-899`）→ `annotation_inner`（`infer.rs:1627-`）は `Fn` の枝でしか `.effects` を読まず、`unwrap_operation`（`infer.rs:2039-2051`）が `Row::Closed(vec![*effect])` で効果 1 つに固定する。**`register_effects` で `op.ret` の効果行を op ごとに保存し、`unwrap_operation` でその行と合併する。**
-- **決定 4: `main` の効果の免除を prelude の効果の集合に一般化する。** `types.rs:76-78` の `has_user_effect` は `effect_ctor(ty) != "Error"` の直書きである。`Env` と `Io` を直書きで足すと次に増えたとき同じ穴になるので、**prelude の効果名の集合との照合に変える**。§5（`docs/spec.md:169`）の「`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`）に限る」がそのまま出る
+- **決定 4: `main` の効果の免除を prelude の効果の集合に一般化する。** `types.rs:76-78` の `has_user_effect` は `effect_ctor(ty) != "Error"` の直書きである。`Env` と `Io` を直書きで足すと次に増えたとき同じ穴になるので、**prelude の効果名の集合との照合に変える**。§5（`docs/spec.md:169`）の「`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`）に限る」がそのまま出る。**集合の出所は `lib.rs` の `prelude_items` の範囲から作り、`Checked` に載せる**（`infer` に `["Error", "Env", "Io"]` を直書きすると、次に prelude の効果が増えたとき同じ穴になる）
+- **決定 4b: prelude の操作と同名の利用者の宣言を E205 にする（D6、§57 の `docs/spec.md:2274`）。** 今は実装されていない。`namespaces.rs:69-84` の `declarations(item)` が `Item::Def` / `Item::SigDef` を返さないので、`:136-143` の prelude との衝突検査に載らない。しかも `namespaces.rs:390-397` の `operation` は bare 名が `prelude_operations` に一致すると無条件で prelude の操作に書き換えるので、**利用者の `def` は黙って影になる**（実測: 外の `def raise = 1` と `def main = raise` は E205 ではなく E513）。R37 は `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 7 名を prelude に足すので影響が最大になる。**`declarations` に値の空間（外の `def`、実装の `def`）を足し、prelude の操作との衝突を E205 にする。** 判定 37-e で固定する
+- **決定 4c: prelude の効果の handler をどのディレクトリにも置けるようにする（§58 の `docs/spec.md:2296`）。** `namespaces.rs:300-302` は `declared_directory(&handler.effect) != directory` で全 handler を効果と同じディレクトリに強制し、prelude の効果（bare 名なので `declared_directory` は空）はサブディレクトリで必ず不一致になる。**prelude の効果を除外する。** これは 24.9 に「サブディレクトリの中の `handler Error` が E204」として残していた既知の穴で、R37 の判定 37-e が「`handler Env as X` はどのディレクトリにも置ける」と主張する以上、ここで直す
 - **決定 5: `main` は引数を取らない（E206 のまま）。** argv は `Env.args` で取る。`names.rs:419-426` の `entry_form` は触らない
 - **決定 6: C の `int main` だけを `int main(int argc, char **argv)` に変え、`argc` / `argv` をファイルスコープの static に退避する。** `hado_entry(void)` の宣言（`runtime/hado_runtime.c:11`）も `emit.rs:592-595` と `:64-70` の signature も**触らない**。これが最小の変更である。`scripts/verify-m0.sh:94-99` は `GC_INIT` `hado_entry` `hado_alloc` `GC_malloc` の綴りを `runtime/` に求めるだけなので緑のまま
-- **決定 7: `effect Io` の衝突を工程 0 で改名する。** `tests/accept/effect_row/main.hd`（コーパス。lock も更新する）と `crates/hado/tests/r24_effects.rs` の 8 箇所の `Io` を `Log` にする。`crates/hado/tests/r23_syntax.rs:135` `:137` は `roundtrip`（parse と canonical 印字の往復）なので触らない
+- **決定 7: `effect Io` の衝突を工程 0 で改名する。** `tests/accept/effect_row/main.hd`（コーパス。lock も更新する）と `crates/hado/tests/r24_effects.rs` の `Io` を `Log` にする。**`effect Io` の 8 箇所だけでなく、`{Io}` `{Ask, Io}` `{Io, Int Yield}` の型注釈と `print_type` の期待文字列を含む全出現を直す**（13 行・25 箇所。片方だけ直すと E205 か E204 になる）。`crates/hado/tests/r23_syntax.rs:135` `:137` は `roundtrip`（parse と canonical 印字の往復）なので触らない
 - **決定 8: 受理コーパスの起動条件を門番に固定する。** `scripts/verify-m6.sh:26` は cwd も stdin も固定していない。24.5 の R37 の行が「受理ケースは空 argv・閉じた stdin・ケース内の相対パスで起動する」と定めているので、**`cwd=str(case)` と `stdin=subprocess.DEVNULL` を足す**（門番を強くする変更で、判定の条件は変えない）。実行ファイルのパスは絶対なので cwd を変えても動く
 - **決定 9: `path` と env の `name` は libc に直接渡さない。** `HadoString` は NUL 終端でない（`runtime/hado_runtime.h:6-9`）。`fopen` `opendir` `getenv` `stat` に渡す前に `length + 1` の領域を確保して NUL を付ける。R36 は「写さない」が正解だったが、**R37 は逆で「写さないと越境する」**
 
@@ -2931,7 +2935,6 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 - **`read_stdin` の 2 回目は空の `Bytes`**（EOF）。24.7 の未確定
 - **`env` の値が非 UTF-8 なら `"InvalidUtf8"` を raise する**（`None` ではない）。§49（1974 行）の「非 UTF-8 の名前は `Error` を raise する」を値にも当てる
 - **E2 の空 argv は `raise { message = "MissingDirectory" }`。** `tools/gates/` は利用者のコードなので §49 の表の外でよい（R34 の `"InvalidLine"` が先例）
-- **`args` はプログラム名を除く**（§49 の 1974 行にある）ので、`verify-m6.sh` が実行ファイル 1 つだけで起動する形では空リストになる
 
 ### 期待値の根拠
 
