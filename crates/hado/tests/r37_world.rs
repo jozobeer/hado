@@ -70,3 +70,79 @@ fn user_operation_parameters_shadow_operations() {
 fn shadowed_capture_is_a_local_let_value() {
     Case::new("effect Foo\ncapture tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
 }
+
+#[test]
+fn prelude_reply_defaults_cover_every_operation() {
+    let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
+    let replies: std::collections::HashSet<_> = checked.operations.iter()
+        .filter(|(_, kind)| **kind == hado::parser::OpKind::Reply)
+        .map(|(name, _)| name).collect();
+    assert!(!replies.is_empty());
+    assert_eq!(replies, checked.default_operations.keys().collect());
+    for definition in checked.default_operations.values() {
+        assert!(checked.definitions.contains_key(definition), "{definition}");
+    }
+}
+
+#[test]
+fn default_definitions_are_required_and_checked_after_inference() {
+    let prefix = "effect Error\nabort raise(error: Exception)\neffect World\n";
+    for (operation, definition, expected) in [
+        ("reply pick: Int", "", Some("E204")),
+        ("reply pick: Int", "def default_pick = \"wrong\"", Some("E305")),
+        ("reply pick: Int", "def default_pick = raise { message = \"x\" }", Some("E302")),
+        ("reply pick: Int {Error}", "def default_pick = 11", None),
+        ("reply pick(n: Int): Int {Error}", "def default_pick n => n + 1", None),
+        ("reply pick(n: Int): Int", "def default_pick = 11", Some("E305")),
+        ("reply pick: Int", "def default_pick n => n + 1", Some("E305")),
+    ] {
+        let source = format!("{prefix}{operation}\n{definition}\ndef main = 0\n");
+        let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");
+        match expected {
+            Some(code) => assert_eq!(result.err().expect(&source).code, Some(code.to_owned()), "{source}"),
+            None => assert!(result.is_ok(), "{source}: {:?}", result.err()),
+        }
+    }
+}
+
+#[test]
+fn runtime_preserves_argv_and_copies_length_delimited_environment_names() {
+    let case = Case::new("def main = 0\n");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let source = case.0.join("probe.c");
+    let object = case.0.join("probe.o");
+    let executable = case.0.join("probe");
+    std::fs::write(&source, r#"
+#include "hado_runtime.h"
+#include <assert.h>
+#include <string.h>
+int32_t hado_entry(void) {
+    assert(hado_argv_count(0) == 3);
+    const HadoString *first = hado_argv_get(0);
+    assert(first->length == 5 && memcmp(first->bytes, "first", 5) == 0);
+    assert(hado_argv_get(1)->length == 0);
+    assert(hado_argv_get(2)->length == 1 && hado_argv_get(2)->bytes[0] == 255);
+    struct { size_t length; unsigned char bytes[9]; } key = {7, "R37_KEYX"};
+    assert(hado_env_has((const HadoString *)&key) == 1);
+    const HadoString *value = hado_env_get((const HadoString *)&key);
+    assert(value->length == 6 && memcmp(value->bytes, "copied", 6) == 0);
+    key.length = 8;
+    assert(hado_env_has((const HadoString *)&key) == 1);
+    value = hado_env_get((const HadoString *)&key);
+    assert(value->length == 4 && memcmp(value->bytes, "tail", 4) == 0);
+    key.bytes[0] = 'Z';
+    assert(hado_env_has((const HadoString *)&key) == 0);
+    return 0;
+}
+"#).unwrap();
+    let compiled = Command::new("cc").args(["-std=c11", "-Wall", "-Werror", "-c"])
+        .arg(&source).arg("-I").arg(root.join("runtime")).arg("-o").arg(&object).output().unwrap();
+    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+    hado::link_executable(&object, &executable).unwrap();
+    use std::os::unix::ffi::OsStrExt;
+    let output = Command::new(executable).args(["first", ""])
+        .arg(std::ffi::OsStr::from_bytes(&[255])).env("R37_KEY", "copied").env("R37_KEYX", "tail")
+        .current_dir(&case.0).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
+}
