@@ -1,0 +1,7 @@
+// spec: §49
+// item: Env と Io
+// expect-error: NotADirectory
+// needs: prelude
+def main =
+  do write_file "ordinary" (Bytes.of_string "file") ->
+  read_dir "ordinary"
