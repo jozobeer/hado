@@ -3124,7 +3124,7 @@ Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作�
 ### 触ってよい場所
 
 工程 0: `scripts/run-gates.sh`（新設）、`scripts/verify-r38.sh`（新設）、`tools/gates/`（oracle と食い違ったときだけ。**食い違いは既定で E2 の側を直す**）。
-工程 1: `docs/spec.md`（追記だけ）、`docs/bug.md`。
+工程 1: `docs/spec.md`（追記だけ）、`docs/bug.md`、`scripts/verify-r38.sh`（**判定 38-d の分だけ**。38-d は bug.md の節の再現を測るので、節が決まってからでないと書けない。38-a・38-b・38-c は工程 0 で済んでいるので触らない）。
 工程 2: `docs/ledger.md`、`tests/corpus.sha256`。
 
 **`crates/hado/src/` と `runtime/` と `stdlib/` は触らない。** 触る必要が出たら、それは実装の穴を直すことなので、止めて報告する。
