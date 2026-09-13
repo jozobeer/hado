@@ -3168,6 +3168,30 @@ fn display_list(value: Expression, element: Type, context: &mut DisplayContext<'
     concat_display(display_text("["), concat_display(items, display_text("]"))?)
 }
 
+fn display_array(value: Expression, context: &mut DisplayContext<'_>) -> Result<Expression, String> {
+    let id = FunctionId(context.next);
+    context.next += 1;
+    let signature = Signature { parameters: vec![value.ty(), Type::Int], result: Type::String };
+    let parameter = Expression::Variable { id: 0, ty: value.ty() };
+    let body = display_array_items(parameter, id, &signature, context)?;
+    context.functions.push(Function { id, name: format!("format_array_items_{id:?}"), signature: signature.clone(), parameters: vec![0, 1], captures: vec![], body });
+    let items = Expression::call_direct(id, &signature, vec![value, Expression::Constant(Constant::Int(0))])?;
+    concat_display(display_text("Array.of_list ["), concat_display(items, display_text("]"))?)
+}
+
+fn display_array_items(value: Expression, id: FunctionId, signature: &Signature, context: &mut DisplayContext<'_>) -> Result<Expression, String> {
+    use crate::{parser::BinOp, runtime_abi::RuntimeFunction};
+    let index = Expression::Variable { id: 1, ty: Type::Int };
+    let length = Expression::call_array(RuntimeFunction::ArrayLength, vec![value.clone()], None)?;
+    let at_end = Expression::Binary { op: BinOp::Eq, left: Box::new(index.clone()), right: Box::new(length.clone()) };
+    let head = context.format(Expression::call_array(RuntimeFunction::ArrayGet, vec![value.clone(), index.clone()], None)?)?;
+    let next = Expression::Binary { op: BinOp::Add, left: Box::new(index), right: Box::new(Expression::Constant(Constant::Int(1))) };
+    let last = Expression::Binary { op: BinOp::Eq, left: Box::new(next.clone()), right: Box::new(length) };
+    let remaining = Expression::call_direct(id, signature, vec![value, next])?;
+    let suffix = branch(last, display_text(""), concat_display(display_text(", "), remaining)?)?;
+    branch(at_end, display_text(""), concat_display(head, suffix)?)
+}
+
 fn display_text(text: &str) -> Expression {
     Expression::Constant(Constant::String(text.into()))
 }
@@ -3204,6 +3228,9 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
         Type::Unit => return Ok(text("()")),
         Type::Data(name, parameters) if name == "List" && parameters.len() == 1 => {
             return display_list(value, parameters[0].clone(), context);
+        }
+        Type::Data(name, parameters) if name == ARRAY && parameters.len() == 1 => {
+            return display_array(value, context);
         }
         ty @ Type::Data(..) if matches!(&ty, Type::Data(name, _) if checked.records.contains_key(name)) => {
             let Type::Data(name, _) = &ty else { unreachable!() };
