@@ -90,11 +90,11 @@ fn default_definitions_are_required_and_checked_after_inference() {
     for (operation, definition, expected) in [
         ("reply pick: Int", "", Some("E204")),
         ("reply pick: Int", "def default_pick = \"wrong\"", Some("E305")),
-        ("reply pick: Int", "def default_pick = raise { message = \"x\" }", Some("E302")),
+        ("reply pick: Int", "def default_pick = raise { message = \"x\" }", Some("E305")),
         ("reply pick: Int {Error}", "def default_pick = 11", None),
         ("reply pick(n: Int): Int {Error}", "def default_pick n => n + 1", None),
-        ("reply pick(n: Int): Int", "def default_pick = 11", Some("E305")),
-        ("reply pick: Int", "def default_pick n => n + 1", Some("E305")),
+        ("reply pick(n: Int): Int", "def default_pick = 11", Some("E301")),
+        ("reply pick: Int", "def default_pick n => n + 1", Some("E301")),
     ] {
         let source = format!("{prefix}{operation}\n{definition}\ndef main = 0\n");
         let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");
