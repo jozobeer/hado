@@ -36,5 +36,226 @@ PY
 }
 check '38-a selected real gates and flat logs' partial_run
 
+check '38-a runner selection, serial execution and failures' python3 - "$workdir" <<'PY'
+from pathlib import Path
+import shutil, subprocess, sys
+base = Path(sys.argv[1]) / 'runner'
+(base / 'scripts').mkdir(parents=True)
+shutil.copy('scripts/run-gates.sh', base / 'scripts/run-gates.sh')
+for name, status in [('a', 1), ('b', 0), ('c', 0)]:
+    (base / f'scripts/verify-{name}.sh').write_text(
+        f'mkdir busy || exit 9\necho {name} >>trace\nsleep 0.02\nrmdir busy\n'
+        f'echo stdout-{name}\necho stderr-{name} >&2\nexit {status}\n')
+def run(output, selectors):
+    return subprocess.run(['bash', str(base / 'scripts/run-gates.sh'), str(base / output), *selectors],
+                          cwd=base.parent, capture_output=True)
+for output, selectors, names, trace in [
+    ('selected logs', ['verify-a.sh', 'scripts/verify-b.sh'], ['a', 'b'], 'a\nb\n'),
+    ('all logs', [], ['a', 'b', 'c'], 'a\nb\na\nb\nc\n')]:
+    result = run(output, selectors)
+    assert result.returncode == 1 and not result.stderr, result
+    assert sorted(p.name for p in (base / output).iterdir()) == [f'verify-{name}.log' for name in names]
+    for name in names:
+        assert (base / output / f'verify-{name}.log').read_text() == f'stdout-{name}\nstderr-{name}\n'
+    assert (base / 'trace').read_text() == trace
+result = run('unknown', ['verify-b', 'verify-missing'])
+assert result.returncode == 1 and b'unknown gate' in result.stderr
+assert not list((base / 'unknown').iterdir())
+result = subprocess.run(['bash', str(base / 'scripts/run-gates.sh')], capture_output=True)
+assert result.returncode == 1 and not result.stdout and b'usage:' in result.stderr
+PY
+
+seed=${SEED:-$(( (RANDOM << 15) | RANDOM ))}
+echo "SEED=$seed"
+if ! python3 - "$workdir" "$seed" <<'PY'
+from pathlib import Path
+import itertools, json, random, sys
+base = Path(sys.argv[1])
+rng = random.Random(int(sys.argv[2]))
+manifest = []
+def case(label, records, rows, empty=False):
+    directory = base / str(len(manifest))
+    logs = directory / 'logs'
+    logs.mkdir(parents=True)
+    for name, passed, total in reversed(records):
+        noise = 'noise\n PASSED: 999/999\n'
+        earlier = f'PASSED: {total+100}/{total+101}\n' * rng.randrange(1, 4)
+        final = f'PASSED: {passed}/{total}\nfinished\n'
+        content = '' if empty else noise + (earlier if rows > 1 else '') + (final if rows else '')
+        (logs / name).write_text(content)
+    invalid = bool(records) and rows == 0
+    red = ' '.join(n for n, p, t in sorted(records) if p < t) or 'none'
+    expected = 'InvalidLine' if invalid else f'{sum(p for _, p, _ in records)}/{sum(t for _, _, t in records)} passed; red: {red}'
+    (directory / 'expect').write_text(expected + '\n')
+    manifest.append([directory.name, label, int(invalid)])
+for count, color, rows, names in itertools.product((1, 2, 'many'), ('green', 'red', 'mixed'), (0, 1, 2), ('ascii', 'utf8')):
+    records = []
+    for index in range(rng.randrange(3, 9) if count == 'many' else count):
+        total = rng.randrange(1, 10000)
+        passed = rng.randrange(total) if color == 'red' or (color == 'mixed' and index % 2 == 0) else total
+        name = ('門番' if names == 'utf8' and index % 2 == 0 else 'gate') + f'-{index}-{rng.randrange(100000)}.log'
+        records.append((name, passed, total))
+    case(f'{count}/{color}/rows={rows}/{names}', records, rows)
+case('empty-directory', [], 0)
+case('empty-log', [('empty.log', 0, 0)], 0, empty=True)
+case('zero-total', [('zero.log', 0, 0)], 1)
+assert len(manifest) == len(list(itertools.product((1, 2, 'many'), ('green', 'red', 'mixed'), (0, 1, 2), ('ascii', 'utf8')))) + 3
+(base / 'manifest.json').write_text(json.dumps(manifest))
+(base / 'manifest.tsv').write_text(''.join(f'{i}\t{label}\t{status}\n' for i, label, status in manifest))
+PY
+then
+    echo 'NG: log generator' >&2
+    exit 1
+fi
+
+output_matches() {
+    local status="$1" expected_status="$2" dir="$3"
+    [ "$status" -eq "$expected_status" ] || return 1
+    if [ "$expected_status" -eq 0 ]; then
+        [ "$(wc -c <"$dir/err")" -eq 0 ] && cmp -s "$dir/out" "$dir/expect"
+    else
+        [ "$(wc -c <"$dir/out")" -eq 0 ] && cmp -s "$dir/err" "$dir/expect"
+    fi
+}
+output_controls() {
+    local dir="$workdir/control" status good empty
+    mkdir "$dir" || return 1
+    printf 'value\n' >"$dir/expect"
+    for status in 0 1; do
+        good=out; empty=err
+        if [ "$status" -eq 1 ]; then good=err; empty=out; fi
+        cp "$dir/expect" "$dir/$good"
+        : >"$dir/$empty"
+        output_matches "$status" "$status" "$dir" || return 1
+        if output_matches "$((1-status))" "$status" "$dir"; then return 1; fi
+        printf '\n' >"$dir/$empty"
+        if output_matches "$status" "$status" "$dir"; then return 1; fi
+        : >"$dir/$empty"
+        printf 'different\n' >"$dir/$good"
+        if output_matches "$status" "$status" "$dir"; then return 1; fi
+        : >"$dir/$good"
+        if output_matches "$status" "$status" "$dir"; then return 1; fi
+    done
+}
+check 'output controls: equal, empty, different, newline, status' output_controls
+oracle() (
+    export LC_ALL=C
+    shopt -s nullglob dotglob
+    local file line counts sum_passed=0 sum_total=0 red=()
+    for file in "$1"/*; do
+        line=$(grep -E '^PASSED:' "$file" | tail -1)
+        if [[ ! "$line" =~ ^PASSED:\ ([0-9]+)/([0-9]+)$ ]]; then
+            echo InvalidLine >&2
+            return 1
+        fi
+        counts=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
+        sum_passed=$((sum_passed + 10#${counts[0]}))
+        sum_total=$((sum_total + 10#${counts[1]}))
+        if (( 10#${counts[0]} < 10#${counts[1]} )); then red+=("${file##*/}"); fi
+    done
+    printf '%s/%s passed; red: %s\n' "$sum_passed" "$sum_total" "${red[*]:-none}"
+)
+oracle_case() {
+    local dir="$1" expected_status="$2" status=0
+    oracle "$dir/logs" >"$dir/out" 2>"$dir/err" || status=$?
+    output_matches "$status" "$expected_status" "$dir"
+}
+while IFS=$'\t' read -r id label status; do
+    check "38-a oracle $label" oracle_case "$workdir/$id" "$status"
+done <"$workdir/manifest.tsv"
+
+mkdir "$workdir/e2" || exit 1
+cp tools/gates/main.hd "$workdir/e2/main.hd" || exit 1
+cp -r tools/gates/report "$workdir/e2/report" || exit 1
+cargo run --offline -q -- check "$workdir/e2/main.hd" || exit 1
+cargo run --offline -q -- build "$workdir/e2/main.hd" || exit 1
+e2_case() {
+    local dir="$1" expected_status="$2" status=0
+    shift 2
+    "$workdir/e2/main" "$@" >"$dir/out" 2>"$dir/err" || status=$?
+    cat "$dir/out" "$dir/err"
+    output_matches "$status" "$expected_status" "$dir"
+}
+while IFS=$'\t' read -r id label status; do
+    check "38-b E2 $label" e2_case "$workdir/$id" "$status" "$workdir/$id/logs"
+done <"$workdir/manifest.tsv"
+mkdir -p "$workdir/missing-argv" "$workdir/subdirectory/logs/child" || exit 1
+printf 'MissingDirectory\n' >"$workdir/missing-argv/expect"
+printf 'IoFailure\n' >"$workdir/subdirectory/expect"
+check '38-b empty argv' e2_case "$workdir/missing-argv" 1
+check '38-b subdirectory is IoFailure' e2_case "$workdir/subdirectory" 1 "$workdir/subdirectory/logs"
+
+if ! python3 - "$workdir" "$seed" "$((1+RANDOM%7))" "$((1+RANDOM%9))" "$((1+RANDOM%7))" "$((1+RANDOM%9))" <<'PY'
+from pathlib import Path
+import json, random, sys
+base = Path(sys.argv[1]) / 'probes'
+base.mkdir()
+rng = random.Random(int(sys.argv[2]))
+manifest = []
+def add(label, source, expected, status=0, mode='run'):
+    directory = base / str(len(manifest))
+    directory.mkdir()
+    (directory / 'main.hd').write_text(source)
+    (directory / 'expect').write_text(expected + '\n')
+    manifest.append([directory.name, label, status, mode])
+    return directory
+value = rng.randrange(1, 1000)
+pairs = [([value], [value, value+1]), ([value, value+1], [value]), ([value], [value]), ([value, value], [value+1])]
+calls = [f'compare (Array.of_list {a}) (Array.of_list {b})' for a, b in pairs]
+add('38-c(1) §45 Array compare', 'def main = [' + ', '.join(calls) + ']\n', str([(a > b) - (a < b) for a, b in pairs]))
+for value in ['007', '+42', ' 42', '1_000', '1.0', '４２']:
+    add('38-c(2) §49 Int.parse ' + json.dumps(value, ensure_ascii=False),
+        'def main = Int.parse ' + json.dumps(value, ensure_ascii=False) + '\n',
+        str(int(value)) if value == '007' else 'InvalidInt', int(value != '007'))
+names = ['.hidden', 'z' + str(rng.randrange(10000)), 'A', 'あ', 'é', 'child']
+directory = add('38-c(3) §49 read_dir', 'def main = read_dir "entries"\n',
+                json.dumps(sorted(names, key=lambda s: s.encode()), ensure_ascii=False))
+(directory / 'entries').mkdir()
+for name in reversed(names):
+    (directory / 'entries' / name).touch()
+(directory / 'entries' / 'child').unlink()
+(directory / 'entries' / 'child').mkdir()
+data = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 2048)))
+directory = add('38-c(4) §49 read_stdin twice',
+                'def main = let first = Bytes.length read_stdin -> let second = Bytes.length read_stdin -> [first, second]\n', str([len(data), 0]))
+(directory / 'stdin').write_bytes(data)
+add('38-c(5) §49 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1, 'env')
+for name, blank, indent in [('EnvDefault', int(sys.argv[3]), int(sys.argv[4])), ('IoDefault', int(sys.argv[5]), int(sys.argv[6]))]:
+    source = 'def main = 0\n' + '\n' * blank + ' ' * indent + 'module ' + name + '\n'
+    add('38-c(6) §47 module ' + name, source, json.dumps(['E205', blank+2, indent+8]), 1, 'reject')
+assert {label.split()[0] for _, label, _, _ in manifest} == {f'38-c({i})' for i in range(1, 7)}
+(base / 'manifest.tsv').write_text(''.join(f'{i}\t{label}\t{status}\t{mode}\n' for i, label, status, mode in manifest))
+PY
+then
+    echo 'NG: probe generator' >&2
+    exit 1
+fi
+probe() {
+    local dir="$1" expected_status="$2" mode="$3" status=0
+    if [ "$mode" = reject ]; then
+        cargo run --offline -q -- check "$dir/main.hd" >"$dir/out" 2>"$dir/err" || status=$?
+        cat "$dir/err"
+        [ "$status" -eq 1 ] && [ "$(wc -c <"$dir/out")" -eq 0 ] || return 1
+        python3 - "$dir" <<'PY'
+from pathlib import Path
+import json, re, sys
+directory = Path(sys.argv[1])
+code, line, col = json.loads((directory / 'expect').read_text())
+actual = (directory / 'err').read_text()
+assert re.fullmatch(re.escape(f'main.hd:{line}:{col}: error[{code}]: ') + r'[^\n]+\n', actual), actual
+PY
+        return $?
+    fi
+    cargo run --offline -q -- build "$dir/main.hd" >"$dir/build.out" 2>"$dir/build.err" || { cat "$dir/build.err"; return 1; }
+    [ "$(wc -c <"$dir/build.err")" -eq 0 ] || return 1
+    if [ ! -f "$dir/stdin" ]; then : >"$dir/stdin"; fi
+    (cd "$dir" && HADO_R38_BAD_VALUE=$'\xff' ./main <stdin >out 2>err) || status=$?
+    cat "$dir/out" "$dir/err"
+    output_matches "$status" "$expected_status" "$dir"
+}
+while IFS=$'\t' read -r id label status mode; do
+    check "$label" probe "$workdir/probes/$id" "$status" "$mode"
+done <"$workdir/probes/manifest.tsv"
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
