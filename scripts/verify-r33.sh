@@ -1008,7 +1008,7 @@ gates_real() {
         printf 'noise\nPASSED: %d/%d\n' "$n" "$limit" >"$base/logs/$name"
         sum_passed=$((sum_passed + n))
         sum_total=$((sum_total + limit))
-        red+=("$name")
+        [ "$n" -lt "$limit" ] && red+=("$name")
     done
     printf '%d/%d passed; red: %s\n' "$sum_passed" "$sum_total" "${red[*]}" >"$base/expect"
     cargo run --offline -q -- check "$base/main.hd" >"$base/out" 2>"$base/err" || return 1
