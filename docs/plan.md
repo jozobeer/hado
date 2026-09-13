@@ -2783,11 +2783,11 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 - **工程は 2 つ。`Int.parse`（工程 0）、E2 の集計部とコーパス（工程 1）。** R35 より 1 つ少ない。`Int` は既存の型なので `Ty` / `Type` / `repr` / `emit` は無傷で、intrinsic は単相なので `value_signature` に載せる普通の経路を使う（R35 の `is_polymorphic()` の 4 分岐は要らない）。`display_value` も `derive_comparison` も触らない
 - **受理する文法は `-?[0-9]+` で、値が i64 の範囲に収まること。それ以外はすべて `raise { message = "InvalidInt" }`。** 導出は 2 つの原則による。
   - **受理の下限は往復が決める。** `Int.parse (Int.to_string n) == n` が全 i64 で成立しなければならない。`Int.to_string` が出す文字列は `-?[0-9]+` の形で i64 全域を覆う（実測 2026-09-13: `9223372036854775807` / `-9223372036854775808` / `0` / `-7`。`hado_int_to_string` は `snprintf("%lld")`）
-  - **上限は「`Int.to_string` が出さないものを足さない」で決める。** `+`・空白・`_`・小数点・全角数字は `to_string` が出さないので、受理する根拠が無い
-  - **先行ゼロは受理して数値にする**（`"007"` → 7、`"-007"` → -7、`"00"` → 0）。`[0-9]+` に含まれるため
+  - **使う字は `Int.to_string` が出す字に限る。** `+`・空白・`_`・小数点・全角数字は `to_string` が出さないので、受理する根拠が無い（`-` と ASCII 数字だけ）
+  - **数字列の形（先行ゼロの可否）は往復では決まらないので、この決定で定める。先行ゼロは長さに上限なく受理して数値にする**（`"007"` → 7、`"-007"` → -7、`"00"` → 0、`"0" * 25 + "5"` → 5）。`[0-9]+` に含まれるためである。**受理を長さで打ち切らない**（打ち切ると oracle と食い違う）
 - **intrinsic は 2 本。失敗は hado 側の包みで `raise`**（R34 の `Bytes.to_string` と同じ形）: `__int_parse_is_valid(s: String): Bool`（文法と i64 の範囲の両方を検査）と `__int_parse_unchecked(s: String): Int`（`is_valid` が真のときだけ呼ぶ）。`stdlib/int.hd` の `parse` は `if __int_parse_is_valid s => __int_parse_unchecked s | raise { message = "InvalidInt" }`。DivisionByZero（`emit.rs:662-707`）のような Cranelift 直書きの経路は使わない（handler で捕まえられないため）
-- **`HadoString` は NUL 終端ではない**（`runtime/hado_runtime.h:6-9` は `size_t length; unsigned char bytes[]`）。`strtoll` に渡すなら長さ分を NUL 付きの一時バッファに写す（`hado_int_to_string` の `buffer[32]` と同じ大きさで足りる。21 バイトを超える入力はその時点で範囲外と判定してよい）。**`bytes` を直接 `strtoll` や `atoll` に渡すと領域を越える**
-- **桁溢れの検査。** `strtoll` を使うなら `errno = 0` を先に置き、`ERANGE` と `*endptr != '\0'` の両方を見る。桁ごとの積み上げで書くなら**負の側に累積して最後に符号を戻す**（正の側に積むと `-9223372036854775808` が受理できない）。どちらでもよいが、`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することを判定で固定する
+- **C は `length` と `bytes` を直接走査する。`strtoll` は使わず、一時バッファも作らない。** `HadoString` は NUL 終端ではない（`runtime/hado_runtime.h:6-9` は `size_t length; unsigned char bytes[]`）ので、`bytes` を `strtoll` や `atoll` に渡すと領域を越える。NUL 付きの一時バッファに写す形も採らない。**入力の長さに上限を置けない（先行ゼロを無制限に受理するため）ので、固定長のバッファでは足りないからである。** 文法の検査はバイト走査で行い（先頭の `-` は 0 個か 1 個、残りは 1 個以上の ASCII 数字。埋め込み NUL も数字でないので同じ走査で落ちる）、範囲の検査は桁ごとの積み上げで行う
+- **桁溢れの検査は桁ごとに負の側へ累積し、最後に符号を戻す。** 正の側に積むと `-9223372036854775808` が受理できない。**先行ゼロは有効桁に数えない**（読み飛ばしてから積む）ので、`"0" * 25 + "5"` は 5 として受理される。累積の各段で `acc < (INT64_MIN + digit) / 10` を先に検査して溢れる前に止める。`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することを判定で固定する
 - **E2 の集計部。** `tools/gates/report/report.hd` に `def parse_line(line: String): T {Error}` を 1 本足す（`fields` が返す `[名前, n, N]` の String を `Int.parse` で数に変えて `add` に渡す）。`fields` の `"InvalidLine"` と `Int.parse` の `"InvalidInt"` は別の失敗で、どちらが出るかは入力の形で決まる。`tools/gates/main.hd` は R37 まで固定リストのままにする（argv とファイルの読みは R37）。**`tools/gates/` は利用者のコードなので §49 の関数集合の対象外**であり、`Report` に member を足してよい
 - **`Int.to_string` は変えない**（`Pure`、§49）
 
@@ -2798,6 +2798,8 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 | `Int.parse "42"` | `42` | §49 |
 | `Int.parse (Int.to_string n)` を全 i64 の代表で | `n` | 本節の決定（往復） |
 | `Int.parse "0"`、`"-0"`、`"007"`、`"-007"`、`"00"` | `0`、`0`、`7`、`-7`、`0` | 本節の決定（先行ゼロは受理） |
+| `Int.parse ("0" を 25 個並べた後に "5")` | `5` | 本節の決定（先行ゼロを長さで打ち切らない） |
+| `Int.parse ("0" を 25 個並べた後に "9223372036854775808")` | `Error` `"InvalidInt"` | 本節の決定（有効桁で範囲を見る） |
 | `Int.parse "9223372036854775807"`、`"-9223372036854775808"` | `9223372036854775807`、`-9223372036854775808` | 本節の決定（i64 の範囲） |
 | `Int.parse "9223372036854775808"`、`"-9223372036854775809"` | `Error` `"InvalidInt"` | §49（桁溢れ） |
 | `Int.parse ""`、`"-"`、`"+42"`、`" 42"`、`"42 "`、`"1_000"`、`"4.2"`、`"４２"`、`"--5"`、`"4a2"`、`"a42"`、`"42a"` | `Error` `"InvalidInt"` | 本節の決定 |
@@ -2814,7 +2816,7 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 
 ### 成果物
 
-`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/runtime_abi.rs`、`stdlib/int.hd`、`tools/gates/report/report.hd`、`crates/hado/tests/r36_int.rs`（新設）、`scripts/verify-r36.sh`（新設）、`tests/accept/`（`// item: Int.parse` の受理。`// expect-error:` の失敗形を含む）、`tests/corpus.sha256`、`docs/ledger.md`。
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/runtime_abi.rs`、`stdlib/int.hd`、`tools/gates/report/report.hd`、`crates/hado/tests/r36_int.rs`（新設）、`scripts/verify-r36.sh`（新設）、`tests/accept/`（`// item: Int.parse` の受理。`// expect-error:` の失敗形を含む。**§49 の member を使うので `// needs: prelude` のヘッダが要る**。`verify-m1-corpus.sh:341-345`）、`tests/corpus.sha256`、`docs/ledger.md`。
 
 ### 工程
 
@@ -2840,7 +2842,7 @@ expected = int(s) if valid else 'InvalidInt'
 
 - **符号:** 無し / `-` / `+`（拒否）/ `--`（拒否）/ 符号だけ（拒否）
 - **本体:** 空 / `0` / 1 桁 / 複数桁（乱数）/ 先行ゼロ付き（`"007"` `"-007"` `"00"`）/ 非数字を含む（先頭 / 中間 / 末尾）/ 空白を含む（先頭 / 中間 / 末尾）/ `_` を含む / 小数点を含む / 全角数字（`４２`）/ 多バイト文字を含む
-- **境界（決定的に含める。乱数任せにしない）:** `9223372036854775807`、`9223372036854775808`、`-9223372036854775808`、`-9223372036854775809`、`18446744073709551616`（2^64）、`10000000000000000000`（10^19）、`100000000000000000000`（10^20）、21 桁以上の数字列
+- **境界（決定的に含める。乱数任せにしない）:** `9223372036854775807`、`9223372036854775808`、`-9223372036854775808`、`-9223372036854775809`、`18446744073709551616`（2^64）、`10000000000000000000`（10^19）、`100000000000000000000`（10^20）、21 桁以上の数字列、**先行ゼロを 25 個付けた `5` と `9223372036854775807` と `9223372036854775808`**（長さで打ち切る実装を落とすため）、埋め込み NUL を含む文字列
 
 判定 36-a: 受理。分類のうち有効な形すべてを、oracle の `int(s)` と照合。**往復を必ず置く**: 乱数の i64（両端 `9223372036854775807` と `-9223372036854775808` と `0` を決定的に含む）を `Int.to_string` → `Int.parse` して元の値と一致
 判定 36-b: 拒否。分類のうち無効な形すべてが、stderr に `InvalidInt` を出して終了コード 1。**負の対照**: 各拒否形のすぐ隣の有効な形（`"42"` に対する `" 42"`、`"9223372036854775807"` に対する `"9223372036854775808"`）
@@ -2848,7 +2850,7 @@ expected = int(s) if valid else 'InvalidInt'
 判定 36-d: `stdlib/int.hd` の 2 member の型を §49 の宣言と照合（引数型・戻り型・効果行。`to_string` は `Pure`、`parse` は `{Error}`）
 判定 36-e: `Report.parse_line`。名前と数を実行時に生成し、`render` の出力を判定器側で計算した文字列と照合。**`n` に `Int.parse` が拒否する形（`"+7"` `" 7"` `"7 "`）を渡したとき `InvalidInt` が出て `InvalidLine` に化けないこと**、区切りが無い行では `InvalidLine` が出ることを、それぞれ 1 本以上
 判定 36-f: `bash scripts/verify-m7.sh` の `prelude inventory` が 38/39 から 39/39 になる
-判定 36-g: 受理コーパス（`// item: Int.parse` 3 本以上、`// expect-error:` の失敗形 1 本以上）、lock 更新、`verify-m1-corpus.sh` の pairs から `Int.parse` が消える（残るのは Env と Io の 1 項目）
+判定 36-g: 受理コーパス（`// item: Int.parse` 3 本以上、`// expect-error:` の失敗形 1 本以上。各ファイルに `// needs: prelude` のヘッダを置く）、lock 更新、`verify-m1-corpus.sh` の pairs から `Int.parse` が消える（残るのは Env と Io の 1 項目）
 判定 36-h: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、許容される赤（下記）以外が満点
 
 Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runtime_string.rs` の流儀で `hado_int_parse_is_valid` と `hado_int_parse_unchecked` の C レベルの動作（境界・NUL を含む入力・21 桁以上）をテストする。**`HadoString` の `bytes` が NUL 終端でないことを突く入力（`"42"` の直後に別の文字が続く領域）を 1 本置く**
@@ -2866,8 +2868,8 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 ### 確認して報告（24.9 と本節の決定から）
 
-- C の桁溢れの検査に選んだ形（`strtoll` か桁ごとの積み上げか）と、`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することの実測
-- `HadoString` を NUL 付きの一時バッファに写した箇所と、21 桁以上の入力をどこで切ったか
+- 桁ごとの積み上げで溢れる前に止めた形（比較の式）と、`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することの実測
+- 先行ゼロを 25 個付けた入力が受理されること（受理を長さで打ち切っていないこと）と、埋め込み NUL を含む入力が拒否されることの実測
 - `Report.parse_line` で `InvalidInt` と `InvalidLine` がどちらも出ることの実測
 - `%` を使う未注釈の再帰生成器が E306 になる件（R35 の工程 0 で踏んだ）に、この工程でも当たったか
 
@@ -2875,7 +2877,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 **C の runtime が hado の List の cell（`repr.rs:117-162` の配置）を読み書きする必要があると判断したら、直さずに中断せよ。**
 
-**`HadoString` を NUL 終端と仮定する C を書かないと通せないと分かったら、止めて報告せよ。**
+**`HadoString` を NUL 終端と仮定する C（`bytes` を `strtoll` / `atoll` に渡す、固定長のバッファに写す）を書かないと通せないと分かったら、止めて報告せよ。** 受理を長さで打ち切って通す形は採らない（先行ゼロを無制限に受理する決定と食い違う）。
 
 **`raise` を prelude の包みから起こす経路が intrinsic の呼び出しの後ろで型を合わせられないと分かったら、止めて報告せよ。**
 
