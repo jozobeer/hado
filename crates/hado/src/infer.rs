@@ -1813,9 +1813,11 @@ impl Checker<'_> {
         if matches!(ty, Ty::Fn(..)) { return true; }
         if visited.contains(ty) { return false; }
         visited.push(ty.clone());
-        if let Ty::Abstract(name, args) = ty {
-            return self.abstract_representations.get(name).is_some_and(|representation|
-                self.contains_function(&representation.apply(args), visited));
+        match ty {
+            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_function(arg, visited)) => return true,
+            Ty::Abstract(name, args) => return self.abstract_representations.get(name).is_some_and(|representation|
+                self.contains_function(&representation.apply(args), visited)),
+            _ => {}
         }
         let Ty::Adt(name, _) = ty else { return false; };
         self.constructors.values()
