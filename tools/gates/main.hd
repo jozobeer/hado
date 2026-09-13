@@ -13,7 +13,11 @@ def summarize directory =>
   List.fold (read_dir directory) report::Report.empty fn(tally, name =>
     report::Report.merge tally (read_report directory name))
 
+def choose (tally: report::Report.T): report::Report.T =>
+  if tally.passed >= 0 => tally
+  | report::Report.empty
+
 def main =
   if args
-  | [directory, ..._] => report::Report.render (summarize directory)
+  | [directory, ..._] => report::Report.render (choose (summarize directory))
   | [] => raise { message = "MissingDirectory" }
