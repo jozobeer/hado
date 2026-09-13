@@ -188,12 +188,7 @@ for operation, path, message in failures:
         group = '37-g(5)' if kind=='caught' else '37-g(4)' if kind=='success' else '37-g('+str({'read_file':1,'read_dir':2,'write_file':3}[operation])+')'
         directory = runtime(group+' '+operation+' '+path+' '+kind, source, expected, error=error)
         if kind=='success' and operation=='write_file': (directory/'expect').write_bytes(b'')
-        (directory/'file').write_bytes(b'ok')
-        (directory/'directory').mkdir()
-        (directory/'denied-file').write_bytes(b'denied')
-        (directory/'denied-file').chmod(0)
-        (directory/'denied-dir').mkdir(mode=0)
-        (directory/'readonly').mkdir(mode=0o500)
+        (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
 io_arms = ['reply read_file _ => Bytes.of_string "virtual"', 'reply write_file _ _ => ()', 'reply read_dir _ => ["virtual"]', 'reply read_stdin => Bytes.of_string "virtual"']
@@ -384,6 +379,13 @@ PY
 from pathlib import Path
 import json, os, subprocess, sys
 base = Path(sys.argv[1])
+if (base / 'failure-fixture').exists():
+    (base/'file').write_bytes(b'ok')
+    (base/'directory').mkdir()
+    (base/'denied-file').write_bytes(b'denied')
+    (base/'denied-file').chmod(0)
+    (base/'denied-dir').mkdir(mode=0)
+    (base/'readonly').mkdir(mode=0o500)
 arguments, overrides, oracle = json.loads((base / 'run.json').read_text()) if (base / 'run.json').exists() else ([], {}, None)
 environment = dict(os.environ)
 for key, value in overrides.items():
