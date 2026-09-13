@@ -84,3 +84,21 @@ fn array_public_members_match_specification() {
     let actual = source.split_once("module Array\ndef A length").unwrap().1.split_once("\nimplement Array as Array").unwrap().0;
     assert_eq!(actual.trim(), expected.trim());
 }
+
+#[test]
+fn polymorphic_allocation_specializes_and_slots_execute() {
+    let dir = std::env::temp_dir().join(format!("hado-array-slots-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (value, expected) in [("9876543210", "9876543210"), ("-0.25", "-0.25"), ("true", "true"), ("'𐀀'", "𐀀"), ("\"あ😀\"", "あ😀")] {
+        let source = format!("def make n x => __array_fill_unchecked (__array_alloc n) 1 x\ndef main = __array_get (make 3 ({value})) 1");
+        let object = dir.join("test.o");
+        hado::compile_source_to_object(&source, "stdlib/probe.hd", &object).unwrap();
+        let executable = dir.join("test");
+        hado::link_executable(&object, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
