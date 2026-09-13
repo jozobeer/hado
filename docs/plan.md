@@ -2769,3 +2769,114 @@ Rust 側: `crates/hado/tests/r35_array.rs` を新設し、`type_arities` の登�
 **多相 intrinsic の 4 分岐（name_resolution の E204 の門、infer の fresh 変数、mono の結果型の導出、emit の load / store）のどれかが、既存の単相の intrinsic の経路を壊さずには通せないと分かったら、止めて報告せよ。** R34 で足した 11 本の Bytes / String の intrinsic が後退しないことが前提である。
 
 それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
+
+## 29. R36 Int.parse の手順書（2026-09-13）
+
+24.1 の C5（`Int.parse`）と C1（失敗の分類）を実装し、E2（`tools/gates/`）の集計部に数への変換を足す。Env と Io（R37）と仕上げ（R38）は別ラウンド。
+
+**読む順:** 本節 → 24.1 の C 表（C5）と 24.4 → `docs/spec.md` の §49（`module Int` の宣言 1952〜1954 行、`Pure` を書く member の一覧 1919 行、失敗の `message` の表 1985 行の `"InvalidInt"`）・§21 → 27 節（R34 の手順書。`__bytes_is_utf8` + `__bytes_to_string_unchecked` が本節の手本）→ 24.5 の R36 の行。
+
+**着手時点で赤の門番:** R35 の終了時の許容される赤（`verify-m1-corpus.sh` 6/7 の 2 pairs は `Int.parse` と Env と Io、その連鎖の `verify-m2.sh` 7/8 と `verify-m3.sh` 11/12、`verify-m7.sh` 2/3 で `prelude inventory: 38/39`）。R36 の入口で単独で測り直す。
+
+### 決定
+
+- **工程は 2 つ。`Int.parse`（工程 0）、E2 の集計部とコーパス（工程 1）。** R35 より 1 つ少ない。`Int` は既存の型なので `Ty` / `Type` / `repr` / `emit` は無傷で、intrinsic は単相なので `value_signature` に載せる普通の経路を使う（R35 の `is_polymorphic()` の 4 分岐は要らない）。`display_value` も `derive_comparison` も触らない
+- **受理する文法は `-?[0-9]+` で、値が i64 の範囲に収まること。それ以外はすべて `raise { message = "InvalidInt" }`。** 導出は 2 つの原則による。
+  - **受理の下限は往復が決める。** `Int.parse (Int.to_string n) == n` が全 i64 で成立しなければならない。`Int.to_string` が出す文字列は `-?[0-9]+` の形で i64 全域を覆う（実測 2026-09-13: `9223372036854775807` / `-9223372036854775808` / `0` / `-7`。`hado_int_to_string` は `snprintf("%lld")`）
+  - **上限は「`Int.to_string` が出さないものを足さない」で決める。** `+`・空白・`_`・小数点・全角数字は `to_string` が出さないので、受理する根拠が無い
+  - **先行ゼロは受理して数値にする**（`"007"` → 7、`"-007"` → -7、`"00"` → 0）。`[0-9]+` に含まれるため
+- **intrinsic は 2 本。失敗は hado 側の包みで `raise`**（R34 の `Bytes.to_string` と同じ形）: `__int_parse_is_valid(s: String): Bool`（文法と i64 の範囲の両方を検査）と `__int_parse_unchecked(s: String): Int`（`is_valid` が真のときだけ呼ぶ）。`stdlib/int.hd` の `parse` は `if __int_parse_is_valid s => __int_parse_unchecked s | raise { message = "InvalidInt" }`。DivisionByZero（`emit.rs:662-707`）のような Cranelift 直書きの経路は使わない（handler で捕まえられないため）
+- **`HadoString` は NUL 終端ではない**（`runtime/hado_runtime.h:6-9` は `size_t length; unsigned char bytes[]`）。`strtoll` に渡すなら長さ分を NUL 付きの一時バッファに写す（`hado_int_to_string` の `buffer[32]` と同じ大きさで足りる。21 バイトを超える入力はその時点で範囲外と判定してよい）。**`bytes` を直接 `strtoll` や `atoll` に渡すと領域を越える**
+- **桁溢れの検査。** `strtoll` を使うなら `errno = 0` を先に置き、`ERANGE` と `*endptr != '\0'` の両方を見る。桁ごとの積み上げで書くなら**負の側に累積して最後に符号を戻す**（正の側に積むと `-9223372036854775808` が受理できない）。どちらでもよいが、`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することを判定で固定する
+- **E2 の集計部。** `tools/gates/report/report.hd` に `def parse_line(line: String): T {Error}` を 1 本足す（`fields` が返す `[名前, n, N]` の String を `Int.parse` で数に変えて `add` に渡す）。`fields` の `"InvalidLine"` と `Int.parse` の `"InvalidInt"` は別の失敗で、どちらが出るかは入力の形で決まる。`tools/gates/main.hd` は R37 まで固定リストのままにする（argv とファイルの読みは R37）。**`tools/gates/` は利用者のコードなので §49 の関数集合の対象外**であり、`Report` に member を足してよい
+- **`Int.to_string` は変えない**（`Pure`、§49）
+
+### 期待値の根拠
+
+| 形 | 導出 | 根拠 |
+|---|---|---|
+| `Int.parse "42"` | `42` | §49 |
+| `Int.parse (Int.to_string n)` を全 i64 の代表で | `n` | 本節の決定（往復） |
+| `Int.parse "0"`、`"-0"`、`"007"`、`"-007"`、`"00"` | `0`、`0`、`7`、`-7`、`0` | 本節の決定（先行ゼロは受理） |
+| `Int.parse "9223372036854775807"`、`"-9223372036854775808"` | `9223372036854775807`、`-9223372036854775808` | 本節の決定（i64 の範囲） |
+| `Int.parse "9223372036854775808"`、`"-9223372036854775809"` | `Error` `"InvalidInt"` | §49（桁溢れ） |
+| `Int.parse ""`、`"-"`、`"+42"`、`" 42"`、`"42 "`、`"1_000"`、`"4.2"`、`"４２"`、`"--5"`、`"4a2"`、`"a42"`、`"42a"` | `Error` `"InvalidInt"` | 本節の決定 |
+| `Int.parse` を handler で捕まえる | `message` が `"InvalidInt"` | §58 |
+| `Report.parse_line "m0 PASSED: 7/7"` を `render` | `7/7 passed; red: none` | 24.1 の E2、32 節の判定 32-j の書式 |
+| `Report.parse_line "m0 PASSED: +7/7"` | `Error` `"InvalidInt"`（`"InvalidLine"` ではない） | 本節の決定 |
+| `Report.parse_line "m0 7/7"`（区切りが無い） | `Error` `"InvalidLine"` | 27 節の決定 |
+
+**本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
+
+### 仕様への疑義（R38 で判断する）
+
+§49（`docs/spec.md:1985`）は `Int.parse` の失敗を「不正（桁溢れを含む）」としか書かず、**何を受理するかを定めていない**。本節は往復（`Int.parse (Int.to_string n) == n`）から `-?[0-9]+` と i64 の範囲を導き、先行ゼロを受理し、`+`・空白・`_`・小数点・全角数字を拒否すると決めた。仕様は変えない。R38 で §49 に 1 文足すかどうかを判断する。R35 の「長さが違う Array の `compare` の順序」と同じ扱いである。
+
+### 成果物
+
+`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/runtime_abi.rs`、`stdlib/int.hd`、`tools/gates/report/report.hd`、`crates/hado/tests/r36_int.rs`（新設）、`scripts/verify-r36.sh`（新設）、`tests/accept/`（`// item: Int.parse` の受理。`// expect-error:` の失敗形を含む）、`tests/corpus.sha256`、`docs/ledger.md`。
+
+### 工程
+
+- 工程 0: `Int.parse`。C の 2 本（`hado_int_parse_is_valid` `hado_int_parse_unchecked`）、`runtime_abi.rs` の 5 箇所、`stdlib/int.hd` の `parse`、**lock の `stdlib/int.hd` の 1 行を更新する**。判定 36-a 36-b 36-c 36-d
+- 工程 1: E2 とコーパス。`tools/gates/report/report.hd` の `parse_line`、受理コーパス（`// item: Int.parse`）、lock、門番の追随。判定 36-e 36-f 36-g 36-h
+
+### 判定
+
+`scripts/verify-r36.sh` を新設する。構造は `scripts/verify-r35.sh` に倣う。**入力の形が列挙できる判定は分類から生成する。境界値は乱数任せにせず決定的に含める。期待値は独立した oracle から導く。** 生成器自身の失敗と manifest の欠落・空を非ゼロ終了にし、成功時の stderr と失敗時の stdout が空であることを `wc -c` で測る。探針を絞り込める環境変数を置かない（R35 の `FILTER` を消した経緯）。
+
+### oracle の作り方（この判定の要）
+
+**python3 の `int()` をそのまま oracle にしてはならない。** `int()` は `"+42"` `" 42 "` `"1_000"` `"４２"` を受理するので、本節の決定より寛容である。判定器の oracle は次の 2 段で書く。
+
+```python
+valid = re.fullmatch(r'-?[0-9]+', s) is not None and -2**63 <= int(s) < 2**63
+expected = int(s) if valid else 'InvalidInt'
+```
+
+**oracle が仕様より寛容なときは、判定器の側で仕様の形に絞る。** これは 24.9 の R34 の教訓 3（期待値は独立した oracle から導く）の裏面である。
+
+### 分類（すべての判定でこの積を回す）
+
+- **符号:** 無し / `-` / `+`（拒否）/ `--`（拒否）/ 符号だけ（拒否）
+- **本体:** 空 / `0` / 1 桁 / 複数桁（乱数）/ 先行ゼロ付き（`"007"` `"-007"` `"00"`）/ 非数字を含む（先頭 / 中間 / 末尾）/ 空白を含む（先頭 / 中間 / 末尾）/ `_` を含む / 小数点を含む / 全角数字（`４２`）/ 多バイト文字を含む
+- **境界（決定的に含める。乱数任せにしない）:** `9223372036854775807`、`9223372036854775808`、`-9223372036854775808`、`-9223372036854775809`、`18446744073709551616`（2^64）、`10000000000000000000`（10^19）、`100000000000000000000`（10^20）、21 桁以上の数字列
+
+判定 36-a: 受理。分類のうち有効な形すべてを、oracle の `int(s)` と照合。**往復を必ず置く**: 乱数の i64（両端 `9223372036854775807` と `-9223372036854775808` と `0` を決定的に含む）を `Int.to_string` → `Int.parse` して元の値と一致
+判定 36-b: 拒否。分類のうち無効な形すべてが、stderr に `InvalidInt` を出して終了コード 1。**負の対照**: 各拒否形のすぐ隣の有効な形（`"42"` に対する `" 42"`、`"9223372036854775807"` に対する `"9223372036854775808"`）
+判定 36-c: handler で捕まえる。§58 により abort の腕の型は `with` 全体の結果型に一致するので、`Int.parse` が返す `Int` に腕を揃えるか、`Int.to_string` で包んで String にする（R34・R35 で繰り返し踏んだ罠）
+判定 36-d: `stdlib/int.hd` の 2 member の型を §49 の宣言と照合（引数型・戻り型・効果行。`to_string` は `Pure`、`parse` は `{Error}`）
+判定 36-e: `Report.parse_line`。名前と数を実行時に生成し、`render` の出力を判定器側で計算した文字列と照合。**`n` に `Int.parse` が拒否する形（`"+7"` `" 7"` `"7 "`）を渡したとき `InvalidInt` が出て `InvalidLine` に化けないこと**、区切りが無い行では `InvalidLine` が出ることを、それぞれ 1 本以上
+判定 36-f: `bash scripts/verify-m7.sh` の `prelude inventory` が 38/39 から 39/39 になる
+判定 36-g: 受理コーパス（`// item: Int.parse` 3 本以上、`// expect-error:` の失敗形 1 本以上）、lock 更新、`verify-m1-corpus.sh` の pairs から `Int.parse` が消える（残るのは Env と Io の 1 項目）
+判定 36-h: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、許容される赤（下記）以外が満点
+
+Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runtime_string.rs` の流儀で `hado_int_parse_is_valid` と `hado_int_parse_unchecked` の C レベルの動作（境界・NUL を含む入力・21 桁以上）をテストする。**`HadoString` の `bytes` が NUL 終端でないことを突く入力（`"42"` の直後に別の文字が続く領域）を 1 本置く**
+
+### 許容される赤
+
+- `verify-m1-corpus.sh` の 1 pair（Env と Io）と、その連鎖の m2 / m3
+
+### スコープ外
+
+- Env と Io（R37）、仕上げと tag（R38）
+- `Float.parse`（24.1 の C5 で「入れない」と決めた）
+- `tools/gates/main.hd` の argv とファイルの読み（R37）
+- 16 進・8 進・2 進のリテラル、`Int.parse` の基数引数
+
+### 確認して報告（24.9 と本節の決定から）
+
+- C の桁溢れの検査に選んだ形（`strtoll` か桁ごとの積み上げか）と、`"-9223372036854775808"` を受理し `"9223372036854775808"` を拒否することの実測
+- `HadoString` を NUL 付きの一時バッファに写した箇所と、21 桁以上の入力をどこで切ったか
+- `Report.parse_line` で `InvalidInt` と `InvalidLine` がどちらも出ることの実測
+- `%` を使う未注釈の再帰生成器が E306 になる件（R35 の工程 0 で踏んだ）に、この工程でも当たったか
+
+### 中断の条件
+
+**C の runtime が hado の List の cell（`repr.rs:117-162` の配置）を読み書きする必要があると判断したら、直さずに中断せよ。**
+
+**`HadoString` を NUL 終端と仮定する C を書かないと通せないと分かったら、止めて報告せよ。**
+
+**`raise` を prelude の包みから起こす経路が intrinsic の呼び出しの後ろで型を合わせられないと分かったら、止めて報告せよ。**
+
+それで届かないと分かったら、どこまで確認したか・何が足りないかを具体的に書いて止める。止めることは正常な終了経路である。
