@@ -101,7 +101,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         values: HashMap::new(),
         numeric_constraints: Vec::new(),
         divisions: Vec::new(),
-        type_arities: HashMap::new(),
+        type_arities: HashMap::from([(crate::mono::ARRAY.into(), 1)]),
         constructor_tags: HashMap::new(),
         constructors: HashMap::new(),
         records: HashMap::new(),

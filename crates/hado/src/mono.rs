@@ -46,6 +46,7 @@ fn convert_types(types: &[Ty]) -> Result<Vec<Type>, UnresolvedType> {
 }
 
 pub(crate) const OUTCOME: &str = "$Outcome";
+pub const ARRAY: &str = "Array";
 const DONE: &str = "$Done";
 const FAIL: &str = "$Fail";
 const YIELD: &str = "$Yield";
