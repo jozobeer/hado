@@ -294,5 +294,45 @@ for invalid in ['', manifest.replace('§45', '§49')]:
 print('coverage: §45=1 §47=1 §49=4')
 PY
 
+# 38-d runs the commands printed in each bug section, without a second probe copy.
+check '38-d documented reproductions and controls' python3 - <<'PY'
+from pathlib import Path
+import re, subprocess
+
+def reproductions(document):
+    result = []
+    for section in re.split(r'^## ', document, flags=re.M)[1:]:
+        title = section.splitlines()[0]
+        commands = re.findall(r'^```bash\n(.*?)^```$', section, re.M | re.S)
+        expected = re.findall(r'^```text\n(.*?)^```$', section, re.M | re.S)
+        assert len(commands) == len(expected) == 1, title
+        result.append((title, commands[0], expected[0].encode()))
+    return result
+
+def reproduced(command, expected):
+    result = subprocess.run(['bash', '-euo', 'pipefail', '-c', command], capture_output=True, timeout=60)
+    return result.returncode == 0 and result.stdout == expected and result.stderr == b''
+
+assert reproductions('# 既知の不具合\n') == []
+for malformed in ['## broken\n', '## broken\n```bash\ntrue\n```\n']:
+    try:
+        reproductions(malformed)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('section without a complete reproduction accepted')
+assert reproduced("printf 'value\\n'", b'value\n')
+for command in ['true', "printf 'wrong\\n'", "printf 'value\\n'; printf '\\n' >&2", "printf 'value\\n'; exit 1"]:
+    assert not reproduced(command, b'value\n'), command
+cases = reproductions(Path('docs/bug.md').read_text())
+for title, command, expected in cases:
+    assert reproduced(command, expected), title
+    print(f'{title}: reproduced')
+    print(expected.decode(), end='')
+    assert not reproduced(command, expected + b'wrong\n'), title
+    print(f'{title}: changed expectation detected')
+print(f'documented reproductions: {len(cases)}')
+PY
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
