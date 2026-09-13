@@ -2313,7 +2313,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 
 **R36 の終了時（2026-09-13、`fa8fddf`）:** 赤は 3 本に減った。`verify-m1-corpus.sh` 6/7 の pairs は 1 項目（Env と Io）だけになり、**`Int.parse` が消えた**。`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖。**`verify-m7.sh` が 3/3 で満点に戻った**（`prelude inventory: 39/39`。§49 の関数集合をすべて満たした）。`verify-m4.sh` 131/131、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`cargo test --offline --no-fail-fast` 0 failed。
 
-**R37 の終了時（2026-09-14、全走 04:23:56→05:56:51 の 93 分）: 赤はゼロ。全門番が満点になった。** `verify-m1-corpus.sh` が **7/7**（pairs から Env と Io が消えた）、`verify-m2.sh` が **8/8**、`verify-m3.sh` が **12/12**。m0 7/7、m1-spec 5/5、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9〜r37 の 24 本すべて満点（`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254）、`cargo test --offline --no-fail-fast` 0 failed。**24.5 が R38 の入口に置いた「全門番が満点」がここで成立した。**
+**R37 の終了時（2026-09-14、`d8f6594`。全走 04:23:56→05:56:51 の 93 分）: 赤はゼロ。全門番が満点になった。** 実装審査は 3 工程が 1 巡ずつ、工程 3 が 3 巡で合格した。 `verify-m1-corpus.sh` が **7/7**（pairs から Env と Io が消えた）、`verify-m2.sh` が **8/8**、`verify-m3.sh` が **12/12**。m0 7/7、m1-spec 5/5、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9〜r37 の 24 本すべて満点（`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254）、`cargo test --offline --no-fail-fast` 0 failed。**24.5 が R38 の入口に置いた「全門番が満点」がここで成立した。**
 
 **`verify-m3.sh` の検査 11（`stdlib-types`）が一度赤になった。門番ではなく `stdlib` の形を直した。** この検査は `stdlib/*.hd` の最初の `module` / `implement` より前に `def` があると落ちる。既定実装を素の `def` として並べる形がこれに当たった。`stdlib/env.hd` と `stdlib/io.hd` を `module EnvDefault` / `implement EnvDefault as EnvDefault` の形に直して解消した（台帳の R37 に理由）。
 
