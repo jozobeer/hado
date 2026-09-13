@@ -69,7 +69,7 @@ seed=${SEED:-$(( (RANDOM << 15) | RANDOM ))}
 echo "SEED=$seed"
 if ! python3 - "$workdir" "$seed" <<'PY'
 from pathlib import Path
-import itertools, json, random, sys
+import itertools, random, sys
 base = Path(sys.argv[1])
 rng = random.Random(int(sys.argv[2]))
 manifest = []
@@ -100,7 +100,6 @@ case('empty-directory', [], 0)
 case('empty-log', [('empty.log', 0, 0)], 0, empty=True)
 case('zero-total', [('zero.log', 0, 0)], 1)
 assert len(manifest) == len(list(itertools.product((1, 2, 'many'), ('green', 'red', 'mixed'), (0, 1, 2), ('ascii', 'utf8')))) + 3
-(base / 'manifest.json').write_text(json.dumps(manifest))
 (base / 'manifest.tsv').write_text(''.join(f'{i}\t{label}\t{status}\n' for i, label, status in manifest))
 PY
 then
@@ -219,7 +218,7 @@ data = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 2048)))
 directory = add('38-c(4) §49 read_stdin twice',
                 'def main = let first = Bytes.length read_stdin -> let second = Bytes.length read_stdin -> [first, second]\n', str([len(data), 0]))
 (directory / 'stdin').write_bytes(data)
-add('38-c(5) §49 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1, 'env')
+add('38-c(5) §49 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1)
 for name, blank, indent in [('EnvDefault', int(sys.argv[3]), int(sys.argv[4])), ('IoDefault', int(sys.argv[5]), int(sys.argv[6]))]:
     source = 'def main = 0\n' + '\n' * blank + ' ' * indent + 'module ' + name + '\n'
     add('38-c(6) §47 module ' + name, source, json.dumps(['E205', blank+2, indent+8]), 1, 'reject')
