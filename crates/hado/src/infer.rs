@@ -2050,6 +2050,10 @@ impl Checker<'_> {
 
     fn unwrap_operation(&mut self, name: &str, ty: Ty) -> Ty {
         if !self.operations.contains_key(name) { return ty; }
+        if !matches!(&ty, Ty::Fn(_, effect, _) if
+            matches!(&**effect, Ty::Adt(name, _) if self.effects.contains_key(name))) {
+            return ty;
+        }
         let Ty::Fn(mut args, effect, _) = ty else { return ty; };
         let Some(op_ty) = args.pop() else { return Ty::fn_of(vec![], *effect); };
         let row = self.inference.union_row(&Row::Closed(vec![*effect]), &self.operation_result_rows[name]);

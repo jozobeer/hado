@@ -480,8 +480,10 @@ impl Lowerer {
             return self.lambda(node, params, body);
         }
         if let NodeKind::Name(name) = &node.kind {
-            if let Some(kind) = self.operations.get(name).copied() {
-                return self.operation(node, name, vec![], kind);
+            if !self.scope.contains_key(name) {
+                if let Some(kind) = self.operations.get(name).copied() {
+                    return self.operation(node, name, vec![], kind);
+                }
             }
             if crate::names::is_upper_reference(name) {
                 let ty = self
@@ -1422,8 +1424,10 @@ impl Lowerer {
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
-            if let Some(kind) = self.operations.get(name).copied() {
-                return self.operation(node, name, arguments, kind);
+            if !self.scope.contains_key(name) {
+                if let Some(kind) = self.operations.get(name).copied() {
+                    return self.operation(node, name, arguments, kind);
+                }
             }
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
@@ -1714,7 +1718,7 @@ impl Lowerer {
 
     fn is_abort_node(&self, node: &crate::parser::Node) -> bool {
         self.operation_name(node)
-            .is_some_and(|name| self.operations.get(name) == Some(&crate::parser::OpKind::Abort))
+            .is_some_and(|name| !self.scope.contains_key(name) && self.operations.get(name) == Some(&crate::parser::OpKind::Abort))
             || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_abort_node(value))
     }
 
@@ -1734,7 +1738,7 @@ impl Lowerer {
 
     fn is_capture_node(&self, node: &crate::parser::Node) -> bool {
         self.operation_name(node)
-            .is_some_and(|name| self.operations.get(name) == Some(&crate::parser::OpKind::Capture))
+            .is_some_and(|name| !self.scope.contains_key(name) && self.operations.get(name) == Some(&crate::parser::OpKind::Capture))
             || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_capture_node(value))
     }
 
