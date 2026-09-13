@@ -2555,6 +2555,10 @@ impl Lowerer {
         if let Some((_, id)) = self.structural_equalities.iter().find(|(cached, _)| cached == &ty) {
             return Expression::call_direct(*id, &signature, vec![left, right]);
         }
+        if matches!(&ty, Type::Data(name, _) if name == ARRAY) {
+            let (id, signature) = self.derive_array_relation(ty, true)?;
+            return Expression::call_direct(id, &signature, vec![left, right]);
+        }
         let fields = match &ty { Type::Data(name, _) => self.records.get(name).map(|record| record.0.clone()), _ => None };
         let id = FunctionId(self.next_function);
         self.next_function += 1;
@@ -2615,6 +2619,9 @@ impl Lowerer {
         if matches!(ty, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::String | Type::Bytes) {
             return Ok(self.derive_scalar_compare(ty));
         }
+        if matches!(&ty, Type::Data(name, _) if name == ARRAY) {
+            return self.derive_array_relation(ty, false);
+        }
         let Type::Data(name, _) = &ty else { return Err("compare derivation is not implemented for this type".into()); };
         let fields = self.records.get(name).map(|record| record.0.clone());
         let signature = Signature { parameters: vec![ty.clone(), ty.clone()], result: Type::Int };
@@ -2642,6 +2649,57 @@ impl Lowerer {
         if fields.is_none() { body = self.adt_comparison_body(&ty, lhs, rhs)?; }
         self.functions.push(Function { id, name: format!("compare_{ty:?}"), signature: signature.clone(), parameters: vec![lhs, rhs], captures: vec![], body });
         Ok((id, signature))
+    }
+
+    fn derive_array_relation(&mut self, ty: Type, equality: bool) -> Result<(FunctionId, Signature), String> {
+        let signature = Signature { parameters: vec![ty.clone(), ty.clone()], result: if equality { Type::Bool } else { Type::Int } };
+        let cache = if equality { &mut self.structural_equalities } else { &mut self.scalar_comparisons };
+        if let Some((_, id)) = cache.iter().find(|(cached, _)| cached == &ty) {
+            return Ok((*id, signature));
+        }
+        let id = FunctionId(self.next_function);
+        self.next_function += 2;
+        cache.push((ty.clone(), id));
+        let parameters = [self.next, self.next + 1, self.next + 2];
+        self.next += parameters.len();
+        let arguments = [Expression::Variable { id: parameters[0], ty: ty.clone() }, Expression::Variable { id: parameters[1], ty }, Expression::Variable { id: parameters[2], ty: Type::Int }];
+        let helper = Signature { parameters: arguments.iter().map(Expression::ty).collect(), result: signature.result.clone() };
+        let body = self.array_relation_body(&arguments, FunctionId(id.0 + 1), &helper, equality)?;
+        self.functions.push(Function { id: FunctionId(id.0 + 1), name: format!("array_relation_items_{id:?}"), signature: helper.clone(), parameters: parameters.to_vec(), captures: vec![], body: body.in_tail_position() });
+        let body = Expression::call_direct(FunctionId(id.0 + 1), &helper, vec![arguments[0].clone(), arguments[1].clone(), Expression::Constant(Constant::Int(0))])?;
+        self.functions.push(Function { id, name: format!("array_relation_{id:?}"), signature: signature.clone(), parameters: parameters[..2].to_vec(), captures: vec![], body });
+        Ok((id, signature))
+    }
+
+    fn array_relation_body(&mut self, arguments: &[Expression; 3], id: FunctionId, signature: &Signature, equality: bool) -> Result<Expression, String> {
+        use crate::{parser::BinOp, runtime_abi::RuntimeFunction};
+        let at_end = |array: &Expression| -> Result<Expression, String> {
+            Ok(Expression::Binary { op: BinOp::Eq, left: Box::new(arguments[2].clone()), right: Box::new(Expression::call_array(RuntimeFunction::ArrayLength, vec![array.clone()], None)?) })
+        };
+        let next = Expression::Binary { op: BinOp::Add, left: Box::new(arguments[2].clone()), right: Box::new(Expression::Constant(Constant::Int(1))) };
+        let remaining = Expression::call_direct(id, signature, vec![arguments[0].clone(), arguments[1].clone(), next])?;
+        let items = self.array_relation_items(arguments, remaining, equality)?;
+        if equality {
+            return branch(at_end(&arguments[0])?, at_end(&arguments[1])?, branch(at_end(&arguments[1])?, Expression::Constant(Constant::Bool(false)), items)?);
+        }
+        let left_ended = branch(at_end(&arguments[1])?, Expression::Constant(Constant::Int(0)), Expression::Constant(Constant::Int(-1)))?;
+        branch(at_end(&arguments[0])?, left_ended, branch(at_end(&arguments[1])?, Expression::Constant(Constant::Int(1)), items)?)
+    }
+
+    fn array_relation_items(&mut self, arguments: &[Expression; 3], remaining: Expression, equality: bool) -> Result<Expression, String> {
+        use crate::{parser::BinOp, runtime_abi::RuntimeFunction};
+        let left = Expression::call_array(RuntimeFunction::ArrayGet, vec![arguments[0].clone(), arguments[2].clone()], None)?;
+        let right = Expression::call_array(RuntimeFunction::ArrayGet, vec![arguments[1].clone(), arguments[2].clone()], None)?;
+        if equality {
+            return branch(self.structural_equality(left, right)?, remaining, Expression::Constant(Constant::Bool(false)));
+        }
+        let (callee, signature) = self.derive_comparison(left.ty())?;
+        let value = Expression::call_direct(callee, &signature, vec![left, right])?;
+        let temporary = self.next;
+        self.next += 1;
+        let order = Expression::Variable { id: temporary, ty: Type::Int };
+        let condition = Expression::Binary { op: BinOp::Eq, left: Box::new(order.clone()), right: Box::new(Expression::Constant(Constant::Int(0))) };
+        Ok(Expression::Let { id: temporary, value: Box::new(value), body: Box::new(branch(condition, remaining, order)?) })
     }
 
     fn adt_comparison_body(&mut self, ty: &Type, lhs: usize, rhs: usize) -> Result<Expression, String> {
