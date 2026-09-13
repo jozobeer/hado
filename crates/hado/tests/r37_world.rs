@@ -42,6 +42,7 @@ fn operation_result_rows_reach_the_call_without_effectful_handler_arms() {
 
 #[test]
 fn operation_result_rows_remain_before_discharge() {
+    Case::new("effect Foo\nreply pick: Int {Error}\ndef use (n: Int) => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
     Case::new("effect Foo\nreply pick: Int {Error}\ndef use (n: Int): Int {Foo, Error} => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
 }
 

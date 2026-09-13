@@ -43,6 +43,7 @@ for arity in (0, 1):
         group = '37-a(2)' if not labels else '37-a(1)' if len(labels) == 1 else '37-a(4)'
         add(f'{group} arity={arity}', handled, 'String' + suffix(labels))
         add(f'37-a(3) arity={arity} labels={len(labels)}', declarations + f'def use (n: Int): Int{suffix(labels + ["Foo"])} => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
+        add(f'37-a(3) inferred arity={arity} labels={len(labels)}', declarations + f'def use (n: Int) => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
 add('37-a(5) abort', 'effect Stop\nabort stop\nhandler Stop as H\nabort stop => 9\ndef main = Int.to_string (with H -> stop)\n', 9, 'print')
 add('37-a(5) capture', 'effect Ask\ncapture ask(value: Int): Unit\nhandler Ask as H\ncapture ask _ => resume ()\ndef main = Int.to_string (with H -> do ask 7 -> 8)\n', 8, 'print')
 values = [-1, 0, 3, 5, 2147483647, rng.randrange(10, 10000)]
@@ -76,10 +77,11 @@ def validate(rows):
         coverage.add((label.split()[0], mode))
         assert (base / ident / 'main.hd').stat().st_size > 0
         assert (base / ident / 'expect').stat().st_size > 0
+    assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}
     assert coverage == {(f'37-a({i})', 'type') for i in range(1, 5)} | {('37-a(5)', 'print')} | {(f'37-b2({i})', 'error' if i == 4 else 'print') for i in range(1, 6)}
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
-for bad in ([], [row for row in rows if not row.endswith('\terror')], rows + rows[:1]):
+for bad in ([], rows[1:], [row for row in rows if not row.endswith('\terror')], rows + rows[:1]):
     try:
         validate(bad)
     except AssertionError:
