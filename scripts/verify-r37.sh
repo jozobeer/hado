@@ -479,6 +479,54 @@ PY
 while IFS=$'\t' read -r ident label mode; do
     check "$label" probe "$mode" "$workdir/$ident"
 done <"$workdir/manifest.tsv"
+check '37-i Env and Io corpus headers and lock' python3 - <<'PY'
+from pathlib import Path
+import hashlib, re
+
+def validate(sources, lock):
+    tagged = {path: source for path, source in sources.items() if '// item: Env と Io' in source.splitlines()}
+    assert tagged, 'missing Env and Io corpus'
+    assert any(re.search(r'^// expect:', source, re.M) for source in tagged.values()), 'missing success'
+    assert any(re.search(r'^// expect-error:', source, re.M) for source in tagged.values()), 'missing failure'
+    entries = {}
+    for line in lock.splitlines():
+        digest, path = line.split('  ', 1)
+        assert path not in entries, path
+        entries[path] = digest
+    for path, source in tagged.items():
+        assert '// spec: §49' in source.splitlines(), path
+        assert '// needs: prelude' in source.splitlines(), path
+        assert len(re.findall(r'^// expect(?:-error)?:', source, re.M)) == 1, path
+        assert entries.get(str(path)) == hashlib.sha256(source.encode()).hexdigest(), f'lock mismatch: {path}'
+    return tagged
+
+sources = {path: path.read_text() for path in Path('tests/accept').glob('*/main.hd')}
+lock = Path('tests/corpus.sha256').read_text()
+tagged = validate(sources, lock)
+print(f'Env and Io corpus: {len(tagged)} files; success, failure, prelude and lock verified')
+controls = [({}, lock)]
+for path in tagged:
+    changed = dict(sources)
+    changed[path] = changed[path].replace('// item: Env と Io\n', '', 1)
+    controls.append((changed, lock))
+    changed = dict(sources)
+    changed[path] = changed[path].replace('// needs: prelude\n', '', 1)
+    controls.append((changed, lock))
+    pattern = r'^([0-9a-f])([0-9a-f]{63}  ' + re.escape(str(path)) + r')$'
+    altered, count = re.subn(pattern, lambda m: ('0' if m[1] != '0' else '1') + m[2], lock, flags=re.M)
+    assert count == 1
+    controls.append((sources, altered))
+for changed, altered in controls:
+    try:
+        validate(changed, altered)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError('corpus mutation escaped')
+print(f'corpus controls: {len(controls)} empty/tag/prelude/lock mutations rejected')
+PY
+check '37-i full corpus lock' sha256sum --strict --status -c tests/corpus.sha256
+
 m6_launch_conditions() {
     python3 - "$workdir" <<'PY'
 from pathlib import Path
