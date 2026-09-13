@@ -2288,3 +2288,52 @@ m0 の赤が m2 の 5・m3 の 9・m7 の 3・r23 の 23-c に連鎖した。
 **副作用。** `namespaces.rs` に `prelude_operations` が入り、prelude の効果の操作が全階層から無修飾で見えるようになった（8 行）。`crates/hado/tests/prelude.rs` が `stdlib/error.hd` を連結するようになった。`scripts/verify-m3.sh` の `cargo test` の上限が 600 秒になり、時間切れが `NG: timeout` として出るようになった。
 
 **次の一手:** R35（配列）。手順書は未着手。R34 の教訓（分類からの生成、境界値の決定的な包含、独立した oracle）は配列の索引にそのまま効く。
+
+## R35 配列（2026-09-13）
+
+24.1 の C3（配列）と C7（印字）・C8（関数集合）・C1（失敗の分類）を実装した。`Array` は要素型を 1 つ取る不変の列で、`{ int64 count; slot[count] }` の 1 つの GC ブロックに stride 8 バイトで詰める。`get` は emit が出す直接の load なので O(1)、`set` は新しい Array を返す。失敗は prelude の包み（hado 側）で `raise` に持ち上げる。**全門番のうち許容される赤以外が満点・終了コード 0、`cargo test --offline --no-fail-fast` が 0 failed。**
+
+指揮・計画は claude（opus-5）。実装は codex（gpt-6-astra high）、審査は opencode（deepseek-v4.1-flash）。計画審査（2 巡）も opencode。
+
+| 判定 | 実測 |
+|---|---|
+| 35-a | 5 member の正常形を、要素型（`Int` / `Float` / `Bool` / `String` / `Char` / record / `Int Array`）× 長さ（`0` / `1` / 乱数 / `3` / `30000`）× 有効な索引（`0` / 中間 / `length - 1`）の積で回し、期待値を python3 のリスト操作で計算して一致。要素の機械型 I64 / F64 / I8 / Pointer / I32 を全部通す |
+| 35-b | 失敗: `get` と `set` の `-1` / `length` / `length + 1` が `IndexOutOfRange`。負の対照は隣の有効な形。handler で捕まえる形は §58 に従い body と腕の型を揃える |
+| 35-c | 3 万要素の `of_list` → `length` と `get 29999` が build と実行を合わせて 2 秒以内（実測 0.15 秒）。`set` も 3 万要素で 0.16 秒、終了コード 0 |
+| 35-d | 印字。最上位の `Array.of_list [...]`、空の `Array.of_list []`、入れ子（List の要素、record の field、Array の Array） |
+| 35-e | 比較。`==` `!=` `compare` を要素型 ×（同内容の別インスタンス / 先頭が違う / 途中が違う / 末尾が違う / 接頭辞 / 空どうし / 空と非空）で回し、期待値を python3 のリスト比較から導く。NaN の等値と順序の違いも測る |
+| 35-e2 | 要素型が Fn を含む Array の `==` と `compare` が E703 / E704（入れ子も）。Fn を含まない同じ形は受理 |
+| 35-f | 利用者の `type A Array = ...` が E205 で 2 回目の宣言の名前。`def f (xs: Int Array) => xs` の注釈は受理 |
+| 35-f2 | `shared type T = Int Array` の等式が型の登録より前に収集される。`shared` を消した対照は E305 |
+| 35-g | `verify-m7.sh` の `prelude inventory` が 32/39 から 38/39。残る赤は `Int.parse` だけ |
+| 35-h | `verify-m1-corpus.sh` の pairs から「配列」が消え、残りは `Int.parse` と Env と Io の 2 項目。受理コーパス 5 本（`// item: 配列`）、lock 206 行が `sha256sum --strict -c` で全件 OK |
+| `verify-r35.sh` | `PASSED: 714/714` |
+| 全走 | 許容される赤（`verify-m1-corpus.sh` 6/7 の 2 pairs、`verify-m2.sh` 7/8 と `verify-m3.sh` 11/12 はその連鎖、`verify-m7.sh` 2/3 は `Int.parse`）以外が満点。`verify-m4.sh` 128/128、`verify-m5.sh` 145/145、`verify-m6.sh` 71/71、`verify-r34.sh` 1360/1360、`cargo test --offline --no-fail-fast` 0 failed |
+
+**設計は手順書を書く前の実測で決めた。** Explore の地図は「型多相 intrinsic は今の器に入らない」として (a) infer の scheme、(b) mono の `CallRuntime` の結果型の上書き、(c) 要素の ABI の 3 つが要ると報告し、C を 8 バイトスロット固定にする案を挙げていた。指揮者が 5 つ測って設計を変えた。
+
+- 3 万要素の List の O(n) 走査は build 0.13 秒・実行 0.01 秒（hado の record で Array を作る案が性能で不可能ではないことの確認）
+- `type A Arr = A Box` の別名は parser が拒否する（`expected a record or a leading | for an ADT`）。**`module Array` の `shared type A T` を §49 の `A Array` と綴らせる道は無い**
+- トップに `type A Array = { items: A List; count: Int }` と書けば綴りは合うが、`a.items` が利用者に漏れて不正な `count` を持つ値を組める
+- **emit は cranelift である。** 要素の load 型を `repr::machine_type` から決められるので、C の ABI の幅問題は存在しない。これが「C を通す案は 1 桁重い」という見立てを覆した
+
+結果として、Array は `Ty::Adt("Array", [A])` / `mono::Type::Data("Array", [T])` の名前キーの `Data` にした（`mono::OUTCOME` と同じ形。新しい `Ty` / `Type` の variant は作っていない）。intrinsic 4 本（`__array_length` `__array_get` `__array_alloc` `__array_fill_unchecked`）は `value_signature` に載せず、`RuntimeFunction::is_polymorphic()` で 4 箇所を分岐させる。C が持つのは `hado_array_alloc` と `hado_array_length` の 2 本だけで、slot の読み書きは emit が `base + index * 8` の load / store を出す。`of_list` `to_list` `set` は hado で書いた（R34 の `Bytes.of_list` と同じ「構築中の未公開の値への書き込み」の形）。
+
+**計画審査が致命 2 件を捕まえた。** どちらも「今のコードでは通らない」という指摘で、指揮者がコードを開いて確かめてから手順書を直した。
+
+1. **`name_resolution.rs:167` は `__` で始まる名前の `value_signature()` が `None` なら E204 にする。** 多相 intrinsic を `value_signature` に載せない決定のままだと `stdlib/array.hd` の中の 4 本すべてが E204 になり、prelude が壊れて工程 0 の最初の `check` から一切通らない。分岐は 3 箇所ではなく 4 箇所だった
+2. **`infer.rs` の `contains_function` は `Ty::Adt` の型引数を再帰しない。** 名前を結果に持つ constructor / record の payload だけを辿るので、`List` は `Cons` の payload で拾えるが、**constructor を持たない Array では `Adt("Array", [Fn])` が常に false になる**。§45 の E703 / E704 が出ず、`build` で `derive_comparison` が Fn に達して内部エラーになる。同じファイルの `contains_abstract` は型引数を再帰しているので、その腕を写した
+
+**実装に致命が 1 度も出なかった。R34 に続いて 2 版連続である。** 3 工程とも審査 1 巡で合格し、fixer は 1 度も要らなかった。R34 が 14 巡（工程 0 が 9 巡、工程 1 が 5 巡）だったのと対照的で、違いは判定器の作り方にある。**R34 の教訓（入力の形が列挙できる判定は手順書の段階で生成規則として書く / 境界値は乱数任せにせず決定的に含める / 期待値は独立した oracle から導く）を 28 節に最初から書いた結果、判定器が 1 巡目から穴を持たなかった。** 審査は工程 0 で 14 件、工程 1 で 13 件の欠陥を注入し、**すべてを判定器が検出した**（落ちない判定は 1 つも無かった）。
+
+**手順書の予想が 1 つ外れた。** `infer/functors.rs` の `shared_body_type` に Array を足す決定を書いたが、既存の arity 参照でそのまま通り、変更は不要だった。R34 で Bytes を通したときに写し落として R33 の順序の欠陥が再発した箇所なので、判定 35-f2 は残してある。
+
+**手順書に無い変更が 1 つ出た。** builder が工程 0 で、handler の中の `Array.length (Array.set ...)` が単相化で `Mismatch` になることを見つけ、`mono.rs` に `contains_handled_call` を足して既存の継続処理へ接続した。全 effect 呼び出しに及ぶ広い変更だが、撤去すると判定 35-b が build できないことを審査が注入で確かめ、`cargo test` 0 failed と `verify-r32/r33/r34` 満点で既存の handler 経路の後退は観測されなかった。
+
+**指揮者が門番を 1 つ強くした**（`83edabb`）。`verify-r35.sh` に `FILTER` 環境変数によるラベルの部分一致での絞り込みがあった。未設定なら全件を回すので既定の実行に影響は無いが、値を与えれば判定を静かに減らせる。判定の条件は変えずに消した。
+
+**未確認のまま残したもの:** `%` を使う未注釈の再帰生成器が E306 になる（builder が工程 0 で踏み、Pure な比較式で回避した。原因は未調査）。R38 で判断する。
+
+**仕様への疑義:** §45 は Array の `compare` を「要素型から派生する」としか定めず、**長さが違う Array の順序を定めていない**。28 節で python3 のリスト比較・`List` の辞書順に合わせて「共通部分がすべて等しいときだけ短い方を先」と決めた。仕様は変えていない。R38 で §45 に 1 文足すかどうかを判断する。
+
+**所要（ログの首尾）:** builder が 3 本で 73 分（28 / 22 / 23）、審査が 3 本、計画審査が 8 分と 10 分。全走は 34 分（入口）と 50 分（出口）。R34 の builder 264 分・審査 361 分に対し、**1 巡で通ったぶん全体が大きく縮んだ**。
