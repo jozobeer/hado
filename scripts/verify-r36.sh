@@ -382,12 +382,12 @@ pairs_remaining() {
     local status=0
     bash scripts/verify-m1-corpus.sh >"$workdir/m1.log" 2>&1 || status=$?
     cat "$workdir/m1.log"
-    [ "$status" -eq 1 ] &&
-        [ "$(grep -c '^NG:' "$workdir/m1.log")" -eq 1 ] &&
-        grep -qxF 'NG: 3 pairs: accept-missing:Env と Io' "$workdir/m1.log" &&
-        [ "$(tail -n 1 "$workdir/m1.log")" = 'PASSED: 6/7' ]
+    [ "$status" -eq 0 ] &&
+        [ "$(grep -c '^NG:' "$workdir/m1.log")" -eq 0 ] &&
+        grep -qxF 'OK: 3 pairs' "$workdir/m1.log" &&
+        [ "$(tail -n 1 "$workdir/m1.log")" = 'PASSED: 7/7' ]
 }
-check '36-g pairs: only Env and Io remain' pairs_remaining
+check '36-g pairs: none remain' pairs_remaining
 
 full_gate() {
     local gate="$1" status=0

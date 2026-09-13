@@ -109,6 +109,17 @@ report_build_run() {
     fi
 }
 
+# argv を使う実物の入口では、stdout と stderr をバイト単位で照合する。
+report_build_run_args() {
+    local base=$1 expected=$2
+    shift 2
+    cargo run --offline -q -- build "$base/main.hd" >"$base/build.out" 2>"$base/build.err" || return 1
+    "$base/main" "$@" >"$base/out" 2>"$base/err" || return 1
+    cat "$base/out"
+    [ "$(wc -c <"$base/build.err")" -eq 0 ] &&
+        [ "$(wc -c <"$base/err")" -eq 0 ] && cmp -s "$base/out" "$expected"
+}
+
 # 32-j 補助: base に report/ を写し、3 つ組（name:passed:total）を add で畳む
 # main.hd を書いて build → 実行。期待値は呼び出し側で計算して渡す。
 report_case() {
@@ -180,7 +191,18 @@ report_case_real() {
         echo "  real main.hd diagnostics"
         return 1
     fi
-    report_build_run "$base" "33/35 passed; red: m7"
+    mkdir "$base/logs"
+    local name n limit sum_passed=0 sum_total=0 red=()
+    for name in "a$RANDOM" "b$RANDOM" "c$RANDOM"; do
+        limit=$((1 + RANDOM % 100))
+        n=$((RANDOM % limit))
+        printf 'noise\nPASSED: %d/%d\n' "$n" "$limit" >"$base/logs/$name"
+        sum_passed=$((sum_passed + n))
+        sum_total=$((sum_total + limit))
+        red+=("$name")
+    done
+    printf '%d/%d passed; red: %s\n' "$sum_passed" "$sum_total" "${red[*]}" >"$base/expect"
+    report_build_run_args "$base" "$base/expect" "$base/logs"
 }
 
 # 32-j: E2 の要約プログラム。report.hd を単体で check し、実行時に生成した
