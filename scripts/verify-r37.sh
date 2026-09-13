@@ -42,7 +42,7 @@ for arity in (0, 1):
         handled = declarations + f'handler Foo as H\nreply pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n'
         group = '37-a(2)' if not labels else '37-a(1)' if len(labels) == 1 else '37-a(4)'
         add(f'{group} arity={arity}', handled, 'String' + suffix(labels))
-        add(f'37-a(3) arity={arity} labels={len(labels)}', declarations + f'def use (_: Int): Int{suffix(labels + ["Foo"])} => {call}\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
+        add(f'37-a(3) arity={arity} labels={len(labels)}', declarations + f'def use (n: Int): Int{suffix(labels + ["Foo"])} => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
 add('37-a(5) abort', 'effect Stop\nabort stop\nhandler Stop as H\nabort stop => 9\ndef main = Int.to_string (with H -> stop)\n', 9, 'print')
 add('37-a(5) capture', 'effect Ask\ncapture ask(value: Int): Unit\nhandler Ask as H\ncapture ask _ => resume ()\ndef main = Int.to_string (with H -> do ask 7 -> 8)\n', 8, 'print')
 values = [-1, 0, 3, 5, 2147483647, rng.randrange(10, 10000)]
