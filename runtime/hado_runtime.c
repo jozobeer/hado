@@ -185,6 +185,42 @@ HadoString *hado_int_to_string(int64_t value) {
   return result;
 }
 
+typedef struct {
+  int8_t valid;
+  int64_t value;
+} IntParseResult;
+
+static IntParseResult parse_int_digits(const HadoString *string, size_t index) {
+  while (index < string->length && string->bytes[index] == '0') ++index;
+  int64_t acc = 0;
+  for (; index < string->length; ++index) {
+    int64_t digit = (int64_t)string->bytes[index] - '0';
+    if (digit < 0 || digit > 9) return (IntParseResult){0, 0};
+    if (acc < (INT64_MIN + digit) / 10) return (IntParseResult){0, 0};
+    acc = acc * 10 - digit;
+  }
+  return (IntParseResult){1, acc};
+}
+
+static IntParseResult parse_int(const HadoString *string) {
+  if (string->length == 0) return (IntParseResult){0, 0};
+  int negative = string->bytes[0] == '-';
+  size_t start = (size_t)negative;
+  if (start == string->length) return (IntParseResult){0, 0};
+  IntParseResult result = parse_int_digits(string, start);
+  if (!negative && result.value == INT64_MIN) return (IntParseResult){0, 0};
+  result.value = negative ? result.value : -result.value;
+  return result;
+}
+
+int8_t hado_int_parse_is_valid(const HadoString *string) {
+  return parse_int(string).valid;
+}
+
+int64_t hado_int_parse_unchecked(const HadoString *string) {
+  return parse_int(string).value;
+}
+
 HadoString *hado_float_to_string(double value) {
   char buffer[32];
   int length = snprintf(buffer, sizeof(buffer), "%.17g", value);

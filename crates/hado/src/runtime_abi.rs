@@ -18,6 +18,8 @@ pub enum RuntimeFunction {
     PrintChar,
     PrintFloat,
     IntToString,
+    IntParseIsValid,
+    IntParseUnchecked,
     FloatToString,
     CharToString,
     QuoteString,
@@ -60,6 +62,8 @@ impl RuntimeFunction {
             Self::CharToString => Some("__char_to_string"),
             Self::FloatToString => Some("__float_to_string"),
             Self::IntToString => Some("__int_to_string"),
+            Self::IntParseIsValid => Some("__int_parse_is_valid"),
+            Self::IntParseUnchecked => Some("__int_parse_unchecked"),
             Self::StringLength => Some("__string_length"),
             Self::StringConcat => Some("__string_concat"),
             Self::StringCompare => Some("__string_compare"),
@@ -94,6 +98,8 @@ impl RuntimeFunction {
             Self::QuoteString => (vec![Type::String], Type::String),
             Self::FloatToString | Self::CanonicalFloat => (vec![Type::Float], Type::String),
             Self::IntToString => (vec![Type::Int], Type::String),
+            Self::IntParseIsValid => (vec![Type::String], Type::Bool),
+            Self::IntParseUnchecked => (vec![Type::String], Type::Int),
             Self::PrintInt => (vec![Type::Int], Type::Unit),
             Self::PrintString | Self::PrintErrorString | Self::AbortError => (vec![Type::String], Type::Unit),
             Self::PrintChar => (vec![Type::Char], Type::Unit),
@@ -116,7 +122,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
+    pub const ALL: &'static [Self] = &[Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -147,6 +153,18 @@ impl RuntimeFunction {
             Self::CharToString => &Declaration { symbol: "hado_char_to_string", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
             Self::FloatToString => &Declaration { symbol: "hado_float_to_string", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
             Self::IntToString => &Declaration { symbol: "hado_int_to_string", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
+            Self::IntParseIsValid => &Declaration {
+                symbol: "hado_int_parse_is_valid",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I8),
+                may_allocate: false,
+            },
+            Self::IntParseUnchecked => &Declaration {
+                symbol: "hado_int_parse_unchecked",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
             Self::PrintFloat => &Declaration { symbol: "hado_print_float", parameters: &[AbiType::F64], result: None, may_allocate: false },
             Self::PrintChar => &Declaration { symbol: "hado_print_char", parameters: &[AbiType::I32], result: None, may_allocate: false },
             Self::StringLength => &Declaration {
