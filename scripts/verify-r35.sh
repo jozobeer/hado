@@ -297,6 +297,31 @@ while IFS=$'\t' read -r kind label mode; do
         *) exit 1 ;;
     esac
 done <"$workdir/manifest.tsv"
+array_corpus() {
+    python3 - <<'PY'
+from pathlib import Path
+import sys
+
+def covered(cases):
+    return (len(cases) >= 3
+            and any(any(line.startswith('// expect:') for line in lines) for lines in cases)
+            and any('// expect-error: IndexOutOfRange' in lines for lines in cases))
+
+success = ['// expect: 1']
+failure = ['// expect-error: IndexOutOfRange']
+assert covered([success, success, failure])
+for missing in ([], [success] * 3, [failure] * 3, [success, failure],
+                [success] * 3 + [['// expect-error: WrongError']]):
+    assert not covered(missing), missing
+
+cases = [path.read_text().splitlines() for path in Path('tests/accept').glob('*/main.hd')]
+arrays = [lines for lines in cases if '// item: 配列' in lines]
+errors = sum('// expect-error: IndexOutOfRange' in lines for lines in arrays)
+print(f'Array corpus: {len(arrays)} cases, {errors} IndexOutOfRange')
+sys.exit(0 if covered(arrays) else 1)
+PY
+}
 check '35-d/35-e selected probes are nonempty' [ "$total" -gt 1 ]
+check '35-h Array corpus includes success and failure cases' array_corpus
 echo "PASSED: $passed/$total"
 [ "$total" -gt 0 ] && [ "$passed" -eq "$total" ]
