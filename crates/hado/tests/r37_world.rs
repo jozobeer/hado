@@ -190,7 +190,11 @@ int32_t hado_entry(void) {
     assert(hado_io_read_file((const HadoString *)&path) == 0);
     HadoString *bytes = hado_io_take_bytes(0);
     assert(bytes->length == 4 && memcmp(bytes->bytes, "data", 4) == 0);
-    assert(hado_io_write_file((const HadoString *)&path, bytes) == 0);
+    assert(hado_io_write_file((const HadoString *)&path, bytes_from_c_string("replaced")) == 0);
+    assert(hado_io_read_file((const HadoString *)&path) == 0);
+    HadoString *written = hado_io_take_bytes(0);
+    assert(written->length == 8 && memcmp(written->bytes, "replaced", 8) == 0);
+    assert(bytes->length == 4 && memcmp(bytes->bytes, "data", 4) == 0);
     assert(hado_io_read_dir((const HadoString *)&path) == 3);
     return 0;
 }
