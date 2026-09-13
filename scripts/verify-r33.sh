@@ -1000,7 +1000,11 @@ gates_real() {
     local name n limit sum_passed=0 sum_total=0 red=()
     for name in "a$RANDOM" "b$RANDOM" "c$RANDOM"; do
         limit=$((1 + RANDOM % 100))
-        n=$((RANDOM % limit))
+        n=$((RANDOM % (limit + 1)))
+        case "$name" in
+            a*) n=$limit ;;
+            b*) n=$((RANDOM % limit)) ;;
+        esac
         printf 'noise\nPASSED: %d/%d\n' "$n" "$limit" >"$base/logs/$name"
         sum_passed=$((sum_passed + n))
         sum_total=$((sum_total + limit))
