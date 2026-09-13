@@ -342,6 +342,25 @@ impl Lowerer {
             || crate::check::children(node).iter().any(|child| self.contains_capture(child))
     }
 
+    fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
+        if !self.handler_needs_outcome() { return false; }
+        if let crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) = &node.kind {
+            if self.is_abort_node(node) && self.handler_for_node(node).is_some() { return true; }
+            let name = match &callee.kind {
+                crate::parser::NodeKind::Name(name) if !self.scope.contains_key(name) => Some(name.clone()),
+                crate::parser::NodeKind::Field(module, member) => match &module.kind {
+                    crate::parser::NodeKind::Name(module) => Some(format!("{module}.{}", member.name)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if name.is_some_and(|name| {
+                self.schemes.get(&self.resolve_definition(&name)).is_some_and(Self::scheme_carries_effects)
+            }) { return true; }
+        }
+        crate::check::children(node).iter().any(|child| self.contains_handled_call(child))
+    }
+
     fn lift_capture_arguments(&mut self, node: &crate::parser::Node) -> Option<crate::parser::Node> {
         use crate::parser::{BinOp, NodeKind::*};
         let mut result = node.clone();
@@ -364,7 +383,7 @@ impl Lowerer {
             PatternBranch { scrutinee, .. } => vec![scrutinee],
             _ => Vec::new(),
         };
-        if !children.iter().any(|child| self.contains_capture(child)) {
+        if !children.iter().any(|child| self.contains_capture(child) || self.contains_handled_call(child)) {
             return None;
         }
         let mut bindings = Vec::new();
@@ -524,7 +543,7 @@ impl Lowerer {
             if self.is_capture_node(value) {
                 return self.capture_do(value, body, Some(pat));
             }
-            let captures = self.contains_capture(value);
+            let captures = self.contains_capture(value) || self.contains_handled_call(value);
             let value = self.expression(value)?;
             if is_outcome(&value.ty()) {
                 if captures {

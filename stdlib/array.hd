@@ -1,0 +1,31 @@
+module Array
+def A length(xs: A Array): Int Pure
+def A get(xs: A Array, index: Int): A {Error}
+def A set(xs: A Array, index: Int, value: A): A Array {Error}
+def A of_list(xs: A List): A Array Pure
+def A to_list(xs: A Array): A List Pure
+implement Array as Array
+def length xs => __array_length xs
+def get xs index =>
+  if index >= 0 && index < length xs
+    => __array_get xs index
+    | raise { message = "IndexOutOfRange" }
+def set xs index value =>
+  if index >= 0 && index < length xs
+    => of_list (replace (to_list xs) index value)
+    | raise { message = "IndexOutOfRange" }
+def of_list xs => build xs 0 (__array_alloc (List.length xs))
+def to_list xs => elements xs 0 (length xs)
+// target は構築中だけに閉じ込め、全 slot を埋めた後で公開する。
+def rec build xs index target =>
+  if xs
+  | [] => target
+  | [head, ...tail] => build tail (index + 1) (__array_fill_unchecked target index head)
+def rec elements xs index count =>
+  if index >= count => [] | [__array_get xs index, ...elements xs (index + 1) count]
+def rec replace xs index value =>
+  if xs
+  | [] => []
+  | [head, ...tail] => replace_head head tail index value
+def rec replace_head head tail index value =>
+  if index == 0 => [value, ...tail] | [head, ...replace tail (index - 1) value]

@@ -146,6 +146,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
             include_str!("../../../stdlib/error.hd"),
             include_str!("../../../stdlib/list.hd"),
             include_str!("../../../stdlib/option.hd"),
+            include_str!("../../../stdlib/array.hd"),
             include_str!("../../../stdlib/string.hd"), include_str!("../../../stdlib/bytes.hd"), include_str!("../../../stdlib/int.hd"), include_str!("../../../stdlib/float.hd")] {
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;
