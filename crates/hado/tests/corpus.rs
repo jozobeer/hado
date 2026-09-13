@@ -55,6 +55,16 @@ fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     Ok(if *status == 0 { (0, bytes, Vec::new()) } else { (1, Vec::new(), bytes) })
 }
 
+fn launch(exe: &Path, work: &Path) -> std::io::Result<std::process::Output> {
+    std::process::Command::new(exe)
+        .current_dir(work)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?
+        .wait_with_output()
+}
+
 fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     let (status, stdout, stderr) = expected_output(text)?;
     let stem = rel.replace('/', "_");
@@ -65,10 +75,7 @@ fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), S
     let result = (|| {
         compile(&obj)?;
         hado::link_executable(&obj, &exe)?;
-        let out = std::process::Command::new(&exe)
-            .current_dir(&work)
-            .stdin(std::process::Stdio::null())
-            .output().map_err(|e| e.to_string())?;
+        let out = launch(&exe, &work).map_err(|e| e.to_string())?;
         if out.status.code() != Some(status) || out.stderr != stderr || out.stdout != stdout {
             return Err(format!("status={:?} stdout={:?} stderr={:?}", out.status, out.stdout, out.stderr));
         }
