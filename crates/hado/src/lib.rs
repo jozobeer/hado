@@ -183,7 +183,7 @@ fn check_parsed_filtered(parsed: &ParsedSource, path: &str, reject_user_main_eff
     let ParsedSource { ast, inspection, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
     let adjust = |error| namespace_diagnostic(check::arm_diagnostic(ast, error), namespace_anchors);
     let name_error = names::resolve_with_prelude(ast, path, *trusted_start, *inspection).err();
-    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection) {
+    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection, *prelude_items) {
         Ok(result) => result,
         Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).chain(namespace_diagnostics.iter().cloned()).map(adjust).min_by_key(diagnostic_order).unwrap()),
     };

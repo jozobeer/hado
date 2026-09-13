@@ -50,6 +50,7 @@ struct Checker<'a> {
     eval_effects: Row,
     main_effects: Row,
     effects: HashMap<String, Vec<(OpKind, String)>>,
+    prelude_effects: HashSet<String>,
     handlers: HashMap<String, String>,
     handler_decls: HashMap<String, HandlerDecl>,
     operations: HashMap<String, OpKind>,
@@ -63,14 +64,14 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
 
 pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<Checked, Diagnostic> {
     let inspection = if crate::has_main_definition(ast) { crate::Inspection::Entry } else { crate::Inspection::Library };
-    let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start, inspection)?;
+    let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start, inspection, 0)?;
     match deferred.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(checked),
     }
 }
 
-pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
+pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection, prelude_items: usize) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let contracts = crate::contract_types::Contracts::collect(&ast.items);
     let contract_diagnostics = contracts.diagnostics(ast, path);
     let mut checker = Checker {
@@ -117,6 +118,10 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         eval_effects: Row::pure(),
         main_effects: Row::pure(),
         effects: HashMap::new(),
+        prelude_effects: ast.items[..prelude_items].iter().filter_map(|item| match item {
+            Item::Effect(effect) => Some(effect_print_name(&effect.name)),
+            _ => None,
+        }).collect(),
         handlers: HashMap::new(),
         handler_decls: HashMap::new(),
         operations: HashMap::new(),
@@ -238,7 +243,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         if checker.contains_abstract(&main, &mut Vec::new()) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E705"), "main cannot return a value containing an abstract type"));
         }
-        if checker.main_effects.has_user_effect() {
+        if checker.main_effects.has_user_effect(&checker.prelude_effects) {
             checker.deferred.push(checker.error(definitions["main"].span, Some("E706"), "main cannot have a user-defined effect"));
         }
         Ok(main)

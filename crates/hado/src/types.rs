@@ -73,8 +73,8 @@ impl Row {
         }
     }
 
-    pub fn has_user_effect(&self) -> bool {
-        self.labels().iter().any(|ty| effect_ctor(ty) != "Error")
+    pub fn has_user_effect(&self, prelude_effects: &std::collections::HashSet<String>) -> bool {
+        self.labels().iter().any(|ty| !prelude_effects.contains(&effect_ctor(ty)))
     }
 
     fn labels(&self) -> &[Ty] {
