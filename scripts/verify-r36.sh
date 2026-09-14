@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 passed=0
 total=0
 check() {
@@ -380,7 +384,7 @@ check '36-g full corpus lock' sha256sum --strict --status -c tests/corpus.sha256
 
 pairs_remaining() {
     local status=0
-    bash scripts/verify-m1-corpus.sh >"$workdir/m1.log" 2>&1 || status=$?
+    gate_cached verify-m1-corpus bash scripts/verify-m1-corpus.sh >"$workdir/m1.log" 2>&1 || status=$?
     cat "$workdir/m1.log"
     [ "$status" -eq 0 ] &&
         [ "$(grep -c '^NG:' "$workdir/m1.log")" -eq 0 ] &&
@@ -391,7 +395,7 @@ check '36-g pairs: none remain' pairs_remaining
 
 full_gate() {
     local gate="$1" status=0
-    bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
+    gate_cached "verify-$gate" bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
     tail -n 4 "$workdir/$gate.log"
     [ "$status" -eq 0 ] || { cat "$workdir/$gate.log"; return 1; }
     python3 - "$workdir/$gate.log" <<'PYCODE'

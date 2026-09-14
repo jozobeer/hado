@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 failed=0
 passed=0
 total=3
-if bash scripts/verify-m6.sh --with-prelude; then passed=$((passed + 1)); else failed=1; fi
+if gate_cached verify-m6-with-prelude bash scripts/verify-m6.sh --with-prelude; then passed=$((passed + 1)); else failed=1; fi
 python3 - <<'PY'
 from pathlib import Path
 import re
@@ -50,6 +54,6 @@ print(f"prelude inventory: {passed}/{total}")
 sys.exit(0 if passed == total else 1)
 PY
 if [ "$?" -eq 0 ]; then passed=$((passed + 1)); else failed=1; fi
-if cargo test --offline --no-fail-fast; then passed=$((passed + 1)); else failed=1; fi
+if cargo_cached test --offline --no-fail-fast; then passed=$((passed + 1)); else failed=1; fi
 echo "PASSED: $passed/$total"
 exit "$failed"

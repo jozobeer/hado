@@ -4,6 +4,10 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
+
 ok=0
 total=7
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
@@ -20,7 +24,7 @@ else
 fi
 
 # --- shared cargo test output for checks 2..4 ---
-cargo test >"$TMPD/test.log" 2>&1
+cargo_cached test --offline --no-fail-fast >"$TMPD/test.log" 2>&1
 test_status=$?
 passed=$(grep -E "test result:" "$TMPD/test.log" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | awk '{s+=$1} END{print s+0}')
 walk_ok=$(awk '/tests.walk.rs/{f=1} f && /test result: ok/{ok=1; f=0} f && /test result: FAILED/{f=0} END{print ok+0}' "$TMPD/test.log")

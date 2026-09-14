@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 passed=0
 total=0
 check() {
@@ -561,7 +565,7 @@ check '37-j actual m6 launch function: relative file, EOF and empty argv' m6_lau
 
 full_gate() {
     local gate="$1" status=0
-    bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
+    gate_cached "verify-$gate" bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
     tail -n 4 "$workdir/$gate.log"
     [ "$status" -eq 0 ] || { cat "$workdir/$gate.log"; return 1; }
     python3 - "$workdir/$gate.log" <<'PY'

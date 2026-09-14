@@ -123,17 +123,23 @@ for folder in ['tests/accept', 'tests/reject', 'tests/library']:
                             for p in source_files(case) if p.parent != case)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
-tests = run('cargo','test','--offline','--no-fail-fast','--','--nocapture','--test-threads=1', timeout=600)
+# 全体は並列で実走し、終了コードと HM のテスト名を取る（m7 と同じコマンドなので
+# 内容が同じなら実走は共有される）。--nocapture の印字（lower_extra_def_ng）は
+# lib の単体テストだけを直列で実走して取る。判定の条件は変えない。
+tests = run('bash','scripts/gate-cache-run.sh','--cargo','test','--offline','--no-fail-fast', timeout=600)
 log = tests.stdout+tests.stderr
 hm = all(re.search(r'test [^\n]*'+name+r'[^\n]* \.\.\. ok',log) for name in ['unify','generalize','occurs','signature_matching'])
 report(8, 'glue+unit-hm', glue and hm)
 gates = tests.returncode == 0
+unit = run('cargo','test','--offline','--lib','--','--nocapture','--test-threads=1', timeout=600)
+unit_log = unit.stdout+unit.stderr
 def script_total(name):
     match = re.search(r'^total=(\d+)', P(f'scripts/verify-{name}.sh').read_text(), flags=re.M)
     return int(match.group(1)) if match else None
 for script in ['m0', 'm1-spec', 'm1-corpus', 'm2']:
     total = script_total(script)
-    r = run('bash', f'scripts/verify-{script}.sh', timeout=None)
+    r = run('bash', 'scripts/gate-cache-run.sh', f'verify-{script}',
+            'bash', f'scripts/verify-{script}.sh', timeout=None)
     ok = total is not None and r.returncode == 0 and r.stdout.rstrip().endswith(f'PASSED: {total}/{total}')
     print(f'gate_{script}: {int(ok)}', flush=True)
     gates &= ok
@@ -163,7 +169,7 @@ types_ok = bool(known_types) and all(re.search(type_pat + re.escape(ty) + r'\s*=
 effect_ok = bool(known_effect) and any(re.search(r'^effect\s+' + re.escape(known_effect) + r'\b', path.read_text(), re.M) for path in stdlib_files)
 no_early_def = not any(re.search(r'\bdef\b', re.split(r'\b(?:module|implement)\b', re.sub(r'//[^\n]*', '', path.read_text()), maxsplit=1)[0]) for path in stdlib_files)
 report(11,'stdlib-types', types_ok and effect_ok and no_early_def)
-report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', log)) == 1)
+report(12,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', unit_log)) == 1)
 passed = sum(results.values())
 print(f'PASSED: {passed}/12')
 raise SystemExit(0 if passed == 12 else 1)

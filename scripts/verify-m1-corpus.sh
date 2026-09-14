@@ -4,6 +4,10 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
+
 ok=0
 total=7
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
@@ -232,7 +236,7 @@ else
     (cd tests/reject 2>/dev/null && ls */main.hd 2>/dev/null | sed 's|^|tests/reject/|' | sort >"$TMPD/disk_reject.txt") || : >"$TMPD/disk_reject.txt"
     cat "$TMPD/disk_accept.txt" "$TMPD/disk_reject.txt" | sort >"$TMPD/disk_all.txt"
 
-    cargo test --test corpus -- --nocapture >"$TMPD/corpus.log" 2>&1
+    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus.log" 2>&1
     corpus_status=$?
     if [ "$corpus_status" -ne 0 ]; then
         c5_reasons="$c5_reasons cargo-test-corpus-exit=$corpus_status"
@@ -261,7 +265,7 @@ else
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
     mkdir -p tests/accept/__probe__
     printf -- '// spec: §39\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
-    cargo test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
+    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__/main.hd
     rmdir tests/accept/__probe__
@@ -276,7 +280,7 @@ else
     if ! grep -qFx 'corpus_file: tests/accept/__probe__/main.hd' "$TMPD/corpus_probe.log"; then
         c5_reasons="$c5_reasons probe-path-missing"
     fi
-    cargo test --test corpus -- --nocapture >"$TMPD/corpus_back.log" 2>&1
+    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_back.log" 2>&1
     if ! grep -qFx "corpus_enumerated: $want_n" "$TMPD/corpus_back.log"; then
         got=$(grep -E '^corpus_enumerated: ' "$TMPD/corpus_back.log" | head -n 1)
         c5_reasons="$c5_reasons probe-removal-not-restored(got:$got)"
@@ -358,11 +362,11 @@ fi
 
 # --- check 7: existing tests green, compiler body untouched ---
 c7_reasons=""
-cargo test --test walk >"$TMPD/walk.log" 2>&1
+cargo_cached test --test walk >"$TMPD/walk.log" 2>&1
 [ "$?" -eq 0 ] || c7_reasons="$c7_reasons walk-exit!=0"
-cargo test --test tail >"$TMPD/tail.log" 2>&1
+cargo_cached test --test tail >"$TMPD/tail.log" 2>&1
 [ "$?" -eq 0 ] || c7_reasons="$c7_reasons tail-exit!=0"
-bash scripts/verify-m0.sh >"$TMPD/m0.log" 2>&1
+gate_cached verify-m0 bash scripts/verify-m0.sh >"$TMPD/m0.log" 2>&1
 m0_status=$?
 m0_last=$(tail -n 1 "$TMPD/m0.log")
 if [ "$m0_status" -ne 0 ] || [ "$m0_last" != "PASSED: 7/7" ]; then

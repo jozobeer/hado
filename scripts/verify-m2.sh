@@ -4,6 +4,10 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
+
 ok=0
 total=8
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
@@ -27,7 +31,7 @@ trap cleanup EXIT
 # --test-threads=1 serialises the four tests so marker lines are not
 # interleaved with harness progress lines (grep below is substring-safe
 # either way).
-cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
+cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
 base_status=$?
 
 # --- check 1: all accept files parse; broken probe is not accepted ---
@@ -45,7 +49,7 @@ done
 # Probe: `def main = )` must not be accepted.
 mkdir -p tests/accept/__probe_bad__
 printf -- '// spec: §41\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__/main.hd
-cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
+cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
 rm -f tests/accept/__probe_bad__/main.hd
     rmdir tests/accept/__probe_bad__ 2>/dev/null || true
 n_probe=$(grep -cF 'parse_accept_ok: tests/accept/__probe_bad__/main.hd' "$TMPD/probe1.log")
@@ -75,7 +79,7 @@ done
 # Content-swap probe: keep the E103 header, put the E104 defect in the body.
 cp tests/reject/E103/main.hd "$TMPD/E103.orig"
 printf -- '// spec: §43\n// error: E103\n// item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103/main.hd
-cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/swap.log" 2>&1
+cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/swap.log" 2>&1
 want_line=$(grep -nF '# trailing comment in the wrong form' tests/reject/E103/main.hd | head -n 1 | cut -d: -f1)
 want_col=$(awk '/# trailing comment/{print index($0, "#"); exit}' tests/reject/E103/main.hd)
 cp "$TMPD/E103.orig" tests/reject/E103/main.hd
@@ -165,7 +169,7 @@ for n in 101 102 103 104 105 106 107; do
     cp "$f" "$TMPD/ls$n.orig"
     awk '/^\/\/ error: E[0-9]/ { print; print ""; next } { print }' "$f" >"$TMPD/ls$n.new"
     cp "$TMPD/ls$n.new" "$f"
-    cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/ls$n.log" 2>&1
+    cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/ls$n.log" 2>&1
     cp "$TMPD/ls$n.orig" "$f"
     base=$(diag_line "$TMPD/base.log" "$f")
     new=$(diag_line "$TMPD/ls$n.log" "$f")
@@ -176,7 +180,7 @@ done
 cp tests/reject/E103/main.hd "$TMPD/cs.orig"
 sed 's/^def main = \.5$/def main =   .5/' tests/reject/E103/main.hd >"$TMPD/cs.new"
 cp "$TMPD/cs.new" tests/reject/E103/main.hd
-cargo test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/cs.log" 2>&1
+cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/cs.log" 2>&1
 cp "$TMPD/cs.orig" tests/reject/E103/main.hd
 base_col=$(diag_col "$TMPD/base.log" "tests/reject/E103/main.hd")
 new_col=$(diag_col "$TMPD/cs.log" "tests/reject/E103/main.hd")
@@ -206,14 +210,14 @@ fi
 
 # --- check 5: M0 and M1 gates keep their completion values ---
 c5_reasons=""
-cargo test >"$TMPD/cargo.log" 2>&1
+cargo_cached test --offline --no-fail-fast >"$TMPD/cargo.log" 2>&1
 [ "$?" -eq 0 ] || c5_reasons="$c5_reasons cargo-test-exit!=0"
-cargo test --test walk >"$TMPD/walk.log" 2>&1
+cargo_cached test --test walk >"$TMPD/walk.log" 2>&1
 [ "$?" -eq 0 ] || c5_reasons="$c5_reasons walk-exit!=0"
 # Why not 6/6: R25 が m1-spec の検査を落としたあと、分母の直書きが追従しない。
 for script in verify-m0.sh verify-m1-spec.sh verify-m1-corpus.sh; do
     want=$(awk -F= '/^total=/ {print $2; exit}' "scripts/$script")
-    bash "scripts/$script" >"$TMPD/$script.log" 2>&1
+    gate_cached "$script" bash "scripts/$script" >"$TMPD/$script.log" 2>&1
     st=$?
     last=$(tail -n 1 "$TMPD/$script.log")
     [ -n "$want" ] && [ "$st" -eq 0 ] && [ "$last" = "PASSED: $want/$want" ] \
