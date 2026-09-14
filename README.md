@@ -45,14 +45,19 @@ main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let 
 ## 検証
 
 ```
-cargo test --offline          # 単体テストとコーパス判定
-scripts/run-gates.sh 出力先   # 門番を直列に全走。各ログの末尾が PASSED: n/N
-bash scripts/verify-m0.sh     # 門番は単独でも走る
+cargo test --offline                     # 単体テストとコーパス判定
+scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い門番（≦ 2 分）
+scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
+scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
+scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
+bash scripts/verify-m0.sh                # 門番は単独でも走る
 ```
 
 `run-gates.sh` は 1 回の全走のあいだ、同じ内容の門番と `cargo test` の実走を 1 度に
-畳む（`docs/plan.md` 32 節）。門番を 1 本ずつ別のシェルで走らせると、その畳み込みは
-各門番の入れ子の範囲でしか効かない。
+畳む（`docs/plan.md` 32 節）。畳み込みは全走のログに「対象の実行」と「ok」の証拠が
+あるときだけ効く（33 節）。層に門番を足すときは `--tier core 出力先 verify-r33` の
+ように書く。門番を 1 本ずつ別のシェルで走らせると、畳み込みは各門番の入れ子の
+範囲でしか効かない。文書の整合は `scripts/lint-docs.sh` が持ち、full の最後に回る。
 
 ## 構成
 

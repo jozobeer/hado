@@ -3200,6 +3200,28 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 - 開発中は変更に関係する門番を core に足して回す。core の終わりに「full でのみ回した門番の一覧」を表示し、取り違えで赤を見逃さない。
 - 32 節のキャッシュはそのまま使う。層はキャッシュの外側の話である。
 
+### 実装（2026-09-15）
+
+- 一覧の唯一の正は `scripts/lib/gate-tiers.sh`。`hado_tier_minimal_gates <層>` が各門番を
+  最小の層に 1 回ずつ割り当て、`hado_tier_gates <層>` が累積（quick / quick+core / 全 38 本）を
+  返す。上の表で m1-spec が quick と core の両方にあるのは、この累積の意味である。**層は分割、
+  実行は累積**なので、3 層は全 38 本を重複なく覆う（33-f）。表の m1-spec を最小層の quick に
+  置いたので、core は quick を含む。
+- `scripts/run-gates.sh --tier quick|core|full` が層を回す。層に `verify-<名前>` を足すと
+  その門番も回る（重複は落とす）。`--print-tier` は一覧を出すだけで、出力ディレクトリも
+  走行スコープも作らない。層も明示も無い引数なしの全走は full と同じ扱いにし、従来の
+  `run-gates.sh <出力先>` の呼び方でも文書層まで回る。
+- quick は門番の前に `cargo build --offline` を 1 回実走する。ログの末尾は集計器
+  （`tools/gates/main.hd`）に合わせて `PASSED: n/N` に揃える。
+- core の終わりに、full でのみ回す門番の一覧を表示する。
+- 文書層は `scripts/lint-docs.sh` として分離し、full の最後（と引数なしの全走）だけが回す。
+  `verify-*.sh` ではないので 38 本には数えない。
+- 部分 `cargo test` の実走は `cargo_test_cached` が畳む。畳むのは、同じ走行の全走
+  （`cargo test --offline --no-fail-fast`）が成功し、そのログに「対象の `tests/<名前>.rs` の
+  実行」と続く「`test result: ok`」の証拠があるときだけである。`--test <名前>` 以外の引数
+  （`--` 以降、`-q`、`--lib`、`--features`、`--release` など）があれば実走する。証拠を要求する
+  ので、対象の改名・削除や赤の全走で検出力は落ちない。
+
 ### ラウンド門番の棚卸し
 
 - 門番 1 本ごとに、その回の決定がどこで守られているかを表にする（corpus のケース、`crates/hado/tests/`、spec の表、他の門番の検査）。
@@ -3212,6 +3234,25 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 - 後者は (i) 構造検査へ置換、(ii) `docs` 層（full のみ）へ移す、(iii) 削除、のいずれかにする。
 - 削除・移動は、処理系の検出力を落とさない根拠を報告に書く。**門番を緩めて green にしない。** 削除は「赤を隠すため」ではなく「処理系を守らない検査だから」に限る。
 - 文書の整合（spec↔plan↔spec-coverage）を守る必要があるなら、門番とは別の `scripts/lint-docs.sh` として分離し、core では回さない。
+
+### 棚卸しの結果（2026-09-15）
+
+- r9・r11〜r26・r28 の個別 `cargo test` は、m0 の全走（同じテストバイナリ）と重複していた。
+  実走を `cargo_test_cached` に通して全走へ畳んだ。**検査は 1 つも消していない。**
+- r23-b・r24-f・r25-b・r26-d の spec↔corpus の突き合わせは `verify-m1-corpus.sh` と
+  `verify-m2.sh` が持つ。これも消さず、重複の記録だけ残す。
+- r25-e（accept に `Ok(`/`Error(` が無い）は r9〜r28 で唯一の固有検査なので残した。
+- r29 以降は固有（SIGPIPE/EPIPE/`/dev/full` の実プロセス、生成探針の広さ、r38 の probe・
+  E2 oracle・bug.md の再現）。r36/r37 の再走はキャッシュで既に 1 回になっている。
+- `verify-m1-spec.sh` は §50 のエラーコード表（処理系との契約）だけを残し、見出し・新設節・
+  対応表・条件列の逐語は `scripts/lint-docs.sh` へ移した（5/5 → 1/1）。
+- `verify-r38.sh` の 38-c は probe の key と §番号の対応・見出しの実在・否定対照（manifest
+  不一致、見出し削除）に置き換え、逐語 regex は lint-docs へ移した。38-e は corpus lock を
+  残し、版文字列と台帳節は lint-docs へ移した（140/140 → 138/138）。
+- lint-docs の検査 7 本は、対応表（m1-spec 検査4）と 38-c の逐語 regex を元のまま持つ。
+  版は spec と spec-coverage の一致、台帳は最新ラウンドの節の存在として一般化した。
+  r38-c(6) の EnvDefault/IoDefault の E205 は probe の実走が r38 に残るため保護は落ちない。
+- 分類の詳細と実測は `docs/ledger.md` の「門番の層別と検査の棚卸し」にある。
 
 ### 判定
 

@@ -2545,3 +2545,106 @@ m0・m1-corpus・m2・m3 だけで 2792 秒（46.5 分）。**同じ内容の実
 - `cargo run` を事前ビルドのバイナリに置き換える最適化は入れていない
 - 門番の並列実行は入れていない（R38 の「直列に走らせ」を維持）
 - 単独で門番を走らせたときの走行スコープは、走行の終わりには消えない。次に走行が始まったとき、既定 1 日より古ければ消える（全走のスコープは run-gates が終わりに消す）
+
+## 門番の層別と検査の棚卸し（2026-09-15）
+
+計画は `docs/plan.md` 33 節。32 節で全走は 16.7 分になったが、目的ごとに回す頻度が無い。3 つの作業（層別、ラウンド門番 r9〜r38 の棚卸し、`docs/spec.md` の文章固定検査の棚卸し）を 1 ラウンドで行った。**門番は 1 つも消していない。判定条件は緩めていない。**
+
+### 実装
+
+- `scripts/lib/gate-tiers.sh` を門番名の唯一の正にした。`hado_tier_minimal_gates <層>` が各門番を最小の層に 1 回ずつ割り当て、`hado_tier_gates <層>` が累積を返す。**層は分割、実行は累積**（quick / quick+core / 全 38 本）なので、3 層は 38 本を重複なく覆う。
+- `scripts/run-gates.sh --tier quick|core|full`。`--tier core 出力先 verify-r33` のように層へ門番を足せる（重複は落とす）。`--print-tier` は一覧を出すだけで出力ディレクトリも走行スコープも作らない。層も明示も無い引数なしの全走は full と同じ扱いで、従来の `run-gates.sh 出力先` でも文書層まで回る。quick は門番の前に `cargo build --offline` を 1 回実走し、ログ末尾を集計器に合わせて `PASSED: n/N` に揃える。core の終わりに full でのみ回す門番を列挙する。
+- 文書層は `scripts/lint-docs.sh`（7 検査）として分離。`verify-*.sh` ではないので 38 本に数えず、full の最後だけが回す。
+- 部分 `cargo test` の実走を `cargo_test_cached` が全走へ畳む。畳む条件は、同じ走行の `cargo test --offline --no-fail-fast` が成功し、**そのログに「対象の `tests/<名前>.rs` の実行」と続く「`test result: ok`」の証拠がある**ときだけ。`--test <名前>` 以外の引数（`--` 以降、`-q`、`--lib`、`--features`、`--release`）があれば実走する。**証拠を要求するので、対象の改名・削除や赤の全走で検出力は落ちない。** 赤い全走のログは証拠として残さない。
+
+### 層の実測（2026-09-15）
+
+| 層 | コマンド | 所要 | 目標 | 赤 |
+|---|---|---|---|---|
+| quick | `run-gates.sh --tier quick target/tier/quick` | **1.7 秒** | ≦ 2 分 | 0 |
+| core | `run-gates.sh --tier core target/tier/core` | **6 分 25 秒** | ≦ 7 分 | 0 |
+| full | `run-gates.sh --tier full target/tier/full` | **13 分 46 秒** | ≦ 18 分 | 0 |
+
+quick は `cargo build --offline`（1/1）、`verify-gate-cache`（13/13）、`verify-m1-spec`（1/1）。core は m0 7/7・m1-corpus 7/7・m1-spec 1/1・m2 8/8・m3 12/12・m4 133/133・m5 145/145・m6 71/71・m7 3/3・r38 138/138・gate-cache 13/13。core の所要は m0 196 秒（全体の半分）と m1-corpus 47・m2 52 が主である。
+
+### full の門番ごとの `PASSED: n/N`（33-b）
+
+32 節の実測と一致した。**N が変わったのは 3 本だけで、いずれも検査を移したか足した結果である。**
+
+| 門番 | 32 節 | 今回 | 差の理由 |
+|---|---|---|---|
+| m1-spec | 5/5 | 1/1 | 検査 1・2・4・5 を lint-docs へ移した |
+| r38 | 140/140 | 138/138 | 38-e の版と台帳の 2 検査を lint-docs へ移した |
+| gate-cache | 6/6 | 13/13 | 層の自己判定 2 と cargo 再利用の対照 5 を足した（33-e が許す増加） |
+
+他は m0 7/7、m1-corpus 7/7、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9 5/5、r11〜r17 と r18〜r22 と r28 と record-constructors が各 1/1、r23 3/3、r24 2/2、r25 4/4、r26 2/2、r29 24/24、r30 16/16、r31 25/25、r32 45/45、r33 73/73、r34 1360/1360、r35 714/714、r36 388/388、r37 254/254。`^NG:` は全ログで 0。lint-docs は 7/7。`cargo test` は 734 passed / 0 failed（m0 の `OK: 2 cargo-test passed=734`）。
+
+### ラウンド門番の棚卸し（r9〜r38）
+
+| 門番 | 検査 | どこが守っているか | 判定 |
+|---|---|---|---|
+| r9 | 5 | r9_syntax / r9_grammar / parse_corpus / r9_order / check_cli / r9_names / r9_unused / r9_module_types / prelude / r9_coverage / r9_print / emit_mono / corpus の各テストバイナリ | m0 の全走と重複（実走のみ畳む） |
+| r11〜r17 | 各 1 | r11_comments 〜 r17_files | m0 の全走と重複 |
+| r18〜r22 | 各 1 | r18_spelling 〜 r22_namespaces | m0 の全走と重複 |
+| r23 | 3 | 23-a r9_grammar、23-b E1xx と §50 の一致、23-c r23_syntax | a・c は m0、b は m1-corpus/m2 と重複。消さずに残す |
+| r24 | 2 | 24-a..e r24_effects、24-f E308/E522/E605 と §50 の一致 | a は m0、f は m1-corpus と重複 |
+| r25 | 4 | 25-a/c corpus の `--exact`、25-b E509 と §50、25-c r25_effects/r14_rails/emit_mono、25-e accept に `Ok(`/`Error(` が無い | a・b・c は重複。**25-e は r9〜r28 で唯一の固有検査** |
+| r26 | 2 | 26-a/b/c/e r26_effects、26-d §50 との一致 | どちらも重複 |
+| r28 | 1 | 28-a/b/c r28_effects | m0 の全走と重複 |
+| r29 | 24 | SIGPIPE / EPIPE / `/dev/full` の実プロセス | **固有** |
+| r30 | 16 | `capture` handler の合成 | **固有** |
+| r31 | 25 | yield 地点の継続と `$Outcome` の型 | **固有** |
+| r32 | 45 | ライブラリ単位 | **固有** |
+| r33 | 73 | 型の共有。うち `cargo test -q --test r9_grammar` / `r23_syntax` の 2 本は m0 と重複 | 固有（2 本は畳まずに残した。下の「迷った点」） |
+| r34 | 1360 | Bytes と String の生成探針 | 標本の**広さ**が固有 |
+| r35 | 714 | 配列の生成探針 | 標本の**広さ**が固有 |
+| r36 | 388 | m1-corpus/m7/m4/m5/m6 の再走は 32 節のキャッシュで 1 回。上乗せ分は固有 | 一部重複（再走は既に 1 回） |
+| r37 | 254 | m1-corpus/m7 の再走は 1 回。上乗せ分は固有 | 一部重複（再走は既に 1 回） |
+| r38 | 138 | 38-a 合成木の runner、38-b E2 oracle、38-c の探針、38-d bug.md の再現、38-e lock | **固有** |
+
+`crates/hado/tests/r18_checks.rs` はどの門番からも参照されていない（`verify-r18.sh` は `r18_spelling` を走らせる）。全走の `cargo test` には入る。今回は触っていない。
+
+### 削除・移動した検査と根拠（33-c）
+
+**削除した検査は 1 つも無い。** 移したのは 6 つで、すべて `scripts/lint-docs.sh` が同じ検査を回す。
+
+| 元 | 移動先 | 移した根拠 |
+|---|---|---|
+| m1-spec 検査 1（見出し §1〜§42 が 1 回ずつ、消していない） | lint-docs 検査 1 | spec の書き方であって処理系の契約ではない |
+| m1-spec 検査 2（新設節 §43〜§59 が §42 より後） | lint-docs 検査 2 | 同上 |
+| m1-spec 検査 4（`spec-coverage` が計画の表 2.2/2.3/9.2/11.2/13.2/18.4/24.2 と一致） | lint-docs 検査 3 | 文書どうしの対応。処理系は §50 の表だけを読む（検査 3 は m1-spec に残る） |
+| m1-spec 検査 5（条件列の逐語「パーサは改行を見ない」） | lint-docs 検査 4 | 文の固定。処理系の契約は各テストが持つ |
+| r38-e 版 `# 言語仕様案 v0.3` | lint-docs 検査 5 | 版は spec と spec-coverage の**一致**に一般化した（固定値を消した） |
+| r38-e `## R38 ` の存在 | lint-docs 検査 6 | 台帳の運用。**最新ラウンド**の節の存在に一般化した |
+
+r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh` の 38-c は
+**probe の key と §番号の対応・その見出しの実在・否定対照（manifest の § を差し替える／見出しを消す）**に置き換えた。文を固定しなくても、規則の振る舞いは 38-c の探針 6 本が実走で測る。**38-c(6) の `EnvDefault`/`IoDefault` の E205 は、この探針が r38 に残るので保護は落ちない。** 38-e の corpus lock は r38 に残した。
+
+`tests/corpus.sha256` は更新していない。`tests/`・`stdlib/`・`crates/`・`runtime/` の差分は空である（`git status --short` と `git diff --stat` で確認）。corpus の実数は accept 119 ファイル・reject 69 コード・stdlib 10 ファイルで、§50 の 69 行と一致する（m1-corpus の検査 5 が緑）。`cargo test` は 734 件のまま。
+
+### 33-f（層が実在の門番と一致し、重複なく覆う）
+
+`verify-gate-cache.sh` に機械検査を足した。実在の `scripts/verify-*.sh` の集合と層の一覧が一致すること、最小層に重複が無いこと、`run-gates.sh --print-tier` が同じ一覧を返すこと、quick ⊆ core ⊆ full かつ full が 38 本であること。合成木で、引数なしの全走が文書層まで回ること、`--tier` に明示した門番が重複せず足されることも測る。13/13。
+
+### 実装審査（claude / fable 5.1）と対応
+
+重大は無し。中 2 件と軽微を直した。
+
+- **`--tier core 出力先 verify-r33` が明示した門番を黙って捨てていた。** 層の一覧で `selectors` を上書きしていたため。層に足して重複を落とす形に直し、合成木の対照を足した。
+- **引数なしの全走（README の `run-gates.sh 出力先`）で文書層が回らなかった。** m1-spec 検査 1・2・4・5 と r38 の固定がこの形から抜けていた。引数なしを full と同じ扱いに直し、合成木の対照を足した。
+- 証拠判定の awk に `Doc-tests` の境界を足した（対象が結果行を出さずに落ちると、続く `Doc-tests hado` の ok を証拠と誤認し得た）。
+- 赤い全走のログを残さないようにした（「成功だけを保存する」原則との食い違い）。
+- 出力ディレクトリの相対パスを呼び出し側の作業ディレクトリ基準に戻した。`--tier bogus` が空のディレクトリを作らないよう、層の検証を mkdir の前に移した。
+- lint-docs の台帳検査の glob を `verify-r*.sh` から `verify-r[0-9]*.sh` に狭めた。
+
+### 迷った点
+
+- **層の意味。** 計画の表は m1-spec を quick と core の両方に置く。これを「実行は累積」と読んで、一覧は最小層に 1 回だけ持つ形にした。層が分割でなければ 33-f の「重複なく覆う」と両立しない。
+- **r33 の 2 本。** `cargo test --offline -q --test r9_grammar` と `r23_syntax` は m0 の全走と重複するが、`-q` は再利用の allowlist の外なので畳んでいない（r33 は 14 秒）。計画の棚卸しの中心は r9〜r28 の重複と r36/r37 の再走なので、境界として残した。
+- **`crates/hado/tests/r18_checks.rs`。** どの門番からも参照されていない。全走には入るので緑だが、門番としての持ち主が無い。今回は触らない。
+- **`verify-m0.sh` の awk。** 同じ `Doc-tests` の境界が無い（既存）。今回は触っていない。
+
+### 仕様への疑義
+
+なし（`docs/spec.md`、`crates/`、`runtime/`、`stdlib/`、`tests/` は触っていない）。
+
