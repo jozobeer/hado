@@ -38,9 +38,21 @@ hado_gate_fingerprint() {
     )
 }
 
+# 死んだ走行のスコープを掃除する。生きている走行に触れないよう、既定 1 日より
+# 古いものだけを消す。全走は分単位なので十分に安全である。走行を始めるときだけ走らす。
+hado_gate_cache_prune() {
+    local base
+    base="$(hado_gate_repo_root)/target/gate-cache"
+    [ -d "$base" ] || return 0
+    find "$base" -mindepth 1 -maxdepth 1 -type d \
+        -mmin +"${HADO_GATE_CACHE_TTL_MINUTES:-1440}" \
+        -exec rm -rf -- {} + 2>/dev/null || true
+}
+
 if [ -z "${HADO_GATE_CACHE_RUN:-}" ]; then
     HADO_GATE_CACHE_RUN="pid$$-$(date +%s)-${RANDOM:-0}"
     export HADO_GATE_CACHE_RUN
+    hado_gate_cache_prune
 fi
 
 hado_gate_cache_run_dir() {

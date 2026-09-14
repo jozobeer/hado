@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 門番キャッシュ（scripts/lib/gate-cache.sh）の判定器。
-# 目的は 4 つ。内容が同じなら実走は 1 回。内容が変われば実走する。失敗は保存しない。
+# 目的は 6 つ。内容が同じなら実走は 1 回。内容が変われば実走する。失敗は保存しない。
 # 引数が違えば別の結果になる。走行スコープが入れ子の run-gates に漏れない。
+# 古い走行のスコープを残さない。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,7 +21,12 @@ check() {
 }
 
 workdir=$(mktemp -d)
-trap 'rm -rf "$workdir"' EXIT
+runid=""
+cleanup() {
+    rm -rf "$workdir"
+    [ -n "$runid" ] && rm -rf target/gate-cache/"$runid"-*
+}
+trap cleanup EXIT
 runid="gate-cache-selftest-$$-$RANDOM"
 
 replay_case() {
@@ -114,11 +120,25 @@ EOS
     [ -n "$recorded" ] && [ "$recorded" != "inherited" ] && [ "$recorded" != "unset" ]
 }
 
+prune_case() {
+    local base=target/gate-cache
+    local old="$base/selftest-old-$$"
+    local fresh="$base/selftest-fresh-$$"
+    mkdir -p "$old" "$fresh"
+    touch -d '2 days ago' "$old"
+    HADO_GATE_CACHE_RUN= bash -c 'source scripts/lib/gate-cache.sh' >/dev/null 2>&1
+    [ ! -d "$old" ] && [ -d "$fresh" ]
+    local ok=$?
+    rm -rf "$old" "$fresh"
+    return "$ok"
+}
+
 check 'cache replays identical content once' replay_case
 check 'cache separates different arguments' argv_case
 check 'cache never stores failure' failure_case
 check 'fingerprint follows content' content_case
 check 'run-gates gives each run its own scope' scope_case
+check 'stale run scopes are pruned' prune_case
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

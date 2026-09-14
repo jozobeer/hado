@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -eu
 cd "$(dirname "$0")/.."
+
+# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
+# 単独で走らせても m3 の入れ子全体で 1 つの走行スコープを共有する。
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 python3 - <<'PY'
 import os, pathlib, re, subprocess, tempfile, json
 import sys
