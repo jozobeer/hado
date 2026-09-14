@@ -17,7 +17,7 @@ effect Unused
 reply unused: Int
 HD
 status=0
-RUSTC_WRAPPER= CARGO_TARGET_DIR=/home/zyun/.cargo/target cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
+RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
 printf 'status=%s\nstdout_bytes=%s\nstderr_bytes=%s\n' "$status" "$(wc -c <"$probe/out")" "$(wc -c <"$probe/err")"
 cat "$probe/out" "$probe/err"
 ```
@@ -47,9 +47,9 @@ def make(s: String): Fn(String => String {Error}) Pure
 implement M as M
 def make s => fn(t => String.concat s (Int.to_string (Int.parse t)))
 HD
-RUSTC_WRAPPER= CARGO_TARGET_DIR=/home/zyun/.cargo/target cargo run --offline -q -- check "$probe/main.hd"
+RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- check "$probe/main.hd"
 status=0
-RUSTC_WRAPPER= CARGO_TARGET_DIR=/home/zyun/.cargo/target cargo run --offline -q -- build "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
+RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- build "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
 printf 'status=%s\nstdout_bytes=%s\n' "$status" "$(wc -c <"$probe/out")"
 cat "$probe/out" "$probe/err"
 ```
@@ -84,7 +84,7 @@ def main = List.length (generate 5)
 HD
 } >"$probe/main.hd"
 status=0
-RUSTC_WRAPPER= CARGO_TARGET_DIR=/home/zyun/.cargo/target cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
+RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
 printf 'status=%s\nstdout_bytes=%s\n' "$status" "$(wc -c <"$probe/out")"
 cat "$probe/out"
 sed -E "s/^main[.]hd:$((blank+1)):$((indent+1)):/main.hd:<anchor>:/; s/ t[0-9]+ / <type> /" "$probe/err"
