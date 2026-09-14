@@ -190,11 +190,13 @@ for name in "${gates[@]}"; do
     fi
 done
 
-# core の終わりに、full でだけ回す門番を見せる。層をまたいだ取り違えで赤を
-# 見逃さないため（docs/plan.md 33 節）。
+# core の終わりに、この走行で回さなかった門番を見せる。層をまたいだ取り違えで
+# 赤を見逃さないため（docs/plan.md 33 節）。明示的に足した門番は差し引く。
 if [ "$tier" = "core" ]; then
-    echo "full-only gates (not run in core):"
-    comm -23 <(hado_tier_all_gates | LC_ALL=C sort) <(hado_tier_gates core | LC_ALL=C sort) | sed 's/^/  /'
+    echo "full-only gates (not run in this run):"
+    comm -23 <(hado_tier_all_gates | LC_ALL=C sort) \
+        <(for name in "${gates[@]}"; do printf '%s\n' "${name#verify-}"; done | LC_ALL=C sort) |
+        sed 's/^/  /'
 fi
 
 # 文書の整合は処理系の門番ではないので、full 層（と引数なしの全走）の最後に

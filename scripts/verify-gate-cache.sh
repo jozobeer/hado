@@ -328,6 +328,21 @@ EOS
         [ -f "$out/verify-quick-gate.log" ] && [ -f "$out/verify-extra-gate.log" ]
 }
 
+# 出力ディレクトリの相対パスは、呼び出し側の作業ディレクトリ基準で解決する。
+relative_output_case() {
+    local tree="$workdir/relative-tree" sub="$workdir/relative-cwd"
+    rm -rf -- "$tree" "$sub"
+    mkdir -p "$tree/scripts/lib" "$sub"
+    cp scripts/run-gates.sh "$tree/scripts/run-gates.sh"
+    cp scripts/lib/gate-cache.sh "$tree/scripts/lib/gate-cache.sh"
+    cat >"$tree/scripts/verify-a.sh" <<'EOS'
+#!/usr/bin/env bash
+echo 'PASSED: 1/1'
+EOS
+    (cd "$sub" && bash "$tree/scripts/run-gates.sh" relout verify-a >/dev/null 2>&1) || return 1
+    [ -f "$sub/relout/verify-a.log" ] && [ ! -e "$tree/relout" ]
+}
+
 check 'cache replays identical content once' replay_case
 check 'cache separates different arguments' argv_case
 check 'cache never stores failure' failure_case
@@ -341,6 +356,7 @@ check 'narrow cargo tests run when the full test failed' narrow_without_full_cas
 check 'narrow cargo tests ignore a Doc-tests ok after a crash' narrow_crash_case
 check 'argument-less run also runs the docs layer' default_all_docs_case
 check 'explicit gates are added to a tier without duplicates' tier_extra_case
+check 'a relative output directory is resolved from the caller cwd' relative_output_case
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

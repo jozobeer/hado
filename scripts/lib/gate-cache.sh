@@ -111,11 +111,19 @@ cargo_cached() {
         gate_cached "cargo:$*" cargo "$@"
         return $?
     fi
-    local log status=0
+    local log status=0 tmp
     log=$(hado_gate_full_test_log)
     mkdir -p "$(dirname "$log")"
-    gate_cached "cargo:$*" cargo "$@" | tee "$log"
-    status=${PIPESTATUS[0]}
+    # パイプを使わない。呼び出し側が set -e と pipefail でも、赤のログを
+    # 消す前に抜けないためである。
+    tmp=$(mktemp "$(dirname "$log")/full-test.XXXXXX")
+    if gate_cached "cargo:$*" cargo "$@" >"$tmp" 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+    tee "$log" <"$tmp"
+    rm -f -- "$tmp"
     # 赤い全走は証拠として残さない（「成功だけを保存する」原則）。
     if [ "$status" -ne 0 ]; then
         rm -f -- "$log"
