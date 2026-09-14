@@ -3138,3 +3138,33 @@ Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作�
 ### スコープ外
 
 - 新しい言語機能、実装の穴の修正（bug.md に置くだけ）、v0.4 の設計
+
+## 32. 門番の高速化（2026-09-14）
+
+R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は門番の入れ子である。m3 は m0・m1-spec・m1-corpus・m2 を呼び、m2 は m0・m1-spec・m1-corpus を呼び、m1-corpus は m0 を呼ぶ。r36 と r37 は m1-corpus・m7 を呼び、m7 は m6 を呼ぶ。同じ内容の `cargo test` が 1 回の全走で 8 回実走され、m3 の単一スレッド全走がさらに 6 分近くを占めていた。**判定を 1 文字も緩めずに、同じ内容の実走を 1 回に畳む。**
+
+### 決定
+
+- `scripts/lib/gate-cache.sh` を置く。`gate_cached <label> <command...>` は、作業ツリーの内容ハッシュ（`target/`・`.git/`・`__pycache__/` を除く全ファイル）と `label` + 引数のハッシュで結果を鍵付けする。**成功（終了コード 0）だけを保存し、失敗は保存しない。**
+- 走行スコープは 1 回の走行に閉じる。`scripts/run-gates.sh` が `HADO_GATE_CACHE_RUN` を発行し、全走の終わりに消す。乱数で探針を作る門番を走行間で凍結せず、内容に現れない環境差（root / 非 root など）を結果に持ち越さないためである。単独で門番を走らせたときは、その門番の入れ子の範囲だけで畳む。
+- 入れ子で門番を呼ぶ箇所を `gate_cached` に通す: m1-corpus → m0、m2 → m0/m1-spec/m1-corpus、m3 → m0/m1-spec/m1-corpus/m2、m7 → m6、r36 → m1-corpus/m7/m4/m5/m6、r37 → m1-corpus/m7。
+- cargo test の呼び出しを `cargo_cached` に通す。全走の全体テストは `cargo test --offline --no-fail-fast` に統一し、m0 / m2 / m3 / m7 のどこで最初に走っても 1 回で済ませる。
+- m3 の単一スレッド全走（`-- --nocapture --test-threads=1`）を、**並列の全走**（終了コードと HM のテスト名）と **lib の単体テスト `--nocapture --test-threads=1`**（`lower_extra_def_ng` の印字）に分ける。判定 8 と 12 が見る条件は変えない。
+- `scripts/verify-gate-cache.sh` を新設し、キャッシュの 5 性質（同一内容の再利用、引数の分離、失敗を保存しない、内容への追随、走行スコープの分離）を測る。
+- `scripts/run-gates.sh` は `HADO_GATE_TIMES` を設定すると門番ごとの所要と終了コードを追記する（任意。通常の出力は変えない）。
+
+### 判定
+
+- 32-a. 全門番（38 本）が満点・終了コード 0。`cargo test --offline --no-fail-fast` が 0 failed。
+- 32-b. 短縮前後の所要の実測。短縮前は 76.8 分（2026-09-14、37 本の直列全走）。
+- 32-c. 各門番の `PASSED: n/N` と `NG:` の数が短縮前と同じ（判定条件を緩めていない）。
+- 32-d. `verify-gate-cache.sh` が 5/5。
+- 32-e. `scripts/run-gates.sh` が r38 の合成木（`scripts/lib/gate-cache.sh` の無い木）でも従来どおり動く。
+
+### 触ってよい場所
+
+`scripts/`、`README.md`、`docs/plan.md`、`docs/ledger.md`。`crates/`、`runtime/`、`stdlib/`、`tests/`、`tests/corpus.sha256` は触らない。
+
+### スコープ外
+
+門番の並列実行（`docs/ledger.md` の「門番を選んで直列に走らせ」は維持する）、`cargo run` の置き換え、`crates/hado/tests/` の分割。

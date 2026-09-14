@@ -46,8 +46,13 @@ main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let 
 
 ```
 cargo test --offline          # 単体テストとコーパス判定
-bash scripts/verify-*.sh      # 門番。最後に PASSED: n/N
+scripts/run-gates.sh 出力先   # 門番を直列に全走。各ログの末尾が PASSED: n/N
+bash scripts/verify-m0.sh     # 門番は単独でも走る
 ```
+
+`run-gates.sh` は 1 回の全走のあいだ、同じ内容の門番と `cargo test` の実走を 1 度に
+畳む（`docs/plan.md` 32 節）。門番を 1 本ずつ別のシェルで走らせると、その畳み込みは
+各門番の入れ子の範囲でしか効かない。
 
 ## 構成
 
