@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
-if cargo test --offline --test named_record_constructors --test named_record_order; then
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
+if cargo_test_cached test --offline --test named_record_constructors --test named_record_order; then
     echo 'OK: named-field constructors, patterns, abstraction and diagnostics'
     echo 'PASSED: 1/1'
 else

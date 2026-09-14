@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 
 passed=0
 total=0
@@ -25,7 +27,7 @@ r24_reject_match() {
     [ -n "$spec" ] && [ "$spec" = "$disk" ]
 }
 
-check '24-a..e generated effect-row probes' cargo test --offline --test r24_effects
+check '24-a..e generated effect-row probes' cargo_test_cached test --offline --test r24_effects
 check '24-f E308 E522 E605 が §50 の表と一致' r24_reject_match
 
 echo "PASSED: $passed/$total"

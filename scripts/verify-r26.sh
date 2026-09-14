@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib/gate-cache.sh
+. scripts/lib/gate-cache.sh
 
 passed=0
 total=0
@@ -23,7 +25,7 @@ reject_codes_match() {
     [ -n "$spec" ] && [ "$spec" = "$disk" ]
 }
 
-check '26-a/b/c/e reply abort capture E706 probes' cargo test --offline --test r26_effects
+check '26-a/b/c/e reply abort capture E706 probes' cargo_test_cached test --offline --test r26_effects
 check '26-d reject codes match §50' reject_codes_match
 
 echo "PASSED: $passed/$total"

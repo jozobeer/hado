@@ -15,6 +15,11 @@
 #   source scripts/lib/gate-cache.sh
 #   gate_cached <label> <command> [args...]
 #   cargo_cached <cargo の引数...>
+#   cargo_test_cached <cargo test の引数...>
+#
+# cargo_test_cached は、同じ走行の中で全走の全体テストが成功していて、その
+# ログに対象の実行と ok の証拠があるときだけ、`--test <名前>` の部分テストの
+# 実走を省く（docs/plan.md 33 節）。証拠が無ければ cargo_cached と同じく実走する。
 
 hado_gate_repo_root() {
     local here
@@ -89,7 +94,130 @@ gate_cached() {
     return "$status"
 }
 
+# 全走の全体テスト（cargo test --offline --no-fail-fast）だけを指す。
+hado_gate_is_full_test() {
+    [ "$*" = "test --offline --no-fail-fast" ]
+}
+
+# 全走の出力を、この内容の証拠として走行スコープに残す。
+hado_gate_full_test_log() {
+    printf '%s/full-test-%s.log' "$(hado_gate_cache_run_dir)" "$(hado_gate_fingerprint)"
+}
+
 # cargo の出力と終了コードを、同じ内容・同じ引数のあいだで再利用する。
+# 全走の全体テストだけは、その出力を走行スコープに残す（cargo_test_cached が使う）。
 cargo_cached() {
-    gate_cached "cargo:$*" cargo "$@"
+    if ! hado_gate_is_full_test "$@"; then
+        gate_cached "cargo:$*" cargo "$@"
+        return $?
+    fi
+    local log status=0
+    log=$(hado_gate_full_test_log)
+    mkdir -p "$(dirname "$log")"
+    gate_cached "cargo:$*" cargo "$@" | tee "$log"
+    status=${PIPESTATUS[0]}
+    # 赤い全走は証拠として残さない（「成功だけを保存する」原則）。
+    if [ "$status" -ne 0 ]; then
+        rm -f -- "$log"
+    fi
+    return "$status"
+}
+
+# cargo_test_cached の再利用を許す形か。許すのは
+#   cargo test [--offline] [--no-fail-fast] --test <名前> ...
+# だけである。`--` 以降（--nocapture など）や -q / --lib / --features /
+# --release などが 1 つでもあれば実走する。引数の解釈を広げない。
+hado_gate_narrow_test_argv() {
+    local -a args=("$@")
+    local i=1 has=0 a
+    [ "${#args[@]}" -ge 1 ] || return 1
+    [ "${args[0]}" = test ] || return 1
+    while [ "$i" -lt "${#args[@]}" ]; do
+        a=${args[$i]}
+        case "$a" in
+            --offline | --no-fail-fast) ;;
+            --test)
+                i=$((i + 1))
+                [ "$i" -lt "${#args[@]}" ] || return 1
+                has=$((has + 1))
+                ;;
+            --test=*)
+                [ -n "${a#--test=}" ] || return 1
+                has=$((has + 1))
+                ;;
+            *) return 1 ;;
+        esac
+        i=$((i + 1))
+    done
+    [ "$has" -gt 0 ]
+}
+
+hado_gate_narrow_test_targets() {
+    local -a args=("$@")
+    local i=1 a
+    while [ "$i" -lt "${#args[@]}" ]; do
+        a=${args[$i]}
+        case "$a" in
+            --test)
+                i=$((i + 1))
+                printf '%s\n' "${args[$i]}"
+                ;;
+            --test=*) printf '%s\n' "${a#--test=}" ;;
+        esac
+        i=$((i + 1))
+    done
+}
+
+# 全走のログに「tests/<名前>.rs を実行して ok」の証拠があるか。
+# 証拠が無い（対象が改名・削除された、全走が赤だった）なら実走する。
+hado_gate_full_log_has_target() {
+    local log=$1 target=$2
+    awk -v t="$target" '
+        $0 ~ ("Running .*tests/" t "\\.rs ") { seen=1; next }
+        seen && /test result: ok\./ { ok=1; exit }
+        seen && (/test result: FAILED/ || /^ *Running / || /^ *Doc-tests / || /^error/ || /^failures:/) { exit }
+        END { exit !(ok) }
+    ' "$log"
+}
+
+# 再利用した根拠（対象の実行行と結果行）を出す。全走ログ 700 行を写さない。
+hado_gate_full_log_evidence() {
+    local log=$1 target=$2
+    awk -v t="$target" '
+        $0 ~ ("Running .*tests/" t "\\.rs ") { seen=1; print; next }
+        seen && /test result:/ { print; exit }
+    ' "$log"
+}
+
+# 部分テストの実走を全走に統合する。全走がこの内容で成功し、そのログに
+# 対象の実行と ok の証拠があるときだけ、実走せず成功を再利用する。
+# 「全走成功 ⇒ 部分成功」は対象が実在するときだけ成り立つので、証拠を要求する。
+cargo_test_cached() {
+    local -a targets=()
+    local target log covered=1
+    if ! hado_gate_narrow_test_argv "$@"; then
+        cargo_cached "$@"
+        return $?
+    fi
+    log=$(hado_gate_full_test_log)
+    if [ ! -f "$log" ]; then
+        cargo_cached "$@"
+        return $?
+    fi
+    mapfile -t targets < <(hado_gate_narrow_test_targets "$@")
+    for target in "${targets[@]}"; do
+        if ! hado_gate_full_log_has_target "$log" "$target"; then
+            covered=0
+            break
+        fi
+    done
+    if [ "$covered" -ne 1 ]; then
+        cargo_cached "$@"
+        return $?
+    fi
+    printf 'gate-cache: full test already covered: cargo %s\n' "$*"
+    for target in "${targets[@]}"; do
+        hado_gate_full_log_evidence "$log" "$target"
+    done
+    return 0
 }
