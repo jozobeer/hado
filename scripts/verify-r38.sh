@@ -324,7 +324,9 @@ for malformed in ['## broken\n', '## broken\n```bash\ntrue\n```\n']:
 assert reproduced("printf 'value\\n'", b'value\n')
 for command in ['true', "printf 'wrong\\n'", "printf 'value\\n'; printf '\\n' >&2", "printf 'value\\n'; exit 1"]:
     assert not reproduced(command, b'value\n'), command
-cases = reproductions(Path('docs/bug.md').read_text())
+document = Path('docs/bug.md').read_text()
+cases = reproductions(document)
+assert len(cases) == len(re.findall(r'^## ', document, flags=re.M)), 'section/reproduction count mismatch'
 for title, command, expected in cases:
     assert reproduced(command, expected), title
     print(f'{title}: reproduced')
