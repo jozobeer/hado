@@ -186,7 +186,7 @@ check '38-b subdirectory is IoFailure' e2_case "$workdir/subdirectory" 1 "$workd
 
 if ! python3 - "$workdir" "$seed" "$((1+RANDOM%7))" "$((1+RANDOM%9))" "$((1+RANDOM%7))" "$((1+RANDOM%9))" <<'PY'
 from pathlib import Path
-import json, random, sys
+import json, random, re, sys
 base = Path(sys.argv[1]) / 'probes'
 base.mkdir()
 rng = random.Random(int(sys.argv[2]))
@@ -202,10 +202,12 @@ value = rng.randrange(1, 1000)
 pairs = [([value], [value, value+1]), ([value, value+1], [value]), ([value], [value]), ([value, value], [value+1])]
 calls = [f'compare (Array.of_list {a}) (Array.of_list {b})' for a, b in pairs]
 add('38-c(1) §45 Array compare', 'def main = [' + ', '.join(calls) + ']\n', str([(a > b) - (a < b) for a, b in pairs]))
-for value in ['007', '+42', ' 42', '1_000', '1.0', '４２']:
+lower, upper = -(2**63), 2**63 - 1
+for value in ['007', '+42', ' 42', '1_000', '1.0', '４２', *map(str, [upper, lower, upper+1, lower-1])]:
+    accepted = bool(re.fullmatch(r'-?[0-9]+', value)) and lower <= int(value) <= upper
     add('38-c(2) §49 Int.parse ' + json.dumps(value, ensure_ascii=False),
         'def main = Int.parse ' + json.dumps(value, ensure_ascii=False) + '\n',
-        str(int(value)) if value == '007' else 'InvalidInt', int(value != '007'))
+        str(int(value)) if accepted else 'InvalidInt', int(not accepted))
 names = ['.hidden', 'z' + str(rng.randrange(10000)), 'A', 'あ', 'é', 'child']
 directory = add('38-c(3) §49 read_dir', 'def main = read_dir "entries"\n',
                 json.dumps(sorted(names, key=lambda s: s.encode()), ensure_ascii=False))
@@ -261,12 +263,14 @@ check '38-c specification sentence coverage' python3 - "$workdir/probes/manifest
 from pathlib import Path
 import re, sys
 rules = {
-    '38-c(1)': (45, r'^Array の `compare` は.*。$'),
-    '38-c(2)': (49, r'^`Int.parse` の受理文法は.*往復から導いた下限.*本節が決めた上限.*。$'),
-    '38-c(3)': (49, r'^`read_dir` は.*。$'),
-    '38-c(4)': (49, r'^`read_stdin` は.*。$'),
-    '38-c(5)': (49, r'^`env` の値が.*。$'),
-    '38-c(6)': (47, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は.*。$'),
+    '38-c(1)': (45, r'^Array の `compare` は要素を先頭から比較して最初に異なる要素の順序を返し、共通部分がすべて等しいときだけ短い方を先とする。$'),
+    '38-c(2)': (49, r'^`Int\.parse` の受理文法は、往復から導いた下限として `Int\.to_string` が返す全ての Int の10進表記を含み、'
+                   r'本節が決めた上限として ASCII の `-\?\[0-9\]\+` に一致して値が -9223372036854775808 以上 9223372036854775807 以下である文字列だけを受理し、'
+                   r'先行ゼロの個数は制限せず、`\+`・空白・`_`・小数点・全角数字は拒否する。$'),
+    '38-c(3)': (49, r'^`read_dir` は指定したディレクトリの各項目の名前だけを返し、`\.` と `\.\.` を除いて UTF-8 のバイト順に整列する。$'),
+    '38-c(4)': (49, r'^`read_stdin` は標準入力を EOF まで読み、同じプロセスでの2回目の呼び出しは空の `Bytes` を返す。$'),
+    '38-c(5)': (49, r'^`env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。$'),
+    '38-c(6)': (47, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は契約の名前空間で予約し、利用者の同名の契約宣言は E205 とする。$'),
 }
 def coverage(spec, manifest):
     sections = dict(re.findall(r'^# (\d+)\.[^\n]*\n(.*?)(?=^# \d+\.|\Z)', spec, re.M | re.S))
