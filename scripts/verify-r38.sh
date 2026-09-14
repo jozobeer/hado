@@ -340,5 +340,31 @@ for title, command, expected in cases:
 print(f'documented reproductions: {len(cases)}')
 PY
 
+# 38-e finishing checks.
+corpus_lock() {
+    local status=0 ok ng
+    LC_ALL=C sha256sum --strict -c tests/corpus.sha256 >"$workdir/lock.log" 2>&1 || status=$?
+    ok=$(grep -c ': OK$' "$workdir/lock.log")
+    ng=$(grep -cv ': OK$' "$workdir/lock.log")
+    echo "corpus lock: OK=$ok NG=$ng status=$status"
+    if [ "$status" -ne 0 ] || [ "$ng" -ne 0 ]; then cat "$workdir/lock.log"; fi
+    [ "$status" -eq 0 ] && [ "$ok" -gt 0 ] && [ "$ng" -eq 0 ]
+}
+check '38-e corpus lock' corpus_lock
+specification_version() {
+    local title
+    IFS= read -r title <docs/spec.md || return 1
+    echo "specification version: $title"
+    [ "$title" = '# 言語仕様案 v0.3' ]
+}
+check '38-e specification version v0.3' specification_version
+ledger_section() {
+    local count
+    count=$(grep -c '^## R38 ' docs/ledger.md) || return 1
+    echo "R38 ledger sections: $count"
+    [ "$count" -gt 0 ]
+}
+check '38-e R38 ledger section' ledger_section
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
