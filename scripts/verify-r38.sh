@@ -259,35 +259,29 @@ while IFS=$'\t' read -r id label status mode; do
 done <"$workdir/probes/manifest.tsv"
 
 # 38-c coverage: each added rule belongs to the section named by its probes.
-check '38-c specification sentence coverage' python3 - "$workdir/probes/manifest.tsv" <<'PY'
+# 文の逐語固定（regex）は文書管理なので scripts/lint-docs.sh へ移した（docs/plan.md
+# 33 節）。ここには構造（probe の key と §番号の対応、その見出しの実在）と対照だけを
+# 残す。規則そのものの振る舞いは上の probe が実走で測る。
+check '38-c probe rule coverage' python3 - "$workdir/probes/manifest.tsv" <<'PY'
 from pathlib import Path
 import re, sys
 rules = {
-    '38-c(1)': (45, r'^Array の `compare` は要素を先頭から比較して最初に異なる要素の順序を返し、共通部分がすべて等しいときだけ短い方を先とする。$'),
-    '38-c(2)': (49, r'^`Int\.parse` の受理文法は、往復から導いた下限として `Int\.to_string` が返す全ての Int の10進表記を含み、'
-                   r'本節が決めた上限として ASCII の `-\?\[0-9\]\+` に一致して値が -9223372036854775808 以上 9223372036854775807 以下である文字列だけを受理し、'
-                   r'先行ゼロの個数は制限せず、`\+`・空白・`_`・小数点・全角数字は拒否する。$'),
-    '38-c(3)': (49, r'^`read_dir` は指定したディレクトリの各項目の名前だけを返し、`\.` と `\.\.` を除いて UTF-8 のバイト順に整列する。$'),
-    '38-c(4)': (49, r'^`read_stdin` は標準入力を EOF まで読み、同じプロセスでの2回目の呼び出しは空の `Bytes` を返す。$'),
-    '38-c(5)': (49, r'^`env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。$'),
-    '38-c(6)': (47, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は契約の名前空間で予約し、利用者の同名の契約宣言は E205 とする。$'),
+    '38-c(1)': 45,
+    '38-c(2)': 49,
+    '38-c(3)': 49,
+    '38-c(4)': 49,
+    '38-c(5)': 49,
+    '38-c(6)': 47,
 }
 def coverage(spec, manifest):
     sections = dict(re.findall(r'^# (\d+)\.[^\n]*\n(.*?)(?=^# \d+\.|\Z)', spec, re.M | re.S))
     probes = set(re.findall(r'\t(38-c\(\d+\)) §(\d+) ', manifest))
-    assert probes == {(key, str(section)) for key, (section, _) in rules.items()}, probes
-    for key, (section, pattern) in rules.items():
-        assert len(re.findall(pattern, sections[str(section)], re.M)) == 1, key
+    assert probes == {(key, str(section)) for key, section in rules.items()}, probes
+    for key, section in rules.items():
+        assert str(section) in sections, f'{key}: missing section {section}'
 spec = Path('docs/spec.md').read_text()
 manifest = Path(sys.argv[1]).read_text()
 coverage(spec, manifest)
-for key, (_, pattern) in rules.items():
-    try:
-        coverage(re.sub(pattern, '', spec, flags=re.M), manifest)
-    except AssertionError:
-        print(f'{key}: missing sentence detected')
-    else:
-        raise AssertionError(f'{key}: missing sentence accepted')
 for invalid in ['', manifest.replace('§45', '§49')]:
     try:
         coverage(spec, invalid)
@@ -295,6 +289,14 @@ for invalid in ['', manifest.replace('§45', '§49')]:
         pass
     else:
         raise AssertionError('missing or mismatched coverage accepted')
+for key, section in rules.items():
+    without = re.sub(r'^# ' + str(section) + r'\.[^\n]*\n', '', spec, count=1, flags=re.M)
+    try:
+        coverage(without, manifest)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f'removed heading §{section} accepted')
 print('coverage: §45=1 §47=1 §49=4')
 PY
 
@@ -351,20 +353,8 @@ corpus_lock() {
     [ "$status" -eq 0 ] && [ "$ok" -gt 0 ] && [ "$ng" -eq 0 ]
 }
 check '38-e corpus lock' corpus_lock
-specification_version() {
-    local title
-    IFS= read -r title <docs/spec.md || return 1
-    echo "specification version: $title"
-    [ "$title" = '# 言語仕様案 v0.3' ]
-}
-check '38-e specification version v0.3' specification_version
-ledger_section() {
-    local count
-    count=$(grep -c '^## R38 ' docs/ledger.md) || return 1
-    echo "R38 ledger sections: $count"
-    [ "$count" -gt 0 ]
-}
-check '38-e R38 ledger section' ledger_section
+# 版文字列と台帳の節の存在は文書管理なので scripts/lint-docs.sh へ移した
+# （docs/plan.md 33 節）。ここにはコーパスの契約だけを残す。
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

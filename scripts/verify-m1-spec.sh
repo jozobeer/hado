@@ -1,17 +1,19 @@
 #!/bin/bash
-# M1 spec acceptance checks 1..5 (see docs/plan.md, M1). Run from the repository root.
-# Each check is independent; all run to the end. Non-zero exit if any fails.
+# M1 spec acceptance check 3 (see docs/plan.md, M1 and 33 節). Run from the repository root.
+#
+# 検査 1（見出し）・2（新設節）・4（対応表）・5（条件列の逐語）は文書管理であって
+# 処理系との契約ではない。docs/plan.md 33 節に従って scripts/lint-docs.sh（full 層）
+# へ移した。ここに残るのは §50 のエラーコード表＝処理系との契約だけである。
+# total= は先頭に数値リテラルで置く（verify-m2.sh と verify-m3.sh が読む）。
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=5
+total=1
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
 SPEC="docs/spec.md"
-PLAN="docs/plan.md"
-COV="docs/spec-coverage.md"
 
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
@@ -23,48 +25,6 @@ heading_count() {
 heading_exists() {
     [ "$(heading_count "$1")" -ge 1 ]
 }
-
-# --- check 1: existing section numbers ---
-del=$(git diff -- "$SPEC" | grep -c '^-#' || true)
-missing=""
-n=1
-while [ "$n" -le 42 ]; do
-    c=$(heading_count "$n")
-    if [ "$c" -ne 1 ]; then
-        missing="$missing #$n:$c"
-    fi
-    n=$((n + 1))
-done
-if [ "$del" -eq 0 ] && [ -z "$missing" ]; then
-    pass 1 "headings"
-else
-    fail 1 "deleted-headings=$del count-mismatch=$missing"
-fi
-
-# --- check 2: new sections 43..59 after 42 ---
-line42=$(grep -nE '^# 42\.' "$SPEC" | head -n 1 | cut -d: -f1)
-line42=${line42:-0}
-ns_reasons=""
-n=43
-while [ "$n" -le 59 ]; do
-    mapfile -t hits < <(grep -nE "^# ${n}\\." "$SPEC" || true)
-    if [ "${#hits[@]}" -eq 0 ]; then
-        ns_reasons="$ns_reasons missing-#$n"
-    else
-        for h in "${hits[@]}"; do
-            ln=${h%%:*}
-            if [ "$ln" -le "$line42" ]; then
-                ns_reasons="$ns_reasons #$n-before-42"
-            fi
-        done
-    fi
-    n=$((n + 1))
-done
-if [ -z "$ns_reasons" ]; then
-    pass 2 "new-sections"
-else
-    fail 2 "new-sections:$ns_reasons"
-fi
 
 # --- check 3: error code table ---
 awk '
@@ -131,160 +91,6 @@ if [ -z "$ec_reasons" ]; then
     pass 3 "error-codes"
 else
     fail 3 "error-codes:$ec_reasons"
-fi
-
-# --- check 4: coverage table (row count derived from the plan tables 2.2, 2.3, 9.2, 11.2, 13.2, 18.4, 24.2) ---
-cov_reasons=""
-if [ ! -f "$COV" ]; then
-    cov_reasons="$cov_reasons missing-file"
-else
-    awk -F '|' '
-        {
-            t=$2; name=$3; secs=$4
-            gsub(/^ +| +$/, "", t)
-            gsub(/^ +| +$/, "", name)
-            gsub(/^ +| +$/, "", secs)
-            if (t=="計画の表" || t=="" || t ~ /^-+$/) next
-            if (name=="" || name=="項目名") next
-            print name "\t" secs
-        }
-    ' "$COV" >"$TMPD/cov.tsv"
-
-    awk -F '|' '
-        /^### 2\.2/ { p=1; next }
-        /^### 2\.3/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan22.txt"
-    awk -F '|' '
-        /^### 2\.3/ { p=1; next }
-        /^## 3\./ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan23.txt"
-    awk -F '|' '
-        /^### 9\.2/ { p=1; next }
-        /^### 9\.3/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan92.txt"
-    awk -F '|' '
-        /^### 11\.2/ { p=1; next }
-        /^### 11\.3/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan112.txt"
-    awk -F '|' '
-        /^### 13\.2/ { p=1; next }
-        /^### 13\.3/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan132.txt"
-    # Why not /^### 18\.4/: 19節に「18.4 の項目の割り当て」があり、同じ項目名が二重に入る。
-    awk -F '|' '
-        /^### 18\.4 仕様の項目/ { p=1; next }
-        /^### 18\.5/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan184.txt"
-    awk -F '|' '
-        /^### 24\.2 仕様の項目/ { p=1; next }
-        /^### 24\.3/ { p=0 }
-        p {
-            name=$2
-            gsub(/^ +| +$/, "", name)
-            if (name=="" || name=="項目" || name ~ /^-+$/) next
-            if ($0 ~ /^\|/) print name
-        }
-    ' "$PLAN" >"$TMPD/plan242.txt"
-    cat "$TMPD/plan22.txt" "$TMPD/plan23.txt" "$TMPD/plan92.txt" "$TMPD/plan112.txt" "$TMPD/plan132.txt" "$TMPD/plan184.txt" "$TMPD/plan242.txt" >"$TMPD/plan_items.txt"
-    nrows=$(wc -l <"$TMPD/cov.tsv" | tr -d ' ')
-    nplan=$(wc -l <"$TMPD/plan_items.txt" | tr -d ' ')
-    if [ "$nrows" -ne "$nplan" ]; then
-        cov_reasons="$cov_reasons rows=$nrows(want-$nplan)"
-    fi
-    cut -f1 "$TMPD/cov.tsv" >"$TMPD/cov_items.txt"
-
-    while IFS= read -r item || [ -n "$item" ]; do
-        found=0
-        while IFS= read -r citem || [ -n "$citem" ]; do
-            if [ "$item" = "$citem" ]; then
-                found=1
-                break
-            fi
-        done <"$TMPD/cov_items.txt"
-        if [ "$found" -eq 0 ]; then
-            cov_reasons="$cov_reasons missing-item"
-            break
-        fi
-    done <"$TMPD/plan_items.txt"
-
-    while IFS= read -r citem || [ -n "$citem" ]; do
-        found=0
-        while IFS= read -r item || [ -n "$item" ]; do
-            if [ "$citem" = "$item" ]; then
-                found=1
-                break
-            fi
-        done <"$TMPD/plan_items.txt"
-        if [ "$found" -eq 0 ]; then
-            cov_reasons="$cov_reasons extra-item"
-            break
-        fi
-    done <"$TMPD/cov_items.txt"
-
-    while IFS=$'\t' read -r name secs; do
-        printf '%s\n' "$secs" | grep -oE '§[0-9]+' | while read -r ref; do
-            num=${ref#§}
-            if ! heading_exists "$num"; then
-                echo " missing-sec-$ref"
-            fi
-        done >"$TMPD/covsec.$$"
-        if [ -s "$TMPD/covsec.$$" ]; then
-            cov_reasons="$cov_reasons$(cat "$TMPD/covsec.$$")"
-        fi
-        rm -f "$TMPD/covsec.$$"
-    done <"$TMPD/cov.tsv"
-fi
-if [ -z "$cov_reasons" ]; then
-    pass 4 "coverage"
-else
-    fail 4 "coverage:$cov_reasons"
-fi
-
-# --- check 5: condition-column newline requirement gone ---
-# (a) lines containing 条件列 AND 改行 == 0
-# (b) lines containing パーサは改行を見ない verbatim >= 1
-a=$(awk 'index($0, "条件列") && index($0, "改行") { n++ } END { print n+0 }' "$SPEC")
-b=$(awk 'index($0, "パーサは改行を見ない") { n++ } END { print n+0 }' "$SPEC")
-if [ "$a" -eq 0 ] && [ "$b" -ge 1 ]; then
-    pass 5 "condition-column"
-else
-    fail 5 "cooccur-条件列-改行=$a verbatim-パーサは改行を見ない=$b"
 fi
 
 echo "PASSED: $ok/$total"
