@@ -2562,10 +2562,10 @@ m0・m1-corpus・m2・m3 だけで 2792 秒（46.5 分）。**同じ内容の実
 | 層 | コマンド | 所要 | 目標 | 赤 |
 |---|---|---|---|---|
 | quick | `run-gates.sh --tier quick target/tier/quick` | **1.7 秒** | ≦ 2 分 | 0 |
-| core | `run-gates.sh --tier core target/tier/core` | **6 分 25 秒** | ≦ 7 分 | 0 |
-| full | `run-gates.sh --tier full target/tier/full` | **13 分 46 秒** | ≦ 18 分 | 0 |
+| core | `run-gates.sh --tier core target/tier/core` | **6 分 19 秒** | ≦ 7 分 | 0 |
+| full | `run-gates.sh --tier full target/tier/full` | **13 分 39 秒** | ≦ 18 分 | 0 |
 
-quick は `cargo build --offline`（1/1）、`verify-gate-cache`（13/13）、`verify-m1-spec`（1/1）。core は m0 7/7・m1-corpus 7/7・m1-spec 1/1・m2 8/8・m3 12/12・m4 133/133・m5 145/145・m6 71/71・m7 3/3・r38 138/138・gate-cache 13/13。core の所要は m0 196 秒（全体の半分）と m1-corpus 47・m2 52 が主である。
+quick は `cargo build --offline`（1/1）、`verify-gate-cache`（14/14）、`verify-m1-spec`（1/1）。core は m0 7/7・m1-corpus 7/7・m1-spec 1/1・m2 8/8・m3 12/12・m4 133/133・m5 145/145・m6 71/71・m7 3/3・r38 138/138・gate-cache 14/14。core の所要は m0 190 秒（全体の半分）と m1-corpus 47・m2 52 が主である。
 
 ### full の門番ごとの `PASSED: n/N`（33-b）
 
@@ -2575,7 +2575,7 @@ quick は `cargo build --offline`（1/1）、`verify-gate-cache`（13/13）、`v
 |---|---|---|---|
 | m1-spec | 5/5 | 1/1 | 検査 1・2・4・5 を lint-docs へ移した |
 | r38 | 140/140 | 138/138 | 38-e の版と台帳の 2 検査を lint-docs へ移した |
-| gate-cache | 6/6 | 13/13 | 層の自己判定 2 と cargo 再利用の対照 5 を足した（33-e が許す増加） |
+| gate-cache | 6/6 | 14/14 | 層の自己判定 5 と cargo 再利用の対照 3 を足した（33-e が許す増加） |
 
 他は m0 7/7、m1-corpus 7/7、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r9 5/5、r11〜r17 と r18〜r22 と r28 と record-constructors が各 1/1、r23 3/3、r24 2/2、r25 4/4、r26 2/2、r29 24/24、r30 16/16、r31 25/25、r32 45/45、r33 73/73、r34 1360/1360、r35 714/714、r36 388/388、r37 254/254。`^NG:` は全ログで 0。lint-docs は 7/7。`cargo test` は 734 passed / 0 failed（m0 の `OK: 2 cargo-test passed=734`）。
 
@@ -2624,7 +2624,7 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 ### 33-f（層が実在の門番と一致し、重複なく覆う）
 
-`verify-gate-cache.sh` に機械検査を足した。実在の `scripts/verify-*.sh` の集合と層の一覧が一致すること、最小層に重複が無いこと、`run-gates.sh --print-tier` が同じ一覧を返すこと、quick ⊆ core ⊆ full かつ full が 38 本であること。合成木で、引数なしの全走が文書層まで回ること、`--tier` に明示した門番が重複せず足されることも測る。13/13。
+`verify-gate-cache.sh` に機械検査を足した。実在の `scripts/verify-*.sh` の集合と層の一覧が一致すること、最小層に重複が無いこと、`run-gates.sh --print-tier` が同じ一覧を返すこと、quick ⊆ core ⊆ full かつ full が 38 本であること。合成木で、引数なしの全走が文書層まで回ること、`--tier` に明示した門番が重複せず足されること、相対の出力先が呼び出し側の作業ディレクトリで解決されることも測る。14/14。
 
 ### 実装審査（claude / fable 5.1）と対応
 
@@ -2636,6 +2636,8 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - 赤い全走のログを残さないようにした（「成功だけを保存する」原則との食い違い）。
 - 出力ディレクトリの相対パスを呼び出し側の作業ディレクトリ基準に戻した。`--tier bogus` が空のディレクトリを作らないよう、層の検証を mkdir の前に移した。
 - lint-docs の台帳検査の glob を `verify-r*.sh` から `verify-r[0-9]*.sh` に狭めた。
+
+2 巡目で 9 件すべてが閉じていることを確認した。残った軽微も直した。core の「full 専用の一覧」が明示的に足した門番を差し引いていなかったので、この走行で回した `gates` との差に変えた。赤い全走のログ消しは、呼び出し側が `set -e` と pipefail だと `rm` に達する前に抜け得たので、パイプをやめて一時ファイルに写す形にした。相対の出力先の自己判定を足した（合計 14/14）。
 
 ### 迷った点
 
