@@ -2777,3 +2777,36 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 - 文法の概形（§59）とコア構文（§57）はどちらも構文の一覧を持つ。付録に並ぶので重複が目に付く。統合は別ラウンドとする。
 
+## R41 旧仕様の記載を外す（2026-09-15）
+
+計画は `docs/plan.md` 37 節。R40 は節番号を振り直した後も、v0.3・R39 の番号を現行に写す `docs/spec-map.md` と、tag `v0.3` の本文との照合を門番に残した。文書には最新の snapshot だけを置けばよいという判断になり、対応表と保存の検査を外した。**言語規則は変えていない。** 版は v0.3.1 のまま、tag `v0.3.1` を最終コミットに付け直した。
+
+### 実装
+
+- `docs/spec-map.md` を削除した。旧番号を現行に写す表は持たない。
+- `docs/spec.md` の前書きから旧 tag・旧番号の説明を外し、「版 v0.3.1 は git tag `v0.3.1` に対応する。」だけを残した。
+- `scripts/verify-r40.sh` を `scripts/verify-r41.sh` にし、3 列の写像と tag `v0.3` との本文保存の検査を落とした。検査は 5 つ。節の並び（文法の概形が §59）、最新のみ（対応表が無く、前書きに v0.3.1 以外の版と `spec-map` が無い）、コーパスのタグと §56 の表、現行文書の §参照、版。
+- `scripts/lib/gate-tiers.sh` の full の `r40` を `r41` にした。
+- `docs/plan.md` 35・36 節とこの台帳の R39・R40 は、当時の番号と `docs/spec-map.md` への言及を残した。当時の判断が何を根拠にしたかの記録である。
+
+### 判定の実測
+
+- **41-a（最新の仕様の自己整合）。** `bash scripts/verify-r41.sh` は 5/5。`sections: 59, part headings: 13, last: 付録`、`current only: version ['v0.3.1'], no spec-map in the live documents or gates`、`codes: 69, corpus tags resolve and match`、`version: v0.3.1`。
+- **41-b（文書層）。** `bash scripts/lint-docs.sh` は 7/7。
+- **41-c（層の一覧）。** `bash scripts/verify-gate-cache.sh` は 26/26。
+- **41-d（層別）。** `--tier quick target/r41-gates/quick` は 7 秒で exit 0（build 1/1、gate-cache 26/26、m1-spec 1/1）。`--tier core target/r41-gates/core` は 345 秒で exit 0（gate-cache 26/26、m0 7/7、m1-corpus 7/7、m1-spec 1/1、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r38 138/138）。`--jobs 8 --tier full target/r41-gates/full` は 40 本、471 秒。3 走行とも exit 0 で `^NG:` は 0。
+- **41-e（cargo test）。** `cargo test --offline -q --test r9_grammar --test r23_syntax --test parse_corpus` は r9_grammar 5、r23_syntax 9、parse_corpus 1 の全て passed（exit 0）。
+- **41-f（門番の参照）。** `docs/spec-map.md` が無く、現行文書と門番に `spec-map` の参照が無い（41-a の検査 2 で実測）。
+- **41-g（tag）。** 軽量 tag `v0.3.1` を最終コミットに付け直した。tag `v0.3` は動いていない。
+
+### 迷った点
+
+- **旧版への言及の残し方。** 削除の対象は対応表と、番号を現行に写すための記載とした。`docs/spec.md` の `--`（v0.1 の記法）は、旧版を参照するためではなく `--` を拒否する理由の説明なので残した。README の「`docs/` の文書は常に現行版。過去の版は git tag で読む。」は方針の記述なので残した。
+- **plan.md 35・36 節の参照先。** 両節は `docs/spec-map.md` を作る・作り直すと書いており、削除後は参照先が無い。当時の手順の記録なので書き換えず、R41 で外したことをここに書く。
+- **保証の置き場。** 本文保存の検査を外すと、再構成が本文を変えていない保証は門番から消える。R39・R40 の実測で確かめた一度きりの性質であり、以後は門番に残さない。
+- **tag の付け直し。** 仕様の本文は変わらないが前書きが変わるので、`v0.3.1` を最終コミットに付け直した。版は上げない。
+
+### 仕様への疑義
+
+- 該当なし。言語規則は変えていない。
+
