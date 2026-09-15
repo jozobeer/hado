@@ -3725,9 +3725,9 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 ### 許容される赤
 
-工程 2 の直後に `verify-r43.sh` の 43-a が赤になる（仕様だけが先に `once log` になるため）。工程 4 で緑へ戻す。**R44 の終了時に許容される赤は無い。**
+工程 2 の直後に `verify-r43.sh` の 43-a が赤になる（仕様だけが先に `once log` になるため）。同じく `crates/hado/tests/r23_syntax.rs` の `spec_effect_and_handler_examples_parse` と `keywords_cannot_be_names` も赤になる（例とキーワード一覧を仕様から読むため）。工程 4 で緑へ戻す。**R44 の終了時に許容される赤は無い。**
 
-R43 の未コミットの成果物（`tests/accept/io_log` `tests/accept/string_join_trim` と `scripts/lib/gate-tiers.sh` の `r43`）は main の作業ツリーにあり、この worktree の土台には無い。main 側で R43 を終えるとき、そのコーパスと門番の `reply` も `once` にする必要がある。
+R44 の作業中に main の R43 が閉じた（`fa6fd59` と `33a4145`）。R44 はその上へ rebase し、R43 が足した `tests/accept/io_log` `tests/accept/string_join_trim`、その lock の行、`scripts/lib/gate-tiers.sh` の `r43` も改名の対象に含める。
 
 ### スコープ外
 
