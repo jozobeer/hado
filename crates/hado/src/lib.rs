@@ -102,7 +102,7 @@ impl Checked {
 }
 
 /// Whether the program passed to `Project::load` (or the single-file API) has an
-/// entry `main`, or is checked as a library (A1, §5, §54, §59).
+/// entry `main`, or is checked as a library (A1, §11, §51, §53).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Inspection { Entry, Library }
 
@@ -251,7 +251,7 @@ pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
         message: "build requires an entry file with main; check treats this directory as a library".into() }
 }
 
-/// The span of the `def main` of a file, whatever its form (§59). `Ast::main` is
+/// The span of the `def main` of a file, whatever its form (§53). `Ast::main` is
 /// only the value definition used for lowering; an argument-taking or pattern
 /// `main` is still a declaration the entry check must anchor to.
 pub(crate) fn main_definition_span(ast: &parser::Ast) -> Option<parser::Span> {
@@ -262,7 +262,7 @@ pub(crate) fn main_definition_span(ast: &parser::Ast) -> Option<parser::Span> {
 }
 
 /// Whether an entry `main` exists, whatever its form. The inspection is decided
-/// by this: only a file without any `def main` is checked as a library (A1, §54).
+/// by this: only a file without any `def main` is checked as a library (A1, §51).
 pub(crate) fn has_main_definition(ast: &parser::Ast) -> bool {
     main_definition_span(ast).is_some()
 }

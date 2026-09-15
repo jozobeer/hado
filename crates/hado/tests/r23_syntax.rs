@@ -57,7 +57,7 @@ fn roundtrip(source: &str) {
 }
 
 fn spec_keywords() -> Vec<String> {
-    let line = spec_between("# 41.", "# 42.")
+    let line = spec_between("## 5.", "## 6.")
         .lines()
         .find(|line| line.contains("キーワードは"))
         .expect("keyword sentence");
@@ -76,8 +76,8 @@ fn handler_type_var_before_a_namespaced_effect_parses() {
 
 #[test]
 fn spec_effect_and_handler_examples_parse() {
-    for block in ocaml_blocks(spec_between("# 57.", "# 58.")).into_iter()
-        .chain(ocaml_blocks(spec_between("# 58.", "# 59.")))
+    for block in ocaml_blocks(spec_between("## 38.", "## 39.")).into_iter()
+        .chain(ocaml_blocks(spec_between("## 39.", "## 40.")))
     {
         parse_source(block, "spec-example.hd").unwrap_or_else(|error| panic!("{error}\n{block}"));
     }

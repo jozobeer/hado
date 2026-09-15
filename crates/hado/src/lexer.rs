@@ -1,8 +1,8 @@
 //! Tokenizer for the hado grammar.
 //!
-//! Follows §43 (literals and `//` line comments) and §44 (operators).
+//! Follows §6 (literals and `//` line comments) and §8 (operators).
 //! Every token carries a 1-based `Span`. Whitespace (including newlines) and
-//! line comments are skipped: the parser does not look at newlines (§41).
+//! line comments are skipped: the parser does not look at newlines (§5).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {

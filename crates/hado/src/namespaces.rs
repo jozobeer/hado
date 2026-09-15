@@ -23,11 +23,11 @@ struct Local {
 struct Resolver<'a> {
     symbols: Symbols,
     directories: &'a BTreeSet<Directory>,
-    // §49: the prelude is placed at `[]`, but a library must still see it while
+    // §56: the prelude is placed at `[]`, but a library must still see it while
     // the user root `[]` stays invisible, so it keeps its own table.
     prelude: BTreeMap<Space, BTreeSet<String>>,
     prelude_operations: BTreeSet<String>,
-    // §55, §59: the root that the current item resolves paths from.
+    // §52, §53: the root that the current item resolves paths from.
     root: Directory,
     sites: BTreeMap<(usize, usize), Vec<DeclaredName>>,
     renamed: BTreeMap<(usize, usize), String>,
@@ -36,7 +36,7 @@ struct Resolver<'a> {
     result: Resolution,
 }
 
-/// §59: the deepest library root that contains `directory`, or the user root
+/// §53: the deepest library root that contains `directory`, or the user root
 /// `[]` when the item sits outside every library.
 fn innermost_library_root(directory: &[String], libraries: &BTreeSet<Directory>) -> Directory {
     libraries.iter().filter(|library| directory.starts_with(library.as_slice()))
@@ -129,7 +129,7 @@ pub(crate) fn resolve(
     }
     for (index, ((item, directory), root)) in ast.items.iter_mut().zip(&locations).zip(&roots).enumerate() {
         resolver.root = root.clone();
-        // §55, §59: a declaration conflicts with the names visible unqualified
+        // §52, §53: a declaration conflicts with the names visible unqualified
         // from its directory. The prelude is visible even at a library root, so
         // its names are checked everywhere. The root's own names are compared
         // only from a subdirectory: at the root the declaration is the root.
@@ -200,9 +200,9 @@ impl Resolver<'_> {
     }
 
     fn resolve_global(&mut self, name: &mut String, span: Span, space: Space, directory: &[String]) {
-        // §55, §59: unqualified names reach the own directory, then the item's
+        // §52, §53: unqualified names reach the own directory, then the item's
         // root (the innermost library root, or the user root outside a library).
-        // The prelude stays visible from everywhere (§49) while the user root
+        // The prelude stays visible from everywhere (§56) while the user root
         // does not reach into a library.
         if !name.contains("::") {
             if self.has(directory, space, name) { *name = qualify(directory, name); }

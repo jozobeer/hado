@@ -187,7 +187,7 @@ fn fn_type_group() {
 
 #[test]
 fn not_unary_precedence() {
-    // `not` sits in the same tier as unary `-` (§44), above `&&` and the
+    // `not` sits in the same tier as unary `-` (§8), above `&&` and the
     // comparisons.
     assert_eq!(parse_expr_ok("def main = not true"), "(not true)");
     assert_eq!(parse_expr_ok("def main = not (1 == 2)"), "(not (1 == 2))");
@@ -229,7 +229,7 @@ fn e105_no_tuple() {
 
 #[test]
 fn e105_tuple_pattern() {
-    // §37: tuple syntax in a pattern is also E105, not a plain error.
+    // §21: tuple syntax in a pattern is also E105, not a plain error.
     let d = parse_source("def main = let (a, b) = x -> a", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E105"));
     let d = parse_source("def main = if x | (a, b) => a | 0", "t").unwrap_err();

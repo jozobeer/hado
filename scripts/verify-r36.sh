@@ -236,7 +236,7 @@ def only_block(pattern, text):
 
 
 def member_block(spec):
-    section = only_block(r"^# 49\.[^\n]*\n(.*?)(?=^# |\Z)", spec)
+    section = only_block(r"^## 56\.[^\n]*\n(.*?)(?=^#{1,2} |\Z)", spec)
     return only_block(r"member の型は次のとおり[^\n]*\n\s*```ocaml\n(.*?)```", section)
 
 
@@ -286,7 +286,7 @@ copy = Path(sys.argv[3]) / "spec-effect.md"
 copy.write_text(spec.replace(contract_block, changed, 1))
 changed_members = members_of(member_block(copy.read_text()))
 assert set(differences(changed_members, expected)) == {"to_string"}, "spec effect mutation escaped"
-print("   (対照: §49 の写しの member to_string Pure → {Error} を検出)")
+print("   (対照: §56 の写しの member to_string Pure → {Error} を検出)")
 
 for pattern, replacement in (
     (r"^(def to_string\([^:]+: [^)]*)(\))", r"\1 List\2"),
@@ -349,7 +349,7 @@ def validate(sources, lock):
         entries[path] = digest
     for path, source in tagged.items():
         assert '// needs: prelude' in source.splitlines(), path
-        assert re.search(r'^// spec: §49$', source, re.M), path
+        assert re.search(r'^// spec: §56$', source, re.M), path
         assert len(re.findall(r'^// expect(?:-error)?:', source, re.M)) == 1, path
         assert entries.get(str(path)) == hashlib.sha256(source.encode()).hexdigest(), f'lock mismatch: {path}'
     return tagged

@@ -22,9 +22,9 @@ TMPD="$(mktemp -d)"
 find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 trap 'rm -rf "$TMPD"' EXIT
 
-# --- shared: section-50 code table (same extraction as verify-m1-spec.sh:79-95) ---
+# --- shared: section-57 code table (same extraction as verify-m1-spec.sh:79-95) ---
 awk '
-    /^# 50\./ { on=1 }
+    /^## 57\./ { on=1 }
     on { print }
 ' "$SPEC" >"$TMPD/sec50.txt"
 awk -F '|' '
@@ -101,16 +101,16 @@ else
     fail 1 "reject-1:1:$c1_reasons"
 fi
 
-# --- check 2: the section-39 examples (first line of each code block) are in the accept corpus ---
+# --- check 2: the section-59 examples (first line of each code block) are in the accept corpus ---
 c2_reasons=""
-awk '/^# 39\./{f=1} /^# 40\./{f=0} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
+awk '/^## 59\./{f=1} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
 [ -s "$TMPD/sec39.txt" ] || c2_reasons="$c2_reasons no-sec39-examples"
 while IFS= read -r s; do
     [ -n "$s" ] || continue
     found=0
     for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
-        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §39$' "$f"; then
+        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §59$' "$f"; then
             found=1
             break
         fi
@@ -264,7 +264,7 @@ else
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
     mkdir -p tests/accept/__probe__
-    printf -- '// spec: §39\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
+    printf -- '// spec: §59\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
     cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__/main.hd
@@ -300,10 +300,10 @@ from pathlib import Path
 import re
 import sys
 
-section = re.search(r'^# 49\.[^\n]*\n(.*?)(?=^# |\Z)', Path(sys.argv[1]).read_text(), re.M | re.S)
+section = re.search(r'^## 56\.[^\n]*\n(.*?)(?=^#{1,2} |\Z)', Path(sys.argv[1]).read_text(), re.M | re.S)
 block = re.search(r'関数集合は次とする。\s*```text\n(.*?)```', section[1], re.S) if section else None
 if not block or not block[1].strip():
-    sys.exit('missing function set in §49')
+    sys.exit('missing function set in §56')
 members = []
 for line in block[1].splitlines():
     if not line.strip():
@@ -312,7 +312,7 @@ for line in block[1].splitlines():
     for name in re.split(r'\s*/\s*', names.strip()):
         members.extend(f'{name}.{member}' for member in functions.split())
 if not members:
-    sys.exit('empty function set in §49')
+    sys.exit('empty function set in §56')
 print('\n'.join(members))
 PY
 }
@@ -330,7 +330,7 @@ for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
         c6_reasons="$c6_reasons $f:first-line-not-spec"
     else
         num=$(printf '%s' "$first" | grep -oE '§[0-9]+' | tr -d '§')
-        hc=$(grep -cE "^# ${num}\\." "$SPEC" || true)
+        hc=$(grep -cE "^## ${num}\\." "$SPEC" || true)
         if [ "$hc" -ne 1 ]; then
             c6_reasons="$c6_reasons $f:spec-heading-#$num-count=$hc"
         fi

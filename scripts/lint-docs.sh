@@ -32,51 +32,52 @@ TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
 heading_count() {
-    grep -cE "^#+ ${1}\\." "$SPEC" 2>/dev/null || true
+    grep -cE "^## ${1}\\." "$SPEC" 2>/dev/null || true
 }
 
 heading_exists() {
     [ "$(heading_count "$1")" -ge 1 ]
 }
 
-# --- 検査 1: 既存の節番号（§1〜§42 が 1 回ずつ、見出しを消していない） ---
+# --- 検査 1: 節番号（§1〜§59 が `## N.` として 1 回ずつ、読み順に並ぶ） ---
 doc_headings() {
-    local del missing n c
-    del=$(git diff -- "$SPEC" | grep -c '^-#' || true)
+    local missing nums n c prev
     missing=""
     n=1
-    while [ "$n" -le 42 ]; do
+    while [ "$n" -le 59 ]; do
         c=$(heading_count "$n")
         if [ "$c" -ne 1 ]; then
             missing="$missing #$n:$c"
         fi
         n=$((n + 1))
     done
-    [ "$del" -eq 0 ] && [ -z "$missing" ]
+    mapfile -t nums < <(grep -oE '^## [0-9]+\.' "$SPEC" | grep -oE '[0-9]+')
+    prev=0
+    for n in "${nums[@]}"; do
+        if [ "$n" -ne $((prev + 1)) ]; then
+            missing="$missing order-$prev-to-$n"
+            break
+        fi
+        prev=$n
+    done
+    [ "${#nums[@]}" -eq 59 ] && [ -z "$missing" ]
 }
 
-# --- 検査 2: 新設節 §43〜§59 が §42 より後にある ---
-doc_new_sections() {
-    local line42 ns_reasons n hits h ln
-    line42=$(grep -nE '^# 42\.' "$SPEC" | head -n 1 | cut -d: -f1)
-    line42=${line42:-0}
-    ns_reasons=""
-    n=43
-    while [ "$n" -le 59 ]; do
-        mapfile -t hits < <(grep -nE "^# ${n}\\." "$SPEC" || true)
-        if [ "${#hits[@]}" -eq 0 ]; then
-            ns_reasons="$ns_reasons missing-#$n"
-        else
-            for h in "${hits[@]}"; do
-                ln=${h%%:*}
-                if [ "$ln" -le "$line42" ]; then
-                    ns_reasons="$ns_reasons #$n-before-42"
-                fi
-            done
+# --- 検査 2: 節は部の下にあり、部の見出しに節番号は無い ---
+doc_parts() {
+    local reasons="" seen=0 line
+    while IFS= read -r line; do
+        if printf '%s' "$line" | grep -qE '^# [0-9]+\.'; then
+            reasons="$reasons numbered-part"
         fi
-        n=$((n + 1))
-    done
-    [ -z "$ns_reasons" ]
+        if printf '%s' "$line" | grep -qE '^## [0-9]+\.'; then
+            [ "$seen" -eq 1 ] || reasons="$reasons section-before-part"
+        fi
+        if printf '%s' "$line" | grep -qE '^# '; then
+            seen=1
+        fi
+    done <"$SPEC"
+    [ -z "$reasons" ]
 }
 
 # --- 検査 3: 対応表（docs/spec-coverage.md）が計画の表 2.2/2.3/9.2/11.2/13.2/18.4/24.2 と一致 ---
@@ -254,17 +255,17 @@ doc_r38_sentences() {
 import re
 from pathlib import Path
 rules = {
-    '38-c(1)': (45, r'^Array の `compare` は要素を先頭から比較して最初に異なる要素の順序を返し、共通部分がすべて等しいときだけ短い方を先とする。$'),
-    '38-c(2)': (49, r'^`Int\.parse` の受理文法は、往復から導いた下限として `Int\.to_string` が返す全ての Int の10進表記を含み、'
+    '38-c(1)': (22, r'^Array の `compare` は要素を先頭から比較して最初に異なる要素の順序を返し、共通部分がすべて等しいときだけ短い方を先とする。$'),
+    '38-c(2)': (56, r'^`Int\.parse` の受理文法は、往復から導いた下限として `Int\.to_string` が返す全ての Int の10進表記を含み、'
                    r'本節が決めた上限として ASCII の `-\?\[0-9\]\+` に一致して値が -9223372036854775808 以上 9223372036854775807 以下である文字列だけを受理し、'
                    r'先行ゼロの個数は制限せず、`\+`・空白・`_`・小数点・全角数字は拒否する。$'),
-    '38-c(3)': (49, r'^`read_dir` は指定したディレクトリの各項目の名前だけを返し、`\.` と `\.\.` を除いて UTF-8 のバイト順に整列する。$'),
-    '38-c(4)': (49, r'^`read_stdin` は標準入力を EOF まで読み、同じプロセスでの2回目の呼び出しは空の `Bytes` を返す。$'),
-    '38-c(5)': (49, r'^`env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。$'),
-    '38-c(6)': (47, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は契約の名前空間で予約し、利用者の同名の契約宣言は E205 とする。$'),
+    '38-c(3)': (56, r'^`read_dir` は指定したディレクトリの各項目の名前だけを返し、`\.` と `\.\.` を除いて UTF-8 のバイト順に整列する。$'),
+    '38-c(4)': (56, r'^`read_stdin` は標準入力を EOF まで読み、同じプロセスでの2回目の呼び出しは空の `Bytes` を返す。$'),
+    '38-c(5)': (56, r'^`env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。$'),
+    '38-c(6)': (50, r'^既定実装の契約名 `EnvDefault` と `IoDefault` は契約の名前空間で予約し、利用者の同名の契約宣言は E205 とする。$'),
 }
 def sections(text):
-    return dict(re.findall(r'^# (\d+)\.[^\n]*\n(.*?)(?=^# \d+\.|\Z)', text, re.M | re.S))
+    return dict(re.findall(r'^## (\d+)\.[^\n]*\n(.*?)(?=^## \d+\.|\Z)', text, re.M | re.S))
 def present(text):
     found = sections(text)
     for key, (section, pattern) in rules.items():
@@ -279,12 +280,12 @@ for key, (_, pattern) in rules.items():
         pass
     else:
         raise AssertionError(f'{key}: missing sentence accepted')
-print('coverage: ' + ' '.join(f'§{section}={sum(1 for s, _ in rules.values() if s == section)}' for section in (45, 47, 49)))
+print('coverage: ' + ' '.join(f'§{section}={sum(1 for s, _ in rules.values() if s == section)}' for section in (22, 50, 56)))
 PY
 }
 
-check 'spec headings §1..§42 exist once and none deleted' doc_headings
-check 'new sections §43..§59 follow §42' doc_new_sections
+check 'spec sections §1..§59 exist once in reading order' doc_headings
+check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
 check 'condition column prose does not require a newline' doc_condition_column
 check 'spec and spec-coverage name the same version' doc_version

@@ -88,7 +88,7 @@ fn library_may_be_followed_by_outer_items_and_sections() {
 
 #[test]
 fn repeated_library_is_left_to_the_assembler() {
-    // §59: 同一ファイルの 2 つ目は名前解決の E205 であって、構文エラーではない。
+    // §53: 同一ファイルの 2 つ目は名前解決の E205 であって、構文エラーではない。
     assert!(parse("library\nlibrary").library.is_some());
 }
 
@@ -100,7 +100,7 @@ fn def_main_is_still_an_item_next_to_library() {
 
 #[test]
 fn library_after_the_first_heading_is_a_syntax_error() {
-    // §41: outer_item は最初の見出しより前にだけ現れる。
+    // §5: outer_item は最初の見出しより前にだけ現れる。
     let error = parse_source("def main = 1\neffect E\nabort stop\nlibrary\n", "generated.hd")
         .expect_err("library after a section heading must be rejected");
     assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
@@ -109,7 +109,7 @@ fn library_after_the_first_heading_is_a_syntax_error() {
 
 #[test]
 fn main_of_a_library_directory_is_e206_before_a_duplicate_library() {
-    // §50: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
+    // §57: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
     let case = Case::new();
     case.write("main.hd", "def main = 1\nlibrary\nlibrary\n");
     let error = match hado::project::Project::load(&case.0.join("main.hd")) {
@@ -131,7 +131,7 @@ fn library_and_shared_are_not_names() {
 
 #[test]
 fn argument_main_reports_the_declaration_position_for_every_command() {
-    // §50: check / build / dump-mono は同じアンカー（その `def main`）を指す。
+    // §57: check / build / dump-mono は同じアンカー（その `def main`）を指す。
     let case = Case::new();
     let source = "\n\ndef main x => x";
     case.write("main.hd", source);
@@ -147,7 +147,7 @@ fn argument_main_reports_the_declaration_position_for_every_command() {
 
 #[test]
 fn paths_resolve_from_the_innermost_library_root() {
-    // §55, §59: a nested `library` makes its directory the root of its own
+    // §52, §53: a nested `library` makes its directory the root of its own
     // subtree, so `leaf::L` is read from `inner/`, not from the outer `lib/`.
     let case = Case::new();
     case.write("app/main.hd", "def main = lib::inner::M.go 7");
@@ -162,7 +162,7 @@ fn paths_resolve_from_the_innermost_library_root() {
 
 #[test]
 fn library_directory_rejects_an_argument_main_in_a_separate_file() {
-    // §59: 禁止は定義の形によらない。値定義だけを探してはいけない。
+    // §53: 禁止は定義の形によらない。値定義だけを探してはいけない。
     let case = Case::new();
     case.write("lib.hd", "library");
     let source = "\n\ndef main x => x\n\nmodule S\ndef read(value: Int): Int\n\nimplement S as Memory\ndef read value => main value";
@@ -180,7 +180,7 @@ fn library_directory_rejects_an_argument_main_in_a_separate_file() {
 
 #[test]
 fn a_library_root_conflicts_with_the_prelude_embedded_and_alone() {
-    // §55, §59: a library root does not compare with the user root, but the
+    // §52, §53: a library root does not compare with the user root, but the
     // prelude stays visible inside the library, so its own `type Option` is E205.
     let case = Case::new();
     case.write("app/main.hd", "def main = 1");
@@ -199,7 +199,7 @@ fn a_library_root_conflicts_with_the_prelude_embedded_and_alone() {
 
 #[test]
 fn a_library_root_conflicts_with_its_subdirectories() {
-    // §55: the library root is the root of its subtree, so a same-named
+    // §52: the library root is the root of its subtree, so a same-named
     // declaration in a subdirectory points at the subdirectory's declaration.
     let types = Case::new();
     types.write("app/main.hd", "def main = 1");

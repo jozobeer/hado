@@ -28,7 +28,7 @@ r24_reject_match() {
 }
 
 check '24-a..e generated effect-row probes' cargo_test_cached test --offline --test r24_effects
-check '24-f E308 E522 E605 が §50 の表と一致' r24_reject_match
+check '24-f E308 E522 E605 が §57 の表と一致' r24_reject_match
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

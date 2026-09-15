@@ -30,7 +30,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
             }
         }
         // A2: the public surface is the root. Outer `def`s are not roots, and
-        // prelude items keep their `.skip(prelude_items)` exemption (§49).
+        // prelude items keep their `.skip(prelude_items)` exemption (§56).
         crate::Inspection::Library => {
             for item in &ast.items {
                 let key = match item {
@@ -51,7 +51,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
         }
     }
     // A handler is part of the program, so what its arms reach is used just like
-    // what `main` or a module reaches: close it transitively (§27).
+    // what `main` or a module reaches: close it transitively (§40).
     for key in handler_references {
         used.extend(transitive_references(&key, &graph));
     }

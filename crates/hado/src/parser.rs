@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the hado grammar of §41, §43 and §44.
+//! Recursive-descent parser for the hado grammar of §5, §6 and §8.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
 //! local bindings (`let` / `let p? =` / `do`), anonymous functions (`fn`),
@@ -6,9 +6,9 @@
 //! branch), patterns, records, list literals, modules (`sig` / `struct`)
 //! and type definitions. Every node carries a `Span`.
 //!
-//! Precedence (§44), high to low: application, unary `-`/`not`,
+//! Precedence (§8), high to low: application, unary `-`/`not`,
 //! `* / %`, `+ -`, comparison (non-associative), `&&`, `||`, `|>`.
-//! The parser ignores newlines (§41:1418).
+//! The parser ignores newlines (§5:422).
 
 use std::fmt;
 
@@ -136,7 +136,7 @@ pub enum NodeKind {
     Resume,
 }
 
-/// A pattern (`pattern :=` in §41).
+/// A pattern (`pattern :=` in §5).
 #[derive(Debug, Clone)]
 pub struct Pattern {
     pub kind: PatternKind,
@@ -222,7 +222,7 @@ pub struct TypeField {
     pub ty: TypeExpr,
 }
 
-/// A type expression (see §8, §10, §35, §37).
+/// A type expression (see §14, §17, §48, §21).
 #[derive(Debug, Clone)]
 pub struct TypeExpr {
     pub kind: TypeKind,
@@ -662,7 +662,7 @@ impl Parser<'_> {
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
-        // §41: outer_item は最初の見出しより前にだけ現れる。
+        // §5: outer_item は最初の見出しより前にだけ現れる。
         let mut outer = context == TypeContext::TopLevel;
         while self.kind() != &TokKind::Eof {
             if context != TypeContext::TopLevel && self.section_boundary() { break; }
@@ -1362,7 +1362,7 @@ impl Parser<'_> {
     }
 
     /// Parse an expression that must not itself contain a branch
-    /// (§20: branches cannot nest). Used for every component of a branch.
+    /// (§31: branches cannot nest). Used for every component of a branch.
     fn parse_branch_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::KwIf {
             return Err(self.error(Some("E101"), "branches cannot be nested inside another branch"));
@@ -1437,7 +1437,7 @@ impl Parser<'_> {
                 if matches!(op, BinOp::Eq | BinOp::Ne) {
                     self.equality_anchors.push((left.span, right.span, operator));
                 }
-                // Comparisons are non-associative (§44): `1 < 2 < 3` is a
+                // Comparisons are non-associative (§8): `1 < 2 < 3` is a
                 // syntax error and carries no E-code.
                 if matches!(
                     self.kind(),
@@ -1503,7 +1503,7 @@ impl Parser<'_> {
                 span,
             })
         } else if self.kind() == &TokKind::KwNot {
-            // `not` sits in the same precedence tier as unary `-` (§44).
+            // `not` sits in the same precedence tier as unary `-` (§8).
             let span = self.span();
             self.bump();
             let operand = self.parse_unary()?;
@@ -2072,7 +2072,7 @@ impl Parser<'_> {
                 PatternKind::Literal(Box::new(lit))
             }
             // E105: no tuples. `(a, b)` is not a pattern, so a `(` at the
-            // start of a pattern is always a tuple attempt (§37).
+            // start of a pattern is always a tuple attempt (§21).
             TokKind::LParen => {
                 return Err(self.error(
                     Some("E105"),
@@ -2104,7 +2104,7 @@ fn bin_node(op: BinOp, left: Node, right: Node) -> Node {
 }
 
 /// Whether `node` (or any expression it contains) is a branch.
-/// Returns the span of the first branch found (§20).
+/// Returns the span of the first branch found (§31).
 fn contains_branch(node: &Node) -> Option<Span> {
     match &node.kind {
         NodeKind::BoolBranch { .. }

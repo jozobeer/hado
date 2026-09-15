@@ -30,7 +30,7 @@ trap 'rm -rf "$workdir"' EXIT
 for module in Bytes String; do
     label='34-c(0)'
     [ "$module" != String ] || label='34-b(6)'
-    check "$label $module の member の引数型・戻り型・効果行は §49 と一致する" \
+    check "$label $module の member の引数型・戻り型・効果行は §56 と一致する" \
         python3 - docs/spec.md "stdlib/${module,,}.hd" "$workdir" "$module" <<'PY'
 from pathlib import Path
 import re
@@ -47,7 +47,7 @@ def only_block(pattern, text):
 
 
 def member_block(spec):
-    section = only_block(r"^# 49\.[^\n]*\n(.*?)(?=^# |\Z)", spec)
+    section = only_block(r"^## 56\.[^\n]*\n(.*?)(?=^#{1,2} |\Z)", spec)
     return only_block(r"member の型は次のとおり[^\n]*\n\s*```ocaml\n(.*?)```", section)
 
 
@@ -97,7 +97,7 @@ copy = Path(sys.argv[3]) / "spec-effect.md"
 copy.write_text(spec.replace(contract_block, changed, 1))
 changed_members = members_of(member_block(copy.read_text()))
 assert set(differences(changed_members, expected)) == {"length"}, "spec effect mutation escaped"
-print("   (対照: §49 の写しの member length Pure → {Error} を検出)")
+print("   (対照: §56 の写しの member length Pure → {Error} を検出)")
 
 for pattern, replacement in (
     (r"^(def length\([^:]+: [^)]*)(\))", r"\1 List\2"),
@@ -890,7 +890,7 @@ print('   ' + lines[-1])
 PY
 
 # 34-h: 検査 6 と同じ導出関数を、仕様の写しで実行する。
-check '34-h §49 の追加・削除に member 一覧が追随し、空入力は拒否する' \
+check '34-h §56 の追加・削除に member 一覧が追随し、空入力は拒否する' \
     python3 - "$workdir" <<'PY'
 from pathlib import Path
 import re
@@ -925,7 +925,7 @@ assert set(changed.stdout.decode().splitlines()) == set(members) | {'Foo.bar'}
 assert len(changed.stdout.decode().splitlines()) == len(members) + 1
 removed = derive(added.replace('Foo: bar\n', ''))
 assert removed.returncode == 0 and removed.stdout == original.stdout and not removed.stderr
-for empty in ('', '# 49. prelude\n', '# 49. prelude\n関数集合は次とする。\n\n```text\n```\n'):
+for empty in ('', '## 56. prelude\n', '## 56. prelude\n関数集合は次とする。\n\n```text\n```\n'):
     result = derive(empty)
     assert result.returncode != 0 and not result.stdout, 'empty inventory accepted'
 print(f'   (member count: {len(members)} → {len(members) + 1} → {len(members)}; added Foo.bar)')
@@ -1042,7 +1042,7 @@ while IFS=$'\t' read -r kind desc mode; do
     esac
 done <"$workdir/cases/fields-manifest.tsv"
 
-# §47・§57: prelude の操作だけがディレクトリ境界を越える。
+# §50・§38: prelude の操作だけがディレクトリ境界を越える。
 for layout in directory library; do
     for mode in success handled unhandled; do
         kind="prelude-$layout-$mode"
