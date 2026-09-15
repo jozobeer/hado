@@ -37,14 +37,24 @@ hado_gate_repo_root() {
 }
 
 # 作業ツリーの内容のハッシュ。target/ と .git/ と __pycache__/ は除外する。
+# HADO_GATE_FINGERPRINT_EXCLUDE があれば、そのリポジトリ相対のパス以下も除く。
+# run-gates は走行自身がログを書く出力先をここに入れる（ログは門番の入力では
+# ないので、鍵と並列の安定性 guard を走行の書き込みで揺らさない）。
 hado_gate_fingerprint() {
-    local repo
+    local repo exclude="${HADO_GATE_FINGERPRINT_EXCLUDE:-}"
     repo=$(hado_gate_repo_root)
     (
         cd "$repo" || exit 1
-        find . -type f \
-            -not -path './target/*' -not -path './.git/*' -not -path '*/__pycache__/*' \
-            -print0 |
+        if [ -n "$exclude" ]; then
+            find . -type f \
+                -not -path './target/*' -not -path './.git/*' -not -path '*/__pycache__/*' \
+                -not -path "./$exclude/*" \
+                -print0
+        else
+            find . -type f \
+                -not -path './target/*' -not -path './.git/*' -not -path '*/__pycache__/*' \
+                -print0
+        fi |
             LC_ALL=C sort -z |
             xargs -0 -r sha256sum |
             sha256sum |
@@ -66,6 +76,8 @@ hado_gate_cache_prune() {
 if [ -z "${HADO_GATE_CACHE_RUN:-}" ]; then
     HADO_GATE_CACHE_RUN="pid$$-$(date +%s)-${RANDOM:-0}"
     export HADO_GATE_CACHE_RUN
+    # 新しい走行スコープに、前のスコープの保持 id は関係ない。
+    unset HADO_GATE_HELD_IDS
     hado_gate_cache_prune
 fi
 
@@ -117,7 +129,7 @@ hado_gate_cache_exec() {
 gate_cached() {
     local label=$1
     shift
-    local base id dir
+    local base id dir rc saved_held
     base=$(hado_gate_cache_run_dir)
     id=$(printf '%s\0' "$label" "$@" | sha256sum | cut -c1-32)
     dir="$base/$(hado_gate_fingerprint)/$id"
@@ -126,12 +138,32 @@ gate_cached() {
         cat "$dir/out"
         return 0
     fi
+    # 同じ id を保持したまま再入すると flock が永久に待つ。門番が自分自身を
+    # 引く循環を、待たずに赤で止める（保持 id は子へ継がせる）。
+    case " ${HADO_GATE_HELD_IDS:-} " in
+        *" $id "*)
+            echo "gate_cached: recursive cache re-entry: $label" >&2
+            return 1
+            ;;
+    esac
     mkdir -p "$dir"
+    saved_held=${HADO_GATE_HELD_IDS:-}
+    HADO_GATE_HELD_IDS="$saved_held $id"
+    export HADO_GATE_HELD_IDS
     if command -v flock >/dev/null 2>&1; then
         (flock 9 && hado_gate_cache_exec "$dir" "$label" "$@") 9>"$dir/lock"
+        rc=$?
     else
         hado_gate_cache_exec "$dir" "$label" "$@"
+        rc=$?
     fi
+    HADO_GATE_HELD_IDS=$saved_held
+    if [ -n "$saved_held" ]; then
+        export HADO_GATE_HELD_IDS
+    else
+        unset HADO_GATE_HELD_IDS
+    fi
+    return "$rc"
 }
 
 # 全走の全体テスト（cargo test --offline --no-fail-fast）だけを指す。
@@ -173,7 +205,8 @@ cargo_cached() {
     if [ "$status" -eq 0 ]; then
         mv -- "$tmp" "$log"
     else
-        rm -f -- "$tmp" "$log"
+        # 赤は公開しない。$log は成功時にしか作られず、あれば手前で返っている。
+        rm -f -- "$tmp"
     fi
     return "$status"
 }

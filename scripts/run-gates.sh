@@ -148,14 +148,38 @@ else
     }
 fi
 
+# 走行自身がログを書く出力先は門番の入力ではない。内容ハッシュから外し、並列の
+# 安定性 guard とキャッシュの鍵がログの増加で揺れないようにする（出力先がツリーの
+# 外なら何もしない）。symlink 越しでも取り違えないよう実体のパスで比べる。
+if declare -F hado_gate_repo_root >/dev/null 2>&1; then
+    repo_root=$(cd -- "$(hado_gate_repo_root)" && pwd -P)
+    output_real=$(cd -- "$output" && pwd -P)
+    case "$output_real" in
+        "$repo_root"/*)
+            HADO_GATE_FINGERPRINT_EXCLUDE=${output_real#"$repo_root"/}
+            export HADO_GATE_FINGERPRINT_EXCLUDE
+            ;;
+    esac
+fi
+
 # 並列のワーカーの pid と作業ディレクトリ。中断時にワーカーを止めてから
-# 走行スコープと作業ディレクトリを消す（親だけが死ぬとワーカーが生き残る）。
+# 走行スコープと作業ディレクトリを消す。kill は親の subshell にしか当たらず、
+# flock を握る subshell や門番本体が孤児で残るので、子孫を葉から止める。
 gate_scratch=""
 gate_worker_pids=()
+hado_kill_tree() {
+    local pid=$1 child
+    if command -v pgrep >/dev/null 2>&1; then
+        for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+            hado_kill_tree "$child"
+        done
+    fi
+    kill "$pid" 2>/dev/null || true
+}
 hado_cleanup() {
     local worker
     for worker in "${gate_worker_pids[@]}"; do
-        kill "$worker" 2>/dev/null || true
+        hado_kill_tree "$worker"
     done
     if [ -n "$gate_scratch" ]; then rm -rf -- "$gate_scratch"; fi
     if [ -n "$gate_run_dir" ]; then rm -rf -- "$gate_run_dir"; fi
@@ -234,30 +258,58 @@ hado_run_gate() {
     printf '%s\n' "$((SECONDS - started))" >"$gate_scratch/$name.seconds"
 }
 
+# 終了したワーカーを追跡から外す（reap 済みの pid を cleanup が殺さないため）。
+hado_forget_pid() {
+    local pid=$1 kept=() p
+    for p in "${gate_worker_pids[@]}"; do
+        if [ "$p" != "$pid" ]; then
+            kept+=("$p")
+        fi
+    done
+    gate_worker_pids=("${kept[@]}")
+}
+
 # 前段（直列の一覧 ∩ 走行する門番）を完走させ、残りを N 並列でファンアウトし、
 # 終了コードと所要を 1 か所に集約する。status は呼び出し側の大域変数。
 hado_run_parallel() {
-    local running=0 name s seconds stable_before= stable_after=
+    local mode=parallel running=0 name s seconds done_pid= stable_before= stable_after=
     gate_scratch=$(mktemp -d)
     # m0 がビルドと全走テストを完走し、full-test の証拠を確定させる。
     for name in "${prelude_gates[@]}"; do
         hado_run_gate "$name"
     done
+    # 前段に赤があれば後段は直列に落とす。赤い門番は probe を戻し切らずに終わり
+    # 得るので、その状態で並列に走らせると鍵が揺れて入れ子が再走する。判定は既に
+    # 赤で確定しているので、緩めずに直列へ落とすだけにする。
+    for name in "${prelude_gates[@]}"; do
+        s=$(cat "$gate_scratch/$name.status" 2>/dev/null) || s=1
+        if [ "$s" -ne 0 ]; then
+            mode=serial
+        fi
+    done
+    if [ "$mode" = serial ]; then
+        echo 'run-gates: a serial gate failed; running the rest serially' >&2
+    fi
     # 前段の後はツリーが静止しているはず。後段が恒久的に変えたら赤にする。
-    if declare -F hado_gate_fingerprint >/dev/null 2>&1; then
+    if [ "$mode" = parallel ] && declare -F hado_gate_fingerprint >/dev/null 2>&1; then
         stable_before=$(hado_gate_fingerprint)
     fi
     for name in "${fanout_gates[@]}"; do
-        while [ "$running" -ge "$gate_jobs" ]; do
-            wait -n 2>/dev/null || true
-            running=$((running - 1))
-        done
-        hado_run_gate "$name" &
-        gate_worker_pids+=("$!")
-        running=$((running + 1))
+        if [ "$mode" = parallel ]; then
+            while [ "$running" -ge "$gate_jobs" ]; do
+                wait -n -p done_pid 2>/dev/null || true
+                if [ -n "$done_pid" ]; then hado_forget_pid "$done_pid"; fi
+                running=$((running - 1))
+            done
+            hado_run_gate "$name" &
+            gate_worker_pids+=("$!")
+            running=$((running + 1))
+        else
+            hado_run_gate "$name"
+        fi
     done
     wait || true
-    #  reap 済みの pid を残すと、再利用された無関係のプロセスを殺し得る。
+    # reap 済みの pid を残すと、再利用された無関係のプロセスを殺し得る。
     gate_worker_pids=()
     if [ -n "$stable_before" ]; then
         stable_after=$(hado_gate_fingerprint)
