@@ -3324,3 +3324,52 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 ### 報告
 
 (1) 34-a〜34-i の実測（コマンドと出力の末尾）、(2) 赤の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
+
+## 35. R39 仕様書の再構成の手順書（2026-09-15）
+
+### 背景
+
+`docs/spec.md` は v0.1 以来、節を末尾に足す形で育った。文法（§41）の後ろに原則（§42）と字句（§43〜§46）が続き、型（§36・§37）が module（§34・§35）の後ろにあり、引数の分岐形（§52・§53）がエラーコード表（§50）と印字（§51）の後ろにある。内容のまとまりと物理順がずれており、単体の言語仕様書として読めない。
+
+`§N` は見出し番号であると同時に、コーパスの `// spec: §N`、§50 のエラーコード表の「節」列、`docs/spec-coverage.md`、`docs/spec-trace.md`、門番、Rust テストが共有する識別子である。並びを直すには番号を振り直し、これらの参照を追随させるしかない。
+
+### 決定
+
+1. **節番号は 1..59 の十進整数のまま**にする。`§N` の字句を変えないので、コーパスと門番の `§[0-9]+` がそのまま使える。
+2. **文書の構造**は、タイトル `# hado 言語仕様 v0.3`、部 `# 第X部 …`、節 `## N. …` の 3 層にする。節は部の中に読み順で 1..59 と並ぶ。節の下に小節を置くときは `### N.M` とする（今回の再構成では小節を割らない）。
+3. **節の数は 59 のまま**（統合・分割はしない）。本文は節単位で丸ごと移し、節内の `第k節`・`§k` の参照だけを写像で置き換える。移動と番号替えだけであることを機械で照合できる。
+4. 旧番号から新番号への写像と、各節がどこへ移ったかは `docs/spec-map.md` に置く。`docs/plan.md`・`docs/ledger.md` の §N は決定と実行の記録なので書き換えない。それらを読むときは `docs/spec-map.md` を通す。
+5. 版は v0.3 のままとし、tag は打たない。言語規則は変えず、文書の並びだけを変える。
+
+### 手順
+
+1. `docs/spec.md` を再構成する（前書き・目次・部・節の並び・節内参照の書き換え）。
+2. `docs/spec-map.md` を作る（旧→新の写像と、そこから読むための注意）。
+3. `docs/spec-coverage.md`・`docs/spec-trace.md`・`README.md`・`docs/bug.md`・`docs/wants.md` の §参照を写像で置き換える。
+4. `tests/accept`・`tests/reject`・`tests/library` の `// spec: §N` を写像で置き換え、`tests/corpus.sha256` の該当行のハッシュを更新する。コーパスのファイル名・本数・`// error:`・`// item:` は変えない。AGENTS.md の「実装の工程で lock を更新しない」の例外を本項が与える。
+5. `docs/spec.md` の見出しと節本文を読む門番と Rust テストを追随させる: `scripts/lint-docs.sh`、`scripts/verify-m1-spec.sh`、`scripts/verify-m1-corpus.sh`、`scripts/verify-m3.sh`、`scripts/verify-m7.sh`、`scripts/verify-r34.sh`、`scripts/verify-r36.sh`、`scripts/verify-r38.sh`、`crates/hado/tests/r9_grammar.rs`、`crates/hado/tests/r23_syntax.rs`。
+6. `scripts/verify-r39.sh` を新設し、`scripts/lib/gate-tiers.sh` の full 層に `r39` を足す。`scripts/verify-gate-cache.sh` の自己判定が「層の一覧 == 実在の門番」を照合するので追随は必須である。
+7. `docs/corpus.md` の門番の説明を直す。
+8. `docs/ledger.md` に R39 の実測を書く。
+
+### 判定
+
+- 39-a. `scripts/verify-r39.sh` が満点。内容は (1) `docs/spec.md` が `## 1.`〜`## 59.` を 1 回ずつ読み順に持ち、各部の下にある、(2) `docs/spec-map.md` の写像が旧 1..59 と新 1..59 の全単射である、(3) tag `v0.3` の各節の本文（節内参照を写像で置き換えたもの）が、新しい対応する節の本文に部分文字列として現れる、(4) コーパス・`docs/spec-coverage.md`・`docs/spec-trace.md` の §参照が全て実在の節を指し、拒否コーパスのタグは §57 の表の節と一致する。
+- 39-b. `scripts/lint-docs.sh` が満点。見出しの検査は「§1..§59 が `## N.` として 1 回ずつ読み順に存在する」に置き換える。`git diff` による見出しの削除の検査は番号の振り直しと両立しないので外す。内容の欠落は 39-a(3) が測る。
+- 39-c. `scripts/verify-m1-spec.sh`・`scripts/verify-m1-corpus.sh`・`scripts/verify-m3.sh`・`scripts/verify-m7.sh` が満点。
+- 39-d. `scripts/run-gates.sh --tier core <出力先>` と `--tier full <出力先>` が exit 0 で、`^NG:` が 0。
+- 39-e. `cargo test --offline --no-fail-fast` が 0 failed。
+- 39-f. `sha256sum --strict --status -c tests/corpus.sha256` が exit 0。コーパスのパス集合と本数は再構成の前後で変わらない。
+- 39-g. 言語規則を変えていない。§57 のエラーコード表の 69 行は、コード・短い名・段階が同じで、節の列が写像の像、アンカー欄が節参照の置換の像である。`stdlib/`・`runtime/` の差分は空、`crates/` の差分は節番号の参照（コメントとテストが見る見出し文字列）の追随だけである。
+
+### 触ってよい場所
+
+`docs/spec.md`、`docs/spec-map.md`（新設）、`docs/spec-coverage.md`、`docs/spec-trace.md`、`docs/corpus.md`、`docs/plan.md`、`docs/ledger.md`、`README.md`、`docs/bug.md`、`docs/wants.md`、`tests/accept`・`tests/reject`・`tests/library` の `// spec:` 行、`tests/corpus.sha256`、`scripts/`（`verify-r39.sh`（新設）、`lib/gate-tiers.sh`、`lint-docs.sh`、`verify-m1-spec.sh`、`verify-m1-corpus.sh`、`verify-m3.sh`、`verify-m7.sh`、`verify-r34.sh`、`verify-r36.sh`、`verify-r38.sh`）、`crates/hado/tests/r9_grammar.rs`、`crates/hado/tests/r23_syntax.rs`、`crates/` と `tools/` の節番号のコメント。
+
+### スコープ外
+
+節の統合・分割、本文の命題の追加・削除・書き換え（重複した事実の統合は別ラウンド）、エラーコードの追加・変更、処理系の振る舞いの変更（`crates/` は節番号のコメントだけを変える）、`runtime/`・`stdlib/` の変更、`docs/plan.md`・`docs/ledger.md` の §N の書き換え、`docs/spec.md` の版上げと tag。
+
+### 報告
+
+(1) 39-a〜39-g の実測（コマンドと出力の末尾）、(2) 赤の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
