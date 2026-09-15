@@ -2707,3 +2707,38 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 なし（`docs/spec.md`、`crates/`、`runtime/`、`stdlib/`、`tests/` は触っていない）。
 
+## R39 仕様書の再構成（2026-09-15）
+
+計画は `docs/plan.md` 35 節。`docs/spec.md` は節を末尾に足す形で育ち、文法（旧 §41）の後ろに原則と字句、型（旧 §36・§37）が module の後ろ、引数の分岐形（旧 §52・§53）がエラーコード表の後ろにあった。並びを読み順に直し、節番号を 1..59 に振り直した。**言語規則は変えていない。**
+
+### 実装
+
+- `docs/spec.md` をタイトル・部 `# 第X部 …`・節 `## N. …` の 3 層にした。前書き（規範性の語と目次）を足し、節は §1〜§59 を読み順に並べた。本文は節単位で丸ごと移し、節内の `第k節`・`§k` だけを写像で置換した。
+- `docs/spec-map.md` を新設した。旧 1..59 から新 1..59 への全単射と、各節の新しい所属を持つ。`docs/plan.md`・`docs/ledger.md` の §N は決定と実行の記録なので書き換えず、この表を通して読む。
+- 追随した参照: `docs/spec-coverage.md`・`docs/spec-trace.md`・`docs/corpus.md`・`README.md`・`docs/bug.md`・`docs/wants.md`、`tests/accept`・`tests/reject`・`tests/library` の `// spec:` 175 ファイル、`tests/corpus.sha256` の 175 行、`scripts/`（`lint-docs.sh`・`verify-m1-spec.sh`・`verify-m1-corpus.sh`・`verify-m3.sh`・`verify-m7.sh`・`verify-r23.sh`〜`verify-r26.sh`・`verify-r32.sh`・`verify-r34.sh`・`verify-r36.sh`・`verify-r37.sh`・`verify-r38.sh`）、`crates/hado/tests/r9_grammar.rs`・`r23_syntax.rs`、`crates/hado/src/` と `crates/hado/tests/` の節番号のコメント。
+- `scripts/verify-r39.sh` を新設し、`scripts/lib/gate-tiers.sh` の full 層に `r39` を足した。`scripts/lint-docs.sh` の見出しの検査は「§1〜§59 が `## N.` として 1 回ずつ読み順に存在し、節が部の下にある」に置き換えた。`git diff` による見出しの削除の検査は番号の振り直しと両立しないので外し、内容の欠落は `verify-r39.sh` の保存検査で測る。
+
+### 判定の実測
+
+- **39-a（構造・写像・保存・参照）。** `bash scripts/verify-r39.sh` は 5/5。内訳は `sections: 59, part headings: 13`、`map rows: 59 (bijection)`、`preserved: 59 sections from v0.3`、`codes: 69, corpus tags resolve and match`、`live document references resolve`。保存検査は `git show v0.3:docs/spec.md` の各節の本文に節参照の置換を当てたものが、写像先の新しい節の本文に現れることを見る。
+- **39-b（文書層）。** `bash scripts/lint-docs.sh` は 7/7。`coverage: §22=1 §50=1 §56=4`。
+- **39-c（コーパスと門番）。** 変更した門番を 1 本ずつ実走した: `verify-m1-spec.sh` 1/1、`verify-m1-corpus.sh` 7/7、`verify-m2.sh` 8/8、`verify-m3.sh` 12/12、`verify-m7.sh` 3/3、`verify-r34.sh` 1360/1360、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254、`verify-r38.sh` 138/138、`verify-r39.sh` 5/5、`lint-docs.sh` 7/7。
+- **39-d（Rust）。** `cargo test --offline -q --test r9_grammar --test r23_syntax --test parse_corpus` は r9_grammar 5、r23_syntax 9、parse_corpus 1 の全て passed（exit 0）。
+- **39-e（corpus-lock）。** `tests/corpus.sha256` は 213 行のまま、うち 175 行のハッシュを更新した。`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。`verify-m3.sh` の check10 も緑。accept の `main.hd` は 104、reject のコードは 69、`tests/library/` は 4。
+- **39-f（全走）。** `bash scripts/run-gates.sh --jobs 8 --tier full /tmp/hado-gates-r39` は exit 0、40 本、real 7 分 51 秒（466 秒）。`^NG:` は 0。全走のログは一時ディレクトリに置いたため、変更した 11 本は `target/r39-gates/` に写して上に数えた。
+- **39-g（規則の不変）。** v0.3 の §50 と新しい §57 の 69 行を照合し、コード・短い名・段階が一致、アンカーの欄が節参照の置換の像、節の列が写像の像であることを確かめた。`git diff --stat -- stdlib runtime` は空、`crates/` の差分は節番号の参照（コメントと `r9_grammar.rs`・`r23_syntax.rs`・`unit/parser.rs` が見る見出し文字列）の追随だけである。
+
+全走の後に `docs/plan.md` の 39-g を書き換えながら `verify-m1-corpus.sh` を回し、check7 が `protected-files-changed-during-verification` で 6/7 になった。検査が正しく効いた例で、編集を止めて回し直すと 7/7 である。
+
+### 迷った点
+
+- **§5 と §6 の順。** 文法の概形（旧 §41）をリテラル（旧 §43）より先に置いた。§5 の「字句と構文の形はこの節を正とし、第6節と第8節は値の意味だけを定める」が素直に読める並びを選んだ。字句の規則が 2 節に分かれる点は残る。
+- **記録と現行の線引き。** `docs/plan.md`・`docs/ledger.md` の §N は当時の番号のまま残し、`docs/spec-map.md` を橋にした。決定と実行の記録を書き換えると、当時の判断が何を根拠にしたか読めなくなる。現行の文書とコードのコメントは追随させた。
+- **節の重複。** 環境変数の文（旧 §37 と §48）、除算の効果（旧 §36 と §49）、字句の規則（旧 §41 と §43）は同じ事実を 2 か所に持つ。統合は本文の書き換えなので今ラウンドの外に置いた。
+- **見出しの削除の検査。** 旧 `lint-docs.sh` の `git diff` による「見出しを消していない」検査は、番号の振り直しで必ず赤になる。内容の保存は `verify-r39.sh` が v0.3 との照合で測る形に替えた。
+- **tag との対応。** 版は v0.3 のままで、`git tag v0.3` は並べ替える前の本文を持つ。命題は同じで、対応は `docs/spec-map.md` が示す。
+
+### 仕様への疑義
+
+- §5（旧 §41）は「字句と構文の形はこの節を正とし」と書きながら、字句の一部（リテラルとコメント）の規則は §6 にある。並びを変えても意味は保たれているが、規範の置き場としては 2 節にまたがる。統合は別ラウンドとする。
+
