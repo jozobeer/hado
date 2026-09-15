@@ -3662,3 +3662,90 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 **`__string_trim` の追加が `runtime_abi.rs` の `Declaration` の網羅の検査（Rust の match）以外に既存の門番を赤にすると分かったら、止めて報告せよ。**
 
 **生成した oracle と hado の結果が食い違い、どちらが正しいか §55 から決められないときは、止めて報告せよ。**
+
+## 40. R44 効果の操作の名前を once / again に変える手順書（2026-09-16）
+
+### 背景
+
+効果の操作の種別は `reply` `abort` `capture` の 3 つである（§37）。`reply` は呼び出し位置で即座に返り、`capture` は継続を捕まえて `resume` で 1 回再開できる。`capture` はクロージャが環境を捕まえることを指す語と同じで、`crates/hado/src/mono.rs` `repr.rs` `emit.rs` の `captures` と仕様の中で意味が重なる。
+
+操作の意味を名前にする。**`reply` → `once`**（呼び出し位置で 1 回返る）、**`capture` → `again`**（継続をもう一度走らせられる）。`abort` と `resume` は動かさない。
+
+改名は 3 層に及ぶ。言語の見える面（キーワード、仕様、コーパス、stdlib、診断）、実装の内部識別子、コーパスのディレクトリ名である。クロージャの `captures` は別概念なので残す。
+
+### 決定
+
+- **決定 1: 見える面を `once` / `again` にする。** §37 の種別表と例、§38 の `again` の腕と `resume` の説明、§53 の末尾呼び出しの限定、§55 の操作の宣言、付録A と付録C（キーワード一覧、`op_kind`、`resume` の但し書き）、§56 の E124 の短い名前（`resume-outside-capture` → `resume-outside-again`）を改名する。`docs/spec-trace.md` `docs/wants.md` `docs/bug.md` も追随する。
+- **決定 2: 旧綴りを予約語から外す。** `reply` と `capture` は普通の `name` になる。別名（両方を受け付ける形）は残さない。`effect E reply x: Int` は E100、`def reply = 1` は受理になる。この 2 つを判定 44-a と 44-d で測る。
+- **決定 3: 実装の内部識別子を揃える。** `OpKind::Once` / `OpKind::Again`、`KwOnce` / `KwAgain`、`mono.rs` の `contains_again` `is_again_node` `again_answer_of` `again_do` `again_operation` `again_result_type` `bind_again_outcome` `again_bind_function` `again_bind_yield` `lift_again_arguments` `again_answers` と、診断文の `capture` / `reply`。**クロージャの `captures`（`mono.rs` `repr.rs` `emit.rs`）と `capture offset overflow`、`parser.rs` の「cannot capture a user binding」は動かさない。** 振る舞いの変更と混ぜないため、識別子の改名を先のコミットにする。
+- **決定 4: コーパスのディレクトリ名を揃える。** `capture_*` → `again_*`、`reply_*` → `once_*`、`nested_captures` → `nested_agains`、`nested_same_capture` → `nested_same_again`。`git mv` で改名し、lock は改名後のパスで作り直す。受理・拒否の本数は §56 の表の行数とディスクの実数から導き、直書きしない。
+- **決定 5: `docs/ledger.md` の過去のラウンドの記述は当時の語のまま残す。** 台帳は各ラウンドの実行記録で、当時 `reply` と呼ばれていた事実を書き換えない。R44 の節で改名を記録する。`docs/plan.md` は現行版なので改名する。
+- **決定 6: `scripts/verify-r44.sh` を新設し、`scripts/lib/gate-tiers.sh` の full に `r44` を足す。** 版（`v0.3.1`）と tag は動かさない。
+
+### 仕様への疑義（R44 では決めない）
+
+- **旧綴りを利用者の名前として許すことの是非。** §49 はキーワードが名前にならないことだけを定め、外した語が名前になることを明記していない。決定 2 は外す側を選ぶ。`reply` `capture` という名前を使う既存のコードが無いことは実測した（`tests/` `stdlib/` `tools/` の `.hd` に 0 件）。§49 に一文を足すかは R45 以降に送る。
+- **`once` / `again` をキーワードにすることの既存コードへの影響。** 同様に 0 件である。英語の once / again と衝突しないことは確認した。
+
+### 期待値の根拠
+
+| 形 | 期待 | 根拠 |
+|---|---|---|
+| `effect E reply x: Int` | E100 | 決定 2。`reply` は `name` で、`effect_item` の先頭の `op_kind` ではない |
+| `def reply = 1` | 受理 | 決定 2 |
+| `effect Ask` / `once ask: String` | 受理、`ask` が `{Ask}` を運ぶ | §37 |
+| `effect A Y` / `again y(value: A): Unit` / handler の `again` 腕 | 受理 | §37、§38 |
+| 受理コーパスの `once` → `reply`、`again` → `capture` の写し | check が非 0 | 決定 2。別名が残っていれば通ってしまう |
+
+### 成果物
+
+`docs/spec.md`、`docs/spec-trace.md`、`docs/plan.md`（本節）、`docs/ledger.md`、`docs/wants.md`、`docs/bug.md`、`crates/hado/src/{lexer,parser,mono,infer}.rs`、`crates/hado/tests/{r9_grammar,r23_syntax,r24_effects,r25_effects,r26_effects,r28_effects,r31_effects,r37_world}.rs`、`tests/accept/`（改名を含む）、`tests/reject/`、`stdlib/*.hd`、`scripts/verify-r26.sh` `verify-r30.sh` `verify-r31.sh` `verify-r33.sh` `verify-r34.sh` `verify-r37.sh` `verify-r43.sh`、`scripts/verify-r44.sh`（新設）、`scripts/lib/gate-tiers.sh`、`tests/corpus.sha256`。
+
+### 工程
+
+- 工程 0: 計画（本節）。
+- 工程 1: 構造。決定 3 の識別子を改名する。キーワードと診断文は旧綴りのまま。`cargo test --offline --no-fail-fast` が緑のままであることを測る。
+- 工程 2: 仕様。決定 1 と 5 の文書を改名する。この時点で `verify-r43.sh` の 43-a（仕様の `reply log` を探す）が赤になる。意図した赤である。
+- 工程 3: 判定器。`scripts/verify-r44.sh` を新設し、44-a〜44-h の赤を実測する。
+- 工程 4: 挙動。字句（`lexer.rs`）・構文（`parser.rs`）・実装（`mono.rs` `infer.rs` の診断文）・コーパス・stdlib・Rust テスト・門番スクリプトを切り替え、lock を更新する。44-a〜44-h を緑にする。
+- 工程 5: 仕上げ。`scripts/lib/gate-tiers.sh` の full に `r44`、`docs/ledger.md` に R44。全走。
+
+### 判定
+
+`scripts/verify-r44.sh` を新設する。構造は `scripts/verify-r31.sh` と `scripts/verify-r43.sh` に倣う。**入力の形が列挙できる判定は分類から生成する。期待値は判定器側で計算し、コーパスのファイル名や行を埋め込まない。** 生成器自身の失敗と manifest の欠落・空を非ゼロ終了にする。
+
+- 判定 44-a: 字句。`once` と `again` がキーワードで、`reply` と `capture` が `name` である。`once` / `again` を使う受理形が check を通り、`effect E reply x: Int` が E100、`def reply = 1` と `def capture = 2` が受理で `main` から使える。
+- 判定 44-b: 仕様。`docs/spec.md` に効果の語としての `\breply\b` `\bcapture\b` が無く、§37 の種別表、§38 の例、§55 の `once log`、付録C の `op_kind` が `once` / `again` である。
+- 判定 44-c: コーパス。受理の全件が実行で緑、拒否の全件がタグのコードで落ち、`sha256sum --strict --status -c tests/corpus.sha256` が 0。拒否の本数は §56 の表の行数とディスクの実数から導く。
+- 判定 44-d: 旧綴りの排除。受理コーパスのうち `once` か `again` を含む各本について、その語を旧綴りに戻した写しが check を通らない（別名が残っていない）。判定器は語を正規表現で置換し、ファイル名は使わない。
+- 判定 44-e: 生成文法。`crates/hado/tests/r9_grammar.rs` の EBNF 生成器が `once` / `again` を綴り、旧綴りを生成しない。
+- 判定 44-f: Rust テスト。`r23` `r24` `r25` `r26` `r28` `r31` `r37_world` が緑。
+- 判定 44-g: `cargo test --offline --no-fail-fast` が 0 failed。
+- 判定 44-h: gate-tiers の full に `r44` があり、`bash scripts/run-gates.sh --tier full` が exit 0 で `^NG:` が 0。
+
+### 許容される赤
+
+工程 2 の直後に `verify-r43.sh` の 43-a が赤になる（仕様だけが先に `once log` になるため）。工程 4 で緑へ戻す。**R44 の終了時に許容される赤は無い。**
+
+R43 の未コミットの成果物（`tests/accept/io_log` `tests/accept/string_join_trim` と `scripts/lib/gate-tiers.sh` の `r43`）は main の作業ツリーにあり、この worktree の土台には無い。main 側で R43 を終えるとき、そのコーパスと門番の `reply` も `once` にする必要がある。
+
+### スコープ外
+
+- `abort` と `resume` の改名
+- クロージャの `captures` の改名（`mono.rs` `repr.rs` `emit.rs`）
+- 版と tag の更新
+- 旧綴りを別名として受け付ける移行措置
+- `docs/ledger.md` の過去のラウンドの語の書き換え
+- main の作業ツリーにある R43 の未コミット成果物
+
+### 確認して報告（決定から）
+
+- `reply` `capture` を利用者の名前として使う既存の `.hd` が本当に 0 件か（決定 2）
+- コーパスのうち旧綴りへ戻すと落ちる本数と、落ちない本数（決定 4、判定 44-d）
+- `docs/plan.md` の過去の節で `capture` がクロージャの環境捕獲を指していないこと（決定 5）
+
+### 中断の条件
+
+**`reply` / `capture` を利用者の名前として使う `.hd` が見つかり、決定 2 が既存のコードを壊すと分かったら、止めて報告せよ。**
+
+**旧綴りに戻した写しが check を通る本が受理コーパスにあり、その理由が §37 から決められないときは、止めて報告せよ。**
