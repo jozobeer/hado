@@ -180,7 +180,10 @@ for name in "${gates[@]}"; do
     echo "RUN: $name -> $output/$name.log"
     started=$SECONDS
     gate_status=0
-    if ! gate_cached "verify-$name" bash "scripts/$name.sh" >"$output/$name.log" 2>&1; then
+    # label は入れ子の呼び出しと同じ `verify-<名>` にする（m1-corpus/m2/m3 は
+    # `gate_cached verify-m0 bash scripts/verify-m0.sh` の形で引く）。ここが
+    # ずれると同じ門番を走行内で 2 回以上実走する（docs/plan.md 34 節）。
+    if ! gate_cached "$name" bash "scripts/$name.sh" >"$output/$name.log" 2>&1; then
         gate_status=1
         status=1
     fi

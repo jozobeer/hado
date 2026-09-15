@@ -217,7 +217,9 @@ cargo_cached test --test walk >"$TMPD/walk.log" 2>&1
 # Why not 6/6: R25 が m1-spec の検査を落としたあと、分母の直書きが追従しない。
 for script in verify-m0.sh verify-m1-spec.sh verify-m1-corpus.sh; do
     want=$(awk -F= '/^total=/ {print $2; exit}' "scripts/$script")
-    gate_cached "$script" bash "scripts/$script" >"$TMPD/$script.log" 2>&1
+    # label は run-gates と同じ `verify-<名>`。`.sh` を付けると別の id になり、
+    # 同じ門番を走行内で 2 回実走する（docs/plan.md 34 節）。
+    gate_cached "${script%.sh}" bash "scripts/$script" >"$TMPD/$script.log" 2>&1
     st=$?
     last=$(tail -n 1 "$TMPD/$script.log")
     [ -n "$want" ] && [ "$st" -eq 0 ] && [ "$last" = "PASSED: $want/$want" ] \
