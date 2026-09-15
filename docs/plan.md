@@ -3274,3 +3274,53 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 ### 報告
 
 (1) 層ごとの実測（コマンドと出力の末尾）、(2) 赤の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、削除・移動した検査と根拠、迷った点。
+
+## 34. 門番の並列実行（2026-09-15）
+
+33 節の直列 full は 13 分 39 秒、門番ごとの秒の総和は 826 秒で wall とほぼ等しい。シェルが 1 本ずつ待っているだけで、マシンは 12 コアある。**判定を 1 つも緩めずに、門番を N 並列で走らせる `--jobs N` を足す。既定は 1（直列）のまま残す。**
+
+### 背景（実測 2026-09-15）
+
+- 直列 full の内訳（`target/tier/full-times.tsv`。秒）: m0 192、r35 141、r34 138、r36 79、m2 52、m1-corpus 48、r37 39、m3 32、r38 20、r25 16、r33 14、m7 13、残りは 9 秒以下。合計 826。
+- 作業ツリーの内容ハッシュは 370 ファイルで 0.053 秒（`time (source scripts/lib/gate-cache.sh; hado_gate_fingerprint)`）。キャッシュの鍵計算は並列でも軽い。
+- `cargo` の target ロック（`target/debug/.cargo-lock`）は実在する。このロックを外から 2 秒握ると `cargo run -- check` は 1.87 秒待つ。ただしビルドが最新のときの保持は短く、`cargo run -- check tests/accept/abort_arm_value/main.hd` 8 本は直列 0.754 秒・並列 0.167 秒（4.5 倍）で、ロックで直列化しない。
+- 期限付きの探針は余裕が大きい。r34 の `timeout 2` は実測 110ms・122ms、r35 の `timeout 2` は 0.13 秒・0.15 秒（いずれも 33 節の full ログ `target/tier/full/verify-r34.log`・`verify-r35.log`）。並列負荷で 13〜18 倍遅くならない限り赤にならない。
+- **入れ子の label が 3 通りに割れている。** `run-gates.sh:183` は `gate_cached "verify-$name"` を呼び、`$name` は既に `verify-` 付きなので label は `verify-verify-m0` になる。入れ子は `verify-m0`（`verify-m1-corpus.sh:369`・`verify-m3.sh:146`・`verify-r36.sh:387`・`verify-r37.sh:568`）と `verify-m0.sh`（`verify-m2.sh:220`）を使う。id は実測で `39be3685`・`0970eaef`・`cdceb8f3` と別。このため同じ門番が 1 回の走行で複数回実走する（m0 は 3 通り、m1-corpus は run-gates 直下と r36 の 2 回。33 節の full ログでも `already covered` が 18 本のログに 23 行ある）。
+- **共有ツリーを改変する門番がある。** `verify-m1-corpus.sh:266-271` が `tests/accept/__probe__` を作り、`verify-m2.sh:50-53`・`81` が `tests/accept/__probe_bad__` と `tests/reject/E103` を入れ替え、`verify-m3.sh:61-77` が reject コーパスを入れ替え・行ずらしし、`verify-gate-cache.sh:97` がリポジトリ直下に `.gate-cache-selftest-probe` を作る。鍵は作業ツリー全体のハッシュなので、これらが並列に走ると他門番のキャッシュが別鍵になり、`tests/` を glob する門番（m3・m4・m5・m6・r34〜r37）と `tests/corpus.sha256` を照合する門番が偽の赤を出し得る。
+
+### 決定
+
+1. **`--jobs N`（既定 1、正の整数）。** 1 のときは 33 節の直列ループをそのまま実行する。2 以上で前段（直列）＋後段（fan-out）に分ける。`--jobs=N` も受ける。0・負・非整数は usage を stderr に出して exit 1（出力ディレクトリを作らない）。`--print-tier` は今までどおり一覧だけを出す。
+2. **入れ子の label を `verify-<名>` に揃える。** `run-gates.sh` は `gate_cached "$name"`（`$name` は `verify-` 付き）、`verify-m2.sh:220` は `gate_cached "${script%.sh}"` に直す。これで同一門番の実走は走行内で 1 回になる。**既定の直列でも入れ子の再利用が増えて wall は縮む**（r36 が抱える m1-corpus の再走 48 秒など）。ログの内容と `PASSED: n/N` はキャッシュの再生なので 1 バイトも変わらない。**34-a の「1 文字も変わらない」は stdout・stderr・ログの内容に限る**（実走の回数と wall は減る）。この差を報告に書く。
+3. **前段（直列）に共有ツリーを改変する門番を置く。** 一覧は `scripts/lib/gate-tiers.sh` の `hado_tier_serial_gates` が唯一の正で、`gate-cache m0 m1-corpus m2 m3` を返す。run-gates は「直列の一覧 ∩ 走行する門番」を一覧の順に完走させ、残りをファンアウトする。一覧の無い木（判定器の合成木）では `verify-m0` だけを前段に置く。quick の `cargo build --offline` は今までどおり前段で実走する。
+4. **後段は N 並列。** 各ワーカーは `gate_cached` 経由で `bash scripts/<門番>.sh` を走らせ、`$output/<門番名>.log` に書く。終了コードと所要は `mktemp -d` の作業ディレクトリへ門番ごとの 1 ファイルとして残す（出力ディレクトリには `.log` 以外を置かない。r38 の平坦なログの契約を守る）。親は全部を待ってから集約し、1 本でも赤なら exit 1。ワーカーの status が無い（OOM kill など）門番は赤として扱う。`HADO_GATE_TIMES` は親が一覧の順に 1 回だけ書く。親の trap はワーカーの pid を kill してから走行スコープと作業ディレクトリを消す。`lint-docs` は今までどおり最後に直列で回す。
+5. **木の安定性を前段・後段の境界で確かめる。** ファンアウトの前後で内容ハッシュを取り、違えば「改変する門番の分類漏れ」として stderr に報告し exit 1 にする（フェイルクローズド）。
+6. **キャッシュの並行安全化。** `gate_cached` は (a) `status` が 0 の高速路、(b) `$dir/lock` を `flock` で取ってから再確認、(c) 実走、(d) 成功なら `out` を temp → rename、`status` も temp → rename、の順にする。`label` と `argv` の記録も lock の中に置く。実走するコマンドへは lock の fd を継がせない（`9>&-`）。実走の直前に任意の記録先へ 1 行追記する（決定 8）。`flock` が無い環境では (b) を省く（直列は安全）。`gate-cache.sh` がある木で `--jobs>1` を指定して `flock` が無ければ明示的に落ちる。合成木のように `gate-cache.sh` が無い（`gate_cached` が素通しの）木では並列はそのまま動く。
+7. **full-test ログも temp → rename。** `cargo_cached` の全走は成功したときだけ `full-test-<内容>.log` へ rename で公開する。赤い全走のログは公開しない。既に公開済みなら再公開しない。`cargo_test_cached` は公開済みの完全なログだけを読む。
+8. **`HADO_GATE_RUNS`（任意の診断。既定は未設定で何も書かない）。** 設定すると `gate_cached` が実走と再利用を label 付きで 1 行ずつ追記する。34-b・34-g の「1 回だけ実走」を機械で数える根拠にする。入れ子の run-gates には `HADO_GATE_TIMES` と同じく継がせない。
+9. **新しい門番は足さない。** 並行性は `scripts/lib/gate-cache.sh`・`scripts/run-gates.sh`・`scripts/lib/gate-tiers.sh` の性質なので、既存の `scripts/verify-gate-cache.sh` を拡張する。門番は 38 本のまま。別門番にすると合成木の足場が二重になり、直列 full がその分だけ延びる。
+10. **探針系も後段に残す。** 背景のとおり期限の余裕が大きく、ロックも実効の妨げにならない。実測で r34/r35 が並列負荷で赤になれば報告し、そのときは直列フェーズへ戻す判断を書く（今は戻さない）。
+
+### 判定
+
+- 34-a. 既定（`--jobs` なし）の出力が 33 節と 1 文字も変わらない。合成木で 33 節版と 34 節版の `run-gates.sh` の stdout・stderr・ログ・trace を byte 比較する。`scripts/verify-r38.sh` の 38-a（合成木の直列実行・平坦なログ・stderr が空）が緑のまま。**label 統一で直列の wall は縮むが、出力と `PASSED` は不変**であることを報告に書く。
+- 34-b. 直列 full と並列 full（`--jobs 2`・`4`・`8`）で、38 本の `PASSED: n/N` がすべて一致し、`^NG:` が 0、終了コード 0。
+- 34-c. `cargo test --offline --no-fail-fast` が 734 passed / 0 failed のまま（m0 の `cargo-test passed=734`）。
+- 34-d. corpus の本数が変わらない（accept のファイル数・reject のコード数・stdlib のファイル数を `tests/corpus.sha256` と仕様の表から導いて直列・並列で比較）。`tests/corpus.sha256` を更新していない。`tests/`・`stdlib/`・`crates/`・`runtime/` の差分が空。
+- 34-e. 並列で赤を隠さない。合成木に赤を 1 本混ぜた `--jobs 4` が exit 1 で、赤の門番のログと終了コードが残る。
+- 34-f. `verify-gate-cache.sh` の自己判定が並行性を測る: 同一コマンドの並行呼び出しが 1 回だけ実走、キャッシュの公開が原子的（out → status の順、部分と赤を公開しない）、直列の一覧 ∩ 走行の門番が fan-out より先に完走、出力先が平坦、`HADO_GATE_TIMES` が門番ごとに 1 行（`env -u HADO_GATE_RUN_ACTIVE` で測る）、`--jobs` の不正値の拒否、`--jobs 2` と直列の `PASSED` が一致。増えた分だけ N が増える（33-e が許す）。
+- 34-g. 実走回数。`HADO_GATE_RUNS` を付けた並列 full で、門番の label ごとの実走が 1 回であること（入れ子の再走が無いこと）。直列 full の同じ記録と比べる。
+- 34-h. 木の安定性 guard が並列 full で発火しない（前段・後段の境界で内容ハッシュが一致）。後段にツリーを恒久的に変える門番を混ぜた対照で guard が発火することも測る。
+- 34-i. 速度の実測。直列と `--jobs 2/4/8` の wall・CPU（user+sys）・門番ごとの秒を表にする。理論下限は m0 192 秒＋直列の改変門番 133 秒＋後段の最長 r35 141 秒 ≒ 466 秒。効かなかった場合は原因を書く。
+
+### 触ってよい場所
+
+`scripts/`（`run-gates.sh`、`lib/gate-cache.sh`、`lib/gate-tiers.sh`、`verify-gate-cache.sh` が主）、`README.md`、`docs/plan.md`、`docs/ledger.md`。`tests/`、`stdlib/`、`crates/`、`runtime/`、`tests/corpus.sha256` は触らない。
+
+### スコープ外
+
+門番の判定条件を緩める変更、門番の削除、`crates/`・`runtime/`・`stdlib/` の変更、r38 の「門番を選んで直列に走らせ」の検査の置き換え、`cargo run` のバイナリ置換、`--jobs` の既定を 1 以外にすること、m1-corpus・m2・m3 の probe を一時ディレクトリへ移す改修（今ラウンドは直列化で閉じ、改修は別ラウンド）。
+
+### 報告
+
+(1) 34-a〜34-i の実測（コマンドと出力の末尾）、(2) 赤の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
