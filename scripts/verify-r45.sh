@@ -116,9 +116,13 @@ TYPES = {
     'W': [('K', 1), ('L', 0)],
 }
 VALUES = {'C2': 'A', 'C3': 'P', 'W': 'L'}
-DECLS = ''.join(
-    f"type {name} = " + ' '.join(f'| {ctor}' + ('(Int)' if arity else '') for ctor, arity in ctors) + '\n'
-    for name, ctors in TYPES.items())
+
+
+def decls(columns):
+    # 使う型だけ宣言する（使わない型は E513 になる）
+    return ''.join(
+        f"type {name} = " + ' '.join(f'| {ctor}' + ('(Int)' if arity else '') for ctor, arity in TYPES[name]) + '\n'
+        for name in TYPES if name in columns)
 
 
 def cell_text(column, cell):
@@ -167,7 +171,8 @@ while sum(counts.values()) < 36 and attempts < 2000:
         for number, row in enumerate(rows))
     if fallback:
         arms += f'  | {len(rows)}\n'
-    source = DECLS + f'def f ({params}): Int =>\n  if {scrutinees}\n{arms}'
+    declared = decls(columns)
+    source = declared + f'def f ({params}): Int =>\n  if {scrutinees}\n{arms}'
     source += 'def main = f ' + ' '.join(VALUES[column] for column in columns) + '\n'
     name = f'matrix-{index}'
     index += 1
@@ -175,7 +180,7 @@ while sum(counts.values()) < 36 and attempts < 2000:
         expect_ok(sys.argv[1] + '/a', name, source)
     else:
         # E402 は `if`、E403 は到達不能な fallback の `|` を指す（§56）
-        line = 1 + len(TYPES) + 1 + (len(rows) + 1 if expected == 'E403' else 0)
+        line = declared.count('\n') + 2 + (len(rows) + 1 if expected == 'E403' else 0)
         expect_code(sys.argv[1] + '/a', name, source, expected, line=line, col=3)
     counts[expected] += 1
 assert all(count >= 4 for count in counts.values()), counts
@@ -276,7 +281,8 @@ sys.path.insert(0, sys.argv[1])
 from harness import expect_code, expect_ok
 
 root = sys.argv[1] + '/d'
-expect_code(root, 'fallback-not-last', 'def f (x: Int Option): Int =>\n  if x\n  | None\n  | Some(v) => v\ndef main = f None\n', 'E404', line=4, col=3)
+# fallback の None は戻り型と合わせる（型の E305 は網羅性の E404 より先に当たる）
+expect_code(root, 'fallback-not-last', 'def f (x: Int Option): Int Option =>\n  if x\n  | None\n  | Some(v) => Some(v + 1)\ndef main = f None\n', 'E404', line=4, col=3)
 expect_ok(root, 'fallback-last', 'def f (x: Int Option): Int =>\n  if x\n  | Some(v) => v\n  | 0\ndef main = f None\n')
 expect_code(root, 'sole-parameter', 'def f x =>\n  if x\n  | Some(v) => v\n  | 0\ndef main = f None\n', 'E515')
 print('existing reading: E404 at the arm after a pattern-shaped fallback, fallback last, E515')
