@@ -2743,3 +2743,37 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 - §5（旧 §41）は「字句と構文の形はこの節を正とし」と書きながら、字句の一部（リテラルとコメント）の規則は §6 にある。並びを変えても意味は保たれているが、規範の置き場としては 2 節にまたがる。統合は別ラウンドとする。
 
+## R40 文法の概形を付録へ移す（2026-09-15）
+
+計画は `docs/plan.md` 36 節。R39 で §5（第II部 字句と文法の先頭）に置いた文法の概形は、言語仕様を読む開発者が最初に読むものではない。参照用の付録へ移し、空いた分だけ残りの節を繰り上げた。**言語規則は変えていない。** 版を v0.3.1 に上げ、tag `v0.3.1` を打った。
+
+### 実装
+
+- `docs/spec.md` の文法の概形を §59（付録の最後）へ移した。付録は コア構文（§57）・典型コード（§58）・文法の概形（§59）。§1〜§4 はそのまま、§5（文法の概形）は §59、§6〜§57 は 1 つ繰り上げて §5〜§56、§58・§59 は §57・§58。本文は節単位で移し、節内の参照だけを写像で置換した。
+- `docs/spec-map.md` を v0.3・R39・現行の 3 列にした。`docs/plan.md` 35 節と R39 の台帳は R39 の番号を使うので、そこからも引ける。
+- 追随した参照: `docs/spec-coverage.md`・`docs/spec-trace.md`・`docs/corpus.md`・`README.md`・`docs/bug.md`・`docs/wants.md`、コーパスの `// spec:` 174 ファイル、`tests/corpus.sha256` の 174 行、門番（`lint-docs.sh`・`verify-m1-spec.sh`・`verify-m1-corpus.sh`・`verify-m2.sh`・`verify-m3.sh`・`verify-m7.sh`・`verify-r23.sh`〜`verify-r26.sh`・`verify-r32.sh`・`verify-r34.sh`・`verify-r36.sh`・`verify-r37.sh`・`verify-r38.sh`）、`crates/hado/tests/r9_grammar.rs`・`r23_syntax.rs`、`crates/` の節番号のコメント。
+- `scripts/verify-r39.sh` を `scripts/verify-r40.sh` に置き換え、`scripts/lib/gate-tiers.sh` の full の `r39` を `r40` にした。本文保存の検査は tag `v0.3` を基準にしたままである。
+- 版を v0.3.1 に上げ、`docs/spec.md`・`docs/spec-coverage.md`・`docs/spec-trace.md` の版を揃えた。tag は `v0.1.1` などと同じ軽量 tag にした。
+
+### 判定の実測
+
+- **40-a（構造・写像・保存・参照）。** `bash scripts/verify-r40.sh` は 6/6。`sections: 59, part headings: 13, last: 付録`、`map rows: 59 (3 columns, each a permutation)`、`preserved: 59 sections from v0.3`、`codes: 69, corpus tags resolve and match`、`version: v0.3.1`。
+- **40-b（文書層）。** `bash scripts/lint-docs.sh` は 7/7。`coverage: §21=1 §49=1 §55=4`。
+- **40-c（門番）。** `verify-m1-spec.sh` 1/1、`verify-m1-corpus.sh` 7/7、`verify-m2.sh` 8/8、`verify-m3.sh` 12/12、`verify-m7.sh` 3/3、`verify-r34.sh` 1360/1360、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254、`verify-r38.sh` 138/138。
+- **40-d（層別）。** `--tier quick target/r40-gates/quick` は 7 秒（build、gate-cache 26/26、m1-spec 1/1）。`--tier core target/r40-gates/core` は 352 秒で、gate-cache 26/26、m0 7/7（cargo test の全走）、m1-corpus 7/7、m1-spec 1/1、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r38 138/138。`--jobs 8 --tier full target/r40-gates/full` は 40 本、472 秒。3 走行とも exit 0 で `^NG:` は 0。
+- **40-e（cargo test）。** `cargo test --offline -q --test r9_grammar --test r23_syntax --test parse_corpus` は r9_grammar 5、r23_syntax 9、parse_corpus 1 の全て passed（exit 0）。
+- **40-f（corpus-lock）。** `tests/corpus.sha256` は 213 行のまま、174 行のハッシュを更新した。`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。`verify-m3.sh` の check10 も緑。
+- **40-g（規則の不変）。** v0.3 の §50 と現行の §56 の 69 行を照合し、コード・短い名・段階が一致、アンカー欄が節参照の置換の像、節の列が写像の像であることを確かめた。`git diff --stat -- stdlib runtime` は空。
+- **40-h（版と tag）。** `docs/spec.md` と `docs/spec-coverage.md` の版は v0.3.1。軽量 tag `v0.3.1` は最終コミットを指し、tag `v0.3` は動いていない（`git rev-parse v0.3^{commit}` は d1c251d のまま）。
+
+### 迷った点
+
+- **付録の位置。** 文法の概形を付録の最後（コア構文・典型コードの後）に置いた。付録の先頭に置く案もあったが、既存の 2 つの付録の並びを変えない方を選んだ。
+- **版を上げるか。** 言語規則が同じなので v0.3 のまま tag を動かす案もあった。tag は動かさず、並びの版として v0.3.1 を打った。`v0.3` は並べ替え前の本文を指したままで、保存の検査の基準になる。
+- **典型コードの例の抽出。** R39 では典型コードが最後の節だったので、`verify-m1-corpus.sh` の check2 は節の終端を書いていなかった。R40 では次に文法の概形が来るため、文法の例（`int :=` など）まで拾って赤になった。節見出しで止める形に直した。門番が前提の変化を炙り出した例である。
+- **裸の節番号。** `§N` の一括置換では、`lint-docs.sh` と `verify-r38.sh` の対応表にある裸の整数（`(22,` など）は置換されない。手で追随させ、門番の赤で拾った。
+
+### 仕様への疑義
+
+- 文法の概形（§59）とコア構文（§57）はどちらも構文の一覧を持つ。付録に並ぶので重複が目に付く。統合は別ラウンドとする。
+
