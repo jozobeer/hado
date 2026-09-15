@@ -178,14 +178,18 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
             rename(body, &scope, next);
         }
         NodeKind::PatternBranch {
-            scrutinee,
+            scrutinees,
             arms,
             fallback,
         } => {
-            rename(scrutinee, scope, next);
-            for (pattern, body) in arms {
+            for scrutinee in scrutinees {
+                rename(scrutinee, scope, next);
+            }
+            for (patterns, body) in arms {
                 let mut scope = scope.clone();
-                bind_pattern(pattern, &mut scope, next);
+                for pattern in patterns {
+                    bind_pattern(pattern, &mut scope, next);
+                }
                 rename(body, &scope, next);
             }
             if let Some(body) = fallback {

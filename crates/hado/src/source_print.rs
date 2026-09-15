@@ -152,8 +152,12 @@ fn function_tail_with_parameters(params: &[Param], ret: Option<&TypeExpr>, body:
     if params.len() == 1 && params[0].name == "$argument" {
         if let NodeKind::PatternBranch { arms, fallback, .. } = &body.kind {
             let mut output = String::new();
-            for (pattern, value) in arms {
-                output.push_str(&format!(" | {pattern} => {}", canonical(value)));
+            for (patterns, value) in arms {
+                output.push_str(&format!(
+                    " | {} => {}",
+                    comma_patterns(patterns),
+                    pattern_arm_body(value)
+                ));
             }
             if let Some(value) = fallback {
                 output.push_str(&format!(" | {}", canonical(value)));

@@ -225,10 +225,10 @@ impl Instance<'_> {
                 self.node(value);
                 self.node(body);
             }
-            NodeKind::PatternBranch { scrutinee, arms, fallback } => {
-                self.node(scrutinee);
-                for (pattern, body) in arms {
-                    self.pattern(pattern);
+            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
+                for scrutinee in scrutinees { self.node(scrutinee); }
+                for (patterns, body) in arms {
+                    for pattern in patterns { self.pattern(pattern); }
                     self.node(body);
                 }
                 self.optional_node(fallback);

@@ -144,14 +144,18 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
             }
         }
         NodeKind::PatternBranch {
-            scrutinee,
+            scrutinees,
             arms,
             fallback,
         } => {
-            free_names(scrutinee, bound, result);
-            for (pattern, body) in arms {
+            for scrutinee in scrutinees {
+                free_names(scrutinee, bound, result);
+            }
+            for (patterns, body) in arms {
                 let mut bound = bound.clone();
-                bind(pattern, &mut bound);
+                for pattern in patterns {
+                    bind(pattern, &mut bound);
+                }
                 free_names(body, &bound, result);
             }
             if let Some(body) = fallback {

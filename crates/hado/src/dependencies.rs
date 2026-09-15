@@ -307,7 +307,9 @@ impl Collector<'_> {
             }
             NodeKind::Let { pat, .. } | NodeKind::LetQ { pat, .. } => self.pattern(pat, scope, references),
             NodeKind::PatternBranch { arms, .. } => {
-                for (pattern, _) in arms { self.pattern(pattern, scope, references); }
+                for (patterns, _) in arms {
+                    for pattern in patterns { self.pattern(pattern, scope, references); }
+                }
             }
             NodeKind::Field(base, _) => {
                 if let NodeKind::Name(name) = &base.kind {

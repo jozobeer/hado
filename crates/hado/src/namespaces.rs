@@ -463,9 +463,12 @@ impl Resolver<'_> {
                 for (condition, body) in arms { self.node(condition, directory, local); self.node(body, directory, local); }
                 if let Some(body) = fallback { self.node(body, directory, local); }
             }
-            NodeKind::PatternBranch { scrutinee, arms, fallback } => {
-                self.node(scrutinee, directory, local);
-                for (pattern, body) in arms { self.pattern(pattern, directory, local); self.node(body, directory, local); }
+            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
+                for scrutinee in scrutinees { self.node(scrutinee, directory, local); }
+                for (patterns, body) in arms {
+                    for pattern in patterns { self.pattern(pattern, directory, local); }
+                    self.node(body, directory, local);
+                }
                 if let Some(body) = fallback { self.node(body, directory, local); }
             }
             NodeKind::With { handler, args, body } => {
