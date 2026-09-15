@@ -31,10 +31,10 @@ no_result_constructors_in_accept() {
     ! grep -REn 'Ok\(|Error\(' tests/accept --include='*.hd' --include='*.hdi' | grep -q .
 }
 
-# Why not require disk == §57: E706 is in the table and R26 adds the file. 25-b
+# Why not require disk == §56: E706 is in the table and R26 adds the file. 25-b
 # asks for E509 gone and remaining codes inside the table; the count matches at R26.
 check '25-a/c accept and reject corpus' cargo_test_cached test --offline --test corpus -- --exact corpus
-check '25-b E509 gone and reject codes subset of §57' e509_gone_and_codes_in_spec
+check '25-b E509 gone and reject codes subset of §56' e509_gone_and_codes_in_spec
 check '25-c generated abort and Option-only rails' cargo_test_cached test --offline --test r25_effects --test r14_rails --test emit_mono
 check '25-e Ok( Error( absent from accept' no_result_constructors_in_accept
 

@@ -16,7 +16,7 @@ pub enum Ty {
     Abstract(String, Vec<Ty>),
 }
 
-/// The names of §20's primitive types that an annotation resolves without a
+/// The names of §19's primitive types that an annotation resolves without a
 /// user declaration. Shared by position annotations and `shared` realizations
 /// so the two cannot drift apart.
 pub fn builtin_type(name: &str) -> Option<Ty> {

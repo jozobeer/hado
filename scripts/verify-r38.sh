@@ -201,15 +201,15 @@ def add(label, source, expected, status=0, mode='run'):
 value = rng.randrange(1, 1000)
 pairs = [([value], [value, value+1]), ([value, value+1], [value]), ([value], [value]), ([value, value], [value+1])]
 calls = [f'compare (Array.of_list {a}) (Array.of_list {b})' for a, b in pairs]
-add('38-c(1) §22 Array compare', 'def main = [' + ', '.join(calls) + ']\n', str([(a > b) - (a < b) for a, b in pairs]))
+add('38-c(1) §21 Array compare', 'def main = [' + ', '.join(calls) + ']\n', str([(a > b) - (a < b) for a, b in pairs]))
 lower, upper = -(2**63), 2**63 - 1
 for value in ['007', '+42', ' 42', '1_000', '1.0', '４２', *map(str, [upper, lower, upper+1, lower-1])]:
     accepted = bool(re.fullmatch(r'-?[0-9]+', value)) and lower <= int(value) <= upper
-    add('38-c(2) §56 Int.parse ' + json.dumps(value, ensure_ascii=False),
+    add('38-c(2) §55 Int.parse ' + json.dumps(value, ensure_ascii=False),
         'def main = Int.parse ' + json.dumps(value, ensure_ascii=False) + '\n',
         str(int(value)) if accepted else 'InvalidInt', int(not accepted))
 names = ['.hidden', 'z' + str(rng.randrange(10000)), 'A', 'あ', 'é', 'child']
-directory = add('38-c(3) §56 read_dir', 'def main = read_dir "entries"\n',
+directory = add('38-c(3) §55 read_dir', 'def main = read_dir "entries"\n',
                 json.dumps(sorted(names, key=lambda s: s.encode()), ensure_ascii=False))
 (directory / 'entries').mkdir()
 for name in reversed(names):
@@ -217,13 +217,13 @@ for name in reversed(names):
 (directory / 'entries' / 'child').unlink()
 (directory / 'entries' / 'child').mkdir()
 data = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 2048)))
-directory = add('38-c(4) §56 read_stdin twice',
+directory = add('38-c(4) §55 read_stdin twice',
                 'def main = let first = Bytes.length read_stdin -> let second = Bytes.length read_stdin -> [first, second]\n', str([len(data), 0]))
 (directory / 'stdin').write_bytes(data)
-add('38-c(5) §56 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1)
+add('38-c(5) §55 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1)
 for name, blank, indent in [('EnvDefault', int(sys.argv[3]), int(sys.argv[4])), ('IoDefault', int(sys.argv[5]), int(sys.argv[6]))]:
     source = 'def main = 0\n' + '\n' * blank + ' ' * indent + 'module ' + name + '\n'
-    add('38-c(6) §50 module ' + name, source, json.dumps(['E205', blank+2, indent+8]), 1, 'reject')
+    add('38-c(6) §49 module ' + name, source, json.dumps(['E205', blank+2, indent+8]), 1, 'reject')
 assert {label.split()[0] for _, label, _, _ in manifest} == {f'38-c({i})' for i in range(1, 7)}
 (base / 'manifest.tsv').write_text(''.join(f'{i}\t{label}\t{status}\t{mode}\n' for i, label, status, mode in manifest))
 PY
@@ -266,12 +266,12 @@ check '38-c probe rule coverage' python3 - "$workdir/probes/manifest.tsv" <<'PY'
 from pathlib import Path
 import re, sys
 rules = {
-    '38-c(1)': 22,
-    '38-c(2)': 56,
-    '38-c(3)': 56,
-    '38-c(4)': 56,
-    '38-c(5)': 56,
-    '38-c(6)': 50,
+    '38-c(1)': 21,
+    '38-c(2)': 55,
+    '38-c(3)': 55,
+    '38-c(4)': 55,
+    '38-c(5)': 55,
+    '38-c(6)': 49,
 }
 def coverage(spec, manifest):
     sections = dict(re.findall(r'^## (\d+)\.[^\n]*\n(.*?)(?=^## \d+\.|\Z)', spec, re.M | re.S))
@@ -282,7 +282,7 @@ def coverage(spec, manifest):
 spec = Path('docs/spec.md').read_text()
 manifest = Path(sys.argv[1]).read_text()
 coverage(spec, manifest)
-for invalid in ['', manifest.replace('§22', '§56')]:
+for invalid in ['', manifest.replace('§21', '§55')]:
     try:
         coverage(spec, invalid)
     except AssertionError:
@@ -297,7 +297,7 @@ for key, section in rules.items():
         pass
     else:
         raise AssertionError(f'removed heading §{section} accepted')
-print('coverage: §22=1 §50=1 §56=4')
+print('coverage: §21=1 §49=1 §55=4')
 PY
 
 # 38-d runs the commands printed in each bug section, without a second probe copy.

@@ -17,9 +17,9 @@ import sys
 spec = Path("docs/spec.md").read_text().splitlines()
 section, on = [], False
 for line in spec:
-    if line.startswith("## 56."):
+    if line.startswith("## 55."):
         on = True
-    elif on and (line.startswith("## ") or line.startswith("# ")) and not line.startswith("## 56."):
+    elif on and (line.startswith("## ") or line.startswith("# ")) and not line.startswith("## 55."):
         break
     if on:
         section.append(line)
@@ -37,7 +37,7 @@ if block:
 passed = total = 0
 if not required:
     total = 1
-    print("NG: prelude inventory: missing function set in §56")
+    print("NG: prelude inventory: missing function set in §55")
 for module, members in required.items():
     path = Path("stdlib") / (module.lower() + ".hd")
     source = path.read_text() if path.exists() else ""

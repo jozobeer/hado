@@ -417,8 +417,8 @@ fn entry_form(ast: &Ast, path: &str, inspection: crate::Inspection) -> Result<()
         _ => None,
     });
     if main.is_some_and(|def| matches!(def.kind, DefKind::Value(_))) { return Ok(()); }
-    // A library inspection has no entry by definition (§53); an argument-taking
-    // `main` is still E206 (§11).
+    // A library inspection has no entry by definition (§52); an argument-taking
+    // `main` is still E206 (§10).
     if inspection == crate::Inspection::Library && main.is_none() { return Ok(()); }
     let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
     Err(crate::parser::Diagnostic { path: path.into(), line: span.line, col: span.col,

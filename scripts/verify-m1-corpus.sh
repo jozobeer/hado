@@ -24,7 +24,7 @@ trap 'rm -rf "$TMPD"' EXIT
 
 # --- shared: section-57 code table (same extraction as verify-m1-spec.sh:79-95) ---
 awk '
-    /^## 57\./ { on=1 }
+    /^## 56\./ { on=1 }
     on { print }
 ' "$SPEC" >"$TMPD/sec50.txt"
 awk -F '|' '
@@ -103,14 +103,14 @@ fi
 
 # --- check 2: the section-59 examples (first line of each code block) are in the accept corpus ---
 c2_reasons=""
-awk '/^## 59\./{f=1} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
+awk '/^## 58\./{f=1; next} f && /^## [0-9]+\./{f=0} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
 [ -s "$TMPD/sec39.txt" ] || c2_reasons="$c2_reasons no-sec39-examples"
 while IFS= read -r s; do
     [ -n "$s" ] || continue
     found=0
     for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
-        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §59$' "$f"; then
+        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §58$' "$f"; then
             found=1
             break
         fi
@@ -165,8 +165,8 @@ while IFS= read -r name || [ -n "$name" ]; do
     [ "$na" -ge 1 ] || c3_reasons="$c3_reasons accept-missing:$name"
     # Reject-exempt (no rejectable form by definition):
     # - 冗長の対象外: permission ("eta expansion is not redundant"), §2
-    # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §48
-    # - Unit payload: E509 (Ok(())) は Result と共に消え、§50 に拒否コードが無い。
+    # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §47
+    # - Unit payload: E509 (Ok(())) は Result と共に消え、§49 に拒否コードが無い。
     #   近くの拒否へ item: を寄せると被覆が嘘になる。
     # - 24.2 の runtime 失敗（Bytes・配列・String 操作・Int.parse・Env と Io）:
     #   違反は実行時の Error で、拒否コーパスに当たるコンパイルコードが無い。
@@ -264,7 +264,7 @@ else
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
     mkdir -p tests/accept/__probe__
-    printf -- '// spec: §59\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
+    printf -- '// spec: §58\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
     cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__/main.hd
@@ -300,10 +300,10 @@ from pathlib import Path
 import re
 import sys
 
-section = re.search(r'^## 56\.[^\n]*\n(.*?)(?=^#{1,2} |\Z)', Path(sys.argv[1]).read_text(), re.M | re.S)
+section = re.search(r'^## 55\.[^\n]*\n(.*?)(?=^#{1,2} |\Z)', Path(sys.argv[1]).read_text(), re.M | re.S)
 block = re.search(r'関数集合は次とする。\s*```text\n(.*?)```', section[1], re.S) if section else None
 if not block or not block[1].strip():
-    sys.exit('missing function set in §56')
+    sys.exit('missing function set in §55')
 members = []
 for line in block[1].splitlines():
     if not line.strip():
@@ -312,7 +312,7 @@ for line in block[1].splitlines():
     for name in re.split(r'\s*/\s*', names.strip()):
         members.extend(f'{name}.{member}' for member in functions.split())
 if not members:
-    sys.exit('empty function set in §56')
+    sys.exit('empty function set in §55')
 print('\n'.join(members))
 PY
 }

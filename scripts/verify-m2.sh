@@ -48,7 +48,7 @@ done
 [ "$(grep -cF "parse_accept_ok_n: $n_accept" "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=$n_accept"
 # Probe: `def main = )` must not be accepted.
 mkdir -p tests/accept/__probe_bad__
-printf -- '// spec: §5\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__/main.hd
+printf -- '// spec: §59\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__/main.hd
 cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
 rm -f tests/accept/__probe_bad__/main.hd
     rmdir tests/accept/__probe_bad__ 2>/dev/null || true
@@ -78,7 +78,7 @@ done
 [ "$(grep -cF "parse_e1xx_ok_n: $n_e1xx" "$TMPD/base.log")" -ge 1 ] || c2_reasons="$c2_reasons e1xx-n!=$n_e1xx"
 # Content-swap probe: keep the E103 header, put the E104 defect in the body.
 cp tests/reject/E103/main.hd "$TMPD/E103.orig"
-printf -- '// spec: §6\n// error: E103\n// item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103/main.hd
+printf -- '// spec: §5\n// error: E103\n// item: リテラル\ndef main = 1\n# trailing comment in the wrong form\n' > tests/reject/E103/main.hd
 cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/swap.log" 2>&1
 want_line=$(grep -nF '# trailing comment in the wrong form' tests/reject/E103/main.hd | head -n 1 | cut -d: -f1)
 want_col=$(awk '/# trailing comment/{print index($0, "#"); exit}' tests/reject/E103/main.hd)

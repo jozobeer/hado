@@ -42,7 +42,7 @@ fn owned<T: Clone>(entries: &HashMap<String, T>, module: &str) -> HashMap<String
 
 // 前処理が `Ty::Abstract` を作る唯一の出口。参照先の契約の arity と型引数の個数が
 // 食い違う等式は登録しない。登録すると `Ty::reveal` から `TypeRealization::apply` の
-// 個数 assert に到達して panic する（§48: 数が違えば E602）。登録しなければ既存の経路
+// 個数 assert に到達して panic する（§47: 数が違えば E602）。登録しなければ既存の経路
 // （annotation_inner の arity 照合、type_realizations の E204）が拒否する。
 fn shared_abstract_type(qualified: String, arity: Option<usize>, arguments: Vec<Ty>) -> Option<Ty> {
     if arity != Some(arguments.len()) { return None; }
@@ -185,7 +185,7 @@ impl Checker<'_> {
             let Some(body) = &definition.ty else { continue };
             // 食い違う arity の等式を登録すると `Ty::reveal` から
             // `TypeRealization::apply` の個数 assert に到達して panic する
-            // （§48: 数が違えば E602）。登録しなければ既存の E602 の経路が拒否する。
+            // （§47: 数が違えば E602）。登録しなければ既存の E602 の経路が拒否する。
             // 契約に無い型は arity が取れず、ここで登録しない（E204 は別の経路）。
             let Some(arity) = contract_arity.get(definition.name.as_str()) else { continue };
             if *arity != definition.params.len() { continue; }

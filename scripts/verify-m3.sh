@@ -96,7 +96,7 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         p.parent.mkdir()
         value = expression(ty,3)
         for _ in range(1 + choice(3)):
-            # Why not Result: §56 から型が消えており、生成すると E204 になる。
+            # Why not Result: §55 から型が消えており、生成すると E204 になる。
             container = choice(2)
             if container == 0:
                 value, ty = f'[{value}]', f'{ty} List'
@@ -164,7 +164,7 @@ def spec_section(number):
         if on:
             lines.append(line)
     return '\n'.join(lines)
-known = re.search(r'型の((?:\s*`[A-Za-z]+`)+)\s*と効果の\s*`([A-Za-z]+)`', spec_section(56))
+known = re.search(r'型の((?:\s*`[A-Za-z]+`)+)\s*と効果の\s*`([A-Za-z]+)`', spec_section(55))
 known_types = re.findall(r'`([A-Za-z]+)`', known.group(1)) if known else []
 known_effect = known.group(2) if known else None
 stdlib_files = list(P('stdlib').glob('*.hd'))

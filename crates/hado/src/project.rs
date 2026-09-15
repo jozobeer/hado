@@ -32,14 +32,14 @@ impl Project {
             code: Some("E206".into()),
             message: "a library directory cannot declare main".into(),
         });
-        // §57: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
+        // §56: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
         if let Some(error) = [duplicate_library, library_error].into_iter().flatten()
             .min_by_key(crate::diagnostic_order) {
             return Err(LoadError::Diagnostic(source_diagnostic(&files, error)));
         }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
         let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
-        // §53: another file's `main` is an entry only in an entry inspection.
+        // §52: another file's `main` is an entry only in an entry inspection.
         parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry { other_entry_roots } else { Vec::new() };
         let namespaces: Vec<_> = files.iter().map(|file| (file.offset, file.directory.clone())).collect();
         crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &libraries, &files[0].path);
@@ -195,8 +195,8 @@ fn parse_files(files: &[TokenFile], libraries: &BTreeSet<Vec<String>>) -> Result
 
 fn parse_file(file: &TokenFile, libraries: &BTreeSet<Vec<String>>) -> Result<Ast, Diagnostic> {
     let path = Path::new(&file.source.path);
-    // §53: an outer `def` is allowed in the root directory and in a library
-    // root directory (A3), not in a plain subdirectory (§51).
+    // §52: an outer `def` is allowed in the root directory and in a library
+    // root directory (A3), not in a plain subdirectory (§50).
     let root_file = file.source.directory.is_empty() || libraries.contains(&file.source.directory);
     let role_error = role_error(&file.tokens, path, root_file);
     let parsed = crate::parser::parse_tokens(&file.tokens, &file.source.path);
@@ -223,7 +223,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
     None
 }
 
-/// A `main` in a directory that declares `library` is E206 (§53), whichever
+/// A `main` in a directory that declares `library` is E206 (§52), whichever
 /// file of the directory it sits in. The prohibition does not depend on the
 /// shape of the definition, so any `def main` counts.
 fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<String>>) -> Option<Span> {
@@ -231,7 +231,7 @@ fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<S
 }
 
 /// Directories that declare `library`, in file order (entry first, then relative path bytes).
-/// The second declaration of a directory, and the second in a file, are E205 (§53);
+/// The second declaration of a directory, and the second in a file, are E205 (§52);
 /// the diagnostic is returned rather than raised so the caller can order it with E206.
 fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnostic>) {
     let mut roots = BTreeSet::new();

@@ -3,7 +3,7 @@
 #
 # 検査 1（見出し）・2（新設節）・4（対応表）・5（条件列の逐語）は文書管理であって
 # 処理系との契約ではない。docs/plan.md 33 節に従って scripts/lint-docs.sh（full 層）
-# へ移した。ここに残るのは §57 のエラーコード表＝処理系との契約だけである。
+# へ移した。ここに残るのは §56 のエラーコード表＝処理系との契約だけである。
 # total= は先頭に数値リテラルで置く（verify-m2.sh と verify-m3.sh が読む）。
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -28,7 +28,7 @@ heading_exists() {
 
 # --- check 3: error code table ---
 awk '
-    /^## 57\./ { on=1 }
+    /^## 56\./ { on=1 }
     on { print }
 ' "$SPEC" >"$TMPD/sec50.txt"
 awk -F '|' '

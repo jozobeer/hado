@@ -197,7 +197,7 @@ for operation, path, message in failures:
         directory = runtime(group+' '+operation+' '+path+' '+kind, source, expected, error=error)
         if kind=='success' and operation=='write_file':
             (directory/'expect').write_bytes(b'')
-            (directory/'unit-output').touch()  # Unit prints nothing at the top level (§55)
+            (directory/'unit-output').touch()  # Unit prints nothing at the top level (§54)
         (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
@@ -206,7 +206,7 @@ for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'),
     directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
     if expected=='':
         (directory/'expect').write_bytes(b'')
-        (directory/'unit-output').touch()  # Unit prints nothing at the top level (§55)
+        (directory/'unit-output').touch()  # Unit prints nothing at the top level (§54)
 for missing in range(len(io_arms)):
     reject('37-d Io missing-arm', 'handler Io as H\n'+'\n'.join(arm for i,arm in enumerate(io_arms) if i!=missing)+'\ndef main = 0\n', 'E605', 'handler Io')
 for sub in (False, True):
@@ -501,7 +501,7 @@ def validate(sources, lock):
         assert path not in entries, path
         entries[path] = digest
     for path, source in tagged.items():
-        assert '// spec: §56' in source.splitlines(), path
+        assert '// spec: §55' in source.splitlines(), path
         assert '// needs: prelude' in source.splitlines(), path
         assert len(re.findall(r'^// expect(?:-error)?:', source, re.M)) == 1, path
         assert entries.get(str(path)) == hashlib.sha256(source.encode()).hexdigest(), f'lock mismatch: {path}'
