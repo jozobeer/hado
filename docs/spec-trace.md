@@ -101,3 +101,7 @@
 | §10 | `main` に残せる効果に prelude の `Env` `Io` を足す | 単相化 | 受理 | `verify-r37.sh` |
 | §54 | Bytes は `Bytes.of_list [72, 105]`、Array は `Array.of_list [1, 2]` の形で印字 | 実行 | 受理 | `verify-r34.sh` `verify-r35.sh` の印字プローブ |
 | §21 | Bytes はバイト列、Array は要素型の構造比較 | 単相化 | E703 / E704 / 受理 | `verify-r34.sh` `verify-r35.sh` |
+| §26 | scrutinee の列と pattern の列は同数（E125）。列が 2 つ以上の行は一部の列だけが `_` か変数なら受理、全列なら E512 / E503 | 構文 / 冗長 | E125 / E512 / E503 / 受理 | `tests/reject/E125/main.hd`、`verify-r45.sh`（45-c） |
+| §26.1 | 腕の条件列は最初の fallback で終わり、その後の `\|` は外側の腕。条件が 1 本の腕の条件列は E520 の対象外。fallback の無い腕の条件列は E401 で腕の `if` を指す | 構文 / 網羅性 / 冗長 | E401 / 受理 | `tests/accept/arm_conditions/main.hd`、`verify-r45.sh`（45-b、45-d） |
+| §28 | 列が 2 つ以上の網羅性は列の直積で判定する | 網羅性 | E402 / E403 | `verify-r45.sh`（45-a） |
+| §30 | 腕の本体に置ける分岐は条件列だけで、条件列の腕には分岐を置けない | 構文 | E101 / 受理 | `verify-r45.sh`（45-b (4)、45-e）、EBNF 生成器 |
