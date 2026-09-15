@@ -19,7 +19,16 @@
 #
 # cargo_test_cached は、同じ走行の中で全走の全体テストが成功していて、その
 # ログに対象の実行と ok の証拠があるときだけ、`--test <名前>` の部分テストの
-# 実走を省く（docs/plan.md 33 節）。証拠が無ければ cargo_cached と同じく実走する。
+# 実走を省く（docs/plan.md 33 節）。
+#
+# 並列（docs/plan.md 34 節）:
+# - 同じ id の gate_cached を並行に呼んでも実走は 1 回である。$dir/lock を flock
+#   で取り、取ってから結果を再確認する。flock が無い環境ではその保護だけを省く
+#   （直列は安全。run-gates.sh --jobs>1 は flock を要求する）。
+# - 公開は out → status の順の rename。読み手は status=0 を見たとき完全な out が
+#   あることを前提にできる。
+# - 全走のログも成功したときだけ temp → rename で公開し、既に公開済みなら
+#   再公開しない。書きかけのログを証拠として読ませない。証拠が無ければ cargo_cached と同じく実走する。
 
 hado_gate_repo_root() {
     local here
@@ -66,32 +75,63 @@ hado_gate_cache_run_dir() {
 
 # gate_cached <label> <command> [args...]
 # 成功した結果だけを、内容ハッシュと label + 引数のハッシュで再利用する。
+# 同じ id を並行に呼んでも実走は 1 回である（$dir/lock の flock）。公開は
+# out → status の順の rename で、読み手に部分的な結果を見せない。
+hado_gate_cache_hit() {
+    [ -f "$1/status" ] && [ "$(cat "$1/status")" = "0" ]
+}
+
+# HADO_GATE_RUNS（任意）に実走と再利用を 1 行ずつ残す。並列の実走回数を数える診断。
+hado_gate_note() {
+    [ -n "${HADO_GATE_RUNS:-}" ] || return 0
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$HADO_GATE_RUNS" 2>/dev/null || true
+}
+
+# lock の中身。既に結果があれば再生し、無ければ実走して成功だけを公開する。
+# 呼び出し側が flock を取る（取れない環境では直列前提で直接呼ぶ）。
+hado_gate_cache_exec() {
+    local dir=$1 label=$2
+    shift 2
+    if hado_gate_cache_hit "$dir"; then
+        hado_gate_note hit "$label" "${*}"
+        cat "$dir/out"
+        return 0
+    fi
+    printf '%s\n' "$label" >"$dir/label"
+    printf '%s\n' "$*" >"$dir/argv"
+    hado_gate_note run "$label" "$*"
+    local tmp="$dir/out.$BASHPID.tmp" status=0
+    # lock の fd（9）は実走するコマンドへ継がせない。
+    ( "$@" ) >"$tmp" 2>&1 9>&- || status=$?
+    cat "$tmp"
+    if [ "$status" -eq 0 ]; then
+        mv -- "$tmp" "$dir/out"
+        printf '0\n' >"$dir/status.$BASHPID.tmp"
+        mv -- "$dir/status.$BASHPID.tmp" "$dir/status"
+    else
+        rm -f -- "$tmp"
+    fi
+    return "$status"
+}
+
 gate_cached() {
     local label=$1
     shift
-    local base id dir tmp status
+    local base id dir
     base=$(hado_gate_cache_run_dir)
     id=$(printf '%s\0' "$label" "$@" | sha256sum | cut -c1-32)
     dir="$base/$(hado_gate_fingerprint)/$id"
-    if [ -f "$dir/status" ] && [ "$(cat "$dir/status")" = "0" ]; then
+    if hado_gate_cache_hit "$dir"; then
+        hado_gate_note hit "$label" "$*"
         cat "$dir/out"
         return 0
     fi
     mkdir -p "$dir"
-    printf '%s\n' "$label" >"$dir/label"
-    printf '%s\n' "$*" >"$dir/argv"
-    tmp="$dir/out.tmp.$$"
-    ( "$@" ) >"$tmp" 2>&1
-    status=$?
-    if [ "$status" -eq 0 ]; then
-        cat "$tmp"
-        mv "$tmp" "$dir/out"
-        printf '0\n' >"$dir/status"
+    if command -v flock >/dev/null 2>&1; then
+        (flock 9 && hado_gate_cache_exec "$dir" "$label" "$@") 9>"$dir/lock"
     else
-        cat "$tmp"
-        rm -f "$tmp"
+        hado_gate_cache_exec "$dir" "$label" "$@"
     fi
-    return "$status"
 }
 
 # 全走の全体テスト（cargo test --offline --no-fail-fast）だけを指す。
@@ -106,6 +146,8 @@ hado_gate_full_test_log() {
 
 # cargo の出力と終了コードを、同じ内容・同じ引数のあいだで再利用する。
 # 全走の全体テストだけは、その出力を走行スコープに残す（cargo_test_cached が使う）。
+# ログは成功したときだけ temp → rename で公開する。書き手が書いている途中の
+# ログを読み手に読ませず、赤い全走のログは証拠として残さない。
 cargo_cached() {
     if ! hado_gate_is_full_test "$@"; then
         gate_cached "cargo:$*" cargo "$@"
@@ -114,19 +156,24 @@ cargo_cached() {
     local log status=0 tmp
     log=$(hado_gate_full_test_log)
     mkdir -p "$(dirname "$log")"
+    # 公開済みなら再公開しない（rename 済みの完全なログを上書きしない）。
+    if [ -f "$log" ]; then
+        gate_cached "cargo:$*" cargo "$@"
+        return $?
+    fi
+    tmp=$(mktemp "$(dirname "$log")/full-test.XXXXXX")
     # パイプを使わない。呼び出し側が set -e と pipefail でも、赤のログを
     # 消す前に抜けないためである。
-    tmp=$(mktemp "$(dirname "$log")/full-test.XXXXXX")
     if gate_cached "cargo:$*" cargo "$@" >"$tmp" 2>&1; then
         status=0
     else
         status=$?
     fi
-    tee "$log" <"$tmp"
-    rm -f -- "$tmp"
-    # 赤い全走は証拠として残さない（「成功だけを保存する」原則）。
-    if [ "$status" -ne 0 ]; then
-        rm -f -- "$log"
+    cat "$tmp"
+    if [ "$status" -eq 0 ]; then
+        mv -- "$tmp" "$log"
+    else
+        rm -f -- "$tmp" "$log"
     fi
     return "$status"
 }
