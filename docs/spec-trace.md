@@ -93,6 +93,10 @@
 | §55 | `Env` と `Io` の操作（無修飾、`{Error}`、handler 無しの既定実装） | 型 / 実行 | 受理 | `verify-r37.sh` |
 | §55 | Env と Io は handler で差し替えられる（操作の全実装を要求） | 型 | E605 / 受理 | `verify-r37.sh` |
 | §55 | 組み込みの失敗の `message` の綴り | 実行 | 受理 | R34〜R37 の判定器（`// expect-error:`） |
+| §55 | `Io.log` は String と改行 1 つを stdout へ書き、失敗は `Error`（`IoFailure`） | 型 / 実行 | 受理 | `verify-r43.sh` |
+| §55 | `String.join` は区切りを要素の間に置き、`String.trim` は ASCII の空白 6 種を両端から除く | 実行 | 受理 | `verify-r43.sh` |
+| §55 | `Int.abs` は i64 の最小値でその値自身を返し、`min` `max` は大小を返す | 実行 | 受理 | `verify-r43.sh` |
+| §55 | `List.head` / `nth` / `take` / `drop` は全域で、範囲外は `None` か `[]` | 型 / 実行 | 受理 | `verify-r43.sh` |
 | §39 | ライブラリでは top-level を公開面として根にする（functor と契約を含む） | 冗長 | 受理 | `verify-r32.sh` |
 | §10 | `main` に残せる効果に prelude の `Env` `Io` を足す | 単相化 | 受理 | `verify-r37.sh` |
 | §54 | Bytes は `Bytes.of_list [72, 105]`、Array は `Array.of_list [1, 2]` の形で印字 | 実行 | 受理 | `verify-r34.sh` `verify-r35.sh` の印字プローブ |

@@ -1814,12 +1814,12 @@ M5 の extern 表の各項目は、hado 側の名前（`__string_length` 等）�
 関数集合は次とする。
 
 ```text
-List: map filter fold length reverse append sort
+List: map filter fold length reverse append sort head nth take drop
 Option: map unwrap_or is_some ok_or
-String: length concat slice get split starts_with contains
+String: length concat slice get split starts_with contains join trim
 Bytes: length get of_list to_list to_string of_string
 Array: length get set of_list to_list
-Int: to_string parse
+Int: to_string parse abs min max
 Float: to_string
 ```
 
@@ -1829,7 +1829,7 @@ Float: to_string
 def A ok_or(value: A Option, error: Exception): A {Error}
 ```
 
-効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` `sort` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
+効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append` `head` `nth` `take` `drop`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains` `join` `trim`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string` `abs` `min` `max`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` `sort` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
 
 `sort` は比較関数を引数に取る merge sort とする。
 
@@ -1846,6 +1846,8 @@ def get(s: String, index: Int): Char {Error}
 def split(s: String, separator: String): String List {Error}
 def starts_with(s: String, prefix: String): Bool Pure
 def contains(s: String, part: String): Bool Pure
+def join(values: String List, separator: String): String Pure
+def trim(s: String): String Pure
 
 module Bytes
 def length(bytes: Bytes): Int Pure
@@ -1865,6 +1867,9 @@ def A to_list(xs: A Array): A List Pure
 module Int
 def to_string(value: Int): String Pure
 def parse(value: String): Int {Error}
+def abs(value: Int): Int Pure
+def min(left: Int, right: Int): Int Pure
+def max(left: Int, right: Int): Int Pure
 ```
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
@@ -1880,6 +1885,7 @@ reply cwd: String {Error}
 effect Io
 reply read_file(path: String): Bytes {Error}
 reply write_file(path: String, contents: Bytes): Unit {Error}
+reply log(contents: String): Unit {Error}
 reply read_dir(path: String): String List {Error}
 reply read_stdin: Bytes {Error}
 ```
@@ -1900,6 +1906,7 @@ reply read_stdin: Bytes {Error}
 | ファイルが無い | `"NotFound"` |
 | 権限が無い | `"PermissionDenied"` |
 | ディレクトリでない | `"NotADirectory"` |
+| stdout への書き込みの失敗（`log`） | `"IoFailure"` |
 | その他の I/O の失敗 | `"IoFailure"` |
 
 prelude は全プログラムに連結され、全ての検査を受ける。prelude の項目は公開面として E513 の根にする（第39節）。
@@ -1911,6 +1918,21 @@ prelude は全プログラムに連結され、全ての検査を受ける。pre
 `read_stdin` は標準入力を EOF まで読み、同じプロセスでの2回目の呼び出しは空の `Bytes` を返す。
 
 `env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。
+
+`log` は `contents` の後に改行 1 つを stdout へ書く。書き込みか flush が失敗したら、`message` が `"IoFailure"` の `Error` を raise する。これは第54節の `main` の値の印字とは別の経路で、失敗は捕捉できる値として観測できる。パイプの受け手が先に終わっていても、シグナルで終了させず同じ `Error` とする。
+
+`String.join` は区切りを要素の間にだけ置く。`[]` は `""`、要素が 1 つならその要素である。`String.trim` は ASCII の空白（SPACE、TAB、LF、VT、FF、CR）を両端から除く。全角空白は除かない。
+
+`Int.abs` は 0 以上ならその値、0 未満なら符号を反転した値である。i64 の最小値では反転が表現できないので、その値自身を返す。`Int.min` と `Int.max` は 2 つの値の小さい方と大きい方を返す。
+
+`List.head` は `[]` で `None`、先頭があれば `Some(先頭)` である。`List.nth` は `index` が負か長さ以上なら `None` である。`List.take` は `count` が 0 以下なら `[]`、長さ以上なら全件である。`List.drop` は `count` が 0 以下なら全件、長さ以上なら `[]` である。`List` のこの 4 つの型は次のとおりとする。
+
+```ocaml
+def A head(values: A List): A Option Pure
+def A nth(values: A List, index: Int): A Option Pure
+def A take(values: A List, count: Int): A List Pure
+def A drop(values: A List, count: Int): A List Pure
+```
 
 # 第XI部 診断
 
