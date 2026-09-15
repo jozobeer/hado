@@ -55,6 +55,8 @@ pub enum RuntimeFunction {
     ArrayGet,
     ArrayAlloc,
     ArrayFillUnchecked,
+    IoLog,
+    StringTrim,
 }
 
 pub struct Declaration {
@@ -74,6 +76,7 @@ impl RuntimeFunction {
             Self::Cwd => Some("__cwd"),
             Self::IoReadFile => Some("__io_read_file"),
             Self::IoWriteFile => Some("__io_write_file"),
+            Self::IoLog => Some("__io_log"),
             Self::IoReadDir => Some("__io_read_dir"),
             Self::IoReadStdin => Some("__io_read_stdin"),
             Self::IoTakeBytes => Some("__io_take_bytes"),
@@ -94,6 +97,7 @@ impl RuntimeFunction {
             Self::StringSlice => Some("__string_slice"),
             Self::StringGet => Some("__string_get"),
             Self::StringFind => Some("__string_find"),
+            Self::StringTrim => Some("__string_trim"),
             Self::BytesLength => Some("__bytes_length"),
             Self::BytesGet => Some("__bytes_get"),
             Self::BytesIsUtf8 => Some("__bytes_is_utf8"),
@@ -135,6 +139,7 @@ impl RuntimeFunction {
             Self::Cwd => (vec![Type::Int], Type::Bytes),
             Self::IoReadFile => (vec![Type::String], Type::Int),
             Self::IoWriteFile => (vec![Type::String, Type::Bytes], Type::Int),
+            Self::IoLog => (vec![Type::String], Type::Int),
             Self::IoReadDir => (vec![Type::String], Type::Int),
             Self::IoReadStdin => (vec![Type::Int], Type::Int),
             Self::IoTakeBytes => (vec![Type::Int], Type::Bytes),
@@ -146,6 +151,7 @@ impl RuntimeFunction {
             Self::StringSlice => (vec![Type::String, Type::Int, Type::Int], Type::String),
             Self::StringGet => (vec![Type::String, Type::Int], Type::Char),
             Self::StringFind => (vec![Type::String, Type::String, Type::Int], Type::Int),
+            Self::StringTrim => (vec![Type::String], Type::String),
             Self::BytesLength => (vec![Type::Bytes], Type::Int),
             Self::BytesGet => (vec![Type::Bytes, Type::Int], Type::Int),
             Self::BytesIsUtf8 => (vec![Type::Bytes], Type::Bool),
@@ -158,7 +164,7 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::IoReadFile, Self::IoWriteFile, Self::IoReadDir, Self::IoReadStdin, Self::IoTakeBytes, Self::IoDirCount, Self::IoDirGet, Self::ArgvCount, Self::ArgvGet, Self::EnvHas, Self::EnvGet, Self::Cwd, Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked];
+    pub const ALL: &'static [Self] = &[Self::IoReadFile, Self::IoWriteFile, Self::IoReadDir, Self::IoReadStdin, Self::IoTakeBytes, Self::IoDirCount, Self::IoDirGet, Self::ArgvCount, Self::ArgvGet, Self::EnvHas, Self::EnvGet, Self::Cwd, Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked, Self::IoLog, Self::StringTrim];
 
     pub fn id(self) -> u32 {
         Self::ALL.iter().position(|function| *function == self).unwrap() as u32
@@ -313,6 +319,18 @@ impl RuntimeFunction {
                 parameters: &[AbiType::Pointer, AbiType::I64, AbiType::I64],
                 result: Some(AbiType::Pointer),
                 may_allocate: false,
+            },
+            Self::IoLog => &Declaration {
+                symbol: "hado_io_log",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::StringTrim => &Declaration {
+                symbol: "hado_string_trim",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
             },
         }
     }

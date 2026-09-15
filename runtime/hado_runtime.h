@@ -24,6 +24,7 @@ HadoString *hado_env_get(const HadoString *name);
 HadoString *hado_cwd(int64_t ignored);
 int64_t hado_io_read_file(const HadoString *path);
 int64_t hado_io_write_file(const HadoString *path, const HadoString *contents);
+int64_t hado_io_log(const HadoString *contents);
 int64_t hado_io_read_dir(const HadoString *path);
 int64_t hado_io_read_stdin(int64_t ignored);
 HadoString *hado_io_take_bytes(int64_t ignored);
@@ -37,6 +38,7 @@ int64_t hado_string_compare(const HadoString *left, const HadoString *right);
 HadoString *hado_string_slice(const HadoString *string, int64_t start, int64_t end);
 uint32_t hado_string_get(const HadoString *string, int64_t index);
 int64_t hado_string_find(const HadoString *string, const HadoString *separator, int64_t from);
+HadoString *hado_string_trim(const HadoString *string);
 
 /* Bytes shares the HadoString layout with String. length counts bytes here,
    while hado_string_length counts Unicode scalar values. */

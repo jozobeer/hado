@@ -167,6 +167,16 @@ int64_t hado_io_write_file(const HadoString *path, const HadoString *contents) {
   return status;
 }
 
+int64_t hado_io_log(const HadoString *contents) {
+  /* Why not io_status_from_errno: every failure of this path (EBADF, EPIPE,
+     ENOSPC) is reported as the same "IoFailure", and the stream state is left
+     to check_stdout so a caught failure still turns into exit 1 (spec §54). */
+  int wrote = fwrite(contents->bytes, 1, contents->length, stdout) == contents->length;
+  if (fputc('\n', stdout) == EOF) wrote = 0;
+  if (fflush(stdout) == EOF) wrote = 0;
+  return wrote ? 0 : 4;
+}
+
 int64_t hado_io_read_stdin(int64_t ignored) {
   /* Intrinsic applications require a dummy argument; stdin is the only input. */
   (void)ignored;
@@ -309,6 +319,26 @@ int64_t hado_string_find(const HadoString *string, const HadoString *separator, 
     ++from;
   }
   return -1;
+}
+
+static int is_ascii_space(unsigned char byte) {
+  return byte == '\t' || byte == '\n' || byte == '\v' || byte == '\f' || byte == '\r' || byte == ' ';
+}
+
+HadoString *hado_string_trim(const HadoString *string) {
+  /* Bytes may be trimmed here: the six whitespace bytes are ASCII, and every
+     continuation byte of UTF-8 is at least 0x80, so no scalar is split. */
+  size_t first = 0;
+  size_t last = string->length;
+  while (first < last && is_ascii_space(string->bytes[first])) ++first;
+  while (last > first && is_ascii_space(string->bytes[last - 1])) --last;
+  size_t length = last - first;
+  if (length > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+  memcpy(result->bytes, string->bytes + first, length);
+  return result;
 }
 
 void hado_print_string(const HadoString *string) {

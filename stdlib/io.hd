@@ -1,11 +1,13 @@
 effect Io
 reply read_file(path: String): Bytes {Error}
 reply write_file(path: String, contents: Bytes): Unit {Error}
+reply log(contents: String): Unit {Error}
 reply read_dir(path: String): String List {Error}
 reply read_stdin: Bytes {Error}
 module IoDefault
 def read_file(path: String): Bytes {Error}
 def write_file(path: String, contents: Bytes): Unit {Error}
+def log(contents: String): Unit {Error}
 def read_dir(path: String): String List {Error}
 def read_stdin: Bytes {Error}
 implement IoDefault as IoDefault
@@ -19,6 +21,9 @@ def read_file path =>
   if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }
 def write_file path contents =>
   let status = __io_write_file path contents ->
+  if status == 0 => () | raise { message = io_failure_message status }
+def log contents =>
+  let status = __io_log contents ->
   if status == 0 => () | raise { message = io_failure_message status }
 def read_dir path =>
   let status = __io_read_dir path ->

@@ -1,9 +1,15 @@
 module Int
 def to_string(value: Int): String Pure
 def parse(value: String): Int {Error}
+def abs(value: Int): Int Pure
+def min(left: Int, right: Int): Int Pure
+def max(left: Int, right: Int): Int Pure
 implement Int as Int
 def to_string value => __int_to_string value
 def parse value =>
   if __int_parse_is_valid value
     => __int_parse_unchecked value
     | raise { message = "InvalidInt" }
+def abs value => if value < 0 => -value | value
+def min left right | left <= right => left | right
+def max left right | left <= right => right | left

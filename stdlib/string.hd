@@ -6,6 +6,8 @@ def get(s: String, index: Int): Char {Error}
 def split(s: String, separator: String): String List {Error}
 def starts_with(s: String, prefix: String): Bool Pure
 def contains(s: String, part: String): Bool Pure
+def join(values: String List, separator: String): String Pure
+def trim(s: String): String Pure
 implement String as String
 def length value => __string_length value
 def concat left right => __string_concat left right
@@ -29,3 +31,9 @@ def rec split_from(s: String, separator: String, start: Int, width: Int, count: 
 def starts_with s prefix =>
   length prefix <= length s && __string_slice s 0 (length prefix) == prefix
 def contains s part => length part == 0 || __string_find s part 0 >= 0
+def rec join values separator =>
+  if values
+  | [] => ""
+  | [value] => value
+  | [head, ...tail] => concat head (concat separator (join tail separator))
+def trim s => __string_trim s
