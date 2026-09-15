@@ -67,7 +67,7 @@ fn pattern_scrutinee_is_evaluated_before_its_arm() {
 }
 
 #[test]
-fn capture_arguments_are_evaluated_before_the_outer_operation() {
+fn again_arguments_are_evaluated_before_the_outer_operation() {
     let (a, b) = payloads();
     run_main(&format!(
         "def n u => if u == () => {b} | 0\ndef main = with Keep -> do y (n (y {a})) -> [7]"
@@ -110,7 +110,7 @@ fn random(state: &mut u64) -> u64 {
 }
 
 #[test]
-fn non_unit_capture_result_is_bound() {
+fn non_unit_again_result_is_bound() {
     let mut state = 0x31_08;
     for _ in 0..4 {
         let seed = random(&mut state);

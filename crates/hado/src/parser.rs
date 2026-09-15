@@ -426,17 +426,17 @@ pub struct ModuleImpl {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpKind {
-    Reply,
+    Once,
     Abort,
-    Capture,
+    Again,
 }
 
 impl OpKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Reply => "reply",
+            Self::Once => "reply",
             Self::Abort => "abort",
-            Self::Capture => "capture",
+            Self::Again => "capture",
         }
     }
 }
@@ -877,9 +877,9 @@ impl Parser<'_> {
 
     fn parse_op_kind(&mut self) -> Option<OpKind> {
         let kind = match self.kind() {
-            TokKind::KwReply => OpKind::Reply,
+            TokKind::KwOnce => OpKind::Once,
             TokKind::KwAbort => OpKind::Abort,
-            TokKind::KwCapture => OpKind::Capture,
+            TokKind::KwAgain => OpKind::Again,
             _ => return None,
         };
         self.bump();
@@ -976,7 +976,7 @@ impl Parser<'_> {
         }
         self.expect(&TokKind::Arrow)?;
         let saved = self.in_resume_scope;
-        self.in_resume_scope = kind == OpKind::Capture;
+        self.in_resume_scope = kind == OpKind::Again;
         let body = self.parse_expr()?;
         self.in_resume_scope = saved;
         Ok(HandlerArm::Operation { kind, name, name_span, params, body, span })

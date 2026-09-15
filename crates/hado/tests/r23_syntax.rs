@@ -100,7 +100,7 @@ fn abort_return_type_is_e123_on_the_colon() {
 }
 
 #[test]
-fn resume_outside_capture_is_e124_on_resume() {
+fn resume_outside_again_is_e124_on_resume() {
     for source in [
         "def main = resume",
         "effect Ask\nreply ask: String\nhandler Ask as Fixed\nreply ask => resume",
@@ -112,7 +112,7 @@ fn resume_outside_capture_is_e124_on_resume() {
 }
 
 #[test]
-fn capture_arm_may_contain_resume() {
+fn again_arm_may_contain_resume() {
     for source in [
         "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as H\ncapture yield value => resume",
         "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as H\ncapture yield value => let rest = resume () -> rest",
@@ -123,7 +123,7 @@ fn capture_arm_may_contain_resume() {
 }
 
 #[test]
-fn reply_and_capture_may_write_a_result() {
+fn once_and_again_may_write_a_result() {
     for source in [
         "effect Ask\nreply ask: String",
         "effect A Yield\ncapture yield(value: A): Unit",

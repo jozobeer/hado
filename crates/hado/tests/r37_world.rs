@@ -67,15 +67,15 @@ fn user_operation_parameters_shadow_operations() {
 }
 
 #[test]
-fn shadowed_capture_is_a_local_let_value() {
+fn shadowed_again_is_a_local_let_value() {
     Case::new("effect Foo\ncapture tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
 }
 
 #[test]
-fn prelude_reply_defaults_cover_every_operation() {
+fn prelude_once_defaults_cover_every_operation() {
     let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
     let replies: std::collections::HashSet<_> = checked.operations.iter()
-        .filter(|(_, kind)| **kind == hado::parser::OpKind::Reply)
+        .filter(|(_, kind)| **kind == hado::parser::OpKind::Once)
         .map(|(name, _)| name).collect();
     assert!(!replies.is_empty());
     assert_eq!(replies, checked.default_operations.keys().collect());

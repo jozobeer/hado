@@ -90,7 +90,7 @@ fn print_type_still_shows_user_effects_on_main() {
 }
 
 #[test]
-fn reply_evaluates_the_handler_arm_in_place() {
+fn once_evaluates_the_handler_arm_in_place() {
     let mut state = 0x26_02;
     for _ in 0..8 {
         let token = format!("t{}", random(&mut state, 100_000));
@@ -142,7 +142,7 @@ fn abort_handler_turns_raise_into_a_value() {
 }
 
 #[test]
-fn reply_tail_recursion_completes_ten_million_iterations() {
+fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
         let n = random(&mut state, 40) + 10;
@@ -163,8 +163,8 @@ fn reply_tail_recursion_completes_ten_million_iterations() {
     }
     let small_n = 1_000_000u64;
     let large_n = 10_000_000u64;
-    let small = build_reply_loop(small_n);
-    let large = build_reply_loop(large_n);
+    let small = build_once_loop(small_n);
+    let large = build_once_loop(large_n);
     assert_eq!(small.run.stdout, format!("{small_n}\n").as_bytes());
     assert_eq!(large.run.stdout, format!("{large_n}\n").as_bytes());
     assert!(large.rss_kb * small_n < small.rss_kb * large_n,
@@ -177,7 +177,7 @@ struct Built {
     rss_kb: u64,
 }
 
-fn build_reply_loop(n: u64) -> Built {
+fn build_once_loop(n: u64) -> Built {
     let case = Case::new();
     case.write("main.hd", &format!(
         "effect Tick\nreply tick: Unit\nhandler Tick as Nop\nreply tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
@@ -231,7 +231,7 @@ fn generator_collects_yielded_values() {
 }
 
 #[test]
-fn capture_loop_counts_each_yield() {
+fn again_loop_counts_each_yield() {
     let mut state = 0x26_07;
     for _ in 0..4 {
         let n = random(&mut state, 30) + 5;
@@ -340,7 +340,7 @@ fn handler_arm_can_call_a_top_level_function() {
 }
 
 #[test]
-fn capture_arm_keeps_pure_helpers_at_their_result_type() {
+fn again_arm_keeps_pure_helpers_at_their_result_type() {
     let mut state = 0x26_15;
     for _ in 0..8 {
         let n = random(&mut state, 6) + 1;
