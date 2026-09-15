@@ -5,6 +5,11 @@
 # 古い走行のスコープを残さない。
 # 加えて 33 節の層別を 2 つ（一覧が実在の門番と一致して重複なく覆う、run-gates が
 # 同じ一覧を解決する）と、全走の証拠がある部分 cargo test だけ実走を省く規則を 3 つ測る。
+# 34 節の並列実行では、同一コマンドの並行呼び出しが 1 回だけ実走すること、公開が
+# 原子的であること、run-gates と入れ子が同じ label で 1 つの鍵を共有すること、
+# 直列の一覧の門番が fan-out より先に完走すること、--jobs が直列と同じ PASSED を
+# 出し赤を隠さないこと、HADO_GATE_TIMES が門番ごとに 1 行になること、不正な
+# --jobs を拒否することを測る。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -343,6 +348,214 @@ EOS
     [ -f "$sub/relout/verify-a.log" ] && [ ! -e "$tree/relout" ]
 }
 
+# 同じ内容・同じ引数の gate_cached を 8 本並行に呼んでも、実走は 1 回だけ。
+# flock が無い（check-then-run の）実装では 8 回走る（docs/plan.md 34 節）。
+concurrent_once_case() {
+    local runs="$workdir/concurrent-runs"
+    : >"$runs"
+    HADO_GATE_CACHE_RUN="$runid-concurrent" bash -c '
+        source scripts/lib/gate-cache.sh
+        runs=$1
+        outdir=$2
+        bump() {
+            printf "run\n" >>"$runs"
+            sleep 0.3
+            printf "out\n"
+        }
+        for i in 1 2 3 4 5 6 7 8; do
+            gate_cached demo bump >"$outdir/concurrent.$i" 2>&1 &
+        done
+        wait
+    ' _ "$runs" "$workdir" || return 1
+    [ "$(wc -l <"$runs")" -eq 1 ] || return 1
+    local i
+    for i in 1 2 3 4 5 6 7 8; do
+        [ "$(cat "$workdir/concurrent.$i")" = "out" ] || return 1
+    done
+}
+
+# 公開は out → status の順の rename。読み手は部分的な out を一度も見ない。
+# 実走は 1 回だけ（読み手が先に lock を取っても同じ）。
+atomic_publish_case() {
+    local runs="$workdir/atomic-runs" bad="$workdir/atomic-bad"
+    : >"$runs"
+    rm -f "$bad"
+    HADO_GATE_CACHE_RUN="$runid-atomic" bash -c '
+        source scripts/lib/gate-cache.sh
+        runs=$1
+        bad=$2
+        emit() {
+            printf "run\n" >>"$runs"
+            local i
+            for i in $(seq 30); do printf "line-%s\n" "$i"; sleep 0.005; done
+        }
+        gate_cached big emit >/dev/null 2>&1 &
+        writer=$!
+        i=0
+        while [ "$i" -lt 40 ]; do
+            got=$(gate_cached big emit 2>/dev/null)
+            if [ -n "$got" ]; then
+                n=$(printf "%s\n" "$got" | grep -c "^line-")
+                [ "$n" -eq 30 ] || printf "partial\n" >"$bad"
+            fi
+            i=$((i + 1))
+        done
+        wait "$writer"
+    ' _ "$runs" "$bad" || true
+    [ ! -f "$bad" ] && [ "$(wc -l <"$runs")" -eq 1 ]
+}
+
+# run-gates が門番 x を走らせた結果を、x を再入する門番 y が同じ label で引ける。
+# label が割れている（verify-verify-x と verify-x）と x が 2 回実走する。
+label_agreement_case() {
+    local tree="$workdir/label-tree" out="$workdir/label-out" runs="$workdir/label-runs"
+    rm -rf -- "$tree" "$out" "$runs"
+    : >"$runs"
+    mkdir -p "$tree/scripts/lib"
+    cp scripts/run-gates.sh "$tree/scripts/run-gates.sh"
+    cp scripts/lib/gate-cache.sh "$tree/scripts/lib/gate-cache.sh"
+    cat >"$tree/scripts/verify-x.sh" <<EOS
+#!/usr/bin/env bash
+printf 'run\n' >>"$runs"
+echo 'PASSED: 1/1'
+EOS
+    cat >"$tree/scripts/verify-y.sh" <<EOS
+#!/usr/bin/env bash
+. scripts/lib/gate-cache.sh
+gate_cached verify-x bash scripts/verify-x.sh >/dev/null 2>&1
+echo 'PASSED: 1/1'
+EOS
+    (cd "$tree" && bash scripts/run-gates.sh "$out" verify-x verify-y) >/dev/null 2>&1 || return 1
+    [ "$(wc -l <"$runs")" -eq 1 ]
+}
+
+# 並列の門番を合成木に用意する。呼び出し側が -out と --jobs を渡す。
+make_parallel_tree() {
+    local tree=$1 runs=$2
+    rm -rf -- "$tree" "$runs"
+    : >"$runs"
+    mkdir -p "$tree/scripts/lib"
+    cp scripts/run-gates.sh "$tree/scripts/run-gates.sh"
+    cp scripts/lib/gate-cache.sh "$tree/scripts/lib/gate-cache.sh"
+}
+
+# --jobs 2 が直列と同じ結果を出し、各門番が 1 回ずつ走る。出力先は平坦な .log だけ。
+parallel_matches_serial_case() {
+    local tree="$workdir/parallel-tree" runs="$workdir/parallel-runs" g f
+    make_parallel_tree "$tree" "$runs" || return 1
+    for g in a b c d; do
+        cat >"$tree/scripts/verify-$g.sh" <<EOS
+#!/usr/bin/env bash
+printf '%s\n' '$g' >>"$runs"
+sleep 0.05
+echo 'PASSED: 1/1'
+EOS
+    done
+    (cd "$tree" && bash scripts/run-gates.sh "$workdir/parallel-serial" verify-a verify-b verify-c verify-d) >/dev/null 2>&1 || return 1
+    (cd "$tree" && bash scripts/run-gates.sh --jobs 2 "$workdir/parallel-jobs2" verify-a verify-b verify-c verify-d) >/dev/null 2>&1 || return 1
+    for g in a b c d; do
+        [ "$(grep -c "^$g$" "$runs")" -eq 2 ] || return 1
+    done
+    [ "$(ls "$workdir/parallel-jobs2" | wc -l)" -eq 4 ] || return 1
+    for f in "$workdir/parallel-jobs2"/*; do
+        case "${f##*/}" in *.log) ;; *) return 1 ;; esac
+        grep -qx 'PASSED: 1/1' "$f" || return 1
+    done
+}
+
+# 直列の一覧（hado_tier_serial_gates）の門番が fan-out より先に完走する（前段の barrier）。
+parallel_barrier_case() {
+    local tree="$workdir/barrier-tree" runs="$workdir/barrier-runs" g rest
+    make_parallel_tree "$tree" "$runs" || return 1
+    cat >"$tree/scripts/lib/gate-tiers.sh" <<'EOS'
+hado_tier_serial_gates() { printf '%s\n' m0 mutator; }
+EOS
+    cat >"$tree/scripts/verify-m0.sh" <<EOS
+#!/usr/bin/env bash
+printf 'm0\n' >>"$runs"
+: >"$workdir/barrier-marker"
+echo 'PASSED: 1/1'
+EOS
+    cat >"$tree/scripts/verify-mutator.sh" <<EOS
+#!/usr/bin/env bash
+printf 'mutator\n' >>"$runs"
+: >"$workdir/barrier-marker"
+echo 'PASSED: 1/1'
+EOS
+    for g in a b; do
+        cat >"$tree/scripts/verify-$g.sh" <<EOS
+#!/usr/bin/env bash
+[ -f "$workdir/barrier-marker" ] || exit 1
+printf '%s\n' '$g' >>"$runs"
+echo 'PASSED: 1/1'
+EOS
+    done
+    (cd "$tree" && bash scripts/run-gates.sh --jobs 3 "$workdir/barrier-out" verify-a verify-b verify-m0 verify-mutator) >/dev/null 2>&1 || return 1
+    [ "$(sed -n '1p' "$runs")" = m0 ] || return 1
+    [ "$(sed -n '2p' "$runs")" = mutator ] || return 1
+    rest=$(sed -n '3,4p' "$runs" | LC_ALL=C sort | tr '\n' ' ')
+    [ "$rest" = "a b " ]
+}
+
+# 赤を隠さない。1 本でも赤なら exit 1 で、赤のログは平坦な場所に残る。
+parallel_red_case() {
+    local tree="$workdir/red-tree" out="$workdir/red-out" g status=0
+    make_parallel_tree "$tree" "$workdir/red-runs" || return 1
+    for g in a b c; do
+        cat >"$tree/scripts/verify-$g.sh" <<'EOS'
+#!/usr/bin/env bash
+echo 'PASSED: 1/1'
+EOS
+    done
+    cat >"$tree/scripts/verify-red.sh" <<'EOS'
+#!/usr/bin/env bash
+echo 'PASSED: 0/1'
+exit 1
+EOS
+    (cd "$tree" && bash scripts/run-gates.sh --jobs 4 "$out" verify-a verify-b verify-c verify-red) >/dev/null 2>&1 || status=$?
+    [ "$status" -eq 1 ] || return 1
+    [ "$(ls "$out" | wc -l)" -eq 4 ] || return 1
+    grep -qx 'PASSED: 0/1' "$out/verify-red.log"
+}
+
+# HADO_GATE_TIMES は並列でも門番ごとに 1 行だけ。最外の run-gates が記録する。
+parallel_times_case() {
+    local tree="$workdir/times-tree" times="$workdir/times.tsv"
+    make_parallel_tree "$tree" "$workdir/times-runs" || return 1
+    local g
+    for g in a b c; do
+        cat >"$tree/scripts/verify-$g.sh" <<'EOS'
+#!/usr/bin/env bash
+sleep 0.05
+echo 'PASSED: 1/1'
+EOS
+    done
+    (cd "$tree" && env -u HADO_GATE_RUN_ACTIVE HADO_GATE_TIMES="$times" \
+        bash scripts/run-gates.sh --jobs 3 "$workdir/times-out" verify-a verify-b verify-c) >/dev/null 2>&1 || return 1
+    [ "$(wc -l <"$times")" -eq 3 ] || return 1
+    [ "$(cut -f2 "$times" | LC_ALL=C sort -u)" = "0" ] || return 1
+    [ "$(cut -f3 "$times" | LC_ALL=C sort | tr '\n' ' ')" = "verify-a verify-b verify-c " ]
+}
+
+# --jobs は正の整数だけ。0・負・非整数・欠落・--jobs=0 は usage で落ち、
+# 出力ディレクトリを作らない。
+jobs_invalid_case() {
+    local bad out
+    for bad in 0 -1 x 1.5 ""; do
+        out="$workdir/jobs-invalid-$bad"
+        rm -rf -- "$out"
+        if bash scripts/run-gates.sh --jobs "$bad" "$out" verify-a >/dev/null 2>"$workdir/jobs-err"; then
+            return 1
+        fi
+        [ ! -e "$out" ] || return 1
+    done
+    if bash scripts/run-gates.sh --jobs >/dev/null 2>"$workdir/jobs-err"; then return 1; fi
+    out="$workdir/jobs-invalid-eq"
+    rm -rf -- "$out"
+    if bash scripts/run-gates.sh --jobs=0 "$out" verify-a >/dev/null 2>"$workdir/jobs-err"; then return 1; fi
+    [ ! -e "$out" ]
+}
+
 check 'cache replays identical content once' replay_case
 check 'cache separates different arguments' argv_case
 check 'cache never stores failure' failure_case
@@ -357,6 +570,14 @@ check 'narrow cargo tests ignore a Doc-tests ok after a crash' narrow_crash_case
 check 'argument-less run also runs the docs layer' default_all_docs_case
 check 'explicit gates are added to a tier without duplicates' tier_extra_case
 check 'a relative output directory is resolved from the caller cwd' relative_output_case
+check 'concurrent callers of one command run it once' concurrent_once_case
+check 'cache publishes complete entries only' atomic_publish_case
+check 'runner and nested gates share one cache label' label_agreement_case
+check '--jobs 2 matches the serial results and runs each gate once' parallel_matches_serial_case
+check 'serial gates finish before the parallel fan-out' parallel_barrier_case
+check 'a red gate is not hidden under --jobs' parallel_red_case
+check 'HADO_GATE_TIMES has one line per gate under --jobs' parallel_times_case
+check '--jobs rejects values that are not positive integers' jobs_invalid_case
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
