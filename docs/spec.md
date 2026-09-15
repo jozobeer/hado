@@ -41,6 +41,7 @@
   - [24. Boolean 分岐](#24-boolean-分岐)
   - [25. 条件列](#25-条件列)
   - [26. パターン分岐](#26-パターン分岐)
+  - [26.1. パターンの腕の条件列](#261-パターンの腕の条件列)
   - [27. パターン分岐の fallback](#27-パターン分岐の-fallback)
   - [28. 網羅性](#28-網羅性)
   - [29. `_` の用途](#29-_-の用途)
@@ -830,7 +831,7 @@ def rec map values f =>
 2. 条件列
 3. pattern分岐
 
-すべてexpressionであり、値を返す。
+すべてexpressionであり、値を返す。pattern 分岐の scrutinee は 1 つ以上で、2 つ以上はカンマで並べる（第26節）。
 
 `if` の後に続く構文によって、どの種類の分岐かを決定する。
 
@@ -856,7 +857,7 @@ if x > 10 => Large | Small
 
 Boolean branchでは、`|` の右側は必ずelse側の式であり、fallback構文ではない。
 
-Bool の値を分岐する形はこの 1 つに限る。同じ意味になる Bool リテラルの pattern 分岐（`if b | true => x | false => y`、`if b | true => x | y`）と、腕が 1 本だけの条件列（`if | b => x | y`）は E520 とする。第31節の形（`def f | true => x | false => y`）も同じである。入れ子の中の Bool リテラルパターン（`Some(true)`）は対象外である。
+Bool の値を分岐する形はこの 1 つに限る。同じ意味になる Bool リテラルの pattern 分岐（`if b | true => x | false => y`、`if b | true => x | y`）と、腕が 1 本だけの条件列（`if | b => x | y`）は E520 とする。第31節の形（`def f | true => x | false => y`）も同じである。入れ子の中の Bool リテラルパターン（`Some(true)`）と、列が 2 つ以上の pattern 分岐の Bool リテラル（第26節）は対象外である。
 
 ## 25. 条件列
 
@@ -920,13 +921,45 @@ pattern branchでは、各branchはpatternと `=>` と式で構成する。
 | pattern => expression
 ```
 
+scrutinee はカンマで 2 つ以上並べられる。腕の pattern も同じ数をカンマで並べ、左から順に対応する。数が合わない腕は E125 である。scrutinee の列と pattern の列は関数型の引数列（第20節）と同じ読みで、tuple の値は作らない。fallback は列の数に関わらず式 1 つである。
+
+```ocaml
+if left, right
+| [], _ => right
+| _, [] => left
+| [a, ..._], [b, ..._] => a + b
+```
+
+式の側の `=>` の後には条件列を置ける（第26.1節）。
+
 pattern branchは、ADTの構造に基づいて網羅的でなければならない。
 
 リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Int と Float のリテラルパターンは先頭に `-` を置け、それはリテラルの一部である。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。Bool の値そのものを分岐する形は第24節の Boolean branch に限る（E520）。
 
-最上位の変数パターン `| x => ...` は禁止する（E512）。入れ子の中の変数パターンは許可する。
+最上位の変数パターン `| x => ...` は禁止する（E512）。入れ子の中の変数パターンは許可する。列が 2 つ以上のときは、全列が変数か `_` で変数を 1 つでも含む行を E512 とし、一部の列だけが変数か `_` の行は許可する。
 
 条件列の全条件が「同一変数 `==` リテラル」なら、pattern 分岐で書けるため拒否する（E511）。
+
+## 26.1. パターンの腕の条件列
+
+pattern branch の腕の本体には、`=>` の後に条件列（第25節）を置ける。
+
+```ocaml
+if left, right
+| [], _ => right
+| _, [] => left
+| [a, ...rest_a], [b, ...rest_b] => if
+  | comparator a b <= 0 => [a, ...merge rest_a right comparator]
+  | [b, ...merge left rest_b comparator]
+```
+
+腕の条件列は fallback で終わり、その後の `|` は外側の次の腕である。条件列の規則（fallback の必須 E401、fallback より後の腕 E404、重複条件 E406、リテラル比較の列 E511）はそのまま当て、E401 と E511 のアンカーはその腕の `if` である。fallback が必須なので、条件列を持つ腕は必ず値を返す。網羅性（第28節）、到達不能（第43節）、重複（第44節）は、その腕を pattern の行を全域で覆う腕として数える。
+
+条件が 1 本の腕の条件列（`| p => if | c => a | b`）は E520 の対象外である。Boolean branch を腕に置く形（`| p => if c => a | b`）が E101 なので、条件列がこの意味の正準形である。
+
+fallback を持たない腕の条件列は、続く `|` の腕を自分の条件として読む。`| Some(x) => if | x > 0 => x | None => 0` の `None` は条件として読まれ、Bool でないので E305 になる。
+
+腕の本体に置ける分岐はこの条件列だけである。Boolean branch と pattern branch を腕に置く形、および条件列の腕の中の分岐は E101 である（第30節）。
 
 ## 27. パターン分岐の fallback
 
@@ -1008,6 +1041,8 @@ fallbackのcanonical formは、
 
 である。
 
+列が 2 つ以上の pattern 分岐（第26節）では、一部の列の `_` は入れ子の一部と同じ扱いで許可し、全列が `_` の行だけを E503 とする。
+
 `()` はパターンではない。Unit の値は名前か `_` で受ける。
 
 ## 30. 分岐のネスト禁止
@@ -1033,8 +1068,10 @@ if a => (if b => x | y) | z
 設計原則：
 
 ```text
-branch depth <= 1
+腕の本体に置ける分岐は条件列だけで、条件列の腕には分岐を置けない
 ```
+
+pattern branch の腕の本体には条件列を置ける（第26.1節）。条件列の腕の中には分岐を置けないので、深さは pattern と条件の 2 段で止まる。
 
 必要であれば、先に状態を分類する。
 
@@ -1047,7 +1084,7 @@ if state
 | C => ...
 ```
 
-ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、branch expression の腕の中に branch expression を置くことである。腕の中の `let` の継続や、腕の中の `fn(...)` の本体に置いた branch も同じである。`fn(| ...)` と `fn(x | ...)` の腕形式は branch として数える。
+ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、branch expression の腕の中に branch expression を置くことである（第26.1節の腕の条件列を除く）。腕の中の `let` の継続や、腕の中の `fn(...)` の本体に置いた branch も同じである。`fn(| ...)` と `fn(x | ...)` の腕形式は branch として数える。
 
 ## 31. 引数のパターン分岐
 
@@ -1959,6 +1996,7 @@ def A drop(values: A List, count: Int): A List Pure
 | E112 | int-literal-range | §5 | 字句 | リテラル |
 | E123 | abort-return-type | §37 | 構文 | `abort` の操作の `:` |
 | E124 | resume-outside-again | §38 | 構文 | `resume` |
+| E125 | pattern-column-count | §26 | 構文 | scrutinee と数の合わない pattern の列を持つ腕の `\|` |
 | E201 | implicit-recursion | §9 | 名前解決 | 自分を参照する名前 |
 | E202 | dunder-in-user | §49 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §49 | 名前解決 | `__` 名 |
@@ -1975,7 +2013,7 @@ def A drop(values: A List, count: Int): A List Pure
 | E306 | occurs-check | §15 | 型 | 同上 |
 | E307 | poly-recursion | §9 | 型 | 再帰呼び出しの先頭。間接呼び出しの位置を追跡できない場合は再帰関数の `def` の先頭（§9） |
 | E308 | effect-position | §36 | 型 | 許されない位置に置かれた効果を持つ式の先頭 |
-| E401 | missing-cond-fallback | §25 | 網羅性 | `if`。第32節の形では `def` か `fn` |
+| E401 | missing-cond-fallback | §25 | 網羅性 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
 | E402 | non-exhaustive | §28 | 網羅性 | `if`。`let` ではそのパターン |
 | E403 | unreachable-branch | §43 | 網羅性 | 到達不能な腕の `|` |
 | E404 | fallback-not-last | §43 | 網羅性 | fallback より後の腕の `|` |
@@ -1990,7 +2028,7 @@ def A drop(values: A List, count: Int): A List Pure
 | E507 | rewrap | §45 | 冗長 | `if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる |
 | E508 | repropagate | §36 | 冗長 | 再伝播する腕の `|`。Option の再伝播に当てる |
 | E510 | list-literal-form | §22 | 冗長 | 式の `Cons` か `Nil` |
-| E511 | cond-to-literal-pattern | §26 | 冗長 | `if`。第32節の形では `def` か `fn` |
+| E511 | cond-to-literal-pattern | §26 | 冗長 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
 | E512 | top-var-pattern | §26 | 冗長 | 変数パターン |
 | E513 | unused-toplevel | §39 | 冗長 | 未使用の宣言の先頭。効果（第37節）と handler（第38節）にも当てる |
 | E514 | unused-implement-def | §47 | 冗長 | `def` |
@@ -2349,14 +2387,15 @@ boolean_branch  := "if" expression "=>" arm_body "|" arm_body
 condition_branch := "if" condition_arms
 condition_arms  := (condition_arm | pattern_fallback)+
 condition_arm   := "|" expression "=>" arm_body
-pattern_branch  := "if" expression pattern_arms
+pattern_branch  := "if" expression ("," expression)* pattern_arms       scrutinee の列（第26節）
 pattern_arms    := (pattern_arm | pattern_fallback)+
-pattern_arm     := "|" pattern "=>" arm_body
+pattern_arm     := "|" pattern ("," pattern)* "=>" (arm_body | arm_conditions)  pattern の列は scrutinee と同数（E125）
+arm_conditions  := "if" condition_arms                                    腕の条件列（第26.1節）。最初の fallback で終わる
 pattern_fallback := "|" arm_body
 arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
 ```
 
-`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第30節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第56節）。`=>` を持つ腕が 1 本も無い列（`if | 5`、`def f x | 5`、`fn(| 5)`）は E100 とし、先頭の `|` を指す。
+`arm_conditions` は最初の `pattern_fallback` で終わり、その後の `|` は外側の pattern の腕である。fallback を持たない `arm_conditions` は続く `|` の腕を条件として読む（第26.1節）。`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第30節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第56節）。`=>` を持つ腕が 1 本も無い列（`if | 5`、`def f x | 5`、`fn(| 5)`）は E100 とし、先頭の `|` を指す。
 
 パターン:
 
@@ -2380,7 +2419,7 @@ literal_pattern := ["-"] int | ["-"] float | char | string | bool
 `if` の 3 形は直後の構文で区別する。
 
 * `if` の直後にexpressionがあり、その後に `=>` が続く場合はBoolean branch
-* `if` の直後にexpressionがあり、その後に `| pattern =>` が続く場合はpattern branch
+* `if` の直後にexpressionがあり、その後に `| pattern =>` が続く場合はpattern branch。expression がカンマで続く場合も pattern branch
 * `if` の直後が `|` なら条件列
 
 パーサは改行を見ない。
