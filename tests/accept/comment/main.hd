@@ -1,4 +1,4 @@
-// spec: §6
+// spec: §5
 // expect: 3
 // item: コメント
 def main = 1 + 2

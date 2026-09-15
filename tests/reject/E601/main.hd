@@ -1,4 +1,4 @@
-// spec: §48
+// spec: §47
 // error: E601
 // item: module
 def get_name t => t.name

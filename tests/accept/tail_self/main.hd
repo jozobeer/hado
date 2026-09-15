@@ -1,4 +1,4 @@
-// spec: §54
+// spec: §53
 // expect: 42
 // item: 末尾呼び出し
 def rec down n => if n == 0 => 42 | down (n - 1)

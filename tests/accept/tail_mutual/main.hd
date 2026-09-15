@@ -1,4 +1,4 @@
-// spec: §54
+// spec: §53
 // expect: 42
 // item: 相互再帰
 def rec ping n => if n == 0 => 42 | pong (n - 1) 1 2 3 4 5 6 7 8

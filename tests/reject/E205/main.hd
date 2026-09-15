@@ -1,4 +1,4 @@
-// spec: §50
+// spec: §49
 // error: E205
 def f x => x + 1
 def f x => x + 1

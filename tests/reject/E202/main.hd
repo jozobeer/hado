@@ -1,4 +1,4 @@
-// spec: §50
+// spec: §49
 // error: E202
 // item: 名前空間
 // item: prelude から組み込みへの到達

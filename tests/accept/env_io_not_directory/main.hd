@@ -1,4 +1,4 @@
-// spec: §56
+// spec: §55
 // item: Env と Io
 // expect-error: NotADirectory
 // needs: prelude

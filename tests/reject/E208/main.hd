@@ -1,4 +1,4 @@
-// spec: §10
+// spec: §9
 // error: E208
 // item: 相互再帰
 def is_even n => is_odd n

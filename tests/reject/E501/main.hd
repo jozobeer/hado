@@ -1,4 +1,4 @@
-// spec: §42
+// spec: §41
 // error: E501
 def f v =>
   let x = v ->

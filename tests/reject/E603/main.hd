@@ -1,4 +1,4 @@
-// spec: §47
+// spec: §46
 // error: E603
 // item: 契約の拡張
 def main = (Store.find (FirstId.make 1)) + (SecondId.value (SecondId.make 2))

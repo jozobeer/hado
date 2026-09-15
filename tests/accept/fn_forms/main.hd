@@ -1,4 +1,4 @@
-// spec: §13
+// spec: §12
 // expect: [5, 7, 9, 8]
 // item: fn の括弧
 type Choice = | A | B

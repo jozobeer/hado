@@ -1,4 +1,4 @@
-// spec: §19
+// spec: §18
 // expect: 42
 // item: record
 type User = Payload { id: Int; name: String }

@@ -1,4 +1,4 @@
-// spec: §31
+// spec: §30
 // error: E101
 // item: fn の括弧
 type Choice = | A | B

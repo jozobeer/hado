@@ -1,4 +1,4 @@
-// spec: §59
+// spec: §58
 // expect: Small
 // item: 演算子
 type Size = | Large | Small

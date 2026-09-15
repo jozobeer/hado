@@ -1,4 +1,4 @@
-// spec: §16
+// spec: §15
 // error: E306
 def self_apply x => x x
 def main = self_apply 1

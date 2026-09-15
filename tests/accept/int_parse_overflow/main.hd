@@ -1,4 +1,4 @@
-// spec: §56
+// spec: §55
 // item: Int.parse
 // expect-error: InvalidInt
 // needs: prelude

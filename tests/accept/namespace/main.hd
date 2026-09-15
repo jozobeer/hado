@@ -1,4 +1,4 @@
-// spec: §50
+// spec: §49
 // expect: 3
 // item: 名前空間
 def main = M.inc 2

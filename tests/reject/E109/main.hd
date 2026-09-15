@@ -1,4 +1,4 @@
-// spec: §9
+// spec: §8
 // error: E109
 def f => 1
 def main = f

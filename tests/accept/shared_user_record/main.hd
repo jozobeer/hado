@@ -1,4 +1,4 @@
-// spec: §48
+// spec: §47
 // expect: alice
 // item: 型の共有
 def main = describe (UserStore.make "alice")

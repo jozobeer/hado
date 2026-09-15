@@ -1,4 +1,4 @@
-// spec: §33
+// spec: §32
 // expect: 1
 // item: 引数の条件列
 def sign_of (a: Int, b: Int): Int | a < b => -1 | a > b => 1 | 0

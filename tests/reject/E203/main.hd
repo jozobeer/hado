@@ -1,4 +1,4 @@
-// spec: §50
+// spec: §49
 // error: E203
 def apply f x => f x
 def main = apply __string_length "hi"

@@ -1,4 +1,4 @@
-// spec: §40
+// spec: §39
 // error: E519
 // item: 契約の拡張
 def f _ => 1

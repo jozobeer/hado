@@ -1,4 +1,4 @@
-// spec: §47
+// spec: §46
 // expect: 41
 // item: 契約の拡張
 def main = Store.find (IntId.make 41)

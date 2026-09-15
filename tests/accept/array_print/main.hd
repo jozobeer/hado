@@ -1,4 +1,4 @@
-// spec: §55
+// spec: §54
 // item: 配列
 // expect: [Array.of_list [1, 2], Array.of_list []]
 // needs: prelude

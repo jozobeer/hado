@@ -1,4 +1,4 @@
-// spec: §35
+// spec: §34
 // expect: 42
 // item: let p? =
 // needs: prelude

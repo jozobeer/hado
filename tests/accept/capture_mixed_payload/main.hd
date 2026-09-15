@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §38
 // expect: ["a", "n1"]
 // needs: prelude
 effect S

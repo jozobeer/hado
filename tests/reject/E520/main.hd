@@ -1,4 +1,4 @@
-// spec: §25
+// spec: §24
 // error: E520
 def f (b: Bool) => if b | true => 1 | false => 0
 def main = f true

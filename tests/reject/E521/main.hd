@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §48
 // error: E521
 // item: Functor
 def main = Applied.run 1

@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §38
 // expect: [1, 2]
 effect Y
 capture y(value: Int): Unit

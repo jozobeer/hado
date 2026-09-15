@@ -1,4 +1,4 @@
-// spec: §34
+// spec: §33
 // expect: ok
 // item: 失敗の効果
 def parse (input: String): String {Error} =>

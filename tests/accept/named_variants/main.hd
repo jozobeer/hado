@@ -1,4 +1,4 @@
-// spec: §18
+// spec: §17
 // expect: 42
 // item: record
 type A Message = | Empty | Item { value: A; weight: Int } | Pair(A, Int)

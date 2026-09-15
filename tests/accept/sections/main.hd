@@ -1,4 +1,4 @@
-// spec: §48
+// spec: §47
 // expect: 42
 // item: 節構文
 type Input = { value: Int }

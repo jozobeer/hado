@@ -1,4 +1,4 @@
-// spec: §54
+// spec: §53
 // item: 末尾呼び出しの限定
 // needs: prelude
 // expect: 10000

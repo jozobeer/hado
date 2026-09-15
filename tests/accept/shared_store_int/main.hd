@@ -1,4 +1,4 @@
-// spec: §11
+// spec: §10
 // expect: 7
 // item: 型の共有
 def main = Store.find 1

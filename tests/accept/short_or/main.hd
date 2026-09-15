@@ -1,4 +1,4 @@
-// spec: §8
+// spec: §7
 // expect: true
 // item: 相互再帰
 // short-circuit: ||

@@ -1,4 +1,4 @@
-// spec: §59
+// spec: §58
 // expect: plain:7 / offset:107
 // item: Functor
 // needs: prelude

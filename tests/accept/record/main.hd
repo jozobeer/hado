@@ -1,4 +1,4 @@
-// spec: §19
+// spec: §18
 // expect: a
 // item: record
 type User = { name: String; age: Int }

@@ -1,4 +1,4 @@
-// spec: §59
+// spec: §58
 // expect: Good
 // item: 条件列の判別
 // item: 冗長・到達不能の判定

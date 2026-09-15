@@ -1,4 +1,4 @@
-// spec: §22
+// spec: §21
 // item: Bytes
 // expect: [1, -1, 0, 1]
 // needs: prelude

@@ -1,4 +1,4 @@
-// spec: §23
+// spec: §22
 // error: E510
 // item: List リテラル
 def f x xs => Cons(x, xs)

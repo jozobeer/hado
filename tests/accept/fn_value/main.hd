@@ -1,4 +1,4 @@
-// spec: §21
+// spec: §20
 // expect: 3
 // item: 関数値
 def inc x => x + 1

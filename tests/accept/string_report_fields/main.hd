@@ -1,4 +1,4 @@
-// spec: §56
+// spec: §55
 // item: String 操作
 // expect: [["unit", "7", "7"], ["型", "3", "5"]]
 // needs: prelude

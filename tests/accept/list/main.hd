@@ -1,4 +1,4 @@
-// spec: §23
+// spec: §22
 // expect: 3
 // needs: prelude
 // item: List リテラル

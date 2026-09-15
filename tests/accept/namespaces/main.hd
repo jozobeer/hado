@@ -1,4 +1,4 @@
-// spec: §52
+// spec: §51
 // expect: 40
 // item: 名前空間
 def extract (status: store::Status): Int => if status | store::Found(value) => value | store::NotFound => 0

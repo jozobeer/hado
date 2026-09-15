@@ -1,4 +1,4 @@
-// spec: §26
+// spec: §25
 // error: E401
 // item: 条件列の判別
 def grade score

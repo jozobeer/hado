@@ -1,4 +1,4 @@
-// spec: §6
+// spec: §5
 // error: E104
 // item: コメント
 def main = 1

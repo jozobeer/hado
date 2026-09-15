@@ -1,4 +1,4 @@
-// spec: §55
+// spec: §54
 // item: Bytes
 // expect: [Bytes.of_list [72, 105], Bytes.of_list []]
 // needs: prelude

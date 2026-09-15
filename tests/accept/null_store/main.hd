@@ -1,4 +1,4 @@
-// spec: §40
+// spec: §39
 // expect: [0, 0, 0, 0]
 // item: 契約の拡張
 // needs: prelude

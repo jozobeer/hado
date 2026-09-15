@@ -1,4 +1,4 @@
-// spec: §48
+// spec: §47
 // error: E514
 // item: module
 def main = M.used 1

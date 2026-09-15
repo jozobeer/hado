@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §48
 // error: E604
 // item: Functor
 def main = First.run 1 + Second.run 2

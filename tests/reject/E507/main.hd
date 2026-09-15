@@ -1,4 +1,4 @@
-// spec: §46
+// spec: §45
 // error: E507
 def f
   | Some(v) => Some(v)

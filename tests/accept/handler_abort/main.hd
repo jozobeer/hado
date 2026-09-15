@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §38
 // expect: 0
 handler Error as ToZero
 abort raise _ => 0

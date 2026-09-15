@@ -1,4 +1,4 @@
-// spec: §19
+// spec: §18
 // error: E304
 // item: record
 type A = { name: String; age: Int }

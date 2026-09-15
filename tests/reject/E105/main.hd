@@ -1,4 +1,4 @@
-// spec: §21
+// spec: §20
 // error: E105
 // item: tuple
 def main = (1, 2)

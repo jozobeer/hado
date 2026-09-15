@@ -1,4 +1,4 @@
-// spec: §51
+// spec: §50
 // expect: 110
 def seed = 100
 def main = FileStore.run seed

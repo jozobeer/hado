@@ -1,4 +1,4 @@
-// spec: §44
+// spec: §43
 // error: E404
 def f x
   | x > 1 => 1
