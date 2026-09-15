@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# R40 仕様書の再構成（docs/plan.md 36 節）。文法の概形を付録の最後へ移した後の
-# 構造・写像・本文の保存・参照の追随・版を測る。リポジトリルートから実行する。
+# R41 旧仕様の記載を外す（docs/plan.md 37 節）。対応表と tag v0.3 との照合を
+# 落とした後の、現行の仕様の自己整合だけを測る。リポジトリルートから実行する。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,7 +18,7 @@ check() {
     fi
 }
 
-# --- 40-a(1): 節は §1〜§59 が `## N.` として 1 回ずつ読み順に並び、部の下にある ---
+# --- 41-a(1): 節は §1〜§59 が `## N.` として 1 回ずつ読み順に並び、部の下にある ---
 spec_structure() {
     python3 - <<'PY'
 import re
@@ -40,68 +40,31 @@ print(f'sections: {len(nums)}, part headings: {len(parts)}, last: {parts[-1]}')
 PY
 }
 
-# --- 40-a(2): docs/spec-map.md の 3 列がどれも 1..59 の置換 ---
-spec_map() {
+# --- 41-a(2): 最新の snapshot だけを持つ（対応表が無く、前書きに旧版の記載が無い） ---
+spec_current_only() {
     python3 - <<'PY'
 import re
 from pathlib import Path
-rows = re.findall(r'^\| §(\d+) \| §(\d+) \| §(\d+) \|', Path('docs/spec-map.md').read_text(), flags=re.M)
-assert len(rows) == 59, len(rows)
-for column, index in [('v0.3', 0), ('R39', 1), ('現行', 2)]:
-    values = sorted(int(row[index]) for row in rows)
-    assert values == list(range(1, 60)), (column, values)
-print(f'map rows: {len(rows)} (3 columns, each a permutation)')
+assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
+front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
+assert 'spec-map' not in front, 'the front matter mentions spec-map'
+versions = set(re.findall(r'v[0-9]+(?:\.[0-9]+)+', front))
+assert versions == {'v0.3.1'}, versions
+bad = []
+for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md']:
+    if 'spec-map' in Path(rel).read_text():
+        bad.append(rel)
+for path in sorted(Path('scripts').glob('verify-*.sh')):
+    if path.name == 'verify-r41.sh':
+        continue  # この検査自身が検査の文言に spec-map を含む
+    if 'spec-map' in path.read_text():
+        bad.append(str(path))
+assert not bad, bad
+print(f'current only: version {sorted(versions)}, no spec-map in the live documents or gates')
 PY
 }
 
-# --- 40-a(3): tag v0.3 の各節の本文が、写像後の対応する節に現れる ---
-spec_preservation() {
-    python3 - <<'PY'
-import re
-import subprocess
-from pathlib import Path
-
-rows = re.findall(r'^\| §(\d+) \| §(\d+) \| §(\d+) \|', Path('docs/spec-map.md').read_text(), flags=re.M)
-mapping = {int(row[0]): int(row[2]) for row in rows}
-old_text = subprocess.run(['git', 'show', 'v0.3:docs/spec.md'], capture_output=True, text=True, check=True).stdout
-new_text = Path('docs/spec.md').read_text()
-
-def parse(text, pattern):
-    sections, current = {}, None
-    for line in text.split('\n'):
-        match = re.match(pattern, line)
-        if match:
-            current = int(match.group(1))
-            sections[current] = []
-        elif current is not None and not re.match(r'^#{1,2} ', line):
-            sections[current].append(line)
-    return {number: strip(body) for number, body in sections.items()}
-
-def strip(lines):
-    body = list(lines)
-    while body and (not body[-1].strip() or body[-1].strip() == '---'):
-        body.pop()
-    while body and not body[0].strip():
-        body.pop(0)
-    return '\n'.join(body)
-
-def remap(text):
-    text = re.sub(r'第\s*(\d+)\s*節', lambda m: f'第{mapping[int(m.group(1))]}節', text)
-    return re.sub(r'§\s*(\d+)', lambda m: f'§{mapping[int(m.group(1))]}', text)
-
-old_sections = parse(old_text, r'^#{1,3} (\d+)\.')
-new_sections = parse(new_text, r'^## (\d+)\.')
-assert set(old_sections) == set(range(1, 60)), sorted(old_sections)
-lost = []
-for old, new in mapping.items():
-    if remap(old_sections[old]) not in new_sections[new]:
-        lost.append(f'§{old}->§{new}')
-assert not lost, lost
-print(f'preserved: {len(mapping)} sections from v0.3')
-PY
-}
-
-# --- 40-a(4): コーパスのタグが §56 の表と一致し、全て実在の節を指す ---
+# --- 41-a(3): コーパスのタグが §56 の表と一致し、全て実在の節を指す ---
 spec_tags() {
     python3 - <<'PY'
 import re
@@ -134,7 +97,7 @@ print(f'codes: {len(table)}, corpus tags resolve and match')
 PY
 }
 
-# --- 40-a(5): 現行の文書の §参照が全て実在の節を指す ---
+# --- 41-a(4): 現行の文書の §参照が全て実在の節を指す ---
 spec_refs() {
     python3 - <<'PY'
 import re
@@ -151,7 +114,7 @@ print('live document references resolve')
 PY
 }
 
-# --- 40-h: 版が v0.3.1 で、spec と spec-coverage が同じ版を名乗る ---
+# --- 41-a(5): 版が v0.3.1 で、spec と spec-coverage が同じ版を名乗る ---
 spec_version() {
     python3 - <<'PY'
 import re
@@ -164,8 +127,7 @@ PY
 }
 
 check 'spec sections §1..§59 are in reading order under parts, 文法の概形 is §59' spec_structure
-check 'spec-map is a 3-column bijection (v0.3 / R39 / 現行)' spec_map
-check 'every v0.3 section body survives in its current section' spec_preservation
+check 'the current spec is the only snapshot (no spec-map, no older version)' spec_current_only
 check 'corpus tags match the §56 table and resolve' spec_tags
 check 'section references in the live documents resolve' spec_refs
 check 'spec and spec-coverage name v0.3.1' spec_version
