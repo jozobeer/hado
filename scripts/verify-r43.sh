@@ -188,18 +188,30 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from harness import build_printed
 
+
+def string_expression(text):
+    """Write a String as a literal, or through Bytes when it holds a control
+    byte: §5 has escapes only for \\n and \\t, so CR, VT and FF cannot be
+    written down directly."""
+    if all(character in '\n\t' or ord(character) >= 0x20 for character in text):
+        return json.dumps(text, ensure_ascii=False)
+    values = ', '.join(str(byte) for byte in text.encode())
+    return f'(Bytes.to_string (Bytes.of_list [{values}]))'
+
+
 trims = ['', ' ', '  abc  ', '\t\n\v\f\r abc \r\n\t', 'a b', '　abc　', '日本 語',
          ' 日本語 ', 'a', '\r\n', '　', 'x\ty\nz']
 for index, text in enumerate(trims):
-    source = f'def main = String.trim {json.dumps(text, ensure_ascii=False)}\n'
+    source = f'def main = String.trim {string_expression(text)}\n'
     expected = text.strip(' \t\n\v\f\r') + '\n'
     build_printed(sys.argv[1], f'trim-{index}', source, expected)
 
 joins = [([], '-'), ([''], '-'), (['a'], '-'), (['a', 'b'], '-'), (['a', '', 'b'], '-'),
-         (['a', 'b'], ''), (['-', '-'], '-'), (['日本語', 'b'], '・'), (['a', 'b', 'c'], '--')]
+         (['a', 'b'], ''), (['-', '-'], '-'), (['日本語', 'b'], '・'), (['a', 'b', 'c'], '--'),
+         (['\r\n', 'x'], '\t')]
 for index, (values, separator) in enumerate(joins):
-    items = ', '.join(json.dumps(value, ensure_ascii=False) for value in values)
-    source = f'def main = String.join [{items}] {json.dumps(separator, ensure_ascii=False)}\n'
+    items = ', '.join(string_expression(value) for value in values)
+    source = f'def main = String.join [{items}] {string_expression(separator)}\n'
     expected = separator.join(values) + '\n'
     build_printed(sys.argv[1], f'join-{index}', source, expected)
 print(f'string ops: {len(trims)} trim, {len(joins)} join cases')
@@ -301,27 +313,48 @@ PY
 
 # --- 43-g: 受理コーパスと lock ---
 r43_corpus() {
-    python3 - <<'PY'
+    python3 - "$workdir" <<'PY'
 from pathlib import Path
-import hashlib
+import hashlib, re, shutil, subprocess, sys
 
+root = Path(sys.argv[1]) / 'corpus'
+root.mkdir(parents=True, exist_ok=False)
 lock = {}
 for line in Path('tests/corpus.sha256').read_text().splitlines():
     digest, path = line.split('  ', 1)
     lock[path] = digest
 
-cases = [('tests/accept/io_log/main.hd', 'Env と Io', 'hello'),
-         ('tests/accept/string_join_trim/main.hd', 'String 操作', '["a-b", "xy"]')]
-for path, item, expected in cases:
-    source = Path(path).read_text()
+# 判定器はファイル名を持たない。新しい prelude の member を使う受理
+# コーパスを本文から選び、札と期待出力と lock をその場で見る。
+patterns = ['String.join', 'String.trim', 'Int.abs', 'Int.min', 'Int.max',
+            'List.head', 'List.nth', 'List.take', 'List.drop', r'\blog\b']
+selected = {path: path.read_text() for path in sorted(Path('tests/accept').glob('*/main.hd'))
+            if any(re.search(pattern, path.read_text()) for pattern in patterns)}
+assert selected, 'no accept case uses the new prelude members'
+items = set()
+for path, source in selected.items():
     lines = source.splitlines()
-    assert lines[0] == '// spec: §55', (path, lines[0])
-    assert f'// item: {item}' in lines, path
+    assert '// spec: §55' in lines, path
     assert '// needs: prelude' in lines, path
-    expects = [line for line in lines if line.startswith('// expect:')]
-    assert len(expects) == 1 and expects[0] == f'// expect: {expected}', (path, expects)
-    assert lock.get(path) == hashlib.sha256(source.encode()).hexdigest(), f'lock mismatch: {path}'
-print(f'corpus: {len(cases)} accept files, agree with the lock')
+    expects = [(line.startswith('// expect-error:'), line.split(':', 1)[1].strip())
+               for line in lines if line.startswith(('// expect:', '// expect-error:'))]
+    assert len(expects) == 1, (path, expects)
+    is_error, expected = expects[0]
+    assert not is_error, path
+    assert lock.get(str(path)) == hashlib.sha256(source.encode()).hexdigest(), f'lock mismatch: {path}'
+    for line in lines:
+        if line.startswith('// item: '):
+            items.add(line[len('// item: '):])
+    directory = root / path.parent.name
+    shutil.copytree(path.parent, directory)
+    copied = directory / path.name
+    build = subprocess.run(['cargo', 'run', '--offline', '-q', '--', 'build', str(copied)], capture_output=True)
+    assert build.returncode == 0 and build.stderr == b'', (path, build.stderr)
+    result = subprocess.run([str(copied.with_suffix(''))], capture_output=True, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0 and result.stderr == b'', (path, result.returncode, result.stderr)
+    assert result.stdout == (expected + '\n').encode(), (path, result.stdout, expected)
+assert items == {'Env と Io', 'String 操作'}, items
+print(f'corpus: {len(selected)} accept cases derived by content, headers, lock and stdout verified')
 PY
 }
 

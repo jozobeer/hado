@@ -151,10 +151,10 @@ int32_t hado_entry(void) {
 }
 
 #[test]
-fn io_is_a_prelude_effect_with_all_four_defaults() {
+fn io_is_a_prelude_effect_with_all_five_defaults() {
     Case::new("def main = [List.length args, Bytes.length read_stdin]\n").prints_type("Int List {Env, Error, Io}");
     let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
-    for operation in ["read_file", "write_file", "read_dir", "read_stdin"] {
+    for operation in ["read_file", "write_file", "log", "read_dir", "read_stdin"] {
         assert_eq!(checked.default_operations[operation], format!("IoDefault.{operation}"));
     }
 }

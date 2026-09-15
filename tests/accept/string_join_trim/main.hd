@@ -1,0 +1,5 @@
+// spec: §55
+// item: String 操作
+// expect: ["a-b", "xy"]
+// needs: prelude
+def main = [String.join ["a", "b"] "-", String.trim "  xy  "]

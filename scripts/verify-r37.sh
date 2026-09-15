@@ -201,8 +201,8 @@ for operation, path, message in failures:
         (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
-io_arms = ['reply read_file _ => Bytes.of_string "virtual"', 'reply write_file _ _ => ()', 'reply read_dir _ => ["virtual"]', 'reply read_stdin => Bytes.of_string "virtual"']
-for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
+io_arms = ['reply read_file _ => Bytes.of_string "virtual"', 'reply write_file _ _ => ()', 'reply log _ => ()', 'reply read_dir _ => ["virtual"]', 'reply read_stdin => Bytes.of_string "virtual"']
+for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('log "virtual"', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
     directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
     if expected=='':
         (directory/'expect').write_bytes(b'')
@@ -211,7 +211,7 @@ for missing in range(len(io_arms)):
     reject('37-d Io missing-arm', 'handler Io as H\n'+'\n'.join(arm for i,arm in enumerate(io_arms) if i!=missing)+'\ndef main = 0\n', 'E605', 'handler Io')
 for sub in (False, True):
     reject('37-e Io effect', 'effect Io\nreply custom: Int\ndef main = 0\n', 'E205', 'Io', sub)
-    for name in ('read_file','write_file','read_dir','read_stdin'):
+    for name in ('read_file','write_file','log','read_dir','read_stdin'):
         for shape, source, anchor in [
             ('def', f'def {name} = 1\n', name),
             ('implementation', f'module M\ndef {name}: Int Pure\nimplement M as M\ndef {name} = 1\n', name+' ='),
@@ -514,15 +514,16 @@ print(f'Env and Io corpus: {len(tagged)} files; success, failure, prelude and lo
 controls = [({}, lock)]
 for path in tagged:
     changed = dict(sources)
-    changed[path] = changed[path].replace('// item: Env と Io\n', '', 1)
-    controls.append((changed, lock))
-    changed = dict(sources)
     changed[path] = changed[path].replace('// needs: prelude\n', '', 1)
     controls.append((changed, lock))
     pattern = r'^([0-9a-f])([0-9a-f]{63}  ' + re.escape(str(path)) + r')$'
     altered, count = re.subn(pattern, lambda m: ('0' if m[1] != '0' else '1') + m[2], lock, flags=re.M)
     assert count == 1
     controls.append((sources, altered))
+# The item tag belongs to the item, not to one file: when more than one file
+# carries it, dropping it from a single file is invisible to validate. Drop it
+# from every tagged file and require the empty set to be rejected.
+controls.append(({path: source.replace('// item: Env と Io\n', '', 1) for path, source in sources.items()}, lock))
 for changed, altered in controls:
     try:
         validate(changed, altered)

@@ -1,0 +1,5 @@
+// spec: §55
+// item: Env と Io
+// expect: hello
+// needs: prelude
+def main = log "hello"

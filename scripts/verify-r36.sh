@@ -407,7 +407,15 @@ assert match and int(match[1]) > 0 and match[1] == match[2], 'missing or non-ful
 PYCODE
 }
 check '36-f m7' full_gate m7
-check '36-f prelude inventory is complete' grep -xF 'prelude inventory: 39/39' "$workdir/m7.log"
+# 件数は §55 の関数集合から導く。直書きすると member を足すたびに古くなる（R43 決定 10）。
+check '36-f prelude inventory is complete' python3 - "$workdir/m7.log" <<'PYCODE'
+from pathlib import Path
+import re, sys
+text = Path(sys.argv[1]).read_text()
+match = re.search(r'^prelude inventory: (\d+)/(\d+)$', text, flags=re.M)
+assert match, 'missing prelude inventory line'
+assert match.group(1) == match.group(2) and int(match.group(1)) > 0, match.group(0)
+PYCODE
 # m7 は cargo test --offline --no-fail-fast を実走する。その結果も空振りなく検査する。
 check '36-h cargo tests executed by m7: no failures' python3 - "$workdir/m7.log" <<'PYCODE'
 from pathlib import Path
