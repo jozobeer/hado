@@ -299,6 +299,21 @@ enum MatchStep {
     Equal(Expression, Expression),
 }
 
+#[derive(Clone)]
+struct MatrixRow {
+    patterns: Vec<crate::parser::Pattern>,
+    body: crate::parser::Node,
+    bindings: Vec<(String, usize, Type)>,
+}
+
+enum ColumnKind {
+    Any,
+    Bool,
+    Constructor,
+    Literal,
+    Record,
+}
+
 #[derive(Default)]
 struct Lowerer {
     constructor_tags: std::collections::HashMap<String, u32>,
@@ -563,14 +578,14 @@ impl Lowerer {
             fallback,
         } = &node.kind
         {
-            if scrutinees.len() != 1 || arms.iter().any(|(patterns, _)| patterns.len() != 1) {
-                return Err("multi-column pattern branch is not implemented".into());
+            if scrutinees.len() == 1 && arms.iter().all(|(patterns, _)| patterns.len() == 1) {
+                let unary: Vec<(crate::parser::Pattern, crate::parser::Node)> = arms
+                    .iter()
+                    .map(|(patterns, body)| (patterns[0].clone(), body.clone()))
+                    .collect();
+                return self.literal_branch(&scrutinees[0], &unary, fallback.as_deref());
             }
-            let unary: Vec<(crate::parser::Pattern, crate::parser::Node)> = arms
-                .iter()
-                .map(|(patterns, body)| (patterns[0].clone(), body.clone()))
-                .collect();
-            return self.literal_branch(&scrutinees[0], &unary, fallback.as_deref());
+            return self.column_branch(scrutinees, arms, fallback.as_deref());
         }
         if let NodeKind::CondBranch { arms, fallback } = &node.kind {
             let fallback = fallback
@@ -689,6 +704,40 @@ fn branch(
         then: Box::new(then),
         otherwise: Box::new(otherwise),
     })
+}
+
+fn wrap_column(source: Option<Expression>, id: usize, body: Expression) -> Expression {
+    match source {
+        Some(value) => Expression::Let {
+            id,
+            value: Box::new(value),
+            body: Box::new(body),
+        },
+        None => body,
+    }
+}
+
+fn wildcards(count: usize, span: crate::parser::Span) -> Vec<crate::parser::Pattern> {
+    vec![
+        crate::parser::Pattern {
+            kind: crate::parser::PatternKind::Underscore,
+            span,
+        };
+        count
+    ]
+}
+
+fn same_literal(left: &crate::parser::Node, right: &crate::parser::Node) -> bool {
+    use crate::parser::NodeKind;
+    match (&left.kind, &right.kind) {
+        (NodeKind::Int(left), NodeKind::Int(right)) => left == right,
+        (NodeKind::Float(left), NodeKind::Float(right)) => left == right,
+        (NodeKind::Bool(left), NodeKind::Bool(right)) => left == right,
+        (NodeKind::Char(left), NodeKind::Char(right)) => left == right,
+        (NodeKind::Str(left), NodeKind::Str(right)) => left == right,
+        (NodeKind::Unit, NodeKind::Unit) => true,
+        _ => false,
+    }
 }
 
 pub fn lower_program(
@@ -1112,6 +1161,564 @@ impl Lowerer {
                 result,
             }),
         })
+    }
+
+    fn column_branch(
+        &mut self,
+        scrutinees: &[crate::parser::Node],
+        arms: &[(Vec<crate::parser::Pattern>, crate::parser::Node)],
+        fallback: Option<&crate::parser::Node>,
+    ) -> Result<Expression, String> {
+        if scrutinees.is_empty()
+            || arms
+                .iter()
+                .any(|(patterns, _)| patterns.len() != scrutinees.len())
+        {
+            return Err("pattern column count mismatch".into());
+        }
+        let saved = self.scope.clone();
+        let mut bindings = Vec::new();
+        let mut values = Vec::new();
+        for scrutinee in scrutinees {
+            let value = self.expression(scrutinee)?;
+            let id = self.next;
+            self.next += 1;
+            let ty = value.ty();
+            bindings.push((id, value));
+            values.push(Expression::Variable { id, ty });
+        }
+        let fallback = fallback.map(|body| self.expression(body)).transpose()?;
+        let rows: Vec<MatrixRow> = arms
+            .iter()
+            .map(|(patterns, body)| MatrixRow {
+                patterns: patterns
+                    .iter()
+                    .map(|pattern| self.positional_pattern(pattern))
+                    .collect(),
+                body: body.clone(),
+                bindings: Vec::new(),
+            })
+            .collect();
+        let compiled = self.compile_matrix(&values, &rows, fallback.as_ref());
+        self.scope = saved;
+        let mut compiled = compiled?;
+        for (id, value) in bindings.into_iter().rev() {
+            compiled = Expression::Let {
+                id,
+                value: Box::new(value),
+                body: Box::new(compiled),
+            };
+        }
+        Ok(compiled)
+    }
+
+    fn compile_matrix(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        if rows.is_empty() {
+            return fallback.cloned().ok_or_else(|| "empty switch".into());
+        }
+        if values.is_empty() {
+            return self.take_matrix_body(&rows[0]);
+        }
+        if rows.iter().any(|row| row.patterns.len() != values.len()) {
+            return Err("pattern column count mismatch".into());
+        }
+        match self.column_kind(&values[0].ty(), rows)? {
+            ColumnKind::Any => self.compile_any_column(values, rows, fallback),
+            ColumnKind::Bool => self.compile_bool_column(values, rows, fallback),
+            ColumnKind::Constructor => self.compile_constructor_column(values, rows, fallback),
+            ColumnKind::Literal => self.compile_literal_column(values, rows, fallback),
+            ColumnKind::Record => self.compile_record_column(values, rows, fallback),
+        }
+    }
+
+    fn take_matrix_body(&mut self, row: &MatrixRow) -> Result<Expression, String> {
+        let saved = self.scope.clone();
+        for (name, id, ty) in &row.bindings {
+            self.scope.insert(name.clone(), (*id, ty.clone()));
+        }
+        let result = self.expression(&row.body);
+        self.scope = saved;
+        result
+    }
+
+    fn column_kind(&self, ty: &Type, rows: &[MatrixRow]) -> Result<ColumnKind, String> {
+        let mut record = false;
+        let mut constructor = false;
+        let mut literal = false;
+        for row in rows {
+            let pattern = &row.patterns[0];
+            if self.record_head(pattern).is_some() {
+                record = true;
+            } else if self.constructor_head(pattern).is_some() {
+                constructor = true;
+            } else if self.literal_head(pattern).is_some() {
+                literal = true;
+            } else if self.catch_all(pattern).is_none() {
+                return Err("unsupported pattern in column".into());
+            }
+        }
+        Ok(if record {
+            ColumnKind::Record
+        } else if *ty == Type::Bool && constructor {
+            ColumnKind::Bool
+        } else if constructor {
+            ColumnKind::Constructor
+        } else if literal {
+            ColumnKind::Literal
+        } else {
+            ColumnKind::Any
+        })
+    }
+
+    fn compile_any_column(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        let (id, ty, _, source) = self.column_var(&values[0]);
+        let rest: Vec<MatrixRow> = rows
+            .iter()
+            .map(|row| self.drop_column(row, id, &ty))
+            .collect();
+        let body = self.compile_matrix(&values[1..], &rest, fallback)?;
+        Ok(wrap_column(source, id, body))
+    }
+
+    fn compile_bool_column(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        let (id, ty, variable, source) = self.column_var(&values[0]);
+        let on_true = self.specialize_rows(rows, "true", 0, id, &ty);
+        let on_false = self.specialize_rows(rows, "false", 0, id, &ty);
+        let then = self.compile_optional_side(&values[1..], &on_true, fallback)?;
+        let otherwise = self.compile_optional_side(&values[1..], &on_false, fallback)?;
+        let (then, otherwise) = match (then, otherwise) {
+            (Some(then), Some(otherwise)) => (then, otherwise),
+            (Some(then), None) => {
+                let result = then.ty();
+                (then, Expression::Unreachable { result })
+            }
+            (None, Some(otherwise)) => {
+                let result = otherwise.ty();
+                (Expression::Unreachable { result }, otherwise)
+            }
+            (None, None) => return fallback.cloned().ok_or_else(|| "empty switch".into()),
+        };
+        let (then, otherwise) = self.align_outcomes(then, otherwise)?;
+        Ok(wrap_column(source, id, branch(variable, then, otherwise)?))
+    }
+
+    fn compile_optional_side(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Option<Expression>, String> {
+        if rows.is_empty() {
+            return Ok(fallback.cloned());
+        }
+        self.compile_matrix(values, rows, fallback).map(Some)
+    }
+
+    fn compile_constructor_column(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        let (id, ty, variable, source) = self.column_var(&values[0]);
+        let family = self.constructors_of(&ty);
+        if rows
+            .iter()
+            .any(|row| self.catch_all(&row.patterns[0]).is_some())
+            && family.is_empty()
+        {
+            return Err("unknown ADT in pattern column".into());
+        }
+        let mut lowered = Vec::new();
+        for name in self.needed_constructors(rows, &family) {
+            let fields = self.constructor_fields(&name, &ty)?;
+            let specialized = self.specialize_rows(rows, &name, fields.len(), id, &ty);
+            if specialized.is_empty() {
+                continue;
+            }
+            let mut next_values: Vec<Expression> = fields
+                .iter()
+                .enumerate()
+                .map(|(index, result)| Expression::Project {
+                    value: Box::new(variable.clone()),
+                    constructor: name.clone(),
+                    index,
+                    result: result.clone(),
+                })
+                .collect();
+            next_values.extend(values.iter().skip(1).cloned());
+            lowered.push((
+                name,
+                self.compile_matrix(&next_values, &specialized, fallback)?,
+            ));
+        }
+        if lowered.is_empty() {
+            return fallback.cloned().ok_or_else(|| "empty switch".into());
+        }
+        let switch_fallback = if family
+            .iter()
+            .all(|(name, _)| lowered.iter().any(|(found, _)| found == name))
+        {
+            None
+        } else {
+            fallback.cloned().map(Box::new)
+        };
+        let (lowered, fallback) = self.align_switch_arms(lowered, switch_fallback)?;
+        let result = lowered
+            .first()
+            .map(|(_, body)| body.ty())
+            .or_else(|| fallback.as_ref().map(|body| body.ty()))
+            .ok_or("empty switch")?;
+        if lowered.iter().any(|(_, body)| body.ty() != result)
+            || fallback.as_ref().is_some_and(|body| body.ty() != result)
+        {
+            return Err("switch result types differ".into());
+        }
+        Ok(wrap_column(
+            source,
+            id,
+            Expression::Switch {
+                value: Box::new(variable),
+                arms: lowered,
+                fallback,
+                result,
+            },
+        ))
+    }
+
+    fn compile_literal_column(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        let (id, ty, variable, source) = self.column_var(&values[0]);
+        let literals = self.column_literals(rows);
+        let wilds: Vec<MatrixRow> = rows
+            .iter()
+            .filter(|row| self.catch_all(&row.patterns[0]).is_some())
+            .map(|row| self.drop_column(row, id, &ty))
+            .collect();
+        let mut result = if wilds.is_empty() {
+            fallback
+                .cloned()
+                .ok_or("pattern branch without fallback is not implemented")?
+        } else {
+            self.compile_matrix(&values[1..], &wilds, fallback)?
+        };
+        for literal in literals.into_iter().rev() {
+            let matching: Vec<MatrixRow> = rows
+                .iter()
+                .filter(|row| self.row_matches_literal(row, &literal))
+                .map(|row| self.drop_column(row, id, &ty))
+                .collect();
+            let body = self.compile_matrix(&values[1..], &matching, fallback)?;
+            let right = self.expression(&literal)?;
+            if right.ty() != variable.ty() {
+                return Err("pattern type mismatch".into());
+            }
+            let condition = Expression::Binary {
+                op: crate::parser::BinOp::Eq,
+                left: Box::new(variable.clone()),
+                right: Box::new(right),
+            };
+            let (body, result_arm) = self.align_outcomes(body, result)?;
+            result = branch(condition, body, result_arm)?;
+        }
+        Ok(wrap_column(source, id, result))
+    }
+
+    fn compile_record_column(
+        &mut self,
+        values: &[Expression],
+        rows: &[MatrixRow],
+        fallback: Option<&Expression>,
+    ) -> Result<Expression, String> {
+        let (id, ty, variable, source) = self.column_var(&values[0]);
+        let fields = self.record_column_fields(&ty, rows)?;
+        let mut next_values = Vec::new();
+        for field in &fields {
+            next_values.push(self.record_get(variable.clone(), field)?);
+        }
+        next_values.extend(values.iter().skip(1).cloned());
+        let rest: Vec<MatrixRow> = rows
+            .iter()
+            .map(|row| self.expand_record_row(row, &fields, id, &ty))
+            .collect::<Result<_, _>>()?;
+        let body = self.compile_matrix(&next_values, &rest, fallback)?;
+        Ok(wrap_column(source, id, body))
+    }
+
+    fn needed_constructors(&self, rows: &[MatrixRow], family: &[(String, usize)]) -> Vec<String> {
+        let mut needed = Vec::new();
+        for row in rows {
+            if let Some((name, _)) = self.constructor_head(&row.patterns[0]) {
+                if !needed.iter().any(|found| found == &name) {
+                    needed.push(name);
+                }
+            }
+        }
+        if rows
+            .iter()
+            .any(|row| self.catch_all(&row.patterns[0]).is_some())
+        {
+            for (name, _) in family {
+                if !needed.iter().any(|found| found == name) {
+                    needed.push(name.clone());
+                }
+            }
+        }
+        needed
+    }
+
+    fn constructors_of(&self, ty: &Type) -> Vec<(String, usize)> {
+        if *ty == Type::Bool {
+            return vec![("true".into(), 0), ("false".into(), 0)];
+        }
+        let mut variants: Vec<_> = self
+            .constructors
+            .keys()
+            .filter_map(|name| {
+                self.constructor_fields(name, ty)
+                    .ok()
+                    .map(|fields| (name.clone(), fields.len()))
+            })
+            .collect();
+        variants
+            .sort_by_key(|(name, _)| self.constructor_tags.get(name).copied().unwrap_or(u32::MAX));
+        variants
+    }
+
+    fn specialize_rows(
+        &self,
+        rows: &[MatrixRow],
+        name: &str,
+        arity: usize,
+        id: usize,
+        ty: &Type,
+    ) -> Vec<MatrixRow> {
+        rows.iter()
+            .filter_map(|row| self.specialize_constructor(row, name, arity, id, ty))
+            .collect()
+    }
+
+    fn specialize_constructor(
+        &self,
+        row: &MatrixRow,
+        name: &str,
+        arity: usize,
+        id: usize,
+        ty: &Type,
+    ) -> Option<MatrixRow> {
+        let span = row.patterns[0].span;
+        if let Some(bind) = self.catch_all(&row.patterns[0]) {
+            let mut bindings = row.bindings.clone();
+            if let Some(name) = bind {
+                bindings.push((name, id, ty.clone()));
+            }
+            let mut patterns = wildcards(arity, span);
+            patterns.extend(row.patterns.iter().skip(1).cloned());
+            return Some(MatrixRow {
+                patterns,
+                body: row.body.clone(),
+                bindings,
+            });
+        }
+        let (found, args) = self.constructor_head(&row.patterns[0])?;
+        if found != name || args.len() != arity {
+            return None;
+        }
+        let mut patterns = args;
+        patterns.extend(row.patterns.iter().skip(1).cloned());
+        Some(MatrixRow {
+            patterns,
+            body: row.body.clone(),
+            bindings: row.bindings.clone(),
+        })
+    }
+
+    fn drop_column(&self, row: &MatrixRow, id: usize, ty: &Type) -> MatrixRow {
+        let mut bindings = row.bindings.clone();
+        if let Some(Some(name)) = self.catch_all(&row.patterns[0]) {
+            bindings.push((name, id, ty.clone()));
+        }
+        MatrixRow {
+            patterns: row.patterns[1..].to_vec(),
+            body: row.body.clone(),
+            bindings,
+        }
+    }
+
+    fn column_literals(&self, rows: &[MatrixRow]) -> Vec<crate::parser::Node> {
+        let mut literals = Vec::new();
+        for row in rows {
+            if let Some(literal) = self.literal_head(&row.patterns[0]) {
+                if !literals.iter().any(|found| same_literal(found, &literal)) {
+                    literals.push(literal);
+                }
+            }
+        }
+        literals
+    }
+
+    fn row_matches_literal(&self, row: &MatrixRow, literal: &crate::parser::Node) -> bool {
+        self.catch_all(&row.patterns[0]).is_some()
+            || self
+                .literal_head(&row.patterns[0])
+                .is_some_and(|found| same_literal(&found, literal))
+    }
+
+    fn record_column_fields(&self, ty: &Type, rows: &[MatrixRow]) -> Result<Vec<String>, String> {
+        let Type::Data(name, _) = ty else {
+            return Err("record pattern requires a record".into());
+        };
+        if let Some((names, _)) = self.records.get(name) {
+            return Ok(names.clone());
+        }
+        let mut names = Vec::new();
+        for row in rows {
+            if let Some(fields) = self.record_head(&row.patterns[0]) {
+                for name in fields {
+                    if !names.iter().any(|found| found == &name) {
+                        names.push(name);
+                    }
+                }
+            }
+        }
+        if names.is_empty() {
+            Err("unknown record type".into())
+        } else {
+            Ok(names)
+        }
+    }
+
+    fn expand_record_row(
+        &self,
+        row: &MatrixRow,
+        fields: &[String],
+        id: usize,
+        ty: &Type,
+    ) -> Result<MatrixRow, String> {
+        let pattern = self.positional_pattern(&row.patterns[0]);
+        let mut bindings = row.bindings.clone();
+        let mut expanded = match &pattern.kind {
+            crate::parser::PatternKind::Record(written) => fields
+                .iter()
+                .map(
+                    |name| match written.iter().find(|(field, _)| &field.name == name) {
+                        Some((_, Some(nested))) => nested.clone(),
+                        Some((field, None)) => crate::parser::Pattern {
+                            kind: crate::parser::PatternKind::Name(field.name.clone()),
+                            span: field.span,
+                        },
+                        None => crate::parser::Pattern {
+                            kind: crate::parser::PatternKind::Underscore,
+                            span: pattern.span,
+                        },
+                    },
+                )
+                .collect(),
+            _ => {
+                if let Some(Some(name)) = self.catch_all(&pattern) {
+                    bindings.push((name, id, ty.clone()));
+                } else if self.catch_all(&pattern).is_none() {
+                    return Err("expected record pattern".into());
+                }
+                wildcards(fields.len(), pattern.span)
+            }
+        };
+        expanded.extend(row.patterns.iter().skip(1).cloned());
+        Ok(MatrixRow {
+            patterns: expanded,
+            body: row.body.clone(),
+            bindings,
+        })
+    }
+
+    fn column_var(&mut self, value: &Expression) -> (usize, Type, Expression, Option<Expression>) {
+        if let Expression::Variable { id, ty } = value {
+            return (*id, ty.clone(), value.clone(), None);
+        }
+        let id = self.next;
+        self.next += 1;
+        let ty = value.ty();
+        (
+            id,
+            ty.clone(),
+            Expression::Variable { id, ty },
+            Some(value.clone()),
+        )
+    }
+
+    fn positional_pattern(&self, pattern: &crate::parser::Pattern) -> crate::parser::Pattern {
+        crate::named_patterns::positional(pattern, &self.named_constructors, &|name| {
+            self.resolve_constructor(name)
+        })
+    }
+
+    fn catch_all(&self, pattern: &crate::parser::Pattern) -> Option<Option<String>> {
+        match &self.positional_pattern(pattern).kind {
+            crate::parser::PatternKind::Underscore => Some(None),
+            crate::parser::PatternKind::Name(name) if !crate::names::is_upper_reference(name) => {
+                Some(Some(name.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn constructor_head(
+        &self,
+        pattern: &crate::parser::Pattern,
+    ) -> Option<(String, Vec<crate::parser::Pattern>)> {
+        match &self.positional_pattern(pattern).kind {
+            crate::parser::PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
+                Some((self.resolve_constructor(name), Vec::new()))
+            }
+            crate::parser::PatternKind::Constructor(name, args) => {
+                Some((self.resolve_constructor(name), args.clone()))
+            }
+            crate::parser::PatternKind::Literal(node) => match node.kind {
+                crate::parser::NodeKind::Bool(true) => Some(("true".into(), Vec::new())),
+                crate::parser::NodeKind::Bool(false) => Some(("false".into(), Vec::new())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn literal_head(&self, pattern: &crate::parser::Pattern) -> Option<crate::parser::Node> {
+        match &self.positional_pattern(pattern).kind {
+            crate::parser::PatternKind::Literal(node)
+                if !matches!(node.kind, crate::parser::NodeKind::Bool(_)) =>
+            {
+                Some((**node).clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn record_head(&self, pattern: &crate::parser::Pattern) -> Option<Vec<String>> {
+        match &self.positional_pattern(pattern).kind {
+            crate::parser::PatternKind::Record(fields) => {
+                Some(fields.iter().map(|(name, _)| name.name.clone()).collect())
+            }
+            _ => None,
+        }
     }
 
     fn constructor_arm(

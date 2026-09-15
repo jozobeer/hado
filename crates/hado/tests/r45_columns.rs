@@ -288,3 +288,116 @@ def main = f (Some(1)) None
         "def f",
     );
 }
+
+fn int_constant_copies(ir: &str, value: i64) -> usize {
+    ir.matches(&format!("Constant(Int({value}))")).count()
+}
+
+#[test]
+fn two_column_three_row_matrix_specializes_left_to_right() {
+    let source = format!(
+        "{PAIR}def f (a: C2, b: C2): Int =>
+  if a, b
+  | A, B => 1
+  | B, B => 2
+  | _, A => 99
+def main = f A B
+"
+    );
+    let ir = hado::dump_mono(&source, "t").unwrap();
+    assert_eq!(ir.matches("Switch {").count(), 3);
+    let copies = int_constant_copies(&ir, 99);
+    assert_eq!(copies, 2, "2-column wildcard body copies\n{ir}");
+    assert!(ir.contains("Constant(Int(1))"), "{ir}");
+    assert!(ir.contains("Constant(Int(2))"), "{ir}");
+}
+
+#[test]
+fn three_column_four_row_wildcard_body_stays_within_constructor_power() {
+    let source = format!(
+        "{PAIR}def f (a: C2, b: C2, c: C2): Int =>
+  if a, b, c
+  | A, A, B => 1
+  | A, B, B => 2
+  | B, _, B => 3
+  | _, _, A => 99
+def main = f A A A
+"
+    );
+    let ir = hado::dump_mono(&source, "t").unwrap();
+    let copies = int_constant_copies(&ir, 99);
+    assert_eq!(
+        copies, 3,
+        "3-column wildcard body copies, bound 2^3=8\n{ir}"
+    );
+}
+
+#[test]
+fn arm_condition_tail_call_stays_tail_in_two_columns() {
+    let source = format!(
+        "{PAIR}def rec down a b n =>
+  if a, b
+  | A, _ => if
+    | n <= 0 => 42
+    | down a b (n - 1)
+  | B, _ => 0
+def main = down A B 3
+"
+    );
+    let ir = hado::dump_mono(&source, "t").unwrap();
+    assert!(ir.contains("TailCall { function: FunctionId(0)"), "{ir}");
+    assert!(!ir.contains("CallDirect { function: FunctionId(0)"), "{ir}");
+}
+
+#[test]
+fn column_bindings_are_visible_in_the_lowered_body() {
+    let source = "def f (a: Int Option, b: Int List): Int =>
+  if a, b
+  | Some(v), [x, ..._] => v + x
+  | None, _ => 0
+  | _, [] => 1
+def main = f (Some(2)) [3]
+";
+    let ir = hado::dump_mono(source, "t").unwrap();
+    assert!(
+        ir.contains("constructor: \"Some\", index: 0, result: Int"),
+        "{ir}"
+    );
+    assert!(
+        ir.contains("constructor: \"Cons\", index: 0, result: Int"),
+        "{ir}"
+    );
+    assert!(ir.contains("op: Add"), "{ir}");
+}
+
+#[test]
+fn bool_columns_lower_to_nested_branches() {
+    let source = "def f (a: Bool, b: Bool): Int =>
+  if a, b
+  | true, true => 1
+  | true, false => 2
+  | false, _ => 3
+def main = f true false
+";
+    let ir = hado::dump_mono(source, "t").unwrap();
+    assert!(ir.contains("Branch {"), "{ir}");
+    assert!(ir.contains("Constant(Int(1))"), "{ir}");
+    assert!(ir.contains("Constant(Int(3))"), "{ir}");
+}
+
+#[test]
+fn record_column_binds_fields_before_the_remaining_switch() {
+    let source = "type User = { age: Int }
+type Flag = | On | Off
+def f (user: User, flag: Flag): Int =>
+  if user, flag
+  | { age = n }, On => n
+  | { age = _ }, Off => 0
+def main = f { age = 3 } On
+";
+    let ir = hado::dump_mono(source, "t").unwrap();
+    assert!(ir.contains("RecordGet {"), "{ir}");
+    assert!(ir.contains("field: \"age\""), "{ir}");
+    assert!(ir.contains("(\"On\""), "{ir}");
+    assert!(ir.contains("(\"Off\""), "{ir}");
+}
