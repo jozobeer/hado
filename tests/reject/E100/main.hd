@@ -1,4 +1,4 @@
-// spec: §59
+// spec: 付録C
 // error: E100
 // item: 型の綴り
 def id(x: Option<Int>): Option<Int> => x
