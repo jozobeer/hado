@@ -2810,3 +2810,36 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 - 該当なし。言語規則は変えていない。
 
+## R42 節番号を増やしても動かない形にする（2026-09-15）
+
+計画は `docs/plan.md` 38 節。本文と付録を 1 本の通し番号で振っていたため、本文の途中に 1 節増えるだけで corpus のタグ・エラー表の節欄・門番・コメントまで全部ずらすことになっていた（R39・R40 で 2 回行った）。付録を文字の別系列にし、本文の追加は小数番号で行う形にして、以後は既存の番号を動かさない。**言語規則は変えていない。** 本文 §1〜§56 の番号と内容も変えていない。
+
+### 実装
+
+- `docs/spec.md` の付録 3 節を `## 付録A コア構文`・`## 付録B 典型コード`・`## 付録C 文法の概形` にし、目次と、付録を引く本文（E100 の節欄と説明）を追随させた。
+- 付録を引く参照を追随させた（`docs/spec-trace.md` 6、`docs/spec-coverage.md` 6、`docs/corpus.md` 2、`docs/wants.md` 1、`crates/` のコメント 6、Rust テスト 2）。
+- corpus の `// spec: §58` 11 件を `付録B`、`§59` 1 件を `付録C` にし、`tests/corpus.sha256` の 12 行を更新した。
+- 門番を追随させた。`lint-docs.sh` は本文（整数と小数）と付録（A から）を分けて検査し、`heading_exists` は `§N` と `付録X` の両方を引く。`verify-m1-corpus.sh` は典型コードの節を `付録B` にし、タグの正規表現を `§N`・`§N.M`・`付録X` に広げた。`verify-m1-spec.sh` も同じ形にした。`verify-m2.sh` と `verify-r23.sh` のタグとラベル。`verify-r41.sh` を `verify-r42.sh` にし、`scripts/lib/gate-tiers.sh` の full を `r42` にした。
+- 保守の規約を `AGENTS.md`（守ること）と `docs/corpus.md`（タグの節）に書いた。本文の新しい節は直前に置きたい節の直後に小数で入れ、整数は本文の末尾にだけ足す。付録は `付録A` から順に足す。
+
+### 判定の実測
+
+- **42-a（構造・参照）。** `bash scripts/verify-r42.sh` は 5/5。`sections: 56 (1..56), appendix: ['付録A', '付録B', '付録C']`、`current only: version ['v0.3.1'], no spec-map in the live documents or gates`、`codes: 69, corpus tags resolve and match`、`version: v0.3.1`。
+- **42-b（文書層）。** `bash scripts/lint-docs.sh` は 7/7。
+- **42-c（層の一覧）。** `bash scripts/verify-gate-cache.sh` は 26/26。
+- **42-d（層別）。** `--tier quick target/r42-gates/quick` は 7 秒で exit 0（build 1/1、gate-cache 26/26、m1-spec 1/1）。`--tier core target/r42-gates/core` は 356 秒で exit 0（gate-cache 26/26、m0 7/7、m1-corpus 7/7、m1-spec 1/1、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r38 138/138）。`--jobs 8 --tier full target/r42-gates/full` は 40 本、471 秒で exit 0。3 走行とも `^NG:` は 0。
+- **42-e（cargo test）。** `cargo test --offline -q --test r9_grammar --test r23_syntax --test parse_corpus` は r9_grammar 5、r23_syntax 9、parse_corpus 1 の全て passed（exit 0）。
+- **42-f（番号の据え置き）。** 本文の整数は 1〜56 のまま。corpus と現行文書の付録参照は `付録A`・`付録B`・`付録C` になった。`grep '§5[789]'`（計画と台帳の記録を除く）は 0 件。
+- 変更した門番: `verify-m1-spec.sh` 1/1、`verify-m1-corpus.sh` 7/7、`verify-m2.sh` 8/8、`verify-m3.sh` 12/12、`verify-m7.sh` 3/3、`verify-r23.sh` 3/3、`verify-r34.sh` 1360/1360、`verify-r36.sh` 388/388、`verify-r37.sh` 254/254、`verify-r38.sh` 138/138。
+
+### 迷った点
+
+- **付録の見出しの形。** `## 付録A コア構文` とした（`## A. コア構文` ではない）。本文の `## N.` と見分けが付き、機械参照 `付録A` がそのまま見出しの先頭になる。
+- **小数の例。** 規約には `§N.M` と書いた。`§20.1` のような実在しない番号を例にすると、参照の実在を検査する 42-a(5) が赤になる。具体例は計画 38 節と本節に置いた。
+- **門番のタグ解析。** 付録を足した時点で、`verify-m1-corpus.sh` の 3 か所と `lint-docs.sh`・`verify-m1-spec.sh` の参照検査が数字だけを前提にしていたことが赤で分かった。`§N`（整数・小数）と `付録X` を受ける形に広げた。
+- **本文への挿入。** 挿入は「直前に置きたい節の直後に `§N.1`」で行う。既に `§N.1` があるときは `§N.2` を足す。この範囲の番号だけは動きうるが、他の節には影響しない。
+
+### 仕様への疑義
+
+- 該当なし。言語規則は変えていない。
+
