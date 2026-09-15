@@ -2726,6 +2726,7 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - **39-d（Rust）。** `cargo test --offline -q --test r9_grammar --test r23_syntax --test parse_corpus` は r9_grammar 5、r23_syntax 9、parse_corpus 1 の全て passed（exit 0）。
 - **39-e（corpus-lock）。** `tests/corpus.sha256` は 213 行のまま、うち 175 行のハッシュを更新した。`sha256sum --strict --status -c tests/corpus.sha256` は exit 0。`verify-m3.sh` の check10 も緑。accept の `main.hd` は 104、reject のコードは 69、`tests/library/` は 4。
 - **39-f（全走）。** `bash scripts/run-gates.sh --jobs 8 --tier full /tmp/hado-gates-r39` は exit 0、40 本、real 7 分 51 秒（466 秒）。`^NG:` は 0。全走のログは一時ディレクトリに置いたため、変更した 11 本は `target/r39-gates/` に写して上に数えた。
+- **39-f（層別）。** `bash scripts/run-gates.sh --tier quick target/r39-gates/quick` は 7 秒（build、gate-cache 26/26、m1-spec 1/1）。`--tier core target/r39-gates/core` は 353 秒で、gate-cache 26/26、m0 7/7（cargo test の全走）、m1-corpus 7/7、m1-spec 1/1、m2 8/8、m3 12/12、m4 133/133、m5 145/145、m6 71/71、m7 3/3、r38 138/138。どちらも exit 0 で `^NG:` は 0。
 - **39-g（規則の不変）。** v0.3 の §50 と新しい §57 の 69 行を照合し、コード・短い名・段階が一致、アンカーの欄が節参照の置換の像、節の列が写像の像であることを確かめた。`git diff --stat -- stdlib runtime` は空、`crates/` の差分は節番号の参照（コメントと `r9_grammar.rs`・`r23_syntax.rs`・`unit/parser.rs` が見る見出し文字列）の追随だけである。
 
 全走の後に `docs/plan.md` の 39-g を書き換えながら `verify-m1-corpus.sh` を回し、check7 が `protected-files-changed-during-verification` で 6/7 になった。検査が正しく効いた例で、編集を止めて回し直すと 7/7 である。
