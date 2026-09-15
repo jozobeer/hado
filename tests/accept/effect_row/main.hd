@@ -2,13 +2,13 @@
 // expect: 1
 // item: 効果行
 effect Ask
-reply ask: String
+once ask: String
 effect Log
-reply tick: Unit
+once tick: Unit
 handler Ask as HAsk
-reply ask => ""
+once ask => ""
 handler Log as HLog
-reply tick => ()
+once tick => ()
 def ordered (x: Int): Int {Log, Ask} => x
 def omitted x => x
 def claimed (x: Int): Int Pure => x

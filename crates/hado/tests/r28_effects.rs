@@ -90,7 +90,7 @@ fn with_inside_abort_arm_applies_its_return() {
         let once = random(&mut state, 20);
         let add = random(&mut state, 11);
         let (status, stdout) = run_main(&format!(
-            "effect A\nabort a\neffect B\nreply b: Int\nhandler A as Outer\nabort a => with Inner -> b\nreturn x => x * 10\nhandler B as Inner\nreply b => {once}\nreturn x => x + {add}\ndef f (n: Int): Int {{A}} => if n > 0 => n | a\ndef main = with Outer -> f 0\n"
+            "effect A\nabort a\neffect B\nonce b: Int\nhandler A as Outer\nabort a => with Inner -> b\nreturn x => x * 10\nhandler B as Inner\nonce b => {once}\nreturn x => x + {add}\ndef f (n: Int): Int {{A}} => if n > 0 => n | a\ndef main = with Outer -> f 0\n"
         ));
         assert_eq!(status, 0);
         assert_eq!(stdout, format!("{}\n", once + add));

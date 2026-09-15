@@ -25,7 +25,7 @@ reject_codes_match() {
     [ -n "$spec" ] && [ "$spec" = "$disk" ]
 }
 
-check '26-a/b/c/e reply abort capture E706 probes' cargo_test_cached test --offline --test r26_effects
+check '26-a/b/c/e once abort again E706 probes' cargo_test_cached test --offline --test r26_effects
 check '26-d reject codes match §56' reject_codes_match
 
 echo "PASSED: $passed/$total"

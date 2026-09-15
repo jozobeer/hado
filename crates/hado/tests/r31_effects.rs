@@ -8,7 +8,7 @@ fn run_main(body: &str, expected: &[i64]) {
     ));
     std::fs::create_dir(&dir).unwrap();
     let source = format!(
-        "effect Y\ncapture y(value: Int): Unit\nhandler Y as Keep\ncapture y value => let rest = resume () -> [value, ...rest]\nreturn x => x\n{body}\n"
+        "effect Y\nagain y(value: Int): Unit\nhandler Y as Keep\nagain y value => let rest = resume () -> [value, ...rest]\nreturn x => x\n{body}\n"
     );
     std::fs::write(dir.join("main.hd"), &source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado"))
@@ -29,7 +29,7 @@ fn payloads() -> (i64, i64) {
 }
 
 #[test]
-fn branch_result_is_bound_after_the_selected_capture() {
+fn branch_result_is_bound_after_the_selected_again() {
     let (a, b) = payloads();
     run_main(&format!(
         "def f u => if u == () => [7] | []\ndef main = with Keep -> let u = if true => y {a} | y {b} -> f u"
@@ -115,14 +115,14 @@ fn non_unit_again_result_is_bound() {
     for _ in 0..4 {
         let seed = random(&mut state);
         Case::new(&format!(
-            "effect Ask\ncapture ask(seed: Int): Int\nhandler Ask as Twice\ncapture ask seed => resume (seed * 2)\nreturn x => x\ndef main = with Twice -> let v = ask {seed} -> [v]\n"
+            "effect Ask\nagain ask(seed: Int): Int\nhandler Ask as Twice\nagain ask seed => resume (seed * 2)\nreturn x => x\ndef main = with Twice -> let v = ask {seed} -> [v]\n"
         )).run_main(&format!("[{}]", seed * 2));
     }
 }
 
 fn mixed_source(body: &str, prefix: &str) -> String {
     format!(
-        "effect S\ncapture s(value: String): Unit\neffect Y\ncapture y(value: Int): Unit\nhandler S as Names\ncapture s value => let rest = resume () -> [value, ...rest]\nreturn x => x\nhandler Y as Collect\ncapture y value => let rest = resume () -> [String.concat \"{prefix}\" (Int.to_string value), ...rest]\nreturn _ => []\ndef main = with Names -> with Collect -> {body}\n"
+        "effect S\nagain s(value: String): Unit\neffect Y\nagain y(value: Int): Unit\nhandler S as Names\nagain s value => let rest = resume () -> [value, ...rest]\nreturn x => x\nhandler Y as Collect\nagain y value => let rest = resume () -> [String.concat \"{prefix}\" (Int.to_string value), ...rest]\nreturn _ => []\ndef main = with Names -> with Collect -> {body}\n"
     )
 }
 

@@ -3,6 +3,6 @@
 // item: handler と with
 def main = 1
 effect Ask
-reply ask: String
+once ask: String
 handler Ask as Fixed
-reply ask => resume
+once ask => resume

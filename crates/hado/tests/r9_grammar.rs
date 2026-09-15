@@ -355,7 +355,7 @@ impl Generator {
     }
 
     fn op_kind(&mut self) -> &'static str {
-        ["reply", "abort", "capture"][self.choose("op_kind", 3)]
+        ["once", "abort", "again"][self.choose("op_kind", 3)]
     }
 
     fn handler_section(&mut self) -> String {
@@ -387,7 +387,7 @@ impl Generator {
                 format!(" {}", if g.random(2) == 0 { "_".into() } else { g.name(false) })
             }, "");
             let saved = self.allow_resume;
-            self.allow_resume = kind == "capture";
+            self.allow_resume = kind == "again";
             let body = self.expression(2, false);
             self.allow_resume = saved;
             format!("{kind} {name}{params} => {body}")

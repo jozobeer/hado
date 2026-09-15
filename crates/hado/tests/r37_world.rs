@@ -35,15 +35,15 @@ impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.
 fn operation_result_rows_reach_the_call_without_effectful_handler_arms() {
     for (annotation, expected) in [("", "String"), (" {Error}", "String {Error}"), (" {Error, Bar}", "String {Bar, Error}")] {
         for (param, arm, call) in [("", "", "pick"), ("(n: Int)", " _", "pick 3")] {
-            Case::new(&format!("effect Bar\nreply other: Int\neffect Foo\nreply pick{param}: Int{annotation}\nhandler Foo as H\nreply pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n")).prints_type(expected);
+            Case::new(&format!("effect Bar\nonce other: Int\neffect Foo\nonce pick{param}: Int{annotation}\nhandler Foo as H\nonce pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n")).prints_type(expected);
         }
     }
 }
 
 #[test]
 fn operation_result_rows_remain_before_discharge() {
-    Case::new("effect Foo\nreply pick: Int {Error}\ndef use (n: Int) => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
-    Case::new("effect Foo\nreply pick: Int {Error}\ndef use (n: Int): Int {Foo, Error} => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
+    Case::new("effect Foo\nonce pick: Int {Error}\ndef use (n: Int) => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
+    Case::new("effect Foo\nonce pick: Int {Error}\ndef use (n: Int): Int {Foo, Error} => pick + n\ndef main = Int.to_string (use 3)\n").prints_type("String {Error, Foo}");
 }
 
 #[test]
@@ -63,12 +63,12 @@ fn let_bindings_shadow_operations() {
 
 #[test]
 fn user_operation_parameters_shadow_operations() {
-    Case::new("effect Foo\nreply tick: Int\ndef f (tick: Int): Int => tick\ndef main = Int.to_string (f 3)\n").runs(3);
+    Case::new("effect Foo\nonce tick: Int\ndef f (tick: Int): Int => tick\ndef main = Int.to_string (f 3)\n").runs(3);
 }
 
 #[test]
 fn shadowed_again_is_a_local_let_value() {
-    Case::new("effect Foo\ncapture tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
+    Case::new("effect Foo\nagain tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
 }
 
 #[test]
@@ -91,13 +91,13 @@ fn prelude_once_defaults_cover_every_operation() {
 fn default_definitions_are_required_and_checked_after_inference() {
     let prefix = "effect Error\nabort raise(error: Exception)\neffect World\n";
     for (operation, signature, definition, expected) in [
-        ("reply pick: Int", "", "", Some("E204")),
-        ("reply pick: Int", "def pick: String Pure", "def pick = \"wrong\"", Some("E305")),
-        ("reply pick: Int", "def pick: Int {Error}", "def pick = raise { message = \"x\" }", Some("E305")),
-        ("reply pick: Int {Error}", "def pick: Int Pure", "def pick = 11", None),
-        ("reply pick(n: Int): Int {Error}", "def pick(n: Int): Int Pure", "def pick n => n + 1", None),
-        ("reply pick(n: Int): Int", "def pick: Int Pure", "def pick = 11", Some("E301")),
-        ("reply pick: Int", "def pick(n: Int): Int Pure", "def pick n => n + 1", Some("E301")),
+        ("once pick: Int", "", "", Some("E204")),
+        ("once pick: Int", "def pick: String Pure", "def pick = \"wrong\"", Some("E305")),
+        ("once pick: Int", "def pick: Int {Error}", "def pick = raise { message = \"x\" }", Some("E305")),
+        ("once pick: Int {Error}", "def pick: Int Pure", "def pick = 11", None),
+        ("once pick(n: Int): Int {Error}", "def pick(n: Int): Int Pure", "def pick n => n + 1", None),
+        ("once pick(n: Int): Int", "def pick: Int Pure", "def pick = 11", Some("E301")),
+        ("once pick: Int", "def pick(n: Int): Int Pure", "def pick n => n + 1", Some("E301")),
     ] {
         let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\nimplement WorldDefault as WorldDefault\n{definition}\n");
         let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");

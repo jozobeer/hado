@@ -434,9 +434,9 @@ pub enum OpKind {
 impl OpKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Once => "reply",
+            Self::Once => "once",
             Self::Abort => "abort",
-            Self::Again => "capture",
+            Self::Again => "again",
         }
     }
 }
@@ -1603,7 +1603,7 @@ impl Parser<'_> {
             TokKind::KwFn => return self.parse_fun(),
             TokKind::KwResume => {
                 if !self.in_resume_scope {
-                    return Err(self.error(Some("E124"), "resume is only allowed in a capture arm"));
+                    return Err(self.error(Some("E124"), "resume is only allowed in an again arm"));
                 }
                 self.bump();
                 NodeKind::Resume

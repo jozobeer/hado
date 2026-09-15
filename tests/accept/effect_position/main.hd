@@ -3,9 +3,9 @@
 // item: 効果の位置
 // needs: prelude
 effect Ask
-reply ask: Bool
+once ask: Bool
 handler Ask as HAsk
-reply ask => false
+once ask => false
 type Flag = | Yes | No
 def fetch (b: Bool): Flag {Ask} => if b => Yes | No
 def get (n: Int): Int {Ask} => n

@@ -14,7 +14,7 @@ trap 'rm -rf "$probe"' EXIT
 cat >"$probe/main.hd" <<'HD'
 def main = 0
 effect Unused
-reply unused: Int
+once unused: Int
 HD
 status=0
 RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?

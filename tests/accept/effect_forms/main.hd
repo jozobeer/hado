@@ -2,17 +2,17 @@
 // expect: 1
 // item: 効果の宣言
 effect Ask
-reply ask: String
+once ask: String
 effect Stop
 abort stop
 effect A Yield
-capture yield(value: A): Unit
+again yield(value: A): Unit
 handler Ask as HAsk
-reply ask => ""
+once ask => ""
 handler Stop as HStop
 abort stop => 0
 handler A Yield as HYield
-capture yield _ => resume ()
+again yield _ => resume ()
 def id (x: Int): Int {Ask, Stop, Int Yield} => x
 def main =
   with HAsk ->

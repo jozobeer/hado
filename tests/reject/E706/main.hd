@@ -2,7 +2,7 @@
 // error: E706
 // item: 末尾呼び出しの限定
 effect A Yield
-capture yield(value: A): Unit
+again yield(value: A): Unit
 def rec loop (n: Int): Unit {Int Yield} =>
   if n <= 0 => ()
   | do yield n -> loop (n - 1)

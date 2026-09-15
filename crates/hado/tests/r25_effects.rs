@@ -93,7 +93,7 @@ fn do_effect_row_is_checked_after_number_defaulting() {
         case.write("main.hd", &format!("def f (x: Int): Int => do (x / x) -> {n}\ndef main = f {arg}\n"));
         assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
         perturb_rejection(&case, "main.hd", &format!("def f x => do {discarded} -> x\ndef main = f {arg}\n"), "E303", &discarded.to_string());
-        case.write("main.hd", &format!("effect Ask\nreply ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"));
+        case.write("main.hd", &format!("effect Ask\nonce ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"));
         assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
     }
 }

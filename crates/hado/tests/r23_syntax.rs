@@ -103,9 +103,9 @@ fn abort_return_type_is_e123_on_the_colon() {
 fn resume_outside_again_is_e124_on_resume() {
     for source in [
         "def main = resume",
-        "effect Ask\nreply ask: String\nhandler Ask as Fixed\nreply ask => resume",
+        "effect Ask\nonce ask: String\nhandler Ask as Fixed\nonce ask => resume",
         "effect Ask\nabort stop\nhandler Ask as Fixed\nabort stop => resume",
-        "effect Ask\nreply ask: String\nhandler Ask as Fixed\nreturn value => resume",
+        "effect Ask\nonce ask: String\nhandler Ask as Fixed\nreturn value => resume",
     ] {
         reject(source, "E124", source.find("resume").unwrap());
     }
@@ -114,9 +114,9 @@ fn resume_outside_again_is_e124_on_resume() {
 #[test]
 fn again_arm_may_contain_resume() {
     for source in [
-        "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as H\ncapture yield value => resume",
-        "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as H\ncapture yield value => let rest = resume () -> rest",
-        "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as H\ncapture yield value => fn(x => resume)",
+        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => resume",
+        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => let rest = resume () -> rest",
+        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => fn(x => resume)",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
@@ -125,9 +125,9 @@ fn again_arm_may_contain_resume() {
 #[test]
 fn once_and_again_may_write_a_result() {
     for source in [
-        "effect Ask\nreply ask: String",
-        "effect A Yield\ncapture yield(value: A): Unit",
-        "effect Ask\nreply ask",
+        "effect Ask\nonce ask: String",
+        "effect A Yield\nagain yield(value: A): Unit",
+        "effect Ask\nonce ask",
         "effect E\nabort raise(error: Exception)",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));

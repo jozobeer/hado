@@ -757,8 +757,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
     printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
     printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
-    printf 'effect Send\ncapture send(value: Store.T): String\n'
-    printf 'handler Send as Handle\ncapture send value => resume (String.concat value "!")\n'
+    printf 'effect Send\nagain send(value: Store.T): String\n'
+    printf 'handler Send as Handle\nagain send value => resume (String.concat value "!")\n'
 } >"$workdir/33eff/main.hd"
 
 # 負 3: shared を外すと操作型の payload は不透明のまま handler の腕で落ちる。
@@ -766,8 +766,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
     printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
     printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
-    printf 'effect Send\ncapture send(value: Store.T): String\n'
-    printf 'handler Send as Handle\ncapture send value => resume (String.concat value "!")\n'
+    printf 'effect Send\nagain send(value: Store.T): String\n'
+    printf 'handler Send as Handle\nagain send value => resume (String.concat value "!")\n'
 } >"$workdir/33effneg/main.hd"
 
 # 正 4 (handler-arm): 効果 Ask の操作 get の結果型が Store.T。register_effects の時点で
@@ -776,8 +776,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
     printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
     printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
-    printf 'effect Ask\ncapture get(value: String): Store.T\n'
-    printf 'handler Ask as Handle\ncapture get value => resume value\n'
+    printf 'effect Ask\nagain get(value: String): Store.T\n'
+    printf 'handler Ask as Handle\nagain get value => resume value\n'
 } >"$workdir/33harm/main.hd"
 
 # 負 4: shared を外すと操作の結果型は不透明のまま腕の resume で落ちる。
@@ -785,8 +785,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
     printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
     printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
     printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
-    printf 'effect Ask\ncapture get(value: String): Store.T\n'
-    printf 'handler Ask as Handle\ncapture get value => resume value\n'
+    printf 'effect Ask\nagain get(value: String): Store.T\n'
+    printf 'handler Ask as Handle\nagain get value => resume value\n'
 } >"$workdir/33harmneg/main.hd"
 
 # --- 工程 1 の修正 5: 関数型を本体とする shared の等式 ---

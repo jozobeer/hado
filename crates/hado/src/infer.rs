@@ -1930,7 +1930,7 @@ impl Checker<'_> {
                 let definition = module.and_then(|module| module.items.iter().find_map(|item| match item {
                     Item::Def(def) if def.name == op.name => Some(format!("{}.{}", module.name, def.name)),
                     _ => None,
-                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude reply has no default definition"))?;
+                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude once has no default definition"))?;
                 self.default_operations.insert(op.name.clone(), definition);
             }
         }
