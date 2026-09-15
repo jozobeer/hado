@@ -62,6 +62,19 @@ hado_tier_all_gates() {
     hado_tier_minimal_gates full
 }
 
+# 並列（--jobs>1）の前段で直列に完走させる門番（docs/plan.md 34 節）。
+# キャッシュの鍵は作業ツリー全体のハッシュなので、共有ツリーを書き換える門番を
+# ファンアウトで走らせると他の門番の結果が揺れる。ここに挙げた門番は
+#   gate-cache      : リポジトリ直下に probe を置いて消す（内容ハッシュを揺らす）
+#   m0              : ビルドと全走テスト。full-test の証拠を確定させる barrier
+#   m1-corpus/m2/m3 : tests/accept・tests/reject に probe を置き、入れ替える
+# ため直列にする。run-gates はこの一覧 ∩ 走行する門番を前段に置く。
+# ツリーを書く門番を足したら、ここにも足す。verify-gate-cache.sh が一覧が
+# 実在の門番の部分集合であることを機械で見る。
+hado_tier_serial_gates() {
+    printf '%s\n' gate-cache m0 m1-corpus m2 m3
+}
+
 hado_tiers() {
     printf '%s\n' quick core full
 }

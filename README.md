@@ -50,6 +50,7 @@ scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い�
 scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
 scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
 scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
+scripts/run-gates.sh --jobs 8 --tier full 出力先 # 同じ判定を 8 並列で（既定 1=直列）
 bash scripts/verify-m0.sh                # 門番は単独でも走る
 ```
 
@@ -58,6 +59,14 @@ bash scripts/verify-m0.sh                # 門番は単独でも走る
 あるときだけ効く（33 節）。層に門番を足すときは `--tier core 出力先 verify-r33` の
 ように書く。門番を 1 本ずつ別のシェルで走らせると、畳み込みは各門番の入れ子の
 範囲でしか効かない。文書の整合は `scripts/lint-docs.sh` が持ち、full の最後に回る。
+
+`--jobs N`（既定 1）は門番を N 並列で走らせる（34 節）。判定は変えず、直列と
+同じ `PASSED: n/N` を出す。既定が直列なのは再現性のためで、`--jobs` なしの
+挙動は 33 節と変わらない。共有ツリーを書き換える門番（m0・m1-corpus・m2・m3・
+gate-cache）は前段で 1 本ずつ完走させてから残りをファンアウトする。ゲート
+キャッシュの鍵は作業ツリーの内容なので、これらを並列に走らせると他の門番の
+結果が揺れるためである。前段の後とファンアウトの後で内容ハッシュを比べ、
+変わっていれば分類漏れとして赤にする。
 
 ## 構成
 
