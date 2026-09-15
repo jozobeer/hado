@@ -1,4 +1,4 @@
-// spec: §45
+// spec: §22
 // item: 配列
 // expect: [1, 1, -1, 0, 1]
 // needs: prelude

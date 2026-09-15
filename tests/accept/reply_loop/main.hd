@@ -1,4 +1,4 @@
-// spec: §48
+// spec: §54
 // expect: 10000000
 effect Tick
 reply tick: Unit

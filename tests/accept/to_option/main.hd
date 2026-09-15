@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §59
 // expect: Some(5)
 handler Error as ToOption
 abort raise _ => None

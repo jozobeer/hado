@@ -1,4 +1,4 @@
-// spec: §21
+// spec: §34
 // expect:
 // item: Unit payload
 def done (x: Int): Unit {Error} => if x == 1 => () | raise { message = "unexpected" }

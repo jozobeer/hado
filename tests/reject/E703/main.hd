@@ -1,4 +1,4 @@
-// spec: §45
+// spec: §22
 // error: E703
 // item: 関数値
 def inc x => x + 1

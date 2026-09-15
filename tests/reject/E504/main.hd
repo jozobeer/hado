@@ -1,4 +1,4 @@
-// spec: §23
+// spec: §36
 // error: E504
 def f x =>
   let _? = Some(x) ->

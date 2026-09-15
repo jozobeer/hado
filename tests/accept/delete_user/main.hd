@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §59
 // expect:
 // item: 呼び出し構文
 def find_user (id: Int): Int {Error} => id

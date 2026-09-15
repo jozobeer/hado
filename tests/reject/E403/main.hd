@@ -1,4 +1,4 @@
-// spec: §31
+// spec: §44
 // error: E403
 def f x =>
   if x

@@ -1,4 +1,4 @@
-// spec: §4
+// spec: §10
 // error: E207
 def rec ping x => seed
 def seed = ping 0

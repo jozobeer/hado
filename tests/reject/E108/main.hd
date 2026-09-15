@@ -1,4 +1,4 @@
-// spec: §11
+// spec: §18
 // error: E108
 type Size = Large | Small
 def main = Large

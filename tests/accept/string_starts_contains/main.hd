@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §56
 // item: String 操作
 // expect: [true, false, true, false, true, true]
 // needs: prelude

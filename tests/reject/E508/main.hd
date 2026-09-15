@@ -1,4 +1,4 @@
-// spec: §24
+// spec: §37
 // error: E508
 def find_user (id: Int): Int Option => Some(id)
 def f id =>

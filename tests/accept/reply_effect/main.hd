@@ -1,4 +1,4 @@
-// spec: §57
+// spec: §38
 // expect: hello
 effect Ask
 reply ask: String

@@ -1,4 +1,4 @@
-// spec: §58
+// spec: §39
 // expect: [2, 1]
 effect Z
 capture z(value: Int): Unit

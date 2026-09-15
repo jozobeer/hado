@@ -1,4 +1,4 @@
-// spec: §52
+// spec: §32
 // error: E515
 type Profile = { name: String }
 type User = | Guest | Member(Profile)

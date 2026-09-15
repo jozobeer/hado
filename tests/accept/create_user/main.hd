@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §59
 // expect: ok
 // item: 関数適用
 def parse (input: Int List): Int List {Error} => input

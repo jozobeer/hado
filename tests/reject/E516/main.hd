@@ -1,4 +1,4 @@
-// spec: §46
+// spec: §23
 // error: E516
 // item: List 構文
 def empty | Nil => true | [_, ..._] => false

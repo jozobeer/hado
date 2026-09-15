@@ -1,4 +1,4 @@
-// spec: §27
+// spec: §40
 // error: E505
 def f x =>
   let unused = 1 ->

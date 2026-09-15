@@ -1,4 +1,4 @@
-// spec: §58
+// spec: §39
 // expect: 101
 effect A
 abort a

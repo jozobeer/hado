@@ -1,4 +1,4 @@
-// spec: §19
+// spec: §30
 // error: E503
 def f
   | Some(v) => v

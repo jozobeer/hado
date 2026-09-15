@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §56
 // item: 配列
 // expect-error: IndexOutOfRange
 // needs: prelude

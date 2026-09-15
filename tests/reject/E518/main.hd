@@ -1,4 +1,4 @@
-// spec: §10
+// spec: §17
 // error: E518
 // item: 契約の拡張
 def main = Phantom.read (Phantom.make 1)

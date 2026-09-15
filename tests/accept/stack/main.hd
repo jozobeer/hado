@@ -1,4 +1,4 @@
-// spec: §34
+// spec: §47
 // expect: [7]
 // item: 契約の拡張
 def main = Stack.contents (Stack.push Stack.empty 7)

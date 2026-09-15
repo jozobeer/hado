@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §56
 // item: Int.parse
 // expect: [42, -7, 0, 7, -7]
 // needs: prelude

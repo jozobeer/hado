@@ -1,4 +1,4 @@
-// spec: §10
+// spec: §17
 // expect: 1
 // item: 再帰型
 type T List2 = | Nil2 | Cons2(T, T List2)

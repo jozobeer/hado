@@ -1,4 +1,4 @@
-// spec: §32
+// spec: §45
 // error: E406
 def grade2 score
   | score >= 70 => 1

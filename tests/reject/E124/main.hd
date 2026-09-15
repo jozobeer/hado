@@ -1,4 +1,4 @@
-// spec: §58
+// spec: §39
 // error: E124
 // item: handler と with
 def main = 1

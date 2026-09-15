@@ -1,4 +1,4 @@
-// spec: §59
+// spec: §53
 // item: ライブラリ単位
 implement Store as Memory
 def read x => x

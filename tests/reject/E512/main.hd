@@ -1,4 +1,4 @@
-// spec: §16
+// spec: §27
 // error: E512
 // item: 変数パターン
 def f

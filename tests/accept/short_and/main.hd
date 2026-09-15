@@ -1,4 +1,4 @@
-// spec: §44
+// spec: §8
 // expect: false
 // short-circuit: &&
 def rec ping x => pong x

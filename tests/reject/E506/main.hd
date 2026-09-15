@@ -1,4 +1,4 @@
-// spec: §28
+// spec: §41
 // error: E506
 def f x =>
   let _ = x ->

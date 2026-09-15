@@ -1,4 +1,4 @@
-// spec: §54
+// spec: §51
 // expect: 42
 // item: 複数の入口
 def seed = 41

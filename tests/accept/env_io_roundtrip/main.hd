@@ -1,4 +1,4 @@
-// spec: §49
+// spec: §56
 // item: Env と Io
 // expect: { argv = []; stdin = 0; same = true }
 // needs: prelude

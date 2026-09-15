@@ -1,4 +1,4 @@
-// spec: §5
+// spec: §11
 // error: E706
 // item: 末尾呼び出しの限定
 effect A Yield

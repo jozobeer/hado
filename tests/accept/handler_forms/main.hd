@@ -1,4 +1,4 @@
-// spec: §58
+// spec: §39
 // expect: 1
 // item: handler と with
 effect Ask

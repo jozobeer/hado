@@ -1,4 +1,4 @@
-// spec: §39
+// spec: §59
 // expect: anonymous
 // item: 変数パターン
 type User = { name: String Option }

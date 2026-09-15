@@ -1,4 +1,4 @@
-// spec: §46
+// spec: §23
 // expect: [3, 7, 3]
 // item: List 構文
 def rec count | [] => 0 | [_, ...tail] => 1 + count tail

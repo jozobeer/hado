@@ -1,4 +1,4 @@
-// spec: §10
+// spec: §17
 // error: E302
 // item: 再帰型
 type T Nest = | Leaf(T) | Node(T List Nest)

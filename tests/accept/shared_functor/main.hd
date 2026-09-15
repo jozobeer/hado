@@ -1,4 +1,4 @@
-// spec: §56
+// spec: §49
 // expect: ab
 // item: 型の共有
 // needs: prelude

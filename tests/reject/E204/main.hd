@@ -1,4 +1,4 @@
-// spec: §47
+// spec: §50
 // error: E204
 // item: 名前空間
 def main = store::MemoryStore.run 1

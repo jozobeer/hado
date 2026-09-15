@@ -1,4 +1,4 @@
-// spec: §57
+// spec: §38
 // expect: [42]
 effect Ask
 capture ask(seed: Int): Int
