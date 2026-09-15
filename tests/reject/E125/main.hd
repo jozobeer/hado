@@ -1,0 +1,8 @@
+// spec: §26
+// error: E125
+def f (a: Int List, b: Int List): Int =>
+  if a, b
+  | [] => 0
+  | [_, ..._], [_, ..._] => 1
+  | 2
+def main = f [] []

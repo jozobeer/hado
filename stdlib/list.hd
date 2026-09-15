@@ -21,9 +21,13 @@ def reverse values => fold values [] fn(reversed, value => [value, ...reversed])
 def rec append left right => if left | [] => right | [head, ...tail] => [head, ...append tail right]
 def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
 def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
-def rec merge left right comparator => if left | [] => right | [a, ...rest_a] => merge_right left a rest_a right comparator
-def rec merge_right left a rest_a right comparator => if right | [] => left | [b, ...rest_b] => merge_heads left a rest_a right b rest_b comparator
-def rec merge_heads left a rest_a right b rest_b comparator => if comparator a b <= 0 => [a, ...merge rest_a right comparator] | [b, ...merge left rest_b comparator]
+def rec merge left right comparator =>
+  if left, right
+  | [], _ => right
+  | _, [] => left
+  | [a, ...rest_a], [b, ...rest_b] => if
+    | comparator a b <= 0 => [a, ...merge rest_a right comparator]
+    | [b, ...merge left rest_b comparator]
 def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => merge (sort (odds values) comparator) (sort (evens values) comparator) comparator
 def head
 | [] => None

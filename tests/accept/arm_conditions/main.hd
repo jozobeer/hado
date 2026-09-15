@@ -1,0 +1,9 @@
+// spec: §26.1
+// expect: excellent
+type Grade = | Pass(Int) | Fail
+def describe
+| Pass(score) => if
+  | score >= 90 => "excellent"
+  | "pass"
+| Fail => "fail"
+def main = describe (Pass(95))
