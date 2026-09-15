@@ -3,12 +3,12 @@
 effect A
 abort a
 effect B
-reply b: Int
+once b: Int
 handler A as Outer
 abort a => with Inner -> b
 return x => x * 10
 handler B as Inner
-reply b => 3
+once b => 3
 return x => x + 2
 def f (n: Int): Int {A} => if n > 0 => n | a
 def main = with Outer -> f 0

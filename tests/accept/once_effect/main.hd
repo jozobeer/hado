@@ -1,0 +1,9 @@
+// spec: §37
+// expect: hello
+effect Ask
+once ask: String
+handler Ask as Fixed
+once ask => "hello"
+def main =
+  with Fixed ->
+  ask

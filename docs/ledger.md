@@ -2896,4 +2896,45 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - **`trim` の空白の集合。** §55 は定めていない。ASCII の 6 種とし、全角空白は除かないと明記した。
 - **`String` の単位と `trim` の実装の単位。** §55 の `String` は文字（Unicode スカラ値）の列だが、`trim` の実装はバイト単位である。除く 6 種が ASCII なので結果は一致するが、実装の単位が仕様の単位と違うことを記録する。
 - **`log` が予約名になること。** §37 により、以後の利用者の `def log` と他の効果の `reply log` は E205 になる（実測: 前者は `E205`、後者は `E205: duplicate declaration log`）。既存のコーパスと stdlib に `log` の宣言は無かった。
+## R44 効果の操作の名前を once / again に変える（2026-09-16）
+
+### 背景と決定
+
+効果の操作の種別 `reply` / `capture` を `once` / `again` に改名した。`capture` はクロージャが環境を捕まえることを指す語と同じで、`crates/hado/src/{mono,repr,emit}.rs` の `captures` と意味が重なる。操作の意味（呼び出し位置で 1 回返る / 継続をもう一度走らせられる）を名前にする。`abort` と `resume` は動かさない。手順と決定は `docs/plan.md` 40 節。
+
+改名は 3 層に及ぶ。言語の見える面（キーワード、仕様、コーパス、stdlib、診断文）、実装の内部識別子、コーパスのディレクトリ名である。クロージャの `captures` は別概念なので残した。
+
+### 実装
+
+- コミットを 6 つに割った。計画（docs）→ 内部識別子（refactor）→ 仕様（docs）→ 判定器（test、赤の実測）→ 挙動（feat）→ 許容される赤の追記（docs）。識別子の改名を振る舞いの変更から先に切ったので、feat の差分はソースの綴りだけになった。
+- 内部識別子を `OpKind::Once` / `OpKind::Again`、`KwOnce` / `KwAgain`、`mono.rs` の `contains_again` `is_again_node` `again_answer_of` `again_do` `again_operation` `again_result_type` `bind_again_outcome` `again_bind_function` `again_bind_yield` `lift_again_arguments` `again_answers` にした。`repr.rs` `emit.rs` の `captures` と `capture offset overflow`、`parser.rs` の "cannot capture a user binding" は動かしていない。
+- 字句は `once` / `again` をキーワードにし、`reply` / `capture` を `name` に戻した。**別名は残さない。** 旧綴りは効果の宣言の位置で E100 になり、利用者の名前としては使える。
+- 見える面を追随させた。§37 の種別表と例、§38 の `again` の腕、§53、§55、付録A、付録C（キーワード一覧と `op_kind`）、§56 の E124 の短い名前（`resume-outside-again`）、`docs/spec-trace.md` `docs/wants.md` `docs/bug.md`、`docs/plan.md` の現行の記述。**台帳の過去のラウンドは当時の語のまま残した。**
+- コーパスの 24 ディレクトリを `git mv` した（`capture_*` → `again_*`、`reply_*` → `once_*`、`nested_captures` → `nested_agains`、`nested_same_capture` → `nested_same_again`）。`tests/corpus.sha256` は改名後のパスで作り直し、215 本になった。
+- `scripts/verify-r44.sh` を新設し、`scripts/lib/gate-tiers.sh` の full に `r43` と並べて `r44` を足した。
+- **`\n` エスケープの直後のキーワードは `\b` で語境界が取れない。** Rust テストと門番に埋め込んだ hado ソース（`'effect Foo\nreply tick: Int\n'` など）は `\n` が実改行ではなく `\` と `n` なので、`\breply\b` は `n` と `r` の間を境界と見なさない。最初の一括置換はこれを取り逃していた。後続文字で切り直し（`reply([^A-Za-z0-9_]|$)`）、`r23_syntax` `r24_effects` `r25_effects` `r26_effects` `r28_effects` `r31_effects` `r37_world` `r9_grammar` のテストと `verify-r26` `r30` `r31` `r33` `r34` `r37` `r43` を改名した。`capture_output` と `--nocapture` は後続が `_` なので巻き込まない。
+
+### 判定の実測
+
+- **44-a〜44-f（R44 の門番）。** `bash scripts/verify-r44.sh` は 6/6。字句は `once` / `again` の受理、`effect E reply x: Int` の E100、`def reply = 1` と `def capture = 2` の受理、仕様は効果の語としての `reply` / `capture` が 0 件、コーパスは拒否 69 コードと lock 215 本と実行、旧綴りの排除は受理コーパスのうち語を含む 30 本が全滅（語を使わない 74 本は対象外）、生成文法は `["once","abort","again"]`。
+- **44-g（全テスト）。** `cargo test --offline --no-fail-fast` は exit 0。
+- **44-h（層別）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full` は 41 本を走らせ、`lint-docs` 以外は全て `^NG:` 0。`verify-r43.sh` 12/12、`verify-r44.sh` 6/6、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r37.sh` 262/262、`verify-gate-cache.sh` 26/26。
+- **工程 3 の赤。** 判定器を足した直後の `bash scripts/verify-r44.sh` は PASSED 2/6。44-a は新綴りが E100、44-d はコーパスに新綴りが無く対象 0 本、44-e は生成器が旧綴り、44-f は仕様から例とキーワード一覧を読む `r23_syntax` の 2 本が赤だった。
+
+### 経緯
+
+- **R44 の作業中に main の R43 が閉じた**（`fa6fd59` `33a4145`）。R44 を `33a4145` へ rebase し、R43 が足した `tests/accept/io_log` `tests/accept/string_join_trim`、lock の 2 行、`gate-tiers.sh` の `r43` を取り込んだ。
+- 競合は 3 つ。`scripts/lib/gate-tiers.sh` は full の並びを `... r42 r43 r44` にした。`scripts/verify-r37.sh` は R43 が足した 5 つ目の `log` の腕と `'log'` の名前を残しつつ `once` にした。`tests/corpus.sha256` は競合を捨てて、rebase 後の木から 215 本で作り直した。
+- rebase の途中で `git rebase --continue` がエディタを開き、60 秒で切れた。`GIT_EDITOR` を指定して再開した。
+
+### 迷った点
+
+- **旧綴りを利用者の名前として許すか。** §49 はキーワードが名前にならないことだけを定め、外した語が名前になることを明記していない。外す側を選び、`def reply = 1` を受理にした。既存の `.hd` に `reply` / `capture` を使う名前が 0 件であることは実測した。
+- **台帳の扱い。** 計画は現行版なので改名し、台帳は当時の実行記録なので過去の語を残した。同じ文書層でも役割で分けた。
+- **診断文の英語。** `resume is only allowed in an again arm` は `an` に直した。`again handler missing answer` など mono の文字列は機械的に置き換えたままで、文法的には不格好である。文言の改善は R45 以降に送る。
+
+### 仕様への疑義
+
+- **旧綴りが名前になることを §49 は明記していない。** 決定 2 は外す側を選んだ。§49 に一文を足すかは R45 以降に送る。
+- **`once` / `again` をキーワードにすることの既存コードへの影響は 0 件**（`tests/` `stdlib/` `tools/` の `.hd` を実測）。
 

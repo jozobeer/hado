@@ -1,8 +1,0 @@
-// spec: §37
-// expect: [42]
-effect Ask
-capture ask(seed: Int): Int
-handler Ask as Twice
-capture ask seed => resume (seed * 2)
-return x => x
-def main = with Twice -> let v = ask 21 -> [v]

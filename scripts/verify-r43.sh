@@ -99,7 +99,7 @@ for path, signatures in members.items():
         assert signature in source, f'{path}: {signature}'
         assert signature in section, f'docs/spec.md §55: {signature}'
 
-log = 'reply log(contents: String): Unit {Error}'
+log = 'once log(contents: String): Unit {Error}'
 assert log in section, log
 assert log in Path('stdlib/io.hd').read_text(), log
 print('spec and stdlib: ' + ', '.join(f'{module}.{member}' for module, items in expected.items() for member in items) + ', Io.log')
@@ -371,13 +371,13 @@ import sys
 
 root = Path(sys.argv[1]) / 'io-handler'
 root.mkdir(parents=True, exist_ok=False)
-arms = ['reply read_file _ => Bytes.of_string "virtual"',
-        'reply write_file _ _ => ()',
-        'reply log _ => ()',
-        'reply read_dir _ => ["virtual"]',
-        'reply read_stdin => Bytes.of_string "virtual"']
+arms = ['once read_file _ => Bytes.of_string "virtual"',
+        'once write_file _ _ => ()',
+        'once log _ => ()',
+        'once read_dir _ => ["virtual"]',
+        'once read_stdin => Bytes.of_string "virtual"']
 full = 'handler Io as MyIo\n' + '\n'.join(arms) + '\ndef main = with MyIo -> do log "virtual" -> 0\n'
-missing = 'handler Io as MyIo\n' + '\n'.join(arm for arm in arms if arm != 'reply log _ => ()') + '\ndef main = 0\n'
+missing = 'handler Io as MyIo\n' + '\n'.join(arm for arm in arms if arm != 'once log _ => ()') + '\ndef main = 0\n'
 
 def check(name, source, expected_code):
     directory = root / name
@@ -395,7 +395,7 @@ def check(name, source, expected_code):
 check('full', full, None)
 check('missing-log', missing, 'E605')
 r37 = Path('scripts/verify-r37.sh').read_text()
-assert "'reply log _ => ()'" in r37, 'verify-r37.sh does not model the fifth operation'
+assert "'once log _ => ()'" in r37, 'verify-r37.sh does not model the fifth operation'
 world = Path('crates/hado/tests/r37_world.rs').read_text()
 assert '"log"' in world, 'r37_world.rs does not check the log default'
 print('io handler: 5 arms accepted, missing log is E605, r37 gates follow')

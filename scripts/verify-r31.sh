@@ -26,9 +26,9 @@ write_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Y as $handler
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 $(if [ "$handler" = Keep ]; then echo "return x => x"; else echo "return _ => []"; fi)
 $body
 EOF
@@ -84,14 +84,14 @@ write_outer_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return $returns
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do y $first -> do z $outer -> $last
 EOF
@@ -102,14 +102,14 @@ write_spread_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect W
-capture w(value: Int): Unit
+again w(value: Int): Unit
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return x => x
 handler W as Inner
-capture w value => [value + 100, ...resume ()]
+again w value => [value + 100, ...resume ()]
 return _ => []
 def main = with Outer -> with Inner -> do w $inner -> do z $outer -> ()
 EOF
@@ -124,46 +124,46 @@ payload_c=$((payload_b + 1 + RANDOM))
 write_outer_source generated_c "$payload_a" "$payload_b" "do y $payload_c -> ()" "x => x"
 write_spread_source generated_f "$payload_a" "$payload_b"
 
-mkdir -p "$workdir/e" "$workdir/ok_outer" "$workdir/ok_reply"
+mkdir -p "$workdir/e" "$workdir/ok_outer" "$workdir/ok_once"
 cat >"$workdir/e/main.hd" <<'EOF'
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler B as Inner
-reply b => 2
+once b => 2
 def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
 EOF
 cat >"$workdir/ok_outer/main.hd" <<'EOF'
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do z 4 -> ()
 EOF
-cat >"$workdir/ok_reply/main.hd" <<'EOF'
+cat >"$workdir/ok_once/main.hd" <<'EOF'
 effect A
-reply a: Int
+once a: Int
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler A as Outer
-reply a => 1
+once a => 1
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do y 9 -> do y a -> ()
 EOF
@@ -171,10 +171,10 @@ EOF
 check '31-a outer return discards inner answer' check_prints a "[2]"
 check '31-b outer return keeps inner answer' check_prints b "[2, 1]"
 check '31-c inner handler is reinstalled after outer resume' check_prints c "[2, 1, 3]"
-check '31-e reply handler between captures' check_prints e "[5]"
+check '31-e once handler between captures' check_prints e "[5]"
 check '31-f resume in list spread' check_prints f "[3, 102]"
-check '31-g outer capture without resume' check_prints ok_outer "[4]"
-check '31-g resume calls outer reply' check_prints ok_reply "[9, 1]"
+check '31-g outer again without resume' check_prints ok_outer "[4]"
+check '31-g resume calls outer once' check_prints ok_once "[9, 1]"
 check '31-k generated 31-a' check_prints generated_a "[$payload_b]"
 check '31-k generated 31-c' check_prints generated_c "[$payload_b, $payload_a, $payload_c]"
 check '31-k generated 31-f' check_prints generated_f "[$payload_b, $((payload_a + 100))]"
@@ -184,9 +184,9 @@ write_ask_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Ask
-capture ask(seed: Int): Int
+again ask(seed: Int): Int
 handler Ask as Twice
-capture ask seed => resume (seed * 2)
+again ask seed => resume (seed * 2)
 return x => x
 def main = with Twice -> let v = ask $seed -> [v]
 EOF
@@ -197,14 +197,14 @@ write_mixed_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect S
-capture s(value: String): Unit
+again s(value: String): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler S as Names
-capture s value => let rest = resume () -> [value, ...rest]
+again s value => let rest = resume () -> [value, ...rest]
 return x => x
 handler Y as Collect
-capture y value => let rest = resume () -> [String.concat "$prefix" (Int.to_string value), ...rest]
+again y value => let rest = resume () -> [String.concat "$prefix" (Int.to_string value), ...rest]
 return _ => []
 def main = with Names -> with Collect -> $body
 EOF
@@ -214,7 +214,7 @@ write_ask_source h 21
 write_ask_source generated_h "$payload_a"
 write_mixed_source i 'do s "a" -> do y 1 -> ()' n
 write_mixed_source j 'do y 1 -> do s "b" -> ()' ''
-check '31-h non-Unit capture result' check_prints h '[42]'
+check '31-h non-Unit again result' check_prints h '[42]'
 check '31-i mixed payloads' check_prints i '["a", "n1"]'
 check '31-j mixed payloads through resume' check_prints j '["b", "1"]'
 check '31-k generated 31-h' check_prints generated_h "[$((payload_a * 2))]"

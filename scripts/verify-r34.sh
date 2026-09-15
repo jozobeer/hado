@@ -1087,7 +1087,7 @@ for visibility in local unknown; do
     operation="probe_$RANDOM"
     printf 'def main = %s\n' "$operation" >"$dir/main.hd"
     if [ "$visibility" = local ]; then
-        printf 'effect Probe\nreply %s: Int\n' "$operation" >"$dir/sub/effect.hd"
+        printf 'effect Probe\nonce %s: Int\n' "$operation" >"$dir/sub/effect.hd"
     fi
     random_padding "$dir/main.hd"
     expect_error_at "34-prelude $visibility の操作は親から未束縛" "$dir/main.hd" E204 "$operation"

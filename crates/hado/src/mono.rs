@@ -319,7 +319,7 @@ struct Lowerer {
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
     handler_stack: Vec<crate::parser::HandlerDecl>,
     handler_answers: Vec<Option<Type>>,
-    capture_answers: Vec<Type>,
+    again_answers: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
     fail_ids: std::collections::HashMap<String, u32>,
@@ -336,11 +336,11 @@ pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String
 }
 
 impl Lowerer {
-    fn contains_capture(&self, node: &crate::parser::Node) -> bool {
-        self.is_capture_node(node)
+    fn contains_again(&self, node: &crate::parser::Node) -> bool {
+        self.is_again_node(node)
             || (matches!(node.kind, crate::parser::NodeKind::Resume)
                 && matches!(&self.resume_binding, Some((_, Type::Closure(_, result))) if is_outcome(result)))
-            || crate::check::children(node).iter().any(|child| self.contains_capture(child))
+            || crate::check::children(node).iter().any(|child| self.contains_again(child))
     }
 
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
@@ -362,7 +362,7 @@ impl Lowerer {
         crate::check::children(node).iter().any(|child| self.contains_handled_call(child))
     }
 
-    fn lift_capture_arguments(&mut self, node: &crate::parser::Node) -> Option<crate::parser::Node> {
+    fn lift_again_arguments(&mut self, node: &crate::parser::Node) -> Option<crate::parser::Node> {
         use crate::parser::{BinOp, NodeKind::*};
         let mut result = node.clone();
         if let Pipe(value, target) = &node.kind {
@@ -384,7 +384,7 @@ impl Lowerer {
             PatternBranch { scrutinee, .. } => vec![scrutinee],
             _ => Vec::new(),
         };
-        if !children.iter().any(|child| self.contains_capture(child) || self.contains_handled_call(child)) {
+        if !children.iter().any(|child| self.contains_again(child) || self.contains_handled_call(child)) {
             return None;
         }
         let mut bindings = Vec::new();
@@ -409,7 +409,7 @@ impl Lowerer {
 
     fn expression(&mut self, node: &crate::parser::Node) -> Result<Expression, String> {
         use crate::parser::NodeKind;
-        if let Some(normalized) = self.lift_capture_arguments(node) {
+        if let Some(normalized) = self.lift_again_arguments(node) {
             return self.expression(&normalized);
         }
         if let NodeKind::Pipe(value, target) = &node.kind {
@@ -509,14 +509,14 @@ impl Lowerer {
             return self.propagation(Some(pat), value, body);
         }
         if let NodeKind::DoQ { value, body } = &node.kind {
-            if self.is_capture_node(value) {
-                return self.capture_do(value, body, None);
+            if self.is_again_node(value) {
+                return self.again_do(value, body, None);
             }
             if self.is_abort_node(value) && self.handler_for_node(value).is_some() {
                 return self.expression(value);
             }
             let source = self.expression(value)?;
-            if is_outcome(&source.ty()) && self.contains_capture(value) {
+            if is_outcome(&source.ty()) && self.contains_again(value) {
                 let name = format!("$do{}", self.next);
                 self.next += 1;
                 let pat = crate::parser::Pattern {
@@ -529,7 +529,7 @@ impl Lowerer {
                     },
                     span: node.span,
                 };
-                return self.bind_capture_outcome(&pat, source, &rest);
+                return self.bind_again_outcome(&pat, source, &rest);
             }
             if matches!(&source.ty(), Type::Data(name, args) if name == "Option" && args.len() == 1) {
                 return self.option_propagation(None, source, body);
@@ -543,14 +543,14 @@ impl Lowerer {
             });
         }
         if let NodeKind::Let { pat, value, body } = &node.kind {
-            if self.is_capture_node(value) {
-                return self.capture_do(value, body, Some(pat));
+            if self.is_again_node(value) {
+                return self.again_do(value, body, Some(pat));
             }
-            let captures = self.contains_capture(value) || self.contains_handled_call(value);
+            let captures = self.contains_again(value) || self.contains_handled_call(value);
             let value = self.expression(value)?;
             if is_outcome(&value.ty()) {
                 if captures {
-                    return self.bind_capture_outcome(pat, value, body);
+                    return self.bind_again_outcome(pat, value, body);
                 }
                 return self.propagate_outcome(pat, value, body);
             }
@@ -1522,8 +1522,8 @@ impl Lowerer {
         kind: crate::parser::OpKind,
     ) -> Result<Expression, String> {
         match kind {
-            crate::parser::OpKind::Capture => self.capture_operation(node, name, arguments, None),
-            crate::parser::OpKind::Reply => {
+            crate::parser::OpKind::Again => self.again_operation(node, name, arguments, None),
+            crate::parser::OpKind::Once => {
                 if self.handler_for(name).is_some() {
                     self.handled_operation(name, arguments)
                 } else {
@@ -1557,14 +1557,14 @@ impl Lowerer {
                 arm,
                 crate::parser::HandlerArm::Return { .. }
                     | crate::parser::HandlerArm::Operation {
-                        kind: crate::parser::OpKind::Capture | crate::parser::OpKind::Abort,
+                        kind: crate::parser::OpKind::Again | crate::parser::OpKind::Abort,
                         ..
                     }
             )
         });
-        let answer = if needs_answer { self.capture_answer_of(node)? } else { None };
+        let answer = if needs_answer { self.again_answer_of(node)? } else { None };
         if let Some(answer) = answer.clone() {
-            self.capture_answers.push(answer);
+            self.again_answers.push(answer);
         }
         let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
@@ -1574,7 +1574,7 @@ impl Lowerer {
         self.handler_answers.pop();
         self.rewriting_return = saved;
         if answer.is_some() {
-            self.capture_answers.pop();
+            self.again_answers.pop();
         }
         value
     }
@@ -1708,7 +1708,7 @@ impl Lowerer {
             .zip(self.handler_answers.iter().rev())
             .find(|(handler, _)| handler.name == target.name && handler.effect == target.effect)
             .and_then(|(_, answer)| answer.clone())
-            .ok_or_else(|| "capture handler missing answer".into())
+            .ok_or_else(|| "again handler missing answer".into())
     }
 
     fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
@@ -1764,13 +1764,13 @@ impl Lowerer {
         }
     }
 
-    fn is_capture_node(&self, node: &crate::parser::Node) -> bool {
+    fn is_again_node(&self, node: &crate::parser::Node) -> bool {
         self.operation_name(node)
-            .is_some_and(|name| !self.scope.contains_key(name) && self.operations.get(name) == Some(&crate::parser::OpKind::Capture))
-            || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_capture_node(value))
+            .is_some_and(|name| !self.scope.contains_key(name) && self.operations.get(name) == Some(&crate::parser::OpKind::Again))
+            || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_again_node(value))
     }
 
-    fn capture_answer_of(&self, node: &crate::parser::Node) -> Result<Option<Type>, String> {
+    fn again_answer_of(&self, node: &crate::parser::Node) -> Result<Option<Type>, String> {
         match self.composite_types.get(&(node.span.line, node.span.col)) {
             Some(ty) => Type::try_from(&self.specialization.resolve(ty))
                 .map(Some)
@@ -1779,13 +1779,13 @@ impl Lowerer {
         }
     }
 
-    fn capture_do(
+    fn again_do(
         &mut self,
         value: &crate::parser::Node,
         rest: &crate::parser::Node,
         pat: Option<&crate::parser::Pattern>,
     ) -> Result<Expression, String> {
-        if let Some(value) = self.lift_capture_arguments(value) {
+        if let Some(value) = self.lift_again_arguments(value) {
             let pat = pat.cloned().unwrap_or(crate::parser::Pattern {
                 kind: crate::parser::PatternKind::Underscore, span: value.span,
             });
@@ -1797,17 +1797,17 @@ impl Lowerer {
             };
             return self.expression(&node);
         }
-        let name = self.operation_name(value).ok_or("capture do without operation")?.to_string();
+        let name = self.operation_name(value).ok_or("again do without operation")?.to_string();
         let arguments = match &value.kind {
             crate::parser::NodeKind::Apply(_, args) | crate::parser::NodeKind::Call(_, args) => {
                 args.iter().map(|arg| self.expression(arg)).collect::<Result<Vec<_>, _>>()?
             }
             _ => Vec::new(),
         };
-        self.capture_operation(value, &name, arguments, Some((rest, pat)))
+        self.again_operation(value, &name, arguments, Some((rest, pat)))
     }
 
-    fn capture_result_type(&self, node: &crate::parser::Node) -> Result<Type, String> {
+    fn again_result_type(&self, node: &crate::parser::Node) -> Result<Type, String> {
         use crate::parser::NodeKind;
         let callee = match &node.kind {
             NodeKind::Apply(callee, _) | NodeKind::Call(callee, _) => callee.as_ref(),
@@ -1819,26 +1819,26 @@ impl Lowerer {
         };
         // pipe と左辺は span を共有するので、複合式の型ではなく操作名の型を使う。
         let ty = self.value_types.get(&(callee.span.line, callee.span.col))
-            .ok_or("capture operation type missing")?;
+            .ok_or("again operation type missing")?;
         let ty = self.specialization.resolve(ty);
         let result = match &ty {
             Ty::Fn(_, result, _) if !matches!(node.kind, NodeKind::Name(_)) => result.as_ref(),
             _ => &ty,
         };
-        Type::try_from(result).map_err(|_| "capture result type is not concrete".into())
+        Type::try_from(result).map_err(|_| "again result type is not concrete".into())
     }
 
-    fn capture_operation(
+    fn again_operation(
         &mut self,
         node: &crate::parser::Node,
         name: &str,
         arguments: Vec<Expression>,
         rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
     ) -> Result<Expression, String> {
-        let handler = self.handler_for(name).cloned().ok_or("unhandled capture")?;
+        let handler = self.handler_for(name).cloned().ok_or("unhandled again")?;
         let answer = self.answer_for_handler(&handler)?;
         let constructor = self.yield_constructor(&handler.effect);
-        let input = self.capture_result_type(node)?;
+        let input = self.again_result_type(node)?;
         let signature = Signature {
             parameters: arguments.iter().map(Expression::ty).collect(),
             result: input.clone(),
@@ -1861,7 +1861,7 @@ impl Lowerer {
             constructor,
             result: match continuation.ty() {
                 Type::Closure(_, result) => *result,
-                _ => return Err("capture continuation is not a closure".into()),
+                _ => return Err("again continuation is not a closure".into()),
             },
             fields: vec![value, continuation],
         })
@@ -2062,7 +2062,7 @@ impl Lowerer {
                 arms.push((fail, self.finish_convert_arm(body, convert)?));
             }
         }
-        if handles_op(handler, crate::parser::OpKind::Capture) {
+        if handles_op(handler, crate::parser::OpKind::Again) {
             let constructor = self.yield_constructor(&handler.effect);
             if self.operation_types.contains_key(&constructor) {
                 arms.push(self.own_yield_arm(handler, variable, convert)?);
@@ -2091,7 +2091,7 @@ impl Lowerer {
     ) -> Result<(String, Expression), String> {
         let constructor = self.yield_constructor(&handler.effect);
         let yield_value = project(variable, &constructor, 0, self.outcome_payload(&constructor)?);
-        let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("capture type missing")?.result.clone()));
+        let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("again type missing")?.result.clone()));
         let resume = self.continuation_calling_convert(continuation, convert)?;
         let body = self.yield_arm(handler, yield_value, resume)?;
         Ok((constructor, self.finish_convert_arm(body, convert)?))
@@ -2114,7 +2114,7 @@ impl Lowerer {
                 continue;
             }
             let payload_value = project(variable, &constructor, 0, self.outcome_payload(&constructor)?);
-            let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("capture type missing")?.result.clone()));
+            let continuation = project(variable, &constructor, 1, convert.continuation_ty(self.operation_types.get(&constructor).ok_or("again type missing")?.result.clone()));
             let wrapped = self.continuation_calling_convert(continuation, convert)?;
             arms.push((
                 constructor.clone(),
@@ -2164,9 +2164,9 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let continuation_ty = continuation.ty();
         let Type::Closure(inputs, _) = &continuation_ty else {
-            return Err("capture continuation is not a closure".into());
+            return Err("again continuation is not a closure".into());
         };
-        let input = inputs.first().cloned().ok_or("capture continuation input missing")?;
+        let input = inputs.first().cloned().ok_or("again continuation input missing")?;
         let captured = self.next;
         self.next += 1;
         let param = self.next;
@@ -2230,14 +2230,14 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let Some((params, body)) = handler.arms.iter().find_map(|arm| match arm {
             crate::parser::HandlerArm::Operation {
-                kind: crate::parser::OpKind::Capture,
+                kind: crate::parser::OpKind::Again,
                 params,
                 body,
                 ..
             } => Some((params.clone(), body.clone())),
             _ => None,
         }) else {
-            return Err("missing capture arm".into());
+            return Err("missing again arm".into());
         };
         let id = self.next;
         self.next += 1;
@@ -2264,7 +2264,7 @@ impl Lowerer {
         effect: &str,
     ) -> Result<Expression, String> {
         let success = self.node_type(node).unwrap_or(Type::Unit);
-        let answer = self.capture_answers.last().cloned().ok_or("abort without handler answer")?;
+        let answer = self.again_answers.last().cloned().ok_or("abort without handler answer")?;
         let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
         let constructor = self.fail_constructor(effect);
         self.operation_types.insert(constructor.clone(), Signature {
@@ -2361,7 +2361,7 @@ impl Lowerer {
         })
     }
 
-    fn bind_capture_outcome(
+    fn bind_again_outcome(
         &mut self,
         pat: &crate::parser::Pattern,
         value: Expression,
@@ -2378,12 +2378,12 @@ impl Lowerer {
         };
         let id = FunctionId(self.next_function);
         self.next_function += 1;
-        self.capture_bind_function(id, &signature)?;
+        self.again_bind_function(id, &signature)?;
         Expression::call_direct(id, &signature, vec![value, continuation])
     }
 
     // 宣言では型引数を具体化できないため、先に単相化した value の登録済み操作だけを扱う。
-    fn capture_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
+    fn again_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
         let parameters = vec![self.next, self.next + 1];
         self.next += 2;
         let value = Expression::Variable { id: parameters[0], ty: signature.parameters[0].clone() };
@@ -2397,7 +2397,7 @@ impl Lowerer {
             if !self.operation_types.contains_key(&constructor) {
                 continue;
             }
-            let continuation = self.capture_bind_yield(&constructor, id, signature, &value, &rest)?;
+            let continuation = self.again_bind_yield(&constructor, id, signature, &value, &rest)?;
             arms.push((constructor.clone(), Expression::Construct {
                 fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?), continuation],
                 constructor,
@@ -2428,7 +2428,7 @@ impl Lowerer {
         Ok(())
     }
 
-    fn capture_bind_yield(
+    fn again_bind_yield(
         &mut self,
         constructor: &str,
         bind: FunctionId,
@@ -2436,7 +2436,7 @@ impl Lowerer {
         value: &Expression,
         rest: &Expression,
     ) -> Result<Expression, String> {
-        let input = self.operation_types.get(constructor).ok_or("capture type missing")?.result.clone();
+        let input = self.operation_types.get(constructor).ok_or("again type missing")?.result.clone();
         let param = self.next;
         self.next += 1;
         let continuation = project(value, constructor, 1, Type::Closure(vec![input.clone()], Box::new(value.ty())));
@@ -2444,7 +2444,7 @@ impl Lowerer {
         let body = Expression::call_direct(bind, signature, vec![resumed, rest.clone()])?;
         let captures = [value, rest].into_iter().map(|value| match value {
             Expression::Variable { id, ty } => Ok((*id, ty.clone())),
-            _ => Err("capture bind requires variables".to_string()),
+            _ => Err("again bind requires variables".to_string()),
         }).collect::<Result<Vec<_>, _>>()?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
@@ -2494,7 +2494,7 @@ impl Lowerer {
                 matches!(
                     arm,
                     crate::parser::HandlerArm::Operation {
-                        kind: crate::parser::OpKind::Abort | crate::parser::OpKind::Capture,
+                        kind: crate::parser::OpKind::Abort | crate::parser::OpKind::Again,
                         ..
                     }
                 )
@@ -2503,7 +2503,7 @@ impl Lowerer {
     }
 
     fn outcome_of(&self, success: &Type, _body: &crate::parser::Node) -> Result<Type, String> {
-        let answer = self.capture_answers.last().cloned().ok_or("handler answer missing")?;
+        let answer = self.again_answers.last().cloned().ok_or("handler answer missing")?;
         Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Unit]))
     }
 
@@ -2515,7 +2515,7 @@ impl Lowerer {
     }
 
     fn resume_variable(&self) -> Result<Expression, String> {
-        let (id, ty) = self.resume_binding.clone().ok_or("resume without capture")?;
+        let (id, ty) = self.resume_binding.clone().ok_or("resume without again")?;
         Ok(Expression::Variable { id, ty })
     }
 

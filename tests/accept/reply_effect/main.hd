@@ -1,9 +1,0 @@
-// spec: §37
-// expect: hello
-effect Ask
-reply ask: String
-handler Ask as Fixed
-reply ask => "hello"
-def main =
-  with Fixed ->
-  ask

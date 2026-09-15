@@ -65,28 +65,28 @@ check_prints() {
 
 write_source a "$(cat <<EOF
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler B as Inner
-reply b => 2
+once b => 2
 def main = with Collect -> with Inner -> do y $payload_a -> do y b -> ()
 EOF
 )"
 
 write_source a2 "$(cat <<EOF
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect W
-capture w(value: Int): Unit
+again w(value: Int): Unit
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return x => x
 handler W as Inner
-capture w value => let rest = resume () -> [value + 100, ...rest]
+again w value => let rest = resume () -> [value + 100, ...rest]
 return _ => []
 def main = with Collect -> with Inner -> do y $payload_a2 -> do w 2 -> ()
 EOF
@@ -94,14 +94,14 @@ EOF
 
 write_source b "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return x => [x]
 handler B as Inner
-reply b => 2
+once b => 2
 return _ => 42
 def main = with Collect -> with Inner -> do y 1 -> ()
 EOF
@@ -109,41 +109,41 @@ EOF
 
 write_source c "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler B as Inner
-reply b => 2
+once b => 2
 def main = with Collect -> with Inner -> do y b -> ()
 EOF
 )"
 
 write_source d "$(cat <<'EOF'
 effect A
-reply a: Int
+once a: Int
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler A as Inner
-reply a => 1
+once a => 1
 def main = with Collect -> with Inner -> do y 3 -> ()
 EOF
 )"
 
 write_source e "$(cat <<EOF
 effect A
-reply a: Int
+once a: Int
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler A as Outer
-reply a => 1
+once a => 1
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do y $payload_e -> ()
 EOF
@@ -151,14 +151,14 @@ EOF
 
 write_source f "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 handler Y as CollectY
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Z as CollectZ
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with CollectY -> with CollectZ -> do y 3 -> ()
 EOF
@@ -166,11 +166,11 @@ EOF
 
 write_source g "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect E
 abort e(reason: Int)
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler E as Trap
 abort e reason => [reason]
@@ -181,30 +181,30 @@ EOF
 
 write_source h "$(cat <<EOF
 effect A
-reply a: Int
+once a: Int
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler A as Outer
-reply a => 1
+once a => 1
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler B as Inner
-reply b => 2
+once b => 2
 def main = with Outer -> with Collect -> with Inner -> do y ($payload_h + a + b) -> ()
 EOF
 )"
 
 write_source i "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Y as CollectOuter
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return x => x
 handler Y as CollectInner
-capture y value => let rest = resume () -> [value + 100, ...rest]
+again y value => let rest = resume () -> [value + 100, ...rest]
 return _ => []
 def main = with CollectOuter -> with CollectInner -> do y 3 -> ()
 EOF
@@ -212,9 +212,9 @@ EOF
 
 write_source j1 "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Collect -> do y 3 -> ()
 EOF
@@ -222,9 +222,9 @@ EOF
 
 write_source j2 "$(cat <<'EOF'
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Collect -> do y 1 -> do y 2 -> ()
 EOF
@@ -232,14 +232,14 @@ EOF
 
 write_source k2 "$(cat <<'EOF'
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do y 1 -> do z 2 -> ()
 EOF
@@ -247,54 +247,54 @@ EOF
 
 write_source k3 "$(cat <<'EOF'
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 effect B
-reply b: Int
+once b: Int
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler B as Inner
-reply b => 2
+once b => 2
 def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
 EOF
 )"
 
 write_source ok_outer "$(cat <<'EOF'
 effect Z
-capture z(value: Int): Unit
+again z(value: Int): Unit
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler Z as Outer
-capture z value => let rest = resume () -> [value, ...rest]
+again z value => let rest = resume () -> [value, ...rest]
 return _ => []
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do z 4 -> ()
 EOF
 )"
 
-write_source ok_reply "$(cat <<'EOF'
+write_source ok_once "$(cat <<'EOF'
 effect A
-reply a: Int
+once a: Int
 effect Y
-capture y(value: Int): Unit
+again y(value: Int): Unit
 handler A as Outer
-reply a => 1
+once a => 1
 handler Y as Collect
-capture y value => let rest = resume () -> [value, ...rest]
+again y value => let rest = resume () -> [value, ...rest]
 return _ => []
 def main = with Outer -> with Collect -> do y 9 -> do y a -> ()
 EOF
 )"
 
-check_prints a "[$payload_a, 2]" "30-a(1) Collect then Inner reply yields generated payload then b"
-check_prints a2 "[$payload_a2, 102]" "30-a(2) Collect then Inner capture yields generated payload then wrapped w"
+check_prints a "[$payload_a, 2]" "30-a(1) Collect then Inner once yields generated payload then b"
+check_prints a2 "[$payload_a2, 102]" "30-a(2) Collect then Inner again yields generated payload then wrapped w"
 check_prints b "[1, 42]" "30-b Inner return remains after resume"
 check_prints c "[2]" "30-c Collect then Inner yields b"
 if build_kind d; then
@@ -303,18 +303,18 @@ else
     check "30-d Collect then Inner A builds" false
 fi
 check_prints e "[$payload_e]" "30-e Outer then Collect yields generated payload"
-check_prints f "[3]" "30-f nested capture handlers"
+check_prints f "[3]" "30-f nested again handlers"
 check_prints g "[7]" "30-g Collect then abort handler"
 check_prints h "[$expected_h]" "30-h three handlers yield generated payload plus a and b"
-check_prints i "[103]" "30-i inner capture wins"
+check_prints i "[103]" "30-i inner again wins"
 check_prints j1 "[3]" "30-j solo Collect"
 check_prints j2 "[1, 2]" "30-j solo Collect yields twice"
 # R31 は拒否を値の一致に置き換える。クラッシュと黙った誤答を防ぐ
 # 30-k の保証に正しい実行結果を加えるため、門番を緩めてはいない。
 check_prints k2 "[2]" "30-k two-level resume captures outer"
 check_prints k3 "[5]" "30-k three-level resume captures outer"
-check_prints ok_outer "[4]" "30-k control outer capture without resume"
-check_prints ok_reply "[9, 1]" "30-k control resume may call outer reply"
+check_prints ok_outer "[4]" "30-k control outer again without resume"
+check_prints ok_once "[9, 1]" "30-k control resume may call outer once"
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

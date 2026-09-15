@@ -1,9 +1,9 @@
 effect Io
-reply read_file(path: String): Bytes {Error}
-reply write_file(path: String, contents: Bytes): Unit {Error}
-reply log(contents: String): Unit {Error}
-reply read_dir(path: String): String List {Error}
-reply read_stdin: Bytes {Error}
+once read_file(path: String): Bytes {Error}
+once write_file(path: String, contents: Bytes): Unit {Error}
+once log(contents: String): Unit {Error}
+once read_dir(path: String): String List {Error}
+once read_stdin: Bytes {Error}
 module IoDefault
 def read_file(path: String): Bytes {Error}
 def write_file(path: String, contents: Bytes): Unit {Error}

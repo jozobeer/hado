@@ -69,7 +69,7 @@ fn main_user_effect_is_e706_on_def_main() {
     perturb_rejection(
         &case,
         "main.hd",
-        "effect Ask\nreply ask: String\ndef main = ask\n",
+        "effect Ask\nonce ask: String\ndef main = ask\n",
         "E706",
         "def main",
     );
@@ -81,7 +81,7 @@ fn print_type_still_shows_user_effects_on_main() {
     for _ in 0..8 {
         let n = random(&mut state, 1000);
         let case = Case::new();
-        case.write("main.hd", &format!("effect Ask\nreply ask: String\ndef f x => if true => ask | x\ndef main = f \"{n}\"\n"));
+        case.write("main.hd", &format!("effect Ask\nonce ask: String\ndef f x => if true => ask | x\ndef main = f \"{n}\"\n"));
         assert_eq!(case.print_type("main.hd"), "String {Ask}\n");
         let output = case.command("check", "main.hd");
         assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
@@ -90,13 +90,13 @@ fn print_type_still_shows_user_effects_on_main() {
 }
 
 #[test]
-fn reply_evaluates_the_handler_arm_in_place() {
+fn once_evaluates_the_handler_arm_in_place() {
     let mut state = 0x26_02;
     for _ in 0..8 {
         let token = format!("t{}", random(&mut state, 100_000));
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Ask\nreply ask: String\nhandler Ask as Fixed\nreply ask => \"{token}\"\ndef main =\n  with Fixed ->\n  ask\n"
+            "effect Ask\nonce ask: String\nhandler Ask as Fixed\nonce ask => \"{token}\"\ndef main =\n  with Fixed ->\n  ask\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
@@ -142,13 +142,13 @@ fn abort_handler_turns_raise_into_a_value() {
 }
 
 #[test]
-fn reply_tail_recursion_completes_ten_million_iterations() {
+fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
         let n = random(&mut state, 40) + 10;
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Tick\nreply tick: Unit\nhandler Tick as Nop\nreply tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+            "effect Tick\nonce tick: Unit\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
         ));
         let dump = case.command("dump-mono", "main.hd");
         assert_eq!(dump.status.code(), Some(0), "{}", String::from_utf8_lossy(&dump.stderr));
@@ -163,12 +163,12 @@ fn reply_tail_recursion_completes_ten_million_iterations() {
     }
     let small_n = 1_000_000u64;
     let large_n = 10_000_000u64;
-    let small = build_reply_loop(small_n);
-    let large = build_reply_loop(large_n);
+    let small = build_once_loop(small_n);
+    let large = build_once_loop(large_n);
     assert_eq!(small.run.stdout, format!("{small_n}\n").as_bytes());
     assert_eq!(large.run.stdout, format!("{large_n}\n").as_bytes());
     assert!(large.rss_kb * small_n < small.rss_kb * large_n,
-        "reply loop RSS scaled with iterations: {} KB at {small_n}, {} KB at {large_n}",
+        "once loop RSS scaled with iterations: {} KB at {small_n}, {} KB at {large_n}",
         small.rss_kb, large.rss_kb);
 }
 
@@ -177,10 +177,10 @@ struct Built {
     rss_kb: u64,
 }
 
-fn build_reply_loop(n: u64) -> Built {
+fn build_once_loop(n: u64) -> Built {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "effect Tick\nreply tick: Unit\nhandler Tick as Nop\nreply tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+        "effect Tick\nonce tick: Unit\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
     ));
     let built = case.build("main.hd");
     assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
@@ -200,7 +200,7 @@ fn max_rss_kb(bin: &std::path::Path) -> u64 {
 }
 
 fn collect_handler() -> &'static str {
-    "effect A Yield\ncapture yield(value: A): Unit\nhandler A Yield as Collect\ncapture yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
+    "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
 }
 
 fn list_literal(values: &[i64]) -> String {
@@ -231,7 +231,7 @@ fn generator_collects_yielded_values() {
 }
 
 #[test]
-fn capture_loop_counts_each_yield() {
+fn again_loop_counts_each_yield() {
     let mut state = 0x26_07;
     for _ in 0..4 {
         let n = random(&mut state, 30) + 5;
@@ -274,7 +274,7 @@ fn distinct_handlers_specialize_the_same_function_apart() {
         let right = random(&mut state, 20);
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Ask\nreply ask: Int\nhandler Ask as One\nreply ask => {one}\nreturn value => value\nhandler Ask as Two\nreply ask => {two}\nreturn value => value\ndef use (x: Int): Int {{Ask}} => ask + x\ndef main = (with One -> use {left}) + (with Two -> use {right})\n"
+            "effect Ask\nonce ask: Int\nhandler Ask as One\nonce ask => {one}\nreturn value => value\nhandler Ask as Two\nonce ask => {two}\nreturn value => value\ndef use (x: Int): Int {{Ask}} => ask + x\ndef main = (with One -> use {left}) + (with Two -> use {right})\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
@@ -329,7 +329,7 @@ fn handler_arm_can_call_a_top_level_function() {
         let x = random(&mut state, 20);
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Ask\nreply ask: Int\ndef double (n: Int): Int => n * 2\nhandler Ask as Fixed\nreply ask => double {k}\nreturn value => value\ndef use (y: Int): Int {{Ask}} => ask + y\ndef main = with Fixed -> use {x}\n"
+            "effect Ask\nonce ask: Int\ndef double (n: Int): Int => n * 2\nhandler Ask as Fixed\nonce ask => double {k}\nreturn value => value\ndef use (y: Int): Int {{Ask}} => ask + y\ndef main = with Fixed -> use {x}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
@@ -340,14 +340,14 @@ fn handler_arm_can_call_a_top_level_function() {
 }
 
 #[test]
-fn capture_arm_keeps_pure_helpers_at_their_result_type() {
+fn again_arm_keeps_pure_helpers_at_their_result_type() {
     let mut state = 0x26_15;
     for _ in 0..8 {
         let n = random(&mut state, 6) + 1;
         let doubled: Vec<i64> = (1..=n as i64).rev().map(|k| k * 2).collect();
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect A Yield\ncapture yield(value: A): Unit\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\ncapture yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
+            "effect A Yield\nagain yield(value: A): Unit\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));

@@ -1866,7 +1866,7 @@ impl Checker<'_> {
         for item in items {
             let Item::Effect(effect) = item else { continue };
             for op in &effect.ops {
-                if op.kind != OpKind::Reply { continue; }
+                if op.kind != OpKind::Once { continue; }
                 let definition = &self.default_operations[&op.name];
                 let scheme = self.module_definitions.get(definition)
                     .ok_or_else(|| self.error(op.name_span, Some("E305"), "default operation requires a definition"))?;
@@ -1921,7 +1921,7 @@ impl Checker<'_> {
         for item in &items[..prelude_items] {
             let Item::Effect(effect) = item else { continue };
             for op in &effect.ops {
-                if op.kind != OpKind::Reply { continue; }
+                if op.kind != OpKind::Once { continue; }
                 let module_name = format!("{}Default", effect.name);
                 let module = items[..prelude_items].iter().find_map(|item| match item {
                     Item::ModuleImpl(module) if module.name == module_name => Some(module),
@@ -1930,7 +1930,7 @@ impl Checker<'_> {
                 let definition = module.and_then(|module| module.items.iter().find_map(|item| match item {
                     Item::Def(def) if def.name == op.name => Some(format!("{}.{}", module.name, def.name)),
                     _ => None,
-                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude reply has no default definition"))?;
+                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude once has no default definition"))?;
                 self.default_operations.insert(op.name.clone(), definition);
             }
         }
@@ -2045,7 +2045,7 @@ impl Checker<'_> {
                     let ty = self.expression(ret)?;
                     self.unify(&ty, answer, *arm_span)?;
                 }
-                HandlerArm::Operation { kind: OpKind::Capture, name, params, body: ret, span: arm_span, .. } => {
+                HandlerArm::Operation { kind: OpKind::Again, name, params, body: ret, span: arm_span, .. } => {
                     let (types, result) = self.operation_payload(name, row)?;
                     for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
                     let resume = Ty::fn_with(vec![result], answer.clone(), Row::pure());
