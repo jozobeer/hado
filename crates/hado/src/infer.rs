@@ -1207,29 +1207,13 @@ impl Checker<'_> {
         if let Some(body) = fallback {
             self.branch_result(body, &result)?;
         }
-        if let [input] = inputs.as_slice() {
-            let unary: Vec<(Pattern, Node)> = arms
-                .iter()
-                .filter_map(|(patterns, body)| {
-                    patterns.first().cloned().map(|pattern| (pattern, body.clone()))
-                })
-                .collect();
-            if unary.len() == arms.len() {
-                if self.inference.resolve(input) == Ty::Bool {
-                    if let Err(error) = crate::check::boolean_coverage(branch_span, &unary, fallback, self.path) {
-                        self.deferred.push(error);
-                    }
-                }
-                if let Ty::Adt(name, _) = self.inference.resolve(input) {
-                    let groups = self.constructor_groups();
-                    let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
-                    let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-                    let arms: Vec<_> = unary.iter().map(|(pattern, body)| (crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned), body.clone())).collect();
-                    if let Err(error) = crate::check::adt_coverage(branch_span, &arms, fallback, &constructors, &families, self.path) {
-                        self.deferred.push(error);
-                    }
-                }
-            }
+        let groups = self.constructor_groups();
+        let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
+        let rows: Vec<Vec<_>> = arms.iter().map(|(patterns, _)| {
+            patterns.iter().map(|pattern| crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned)).collect()
+        }).collect();
+        if let Err(error) = crate::check::matrix_coverage(branch_span, &rows, fallback, &families, self.path) {
+            self.deferred.push(error);
         }
         Ok(self.inference.resolve(&result))
     }

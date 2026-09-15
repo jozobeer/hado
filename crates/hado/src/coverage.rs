@@ -1,4 +1,4 @@
-use crate::parser::{Node, NodeKind, Pattern, PatternKind};
+use crate::parser::{NodeKind, Pattern, PatternKind};
 use std::collections::HashMap;
 
 pub(crate) type Families = HashMap<String, Vec<(String, usize)>>;
@@ -15,32 +15,8 @@ pub(crate) fn covers_pattern(pattern: &Pattern, families: &Families) -> Option<b
     covers(&[vec![cell(pattern)]], families)
 }
 
-pub(crate) fn constructor_payloads(
-    name: &str,
-    arms: &[(Pattern, Node)],
-    families: &Families,
-) -> Option<bool> {
-    if arms.iter().any(|(pattern, _)| matches!(cell(pattern), Cell::Any)) {
-        return Some(true);
-    }
-    let rows: Vec<_> = arms
-        .iter()
-        .filter_map(|(pattern, _)| match cell(pattern) {
-            Cell::Constructor(n, args) if n == name => Some(args),
-            _ => None,
-        })
-        .collect();
-    covers(&rows, families)
-}
-
-pub(crate) fn record_patterns(arms: &[(Pattern, Node)], families: &Families) -> Option<bool> {
-    covers(
-        &arms
-            .iter()
-            .map(|(pattern, _)| vec![cell(pattern)])
-            .collect::<Vec<_>>(),
-        families,
-    )
+pub(crate) fn covers_rows(rows: &[Vec<Pattern>], families: &Families) -> Option<bool> {
+    covers(&rows.iter().map(|row| row.iter().map(cell).collect()).collect::<Vec<_>>(), families)
 }
 
 fn cell(pattern: &Pattern) -> Cell {

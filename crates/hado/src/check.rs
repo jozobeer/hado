@@ -273,30 +273,16 @@ fn check_sole_parameter_branch(
         code: Some("E515".into()), message: "use pattern arms directly for the sole parameter".into() })
 }
 
-pub(crate) fn boolean_coverage(
+pub(crate) fn matrix_coverage(
     branch_span: crate::parser::Span,
-    arms: &[(Pattern, Node)],
+    rows: &[Vec<Pattern>],
     fallback: Option<&Node>,
+    families: &crate::coverage::Families,
     path: &str,
 ) -> Result<(), Diagnostic> {
-    let exhaustive = [false, true].iter().all(|value| {
-        arms.iter().any(|(pattern, _)| {
-        matches!(&pattern.kind, PatternKind::Literal(node) if node.kind == NodeKind::Bool(*value))
-            || matches!(&pattern.kind, PatternKind::Underscore)
-            || matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name))
-    })
-    });
-    let (code, location, message) = match (exhaustive, fallback) {
-        (false, None) => (
-            "E402",
-            branch_span,
-            "Boolean patterns do not cover both values",
-        ),
-        (true, Some(body)) => (
-            "E403",
-            body.span,
-            "fallback is unreachable after both Boolean values",
-        ),
+    let (code, location, message) = match (crate::coverage::covers_rows(rows, families), fallback) {
+        (Some(false), None) => ("E402", branch_span, "not all constructor values are covered"),
+        (Some(true), Some(body)) => ("E403", body.span, "fallback is unreachable after all constructors"),
         _ => return Ok(()),
     };
     Err(Diagnostic {
@@ -388,30 +374,9 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
             });
         }
     }
-    if let NodeKind::PatternBranch { scrutinees, arms, .. } = &node.kind {
-        if scrutinees.len() == 1 {
-            for (patterns, _) in arms {
-                let [pattern] = patterns.as_slice() else { continue };
-                if matches!(pattern.kind, PatternKind::Underscore) {
-                    return Err(Diagnostic {
-                        path: path.into(),
-                        line: pattern.span.line,
-                        col: pattern.span.col,
-                        code: Some("E503".into()),
-                        message: "use a fallback instead of a catch-all underscore pattern".into(),
-                    });
-                }
-                if matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name))
-                {
-                    return Err(Diagnostic {
-                        path: path.into(),
-                        line: pattern.span.line,
-                        col: pattern.span.col,
-                        code: Some("E512".into()),
-                        message: "top-level variable patterns are forbidden".into(),
-                    });
-                }
-            }
+    if let NodeKind::PatternBranch { arms, .. } = &node.kind {
+        for (patterns, _) in arms {
+            catch_all_row(patterns, path)?;
         }
     }
     if let NodeKind::LetQ { pat, .. } = &node.kind {
@@ -453,37 +418,29 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-pub(crate) fn adt_coverage(
-    branch_span: crate::parser::Span,
-    arms: &[(Pattern, Node)],
-    fallback: Option<&Node>,
-    constructors: &[String],
-    families: &crate::coverage::Families,
-    path: &str,
-) -> Result<(), Diagnostic> {
-    let coverage: Vec<_> = if constructors.is_empty() {
-        vec![crate::coverage::record_patterns(arms, families)]
+fn is_wildcard_pattern(pattern: &Pattern) -> bool {
+    matches!(pattern.kind, PatternKind::Underscore)
+}
+
+fn is_variable_pattern(pattern: &Pattern) -> bool {
+    matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name))
+}
+
+fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
+    if !patterns.iter().all(|pattern| is_wildcard_pattern(pattern) || is_variable_pattern(pattern)) {
+        return Ok(());
+    }
+    let (code, pattern, message) = if patterns.iter().all(is_wildcard_pattern) {
+        let Some(pattern) = patterns.first() else { return Ok(()); };
+        ("E503", pattern, "use a fallback instead of a catch-all underscore pattern")
     } else {
-        constructors
-            .iter()
-            .map(|name| crate::coverage::constructor_payloads(name, arms, families))
-            .collect()
-    };
-    let exhaustive = coverage.iter().all(|covered| *covered == Some(true));
-    let missing = coverage.contains(&Some(false));
-    let (code, location, message) = match (exhaustive, fallback) {
-        (false, None) if missing => ("E402", branch_span, "not all constructor values are covered"),
-        (true, Some(body)) => (
-            "E403",
-            body.span,
-            "fallback is unreachable after all constructors",
-        ),
-        _ => return Ok(()),
+        let Some(pattern) = patterns.iter().find(|pattern| is_variable_pattern(pattern)) else { return Ok(()); };
+        ("E512", pattern, "top-level variable patterns are forbidden")
     };
     Err(Diagnostic {
         path: path.into(),
-        line: location.line,
-        col: location.col,
+        line: pattern.span.line,
+        col: pattern.span.col,
         code: Some(code.into()),
         message: message.into(),
     })
@@ -555,17 +512,10 @@ fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
 }
 
 fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    let NodeKind::PatternBranch { scrutinees, arms, fallback, .. } = &node.kind else {
+    let NodeKind::PatternBranch { arms, fallback, .. } = &node.kind else {
         return Ok(());
     };
-    if scrutinees.len() != 1 {
-        return Ok(());
-    }
-    if fallback.is_none()
-        && arms.iter().any(|(patterns, _)| {
-            matches!(patterns.as_slice(), [pattern] if needs_literal_fallback(pattern))
-        })
-    {
+    if fallback.is_none() && arms.iter().any(|(patterns, _)| patterns.iter().any(needs_literal_fallback)) {
         return Err(Diagnostic {
             path: path.into(),
             line: node.span.line,
@@ -657,28 +607,34 @@ fn literal_comparison(node: &Node) -> Option<&str> {
     .then_some(name)
 }
 
+fn covers_row(previous: &[Pattern], next: &[Pattern]) -> bool {
+    previous.len() == next.len()
+        && previous.iter().zip(next).all(|(left, right)| crate::normalize::covers_pattern(left, right))
+}
+
+fn same_row(previous: &[Pattern], next: &[Pattern]) -> bool {
+    previous.len() == next.len()
+        && previous.iter().zip(next).all(|(left, right)| crate::normalize::same_pattern(left, right))
+}
+
 fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    let NodeKind::PatternBranch { scrutinees, arms, .. } = &node.kind else {
+    let NodeKind::PatternBranch { arms, .. } = &node.kind else {
         return Ok(());
     };
-    if scrutinees.len() != 1 {
-        return Ok(());
-    }
     for (index, (patterns, _)) in arms.iter().enumerate() {
-        let [pattern] = patterns.as_slice() else { continue };
         if let Some(previous) = arms[..index].iter().find_map(|(previous, _)| {
-            let [previous] = previous.as_slice() else { return None };
-            crate::normalize::covers_pattern(previous, pattern).then_some(previous)
+            covers_row(previous, patterns).then_some(previous)
         }) {
-            let duplicate = crate::normalize::same_pattern(previous, pattern);
+            let Some(pattern) = patterns.first() else { continue };
+            let Some(previous_pattern) = previous.first() else { continue };
             return Err(Diagnostic {
                 path: path.into(),
                 line: pattern.span.line,
                 col: pattern.span.col,
-                code: Some(if duplicate { "E405" } else { "E403" }.into()),
+                code: Some(if same_row(previous, patterns) { "E405" } else { "E403" }.into()),
                 message: format!(
                     "pattern is covered by the arm at {}:{}",
-                    previous.span.line, previous.span.col
+                    previous_pattern.span.line, previous_pattern.span.col
                 ),
             });
         }
