@@ -2,7 +2,7 @@
 //!
 //! Follows §5 (literals and `//` line comments) and §7 (operators).
 //! Every token carries a 1-based `Span`. Whitespace (including newlines) and
-//! line comments are skipped: the parser does not look at newlines (§59).
+//! line comments are skipped: the parser does not look at newlines (付録C).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {

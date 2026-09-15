@@ -26,7 +26,7 @@ e1xx_match() {
 }
 
 # Why not verify-r9.sh: R9-1 は parse_corpus の corpus_counts を同梱し、計画はそれを R26 まで赤とする。
-check '23-a §59 生成プログラムの往復' cargo_test_cached test --offline --test r9_grammar
+check '23-a 付録C 生成プログラムの往復' cargo_test_cached test --offline --test r9_grammar
 check '23-b E1xx が §56 の表と一致' e1xx_match
 check '23-c §37/§38 の例と E123/E124 の位置摂動' cargo_test_cached test --offline --test r23_syntax
 

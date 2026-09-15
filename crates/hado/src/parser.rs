@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the hado grammar of §59, §5 and §7.
+//! Recursive-descent parser for the hado grammar of 付録C, §5 and §7.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
 //! local bindings (`let` / `let p? =` / `do`), anonymous functions (`fn`),
@@ -8,7 +8,7 @@
 //!
 //! Precedence (§7), high to low: application, unary `-`/`not`,
 //! `* / %`, `+ -`, comparison (non-associative), `&&`, `||`, `|>`.
-//! The parser ignores newlines (§59:2364).
+//! The parser ignores newlines (付録C:2364).
 
 use std::fmt;
 
@@ -136,7 +136,7 @@ pub enum NodeKind {
     Resume,
 }
 
-/// A pattern (`pattern :=` in §59).
+/// A pattern (`pattern :=` in 付録C).
 #[derive(Debug, Clone)]
 pub struct Pattern {
     pub kind: PatternKind,
@@ -662,7 +662,7 @@ impl Parser<'_> {
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
-        // §59: outer_item は最初の見出しより前にだけ現れる。
+        // 付録C: outer_item は最初の見出しより前にだけ現れる。
         let mut outer = context == TypeContext::TopLevel;
         while self.kind() != &TokKind::Eof {
             if context != TypeContext::TopLevel && self.section_boundary() { break; }

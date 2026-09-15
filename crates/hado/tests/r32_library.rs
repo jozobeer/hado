@@ -100,7 +100,7 @@ fn def_main_is_still_an_item_next_to_library() {
 
 #[test]
 fn library_after_the_first_heading_is_a_syntax_error() {
-    // §59: outer_item は最初の見出しより前にだけ現れる。
+    // 付録C: outer_item は最初の見出しより前にだけ現れる。
     let error = parse_source("def main = 1\neffect E\nabort stop\nlibrary\n", "generated.hd")
         .expect_err("library after a section heading must be rejected");
     assert_eq!(error.code.as_deref(), Some("E100"), "{error}");

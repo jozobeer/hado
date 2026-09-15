@@ -18,12 +18,13 @@ SPEC="docs/spec.md"
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
-heading_count() {
-    grep -cE "^## ${1}\\." "$SPEC" 2>/dev/null || true
-}
-
+# 引数は `§N`（N は整数か小数）または `付録X`。
 heading_exists() {
-    [ "$(heading_count "$1")" -ge 1 ]
+    case "$1" in
+        付録*) grep -qE "^## ${1} " "$SPEC" 2>/dev/null ;;
+        §*) local number=${1#§}; grep -qE "^## ${number//./\\.}\\. " "$SPEC" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
 }
 
 # --- check 3: error code table ---
@@ -59,9 +60,8 @@ else
         if [ -z "$secs" ]; then
             ec_reasons="$ec_reasons empty-sec-$code"
         else
-            printf '%s\n' "$secs" | grep -oE '§[0-9]+' | while read -r ref; do
-                num=${ref#§}
-                if ! heading_exists "$num"; then
+            printf '%s\n' "$secs" | grep -oE '§[0-9]+(\.[0-9]+)?|付録[A-Z]' | while read -r ref; do
+                if ! heading_exists "$ref"; then
                     echo " missing-sec-$code-$ref"
                 fi
             done >"$TMPD/secmiss.$$"

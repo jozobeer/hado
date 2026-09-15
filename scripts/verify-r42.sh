@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# R41 旧仕様の記載を外す（docs/plan.md 37 節）。対応表と tag v0.3 との照合を
-# 落とした後の、現行の仕様の自己整合だけを測る。リポジトリルートから実行する。
+# R42 節番号を増やしても動かない形にする（docs/plan.md 38 節）。本文は整数と
+# 小数、付録は文字で引き、参照が実在を指すことを測る。リポジトリルートから実行する。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,29 +18,41 @@ check() {
     fi
 }
 
-# --- 41-a(1): 節は §1〜§59 が `## N.` として 1 回ずつ読み順に並び、部の下にある ---
+# --- 42-a(1): 本文の節が `## N.` として 1 回ずつ読み順に、付録が A から順に ---
 spec_structure() {
     python3 - <<'PY'
 import re
 from pathlib import Path
 spec = Path('docs/spec.md').read_text()
-nums = [int(n) for n in re.findall(r'^## (\d+)\.', spec, flags=re.M)]
-assert nums == list(range(1, 60)), nums
-seen_part = False
+body, appendix, in_appendix, seen_part = [], [], False, False
 for line in spec.splitlines():
     assert not re.match(r'^# [0-9]+\.', line), line
-    if re.match(r'^## [0-9]+\.', line):
-        assert seen_part, 'section before any part heading'
     if line.startswith('# '):
         seen_part = True
-parts = re.findall(r'^# (.+)$', spec, flags=re.M)
-assert parts[-1] == '付録', parts[-1]
-assert re.search(r'^## 59\. 文法の概形$', spec, flags=re.M), '文法の概形 is not §59'
-print(f'sections: {len(nums)}, part headings: {len(parts)}, last: {parts[-1]}')
+    if re.match(r'^## \d', line):
+        assert seen_part, 'section before any part heading'
+        assert not in_appendix, f'body section after the appendix: {line}'
+        match = re.match(r'^## (\d+(?:\.\d+)?)\. ', line)
+        assert match, line
+        body.append(tuple(int(part) for part in match.group(1).split('.')))
+    elif re.match(r'^## 付録', line):
+        assert seen_part, 'section before any part heading'
+        in_appendix = True
+        match = re.match(r'^## (付録[A-Z]) ', line)
+        assert match, line
+        appendix.append(match.group(1))
+assert body == sorted(body), 'body sections are not in reading order'
+assert len(set(body)) == len(body), 'duplicate body section number'
+integers = [number for number in body if len(number) == 1]
+assert [number[0] for number in integers] == list(range(1, len(integers) + 1)), integers
+assert appendix == [f'付録{chr(ord("A") + i)}' for i in range(len(appendix))], appendix
+assert re.search(r'^# 付録$', spec, flags=re.M), 'no appendix part'
+assert re.search(r'^## 付録C 文法の概形$', spec, flags=re.M), '文法の概形 is not 付録C'
+print(f'sections: {len(body)} (1..{integers[-1][0]}), appendix: {appendix}')
 PY
 }
 
-# --- 41-a(2): 最新の snapshot だけを持つ（対応表が無く、前書きに旧版の記載が無い） ---
+# --- 42-a(2): 最新の snapshot だけを持つ（対応表が無く、前書きに旧版の記載が無い） ---
 spec_current_only() {
     python3 - <<'PY'
 import re
@@ -55,7 +67,7 @@ for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs
     if 'spec-map' in Path(rel).read_text():
         bad.append(rel)
 for path in sorted(Path('scripts').glob('verify-*.sh')):
-    if path.name == 'verify-r41.sh':
+    if path.name == 'verify-r42.sh':
         continue  # この検査自身が検査の文言に spec-map を含む
     if 'spec-map' in path.read_text():
         bad.append(str(path))
@@ -64,49 +76,61 @@ print(f'current only: version {sorted(versions)}, no spec-map in the live docume
 PY
 }
 
-# --- 41-a(3): コーパスのタグが §56 の表と一致し、全て実在の節を指す ---
+# --- 42-a(3): コーパスのタグが §56 の表の節と一致し、全て実在の節を指す ---
 spec_tags() {
     python3 - <<'PY'
 import re
 from pathlib import Path
 
 spec = Path('docs/spec.md').read_text()
-heads = {int(n) for n in re.findall(r'^## (\d+)\.', spec, flags=re.M)}
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+appendix = set(re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M))
+tag_re = re.compile(r'^// spec: (§\d+(?:\.\d+)?|付録[A-Z])$', re.M)
+
+def exists(tag):
+    if tag.startswith('§'):
+        return tag[1:] in headings
+    return tag in appendix
+
 table_text = spec.split('## 56. エラーコード', 1)[1]
-table = dict(re.findall(r'^\| (E[1-7]\d\d) \|[^|]*\| §(\d+) \|', table_text, flags=re.M))
+table = dict(re.findall(r'^\| (E[1-7]\d\d) \|[^|]*\| (§\d+(?:\.\d+)?|付録[A-Z]) \|', table_text, flags=re.M))
 assert len(table) == 69, len(table)
 bad = []
 for path in sorted(Path('tests').rglob('main.hd')):
     text = path.read_text()
-    tag = re.search(r'^// spec: §(\d+)$', text, flags=re.M)
+    tag = tag_re.search(text)
     if not tag:
         bad.append(f'{path}:no-spec-tag')
         continue
-    if int(tag.group(1)) not in heads:
+    if not exists(tag.group(1)):
         bad.append(f'{path}:missing-heading-{tag.group(1)}')
     error = re.search(r'^// error: (E[1-7]\d\d)$', text, flags=re.M)
     if error and table.get(error.group(1)) != tag.group(1):
         bad.append(f'{path}:{error.group(1)}-table-{table.get(error.group(1))}-tag-{tag.group(1)}')
 for path in sorted(Path('tests/library').rglob('*')):
     if path.suffix in ('.hd', '.hdi'):
-        tag = re.search(r'^// spec: §(\d+)$', path.read_text(), flags=re.M)
-        if tag and int(tag.group(1)) not in heads:
+        tag = tag_re.search(path.read_text())
+        if tag and not exists(tag.group(1)):
             bad.append(f'{path}:missing-heading-{tag.group(1)}')
 assert not bad, bad[:10]
 print(f'codes: {len(table)}, corpus tags resolve and match')
 PY
 }
 
-# --- 41-a(4): 現行の文書の §参照が全て実在の節を指す ---
+# --- 42-a(4): 現行の文書の §参照と付録参照が全て実在を指す ---
 spec_refs() {
     python3 - <<'PY'
 import re
 from pathlib import Path
 
-heads = {int(n) for n in re.findall(r'^## (\d+)\.', Path('docs/spec.md').read_text(), flags=re.M)}
+spec = Path('docs/spec.md').read_text()
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+letters = {name[-1] for name in re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M)}
 bad = []
 for rel in ['docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'docs/bug.md', 'docs/wants.md']:
-    missing = sorted({int(n) for n in re.findall(r'§(\d+)', Path(rel).read_text())} - heads)
+    text = Path(rel).read_text()
+    missing = sorted({n for n in re.findall(r'§(\d+(?:\.\d+)?)', text)} - headings)
+    missing += sorted({a for a in re.findall(r'付録([A-Z])', text)} - letters)
     if missing:
         bad.append(f'{rel}:{missing}')
 assert not bad, bad
@@ -114,7 +138,7 @@ print('live document references resolve')
 PY
 }
 
-# --- 41-a(5): 版が v0.3.1 で、spec と spec-coverage が同じ版を名乗る ---
+# --- 42-a(5): 版が v0.3.1 で、spec と spec-coverage が同じ版を名乗る ---
 spec_version() {
     python3 - <<'PY'
 import re
@@ -126,10 +150,10 @@ print('version: v0.3.1')
 PY
 }
 
-check 'spec sections §1..§59 are in reading order under parts, 文法の概形 is §59' spec_structure
+check 'body sections §1..§56 and 付録A.. are in reading order under parts' spec_structure
 check 'the current spec is the only snapshot (no spec-map, no older version)' spec_current_only
 check 'corpus tags match the §56 table and resolve' spec_tags
-check 'section references in the live documents resolve' spec_refs
+check 'section and appendix references in the live documents resolve' spec_refs
 check 'spec and spec-coverage name v0.3.1' spec_version
 
 echo "PASSED: $passed/$total"

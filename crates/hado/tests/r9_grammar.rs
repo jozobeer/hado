@@ -822,7 +822,7 @@ fn grammar_generated_programs_preserve_every_declaration() {
     assert!(ordinary_shared_seen, "generator never emitted shared in ordinary implementation");
     assert!(functor_shared_seen, "generator never emitted shared in functor body");
     let spec = include_str!("../../../docs/spec.md");
-    let grammar = spec.split("## 59.").nth(1).unwrap();
+    let grammar = spec.split("## 付録C ").nth(1).unwrap();
     let rules: BTreeSet<_> = grammar.lines().filter_map(|line| line.split_once(":=").map(|(name, _)| name.trim())).collect();
     let visited: BTreeSet<_> = generator.choices.keys().copied().collect();
     assert!(rules.difference(&visited).next().is_none(), "unvisited rules: {:?}", rules.difference(&visited).collect::<Vec<_>>());

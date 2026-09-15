@@ -31,36 +31,42 @@ COV="docs/spec-coverage.md"
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
-heading_count() {
-    grep -cE "^## ${1}\\." "$SPEC" 2>/dev/null || true
-}
-
+# 引数は `§N`（N は整数か小数）または `付録X`。
 heading_exists() {
-    [ "$(heading_count "$1")" -ge 1 ]
+    case "$1" in
+        付録*) grep -qE "^## ${1} " "$SPEC" 2>/dev/null ;;
+        §*) local number=${1#§}; grep -qE "^## ${number//./\\.}\\. " "$SPEC" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
 }
 
-# --- 検査 1: 節番号（§1〜§59 が `## N.` として 1 回ずつ、読み順に並ぶ） ---
+# --- 検査 1: 節番号（本文 §1〜§56 が `## N.` として 1 回ずつ読み順に、付録は A から順に） ---
 doc_headings() {
-    local missing nums n c prev
-    missing=""
-    n=1
-    while [ "$n" -le 59 ]; do
-        c=$(heading_count "$n")
-        if [ "$c" -ne 1 ]; then
-            missing="$missing #$n:$c"
-        fi
-        n=$((n + 1))
-    done
-    mapfile -t nums < <(grep -oE '^## [0-9]+\.' "$SPEC" | grep -oE '[0-9]+')
-    prev=0
-    for n in "${nums[@]}"; do
-        if [ "$n" -ne $((prev + 1)) ]; then
-            missing="$missing order-$prev-to-$n"
-            break
-        fi
-        prev=$n
-    done
-    [ "${#nums[@]}" -eq 59 ] && [ -z "$missing" ]
+    python3 - "$SPEC" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+spec = Path(sys.argv[1]).read_text()
+body, appendix, in_appendix = [], [], False
+for line in spec.splitlines():
+    if re.match(r'^## \d', line):
+        assert not in_appendix, f'body section after the appendix: {line}'
+        match = re.match(r'^## (\d+(?:\.\d+)?)\. ', line)
+        assert match, line
+        body.append(tuple(int(part) for part in match.group(1).split('.')))
+    elif re.match(r'^## 付録', line):
+        in_appendix = True
+        match = re.match(r'^## (付録[A-Z]) ', line)
+        assert match, line
+        appendix.append(match.group(1))
+assert body == sorted(body), 'body sections are not in reading order'
+assert len(set(body)) == len(body), 'duplicate body section number'
+integers = [number for number in body if len(number) == 1]
+assert [number[0] for number in integers] == list(range(1, len(integers) + 1)), integers
+assert appendix == [f'付録{chr(ord("A") + i)}' for i in range(len(appendix))], appendix
+assert appendix, 'no appendix section'
+PY
 }
 
 # --- 検査 2: 節は部の下にあり、部の見出しに節番号は無い ---
@@ -70,7 +76,7 @@ doc_parts() {
         if printf '%s' "$line" | grep -qE '^# [0-9]+\.'; then
             reasons="$reasons numbered-part"
         fi
-        if printf '%s' "$line" | grep -qE '^## [0-9]+\.'; then
+        if printf '%s' "$line" | grep -qE '^## ([0-9]+(\.[0-9]+)?\.|付録[A-Z] )'; then
             [ "$seen" -eq 1 ] || reasons="$reasons section-before-part"
         fi
         if printf '%s' "$line" | grep -qE '^# '; then
@@ -206,9 +212,8 @@ doc_coverage() {
     done <"$TMPD/cov_items.txt"
 
     while IFS=$'\t' read -r name secs; do
-        printf '%s\n' "$secs" | grep -oE '§[0-9]+' | while read -r ref; do
-            num=${ref#§}
-            if ! heading_exists "$num"; then
+        printf '%s\n' "$secs" | grep -oE '§[0-9]+(\.[0-9]+)?|付録[A-Z]' | while read -r ref; do
+            if ! heading_exists "$ref"; then
                 echo " missing-sec-$ref"
             fi
         done >"$TMPD/covsec.$$"
@@ -284,7 +289,7 @@ print('coverage: ' + ' '.join(f'§{section}={sum(1 for s, _ in rules.values() if
 PY
 }
 
-check 'spec sections §1..§59 exist once in reading order' doc_headings
+check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
 check 'condition column prose does not require a newline' doc_condition_column

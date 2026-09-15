@@ -48,7 +48,7 @@ done
 [ "$(grep -cF "parse_accept_ok_n: $n_accept" "$TMPD/base.log")" -ge 1 ] || c1_reasons="$c1_reasons accept-n!=$n_accept"
 # Probe: `def main = )` must not be accepted.
 mkdir -p tests/accept/__probe_bad__
-printf -- '// spec: §59\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__/main.hd
+printf -- '// spec: 付録C\n// expect: 0\ndef main = )\n' > tests/accept/__probe_bad__/main.hd
 cargo_cached test --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/probe1.log" 2>&1
 rm -f tests/accept/__probe_bad__/main.hd
     rmdir tests/accept/__probe_bad__ 2>/dev/null || true

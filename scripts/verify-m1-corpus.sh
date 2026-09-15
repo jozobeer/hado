@@ -15,6 +15,8 @@ fail() { echo "NG: $1 $2"; }
 
 SPEC="docs/spec.md"
 COV="docs/spec-coverage.md"
+# 本文 §N（N は整数か小数）と付録 付録X の両方を受ける。
+TAG_RE='^// spec: (§[0-9]+(\.[0-9]+)?|付録[A-Z])$'
 PLAN="docs/plan.md"
 CORPUS_RS="crates/hado/tests/corpus.rs"
 
@@ -71,11 +73,11 @@ for f in tests/reject/*/main.hd; do
         c1_reasons="$c1_reasons $f:error-lines=$n_err"
     fi
     grep -E '^// error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's|^// error: ||' >>"$TMPD/corpus_codes.txt" || true
-    n_spec=$(grep -cE '^// spec: §[0-9]+$' "$f" || true)
+    n_spec=$(grep -cE "$TAG_RE" "$f" || true)
     if [ "$n_spec" -ne 1 ]; then
         c1_reasons="$c1_reasons $f:spec-lines=$n_spec"
     else
-        specval=$(grep -E '^// spec: §[0-9]+$' "$f" | sed 's|^// spec: ||')
+        specval=$(grep -E "$TAG_RE" "$f" | sed 's|^// spec: ||')
         errcode=$(grep -E '^// error: E[1-7][0-9][0-9]$' "$f" 2>/dev/null | sed 's|^// error: ||' | head -n 1)
         if [ -n "$errcode" ]; then
             wantsec=$(awk -F '\t' -v c="$errcode" '$1==c {print $3}' "$TMPD/codes.tsv" | head -n 1)
@@ -103,14 +105,14 @@ fi
 
 # --- check 2: the section-59 examples (first line of each code block) are in the accept corpus ---
 c2_reasons=""
-awk '/^## 58\./{f=1; next} f && /^## [0-9]+\./{f=0} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
+awk '/^## 付録B /{f=1; next} f && /^## /{f=0} f && /^```/{inb=!inb; first=inb; next} f && inb && first {print; first=0}' "$SPEC" >"$TMPD/sec39.txt"
 [ -s "$TMPD/sec39.txt" ] || c2_reasons="$c2_reasons no-sec39-examples"
 while IFS= read -r s; do
     [ -n "$s" ] || continue
     found=0
     for f in tests/accept/*/main.hd; do
         [ -e "$f" ] || continue
-        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: §58$' "$f"; then
+        if grep -qxF -- "$s" "$f" && grep -qE '^// spec: 付録B$' "$f"; then
             found=1
             break
         fi
@@ -264,7 +266,7 @@ else
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
     mkdir -p tests/accept/__probe__
-    printf -- '// spec: §58\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
+    printf -- '// spec: 付録B\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
     cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__/main.hd
@@ -326,13 +328,16 @@ fi
 for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
     [ -e "$f" ] || continue
     first=$(grep -vE '^[[:space:]]*$' "$f" | head -n 1)
-    if ! printf '%s' "$first" | grep -qE '^// spec: §[0-9]+$'; then
+    if ! printf '%s' "$first" | grep -qE "$TAG_RE"; then
         c6_reasons="$c6_reasons $f:first-line-not-spec"
     else
-        num=$(printf '%s' "$first" | grep -oE '§[0-9]+' | tr -d '§')
-        hc=$(grep -cE "^## ${num}\\." "$SPEC" || true)
+        token=$(printf '%s' "$first" | sed 's|^// spec: ||')
+        case "$token" in
+            付録*) hc=$(grep -cE "^## ${token} " "$SPEC" || true) ;;
+            *) number=${token#§}; hc=$(grep -cE "^## ${number//./\\.}\\. " "$SPEC" || true) ;;
+        esac
         if [ "$hc" -ne 1 ]; then
-            c6_reasons="$c6_reasons $f:spec-heading-#$num-count=$hc"
+            c6_reasons="$c6_reasons $f:spec-heading-$token-count=$hc"
         fi
     fi
     case "$f" in

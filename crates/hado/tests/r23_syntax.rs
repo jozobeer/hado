@@ -12,6 +12,12 @@ fn spec_between(start: &str, end: &str) -> &'static str {
     &rest[..until]
 }
 
+fn spec_to_end(start: &str) -> &'static str {
+    let text = spec();
+    let from = text.find(start).unwrap_or_else(|| panic!("missing {start}"));
+    &text[from..]
+}
+
 fn ocaml_blocks(section: &str) -> Vec<&str> {
     section
         .split("```ocaml")
@@ -57,7 +63,7 @@ fn roundtrip(source: &str) {
 }
 
 fn spec_keywords() -> Vec<String> {
-    let line = spec_between("## 59.", "## 60.")
+    let line = spec_to_end("## 付録C ")
         .lines()
         .find(|line| line.contains("キーワードは"))
         .expect("keyword sentence");
