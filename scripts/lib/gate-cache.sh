@@ -37,6 +37,8 @@ hado_gate_repo_root() {
 }
 
 # 作業ツリーの内容のハッシュ。target/ と .git/ と __pycache__/ は除外する。
+# 入れ子の git worktree（.worktrees/。.git/info/exclude にある）も除く。別の
+# worktree の target/ はこのツリーの入力ではなく、走っているだけで鍵が揺れる。
 # HADO_GATE_FINGERPRINT_EXCLUDE があれば、そのリポジトリ相対のパス以下も除く。
 # run-gates は走行自身がログを書く出力先をここに入れる（ログは門番の入力では
 # ないので、鍵と並列の安定性 guard を走行の書き込みで揺らさない）。
@@ -48,11 +50,13 @@ hado_gate_fingerprint() {
         if [ -n "$exclude" ]; then
             find . -type f \
                 -not -path './target/*' -not -path './.git/*' -not -path '*/__pycache__/*' \
+                -not -path './.worktrees/*' \
                 -not -path "./$exclude/*" \
                 -print0
         else
             find . -type f \
                 -not -path './target/*' -not -path './.git/*' -not -path '*/__pycache__/*' \
+                -not -path './.worktrees/*' \
                 -print0
         fi |
             LC_ALL=C sort -z |
