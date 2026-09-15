@@ -1303,25 +1303,25 @@ effect Error
 abort raise(error: Exception)
 
 effect A Yield
-capture yield(value: A): Unit
+again yield(value: A): Unit
 
 effect Ask
-reply ask: String
+once ask: String
 ```
 
 操作の種別は宣言で固定する。呼び出し位置から見て、どの保証が当たるかが静的に決まる。
 
 | 種別 | `resume` | 第53節の保証 |
 |---|---|---|
-| `reply` | 呼び出し位置で即座に返る | あり |
+| `once` | 呼び出し位置で即座に返る | あり |
 | `abort` | 再開しない | あり |
-| `capture` | 節の中のどこでも 1 回 | なし |
+| `again` | 節の中のどこでも 1 回 | なし |
 
-`abort` は再開しないので戻り値が存在しない。戻り型を書くと E123 とする。呼び出し位置の式の型は、その位置が要求する型に合わせる。返らないので、どの型とも矛盾しない。`reply` と `capture` は契約の member と同じ形で書き、引数を取らない操作は `reply ask: String` の形とする。
+`abort` は再開しないので戻り値が存在しない。戻り型を書くと E123 とする。呼び出し位置の式の型は、その位置が要求する型に合わせる。返らないので、どの型とも矛盾しない。`once` と `again` は契約の member と同じ形で書き、引数を取らない操作は `once ask: String` の形とする。
 
 効果の操作は値の名前空間に無修飾で入る（第49節）。値の空間はファイルごとだが、操作はこの規則の唯一の例外で、効果を宣言したディレクトリの全てのファイルから書ける。書けるのはそのディレクトリの中だけである。値の修飾は `実装名.値` の形しか無く（第59節）、小文字の操作名を別のディレクトリから綴る手段が無いためである。同じディレクトリの別の効果が同じ操作名を宣言すると E205 とする。prelude の操作はどこからでも書ける。prelude の操作と同名のユーザーの宣言（外の `def`、実装の `def`、他の効果の操作）は、どのディレクトリでも E205 とする。prelude の効果の handler はどのディレクトリにも置ける。
 
-prelude の操作は、handler が無ければ `reply` なら runtime の既定実装で応え、`abort` なら `main` の入口で stderr と終了コード 1 になる（第54節）。`capture` は handler が要る。
+prelude の操作は、handler が無ければ `once` なら runtime の既定実装で応え、`abort` なら `main` の入口で stderr と終了コード 1 になる（第54節）。`again` は handler が要る。
 
 操作の結果の効果行には、その操作が起こす追加の効果だけを書く（第55節）。
 
@@ -1345,11 +1345,11 @@ handler は処理する効果と同じディレクトリに置く。腕が操作
 
 `return` の腕は、handler が包む計算が正常に終わったときの値を変換する。書かなければ恒等とする。
 
-`capture` の腕では `resume` を書ける。`resume` は捕まえた継続を 1 回だけ再開する。腕の中の任意の位置に置けるが、値として保存したり返したりはできない。`capture` 以外の腕と、handler の外に `resume` を書くと E124 とする。`resume` が書ける場所は構文的な入れ子だけで決まる。
+`again` の腕では `resume` を書ける。`resume` は捕まえた継続を 1 回だけ再開する。腕の中の任意の位置に置けるが、値として保存したり返したりはできない。`again` 以外の腕と、handler の外に `resume` を書くと E124 とする。`resume` が書ける場所は構文的な入れ子だけで決まる。
 
 ```ocaml
 handler A Yield as Collect
-capture yield value =>
+again yield value =>
   let rest = resume () ->
   [value, ...rest]
 return _ => []
@@ -1754,9 +1754,9 @@ def find(id: Int): T Option
 
 末尾位置は、関数の本体そのものと、そこから次の規則で辿れる位置とする。`let` と `do` と `with` の継続、分岐（第24節から第27節）の腕と fallback である。`fn` の本体はその `fn` にとっての末尾位置であり、囲む関数のものではない。適用の引数、演算子の被演算子、record 式の field、分岐の条件と scrutinee は末尾位置ではない。
 
-`capture` 操作（第37節）を経由しない末尾位置の関数呼び出しは、スタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
+`again` 操作（第37節）を経由しない末尾位置の関数呼び出しは、スタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
 
-`capture` 操作は継続を捕まえるので、その後ろの末尾呼び出しはこの保証の外にある。`capture` を含むループはスタックを反復回数に比例して消費する。`reply` と `abort` は継続を捕まえないので保証の内側にある。
+`again` 操作は継続を捕まえるので、その後ろの末尾呼び出しはこの保証の外にある。`again` を含むループはスタックを反復回数に比例して消費する。`once` と `abort` は継続を捕まえないので保証の内側にある。
 
 全ての hado 関数は環境を第 1 引数に取る。名前付き関数は環境を無視する。単相の `Fn` 型ごとに `tail` 規約の signature が一つに定まる。関数値経由の末尾呼び出しは `return_call_indirect` で表せる。
 
@@ -1874,20 +1874,20 @@ def max(left: Int, right: Int): Int Pure
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
 
-prelude は効果 `Env` と `Io` を持ち、操作を値の空間に置く。操作は `reply` で、handler が無ければ runtime の既定実装が応える。既定実装は失敗を `Error` として raise する。利用者は `raise` と同じく無修飾で呼ぶ。
+prelude は効果 `Env` と `Io` を持ち、操作を値の空間に置く。操作は `once` で、handler が無ければ runtime の既定実装が応える。既定実装は失敗を `Error` として raise する。利用者は `raise` と同じく無修飾で呼ぶ。
 
 ```ocaml
 effect Env
-reply args: String List {Error}
-reply env(name: String): String Option {Error}
-reply cwd: String {Error}
+once args: String List {Error}
+once env(name: String): String Option {Error}
+once cwd: String {Error}
 
 effect Io
-reply read_file(path: String): Bytes {Error}
-reply write_file(path: String, contents: Bytes): Unit {Error}
-reply log(contents: String): Unit {Error}
-reply read_dir(path: String): String List {Error}
-reply read_stdin: Bytes {Error}
+once read_file(path: String): Bytes {Error}
+once write_file(path: String, contents: Bytes): Unit {Error}
+once log(contents: String): Unit {Error}
+once read_dir(path: String): String List {Error}
+once read_stdin: Bytes {Error}
 ```
 
 操作の結果の効果行には、その操作が起こす追加の効果だけを書く（`Io` の操作なら `Error`）。`args` はプログラム名を除く引数である。`env` は未設定を `None` とする。非 UTF-8 の名前は `Error` を raise する。
@@ -1958,7 +1958,7 @@ def A drop(values: A List, count: Int): A List Pure
 | E111 | char-literal-form | §5 | 字句 | `'` |
 | E112 | int-literal-range | §5 | 字句 | リテラル |
 | E123 | abort-return-type | §37 | 構文 | `abort` の操作の `:` |
-| E124 | resume-outside-capture | §38 | 構文 | `resume` |
+| E124 | resume-outside-again | §38 | 構文 | `resume` |
 | E201 | implicit-recursion | §9 | 名前解決 | 自分を参照する名前 |
 | E202 | dunder-in-user | §49 | 名前解決 | `__` 名 |
 | E203 | dunder-as-value | §49 | 名前解決 | `__` 名 |
@@ -2054,9 +2054,9 @@ module
 implement
 effect
 handler
-reply
+once
 abort
-capture
+again
 return
 as
 ::
@@ -2195,7 +2195,7 @@ comment         := "//" 行末までの文字                   `--` と `#` は
 
 `_` 単独は wildcard であり名前ではない。`::` は名前空間の区切り（第51節）、`.` は member と field の区切りで、どちらも 1 つのトークンである。空白とコメントはトークンの区切りで、それ以外の意味を持たない。
 
-キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `as` `library` `shared` `not` `true` `false` と `Fn` `Pure` である。名前には使えない。
+キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `effect` `handler` `with` `resume` `return` `once` `abort` `again` `as` `library` `shared` `not` `true` `false` と `Fn` `Pure` である。名前には使えない。
 
 プログラム:
 
@@ -2279,7 +2279,7 @@ implement_item  := definition
 effect_section  := "effect" type_vars? upper_name effect_item*
 effect_item     := op_kind name "(" contract_param ("," contract_param)* ")" [":" result]
                  | op_kind name [":" result]                              引数を取らない操作
-op_kind         := "reply" | "abort" | "capture"
+op_kind         := "once" | "abort" | "again"
 handler_section := "handler" type_vars? contract_ref "as" upper_name handler_params? handler_item*
 handler_params  := "(" typed_param ("," typed_param)* ")"
 handler_item    := op_kind name param* "=>" expression
@@ -2310,7 +2310,7 @@ primary         := int | float | char | string | bool | unit
                  | record_expr
                  | list_expr
                  | lambda                                                 `fn(` で始まり `)` で閉じる
-                 | "resume"                                               capture の腕の中に限る（第38節）
+                 | "resume"                                               again の腕の中に限る（第38節）
                  | "(" expression ")"
 constructor_expr := path? upper_name ["(" expression ("," expression)* ")" | record_expr]
 record_expr     := "{" name "=" expression (";" name "=" expression)* "}"

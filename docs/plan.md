@@ -278,7 +278,7 @@ top-level 値定義は 0 引数関数にした。一度だけ評価して global
 - 非末尾再帰はスタックを消費する。`List.map` のような cons list の素直な再帰は、既定のスタック（Linux では通常 8 MB）を超える深さで SIGSEGV になり、メッセージは出ない。v0.1 では許容し、prelude も素直な再帰で書く。
 - Boehm GC の保守的走査。ポインタをタグ埋め込み等で隠すと回収されて壊れる。`repr` はポインタを隠さず 1 語で置く。
 - 多相再帰。型注釈付きで多相再帰が推論される場合、実体化の集合が有限に閉じず単相化が停止しないことがある。v0.1 では M5 で検出して一律にエラーにする。
-- v0.2 の `capture` 操作は末尾再帰でもスタックを消費する。Koka 3.2.3 の実測で約 330 バイト / 反復、既定スタック 8 MB では約 3 万反復で SIGSEGV し、メッセージは出ない（17.8）。生成器やイテレータを長い列に使うときの上限になる。回避には segmented stacks が要り、専用ランタイムを持つことになる。
+- v0.2 の `again` 操作は末尾再帰でもスタックを消費する。Koka 3.2.3 の実測で約 330 バイト / 反復、既定スタック 8 MB では約 3 万反復で SIGSEGV し、メッセージは出ない（17.8）。生成器やイテレータを長い列に使うときの上限になる。回避には segmented stacks が要り、専用ランタイムを持つことになる。
 
 v0.2 へ保留:
 
@@ -1218,7 +1218,7 @@ optimizer を入れるとき、型から純粋性を仮定してはならない�
 | Q3 | 効果の深さ | 一般 `ctl`（1 回再開）まで。multi-shot は入れない | 新節 |
 | Q4 | `resume` の形 | handler 節内限定のキーワード。値化・保存・返却は禁止し、節内なら位置は問わない。全ての再開が scoped になり、静的 evidence（EPT）が使える | 新節 |
 | Q5 | 種別の位置 | 操作の種別は効果宣言で固定する。「この呼び出しが yield しうるか」が呼び出し位置ごとに静的に決まる | 新節 |
-| Q6 | 種別と §48 | 種別は 3 つ（18 節 Q12 で `reply` / `abort` / `capture` と綴る）。§48 は「`capture` を経由しない末尾呼び出しはスタックを消費しない」に限定する。`capture` の下では末尾呼び出しが失われ、スタックを反復回数に線形に消費する（17.8 の実測） | §48, 新節 |
+| Q6 | 種別と §48 | 種別は 3 つ（18 節 Q12 で `once` / `abort` / `again` と綴る）。§48 は「`again` を経由しない末尾呼び出しはスタックを消費しない」に限定する。`again` の下では末尾呼び出しが失われ、スタックを反復回数に線形に消費する（17.8 の実測） | §48, 新節 |
 | Q7 | Option の境界 | 理由の有無で分ける。Option は値の不在、効果は理由のある失敗。今の Option / Result の区別をそのまま使う | §21 |
 | Q8 | `?` と `do` | 効果的な呼び出しの束縛に印を付けない。`?` は Option 専用の見分け札として存続し、`do` は「効果を持つ式の値を捨てて継続する」に意味を移して存続する | §22, §23, §24 |
 | Q9 | handler の形 | §34 / §35 と同じ節構文。`effect E` が契約側、`handler E as H` が実装側で、使用は `with H -> rest`。宣言なので §20 の branch のネスト禁止に触れず、handler 節の中で `if` が書ける | 新節, §34, §35 |
@@ -1227,7 +1227,7 @@ optimizer を入れるとき、型から純粋性を仮定してはならない�
 | Q12 | 効果行の綴り | 後置の行。区切りと効果名は 18 節が定める（`Int {Error}`、`Fn(A => B {E})`） | §37, §41 |
 | Q13 | 省略 | 効果行だけ結果型と独立に省略できる | §8, §9 |
 | Q14 | 省略の意味 | 省略は暗黙の効果変数（効果多相）。契約でも外の `def` でも同じ意味とし、純粋の主張には `Pure` を書く | §34, §9 |
-| Q15 | `capture` を含むループ | 継続の表現は short-cut resumption とする。ただしこれは実行時間の最適化であって、§48 の保証は回復しない（17.8 の実測） | §48, 新節 |
+| Q15 | `again` を含むループ | 継続の表現は short-cut resumption とする。ただしこれは実行時間の最適化であって、§48 の保証は回復しない（17.8 の実測） | §48, 新節 |
 | Q16 | 操作の名前空間 | 値空間に無修飾で入れる（`raise error`）。`compare` と同じ扱いで、名前空間は 5 つのまま増やさない | §47 |
 | Q17 | 進め方 | 未確認をプロトタイプで潰してから、効果を足し `Result` を最後に撤去する。各ラウンドで門番を green に保つ | 手順書 |
 | Q18 | 版 | v0.2 | — |
@@ -1238,9 +1238,9 @@ optimizer を入れるとき、型から純粋性を仮定してはならない�
 
 | 種別 | `resume` | §48 の保証 | コード生成 |
 |---|---|---|---|
-| `reply` | 呼び出し位置で即時 | あり | その場で評価し、yield しない |
+| `once` | 呼び出し位置で即時 | あり | その場で評価し、yield しない |
 | `abort` | 不可（中断のみ） | あり | tag 検査と分岐。現行の Result と同形 |
-| `capture` | 節内のどこでも 1 回 | なし | short-cut resumption。継続を捕まえるため末尾呼び出しが失われ、スタックを反復ごとに約 330 バイト消費する |
+| `again` | 節内のどこでも 1 回 | なし | short-cut resumption。継続を捕まえるため末尾呼び出しが失われ、スタックを反復ごとに約 330 バイト消費する |
 
 `raise` は `abort` なので、最も頻出する効果が最も安いパスを通る。種別の綴りは 18 節 Q12 が定める。
 
@@ -1293,7 +1293,7 @@ Ningning Xie and Daan Leijen. *Generalized Evidence Passing for Effect Handlers:
 
 ### 17.8 実測（17.6 の 1、2026-09-09）
 
-Koka 3.2.3 で、`capture` に相当する `ctl` 操作を含む末尾再帰ループを走らせた。測定は docker の ubuntu 22.04、公式インストーラ。プログラムは `docs/ledger.md` の「0.2 のプロトタイプ」に置いた形。
+Koka 3.2.3 で、`again` に相当する `ctl` 操作を含む末尾再帰ループを走らせた。測定は docker の ubuntu 22.04、公式インストーラ。プログラムは `docs/ledger.md` の「0.2 のプロトタイプ」に置いた形。
 
 | ケース | N | 結果 | 最大 RSS |
 |---|---|---|---|
@@ -1310,14 +1310,14 @@ Koka 3.2.3 で、`capture` に相当する `ctl` 操作を含む末尾再帰ル�
 - `resume` を末尾位置に置いても救われない。handler 側ではなく、操作を起こす側の末尾呼び出しが bind のラムダの下に入ることが原因である（17.7 の p.71:11）。
 - short-cut resumption はこの問題を解かない。Koka は実装済みで（17.7 の p.71:3）この結果である。論文の「minimal stack space」は定数の意味ではない。
 
-`reply` に相当する tail-resumptive 操作は効果を持たないループと同じ挙動で、§48 の保証はこの種別で完全に成り立つ。
+`once` に相当する tail-resumptive 操作は効果を持たないループと同じ挙動で、§48 の保証はこの種別で完全に成り立つ。
 
 ### 17.9 実測（17.6 の 2、2026-09-10）
 
 17.6 の未確認 2（short-cut resumption の prompt / under フレーム復元が、hado の設定でも必要か）を、
 本体の実測・現物の読み・最小モデルの 3 つで確かめた。
 
-**本体の実測。** `capture` handler を他の handler と組み合わせた 15 形を `hado build` にかけた。
+**本体の実測。** `again` handler を他の handler と組み合わせた 15 形を `hado build` にかけた。
 **15 形すべて `hado check` は通る。破れるのは単相化だけである。**
 
 | 形 | 実測 |
@@ -1326,22 +1326,22 @@ Koka 3.2.3 で、`capture` に相当する `ctl` 操作を含む末尾再帰ル�
 | `Collect` 単独・yield 2 回 | ok。`[1, 2]` |
 | `Outer(A)` ⊃ `Collect` | NG `done payload mismatch` |
 | `Outer(A、return 腕あり)` ⊃ `Collect` | NG `done payload mismatch` |
-| `CollectY` ⊃ `CollectZ`（capture 同士） | NG `done payload mismatch` |
+| `CollectY` ⊃ `CollectZ`（again 同士） | NG `done payload mismatch` |
 | 同じ効果 `Y` の handler の入れ子 | NG `done payload mismatch` |
 | `Collect` ⊃ `Trap`（abort の handler） | NG `done payload mismatch` |
-| `resume` の中から外側の `capture` を起こす | NG `done payload mismatch` |
-| `resume` の中から外側の `reply` を起こす | NG `done payload mismatch` |
+| `resume` の中から外側の `again` を起こす | NG `done payload mismatch` |
+| `resume` の中から外側の `once` を起こす | NG `done payload mismatch` |
 | 内側 handler の `return` が最終結果に残る形 | NG `done payload mismatch` |
 | `Collect` ⊃ `Inner(B)` | NG `continuation result type mismatch` |
 | `Collect` ⊃ `Inner(A)` | NG `continuation result type mismatch` |
 | `Collect` ⊃ `Inner(B)`・yield 2 回 | NG `continuation result type mismatch` |
-| 再開した継続の中で内側の `reply` を呼ぶ形 | NG `continuation result type mismatch` |
+| 再開した継続の中で内側の `once` を呼ぶ形 | NG `continuation result type mismatch` |
 | `Outer(A)` ⊃ `Collect` ⊃ `Inner(B)`（B5） | NG `continuation result type mismatch` |
 
-**B5 は 3 段固有ではない。2 段で既に壊れ、`capture` handler が内側か外側かで症状が変わる。**
+**B5 は 3 段固有ではない。2 段で既に壊れ、`again` handler が内側か外側かで症状が変わる。**
 内側なら forwarding が handler の答えを外側の Outcome の `$Done` に包み、外側なら継続が
 最内 handler で閉じる。`docs/bug.md` の B5 は 3 段の例だけを記録しており、範囲を過小に書いていた。
-**測った 15 形のうち、通ったのは `capture` handler が単独の 2 形だけである**
+**測った 15 形のうち、通ったのは `again` handler が単独の 2 形だけである**
 （15 形は網羅ではないので、これ以外に通る合成があるかは未確認）。
 `hado check` が 15 形すべてを通すことから、仕様も型システムもこの形を認めており、
 追いついていないのは単相化の畳み方だけだと分かる。
@@ -1377,20 +1377,20 @@ one-shot 継続になり、§58 の「`resume` は捕まえた継続を 1 回だ
 | `Collect` ⊃ `Trap` | `[7]` | `[7]` |
 | `Collect` ⊃ `Inner(B)` | `[2]` | continuation result type mismatch |
 | 同上・yield 2 回 | `[2, 5]` | unhandled operation |
-| 再開後に内側の `reply` を呼ぶ | `[1, 2]` | unhandled operation |
+| 再開後に内側の `once` を呼ぶ | `[1, 2]` | unhandled operation |
 | 内側の `return` が結果に残る | `[1, 42]` | continuation result type mismatch |
 | B5（3 段） | `[3]` | continuation result type mismatch |
-| `resume` の中から外側の `capture` | NG unhandled operation | NG unhandled operation |
+| `resume` の中から外側の `again` | NG unhandled operation | NG unhandled operation |
 
 **モデルが確かめたこと。** `under` の切り方なら、11 形が**畳み切れて**、handler に設定した
 型ラベルが最後まで矛盾なく繋がる。**モデルは型検査を持たない**ので、これは「型が正しい」の
 証明ではなく「型ラベルの流れに切れ目が無い」の確認である。`$Outcome` の型付けそのものは
 確かめていない。移植では型の設計を別に立てる必要がある。
 
-再開した継続の中で内側の `reply` を呼ぶ形（`[1, 2]`）と、内側の `return` が最終結果に残る形
+再開した継続の中で内側の `once` を呼ぶ形（`[1, 2]`）と、内側の `return` が最終結果に残る形
 （`[1, 42]`）は、**under フレームの復元が実際に効いていないと出ない値**である。前者のトレースは
-`Collect.capture y(1) を 2 段で捕捉（復元する内側 handler 1 段）` の後に
-`Inner.reply b() = 2` が続く。
+`Collect.again y(1) を 2 段で捕捉（復元する内側 handler 1 段）` の後に
+`Inner.once b() = 2` が続く。
 
 **モデルが確かめていないこと。** `hado` の側は 15 形のうち 5 形しか症状を再現しない。
 モデルは forwarding を実行時に決め、本体は単相化の時点で型を決めるためである。
@@ -1434,13 +1434,13 @@ prompt / under フレームの復元は省けない。
 | Q9 | 区切り記号 | 波括弧。`Config {Io, Error}` | §37, §41 |
 | Q10 | `return` 節 | 持たせる。handler が本体の型を変えられる | 新節 |
 | Q11 | `Error` の型引数 | 持たない。payload は `type Exception = { message: String }`。他の効果は型引数を取れる | §49, 新節 |
-| Q12 | 操作の種別の綴り | `reply` / `abort` / `capture`。継続に何が起きるかを名指しする | 新節 |
+| Q12 | 操作の種別の綴り | `once` / `abort` / `again`。継続に何が起きるかを名指しする | 新節 |
 | Q13 | `abort` の戻り型 | 書かせない。再開しないので戻り値が存在しない | 新節, §50 |
 | Q14 | handler の未使用引数 | `_` を許す（13.1 Q4 の範囲を handler 節へ広げる） | §27 |
 | Q15 | `Error` の印字 | payload の `message` field だけを stderr へ出す | §51 |
 | Q16 | `DivisionError` | 廃止する。`/` と `%` は `Error` を raise する | §36, §44, §49 |
 | Q17 | `with` の位置 | `prefix_form`。`let` `do` と同じ継続の形 | §41 |
-| Q18 | `resume` | `capture` の腕の中でだけ書ける primary | §41, 新節 |
+| Q18 | `resume` | `again` の腕の中でだけ書ける primary | §41, 新節 |
 | Q19 | 行の正準順 | アルファベット順。`{Error, Io}` | §37, §41 |
 
 ### 18.2 構文の確定案
@@ -1470,10 +1470,10 @@ def main =>
 
 ```ocaml
 effect A Yield
-capture yield(value: A): Unit
+again yield(value: A): Unit
 
 handler A Yield as Collect
-capture yield value =>
+again yield value =>
   let rest = resume () ->
   Cons(value, rest)
 return _ => Nil
@@ -1489,16 +1489,16 @@ def main =>
   each [1, 2, 3]
 ```
 
-`main` の型は `Int List`、出力は `[1, 2, 3]`。`resume ()` の後ろに `Cons(value, rest)` があるので `capture` が要る。§48 の保証を失うのはこの種別だけで、`{Int Yield}` という行から呼び出し側が静的に判別できる。
+`main` の型は `Int List`、出力は `[1, 2, 3]`。`resume ()` の後ろに `Cons(value, rest)` があるので `again` が要る。§48 の保証を失うのはこの種別だけで、`{Int Yield}` という行から呼び出し側が静的に判別できる。
 
 即答:
 
 ```ocaml
 effect Ask
-reply ask: String
+once ask: String
 
 handler Ask as Fixed
-reply ask => "there"
+once ask => "there"
 ```
 
 ### 18.3 文法の差分（§41）
@@ -1510,7 +1510,7 @@ section         := module_section | implement_section | functor_section | apply_
 effect_section  := "effect" type_vars? upper_name effect_item*
 effect_item     := op_kind name "(" contract_param ("," contract_param)* ")" [":" type_expr]
                  | op_kind name [":" type_expr]
-op_kind         := "reply" | "abort" | "capture"
+op_kind         := "once" | "abort" | "again"
 
 handler_section := "handler" contract_ref "as" upper_name handler_item*
                  | "handler" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" handler_item*
@@ -1527,7 +1527,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
                  | "Pure"
 ```
 
-キーワードは `effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure` の 9 個を足し、14 個から 23 個になる。
+キーワードは `effect` `handler` `with` `resume` `return` `once` `abort` `again` `Pure` の 9 個を足し、14 個から 23 個になる。
 
 `abort` は戻り型を書けない。文法では表せないので本文で定める。
 
@@ -1537,19 +1537,19 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 | 項目 | 仕様の節 | 内容 |
 |---|---|---|
-| 効果の宣言 | §57 | `effect` 節、`reply` / `abort` / `capture`、型引数、0 引数の操作 |
+| 効果の宣言 | §57 | `effect` 節、`once` / `abort` / `again`、型引数、0 引数の操作 |
 | handler と with | §58 | `handler` 節、`return` の腕、`resume`、`with H -> rest`、引数付き handler |
 | 効果行 | §37, §41 | 波括弧の行、`Pure`、省略と推論、アルファベット順の正準形 |
 | 失敗の効果 | §21, §49 | `Error` と `Exception`、Option との境界、`Option.ok_or` |
 | 効果の位置 | §24, §44 | 効果を持つ式を書けないのは分岐の条件だけ。scrutinee・引数・被演算子・record field は許し、評価順を §44 が定める |
-| 末尾呼び出しの限定 | §48 | `capture` を経由しない呼び出しだけを保証する |
+| 末尾呼び出しの限定 | §48 | `again` を経由しない呼び出しだけを保証する |
 
 ### 18.5 新しいエラーコード
 
 | 段階 | 検査 | 由来 |
 |---|---|---|
 | 構文 | `abort` の操作に戻り型を書いた | Q13 |
-| 構文 | `resume` を `capture` 以外の腕で書いた。書ける場所は構文的な入れ子だけで決まる | Q18 |
+| 構文 | `resume` を `again` 以外の腕で書いた。書ける場所は構文的な入れ子だけで決まる | Q18 |
 | 型 | 効果を持つ式を分岐の条件に置いた | 17 節 Q20 |
 | 型（契約） | handler が効果の操作を実装していない、または効果に無い操作を書いた | 17 節 Q9 |
 | 冗長 | 効果行に同じ効果を 2 回書いた | Q4 |
@@ -1588,13 +1588,13 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 仕様は §40 §41 §57 §58 に反映済み。このラウンドは字句と構文だけで、型は見ない。
 
-- 9 個のキーワード（`effect` `handler` `with` `resume` `return` `reply` `abort` `capture` `Pure`）を字句に足す
+- 9 個のキーワード（`effect` `handler` `with` `resume` `return` `once` `abort` `again` `Pure`）を字句に足す
 - `effect_section` `handler_section` `with_form` を節と式の文法に足す
 - `resume` を primary に足す
 - `result := type_expr effect_row?` と `effect_row := "{" ... "}" | "Pure"` を型式に足す
-- 拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E124/`（`capture` の外の `resume`）を新設する。どちらも構文段階なので、このラウンドで完結する
+- 拒否コーパスに `E123/`（`abort` の操作に戻り型）と `E124/`（`again` の外の `resume`）を新設する。どちらも構文段階なので、このラウンドで完結する
 
-判定 23-a: `verify-r9.sh` が緑に戻る。§41 の EBNF から生成したプログラムが往復する。生成器は `abort` の操作に戻り型を付けず、`resume` を `capture` の腕の外に置かない。E123 と E124 は文法では表せず本文が定めるので、生成対象から外す。
+判定 23-a: `verify-r9.sh` が緑に戻る。§41 の EBNF から生成したプログラムが往復する。生成器は `abort` の操作に戻り型を付けず、`resume` を `again` の腕の外に置かない。E123 と E124 は文法では表せず本文が定めるので、生成対象から外す。
 判定 23-b: E1xx の本数が §50 の表の行数と一致する（`verify-m2.sh` の検査 2）。
 判定 23-c: §57 と §58 の例が全て parse できる。E123 のアンカー（`abort` の操作の `:`）と E124 のアンカー（`resume`）を位置摂動プローブで確かめる。
 判定 23-d: `verify-r23.sh` を新設し、上記を判定する。
@@ -1634,15 +1634,15 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 
 ### R26 種別ごとのコード生成
 
-- `reply` はその場で評価し、yield しない
+- `once` はその場で評価し、yield しない
 - `abort` は tag 検査と分岐に落とす。0.1.3 の Result のコード生成と同形になる。最小の経路は R25 が置くので、このラウンドは handler 経由の中断と `return` の腕を足す
-- `capture` は evidence passing と short-cut resumption で実装する。継続はヒープのフレーム列
+- `again` は evidence passing と short-cut resumption で実装する。継続はヒープのフレーム列
 - E706（`main` にユーザー定義効果）を実装し、拒否コーパスに `E706/` を新設する
 - 受理コーパスに 3 種別それぞれの実行例と、handler を使う例（`with` で `abort` を受けて値に変える形）を新設する。R25 は handler を使わない形までを担うので、handler の実行はこのラウンドで初めて確かめる
 
-判定 26-a: `reply` を含む末尾再帰が 1000 万反復で定数メモリに収まる（17.8 の対照 2 と同じ形）。
+判定 26-a: `once` を含む末尾再帰が 1000 万反復で定数メモリに収まる（17.8 の対照 2 と同じ形）。
 判定 26-b: `abort` を含むプログラムが 0.1.3 の Result 版と同じ出力と終了コードを出す。
-判定 26-c: `capture` の生成器が正しい値を返す。17.8 のとおりスタックを消費するので、反復数は 1 万で測る。
+判定 26-c: `again` の生成器が正しい値を返す。17.8 のとおりスタックを消費するので、反復数は 1 万で測る。
 判定 26-d: 拒否コーパスの本数が §50 の表の行数（69）と一致する。R23 が 2 本、R24 が 3 本、R26 が 1 本を足し、R25 が `E509/` を 1 本消すので、64 − 1 + 6 = 69 になる。
 判定 26-e: E706 のアンカー（`def main`）を位置摂動プローブで確かめる。
 判定 26-f: `verify-r26.sh` を新設する。
@@ -1671,7 +1671,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 | 効果の位置 | `effect_position/` | `E308/` | R24 |
 
 `E308/` は分岐の条件に効果を置く。緩和で許した scrutinee・引数位置・被演算子・record field を書くと受理されて E308 として機能しない。受理側の `effect_position/` には、許した 4 つの位置（scrutinee、引数、被演算子、record field）に効果を置く例を並べ、将来の狭めを回帰として検出できるようにする。
-| 末尾呼び出しの限定 | `capture_loop/` | `E706/` | R26 |
+| 末尾呼び出しの限定 | `again_loop/` | `E706/` | R26 |
 
 ### 各ラウンドで許容される赤
 
@@ -1688,7 +1688,7 @@ effect_row      := "{" type_expr ("," type_expr)* "}"
 ### スコープ外
 
 - 17.6 の未確認 2（`under` フレームの復元）。実装方式の問題で、R26 で必要になれば扱う
-- segmented stacks。`capture` のスタック消費は 6 節のリスクとして受け入れる
+- segmented stacks。`again` のスタック消費は 6 節のリスクとして受け入れる
 - 効果の推論の最適化。まず正しく動くことを優先する
 
 ## 20. R28 入れ子の handler の手順書（2026-09-10）
@@ -1739,7 +1739,7 @@ R26 が残した `docs/bug.md` の B4 を直す。**`v0.2` の tag は R28 の�
 
 ### 17.5 との関係
 
-17.5「やらないこと」の「継続を別の handler の下へ運ぶ使い方」は `capture` 固有である。
+17.5「やらないこと」の「継続を別の handler の下へ運ぶ使い方」は `again` 固有である。
 B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 では覆えず、
 **`abort` の入れ子について計画も仕様も沈黙していた。** 本節がその穴を埋める。
 
@@ -1797,14 +1797,14 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 ### スコープ外
 
 - 実行中の印字（print 効果）。v0.2 の言語に存在しない
-- B5（`capture` を挟む 3 段の入れ子）。プロトタイプ実測を経て R30 で扱う
+- B5（`again` を挟む 3 段の入れ子）。プロトタイプ実測を経て R30 で扱う
   （`docs/ledger.md` の「バグ修正方針」の節）
 
-## 22. R30 `capture` handler の合成の手順書（2026-09-10）
+## 22. R30 `again` handler の合成の手順書（2026-09-10）
 
 `docs/bug.md` の B5 を直す。**`v0.2.2` の tag は R30 の完了後に打つ。**
 
-17.9 の実測で範囲が広がった。B5 は 3 段固有ではなく、**`capture` handler を他の handler と
+17.9 の実測で範囲が広がった。B5 は 3 段固有ではなく、**`again` handler を他の handler と
 組み合わせると内外どちらでも build に失敗する**。測った 15 形のうち通ったのは単独の 2 形だけである。
 17.6 の未確認 2（prompt / under フレームの復元）は「必要」で決着した。
 
@@ -1862,9 +1862,9 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 
 **2 段に切る。症状が 2 種類で根が違うので、深い方から通す。**
 
-- 工程 1: `continuation result type mismatch` の側（`capture` handler が外側）。判定 30-a〜30-d。
+- 工程 1: `continuation result type mismatch` の側（`again` handler が外側）。判定 30-a〜30-d。
   **under フレームの復元そのものがここに当たる**
-- 工程 2: `done payload mismatch` の側（`capture` handler が内側）と 3 段。判定 30-e〜30-j。
+- 工程 2: `done payload mismatch` の側（`again` handler が内側）と 3 段。判定 30-e〜30-j。
   **工程 1 の機構がこの側も副作用で通したので、工程 2 の実体は判定器・受理コーパス・
   スコープ外の形の拒否（判定 30-k）になった**
 
@@ -1876,25 +1876,25 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 期待値そのものが仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
 
 **判定 30-a〜30-b は under フレームの復元を直接固定する。**
-内側の handler を捨てて `capture` handler で継続を閉じるだけの不完全な修正は、ここで落ちる。
+内側の handler を捨てて `again` handler で継続を閉じるだけの不完全な修正は、ここで落ちる。
 
 判定 30-a: **再開した継続の中で内側の handler の操作を呼ぶ。2 つを別に判定する。**
 
-  - (1) 内側が `reply`: `Collect` ⊃ `Inner(B)` で `do y 1 -> do y b -> ()`。実行して `[1, 2]`
-  - (2) 内側が `capture`: `Collect`（`return x => x`）⊃ `Inner`（`capture w value => [value + 100, ...resume ()]`）
+  - (1) 内側が `once`: `Collect` ⊃ `Inner(B)` で `do y 1 -> do y b -> ()`。実行して `[1, 2]`
+  - (2) 内側が `again`: `Collect`（`return x => x`）⊃ `Inner`（`again w value => [value + 100, ...resume ()]`）
     で `do y 1 -> do w 2 -> ()`。実行して `[1, 102]`
 
-  **包み直しを固定するのは (2) だけである。** `reply` は tail-resumptive で、単相化の時点で
+  **包み直しを固定するのは (2) だけである。** `once` は tail-resumptive で、単相化の時点で
   腕がその場に展開され `$Yield` を作らない。したがって継続の包み直しを外しても (1) は通る
   （実測: 包み直しを外すと (1) は通り、判定 30-b だけが落ちた）。**`$Yield` を実際に作る操作、
-  つまり内側の `capture` でしか固定できない。**
+  つまり内側の `again` でしか固定できない。**
 判定 30-b: **内側の handler の `return` の変換が最終結果に残る。**
   `Collect`（`return x => [x]`）⊃ `Inner`（`return _ => 42`）で `do y 1 -> ()`。実行して `[1, 42]`。
   `resume` の後に `Inner` の `return` が当たっていないと `42` が現れない
 判定 30-c: `Collect` ⊃ `Inner(B)` がビルド可。実行して `[2]`
 判定 30-d: `Collect` ⊃ `Inner(A)` がビルド可
 判定 30-e: `Outer(A)` ⊃ `Collect` がビルド可。実行して `[1]`
-判定 30-f: `CollectY` ⊃ `CollectZ`（capture 同士）がビルド可。実行して `[3]`。
+判定 30-f: `CollectY` ⊃ `CollectZ`（again 同士）がビルド可。実行して `[3]`。
   導出: `y` を `CollectY` が捕まえ、`resume ()` が残りの `()` を `CollectZ` の下で走らせて
   `CollectZ.return → []`、それが `CollectY` の本体の値になり `CollectY.return(_) → []`、
   腕の結果が `[3, ...[]]`
@@ -1903,12 +1903,12 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 判定 30-i（**負の対照**）: 同じ効果の handler の入れ子では**内側が捕まえる**。
   外側を `return x => x`、内側の腕を `value + 100` にして、実行して `[103]`。
   内側を素通しさせる直し方はここで `[3]` になって落ちる。
-  導出: 内側の `capture` の腕の結果 `[103]` が外側 handler の**正常完了値**になり、
+  導出: 内側の `again` の腕の結果 `[103]` が外側 handler の**正常完了値**になり、
   外側の `return x => x` がそれに当たる。外側を `return _ => []` にすると `[]` になる
 判定 30-j（**負の対照**）: 単独 handler の既存の形が壊れない。`Collect` 単独が `[3]`、
   yield 2 回が `[1, 2]`
 判定 30-k（**実測で判明。工程 1 の後に必須になった**）: `resume` した継続の中から、
-  その handler より外側の handler が扱う `capture` を起こす形は、**単相化の時点で拒否する**。
+  その handler より外側の handler が扱う `again` を起こす形は、**単相化の時点で拒否する**。
   工程 1 の機構を入れると、この形は `hado check` も `hado build` も通ったうえで
   **実行時に SIGILL でクラッシュする**（終了コード 132、印字なし）。工程 1 の前は
   `done payload mismatch` でビルドが失敗していたので、**受理してクラッシュするのは後退である**。
@@ -1931,10 +1931,10 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
 
 ### スコープ外
 
-- **`resume` の中から、その handler `H` より外側の handler が扱う `capture` を起こす形。**
-  **`reply` は含まない。** 工程 1 の後に実測したところ `[9, 1]` を正しく返した。`reply` は
+- **`resume` の中から、その handler `H` より外側の handler が扱う `again` を起こす形。**
+  **`once` は含まない。** 工程 1 の後に実測したところ `[9, 1]` を正しく返した。`once` は
   tail-resumptive で、単相化の時点で腕がその場に展開され `$Yield` を作らないためである。
-  当初この節は `reply` も含めていたが、実測で誤りと分かった。
+  当初この節は `once` も含めていたが、実測で誤りと分かった。
   `hado check` は通るので §58 はこれを禁じていない。
   `interpret_outcome` は継続を `Closure([Unit], answer)`（`mono.rs:1747-1753`）として射影する。
   つまり `resume : Unit -> A_H` で答えの型そのものを返す。
@@ -1963,7 +1963,7 @@ forwarding の包み直しという、単相化の中の変更である。それ
 `docs/bug.md` の B6〜B9 を直す。**`v0.2.3` の tag は R31 の完了後に打つ。**
 
 4 件の根は 2 本である。**継続** — yield 地点の後ろの計算を継続に切り出す
-仕組みが `do <capture> -> rest` の形にしか無い（B6・B7）。**型** — `$Outcome` が payload の型を
+仕組みが `do <again> -> rest` の形にしか無い（B6・B7）。**型** — `$Outcome` が payload の型を
 1 つしか持たず、継続の引数型が Unit に固定されている（B8・B9）。B8 は両方に当たる。
 
 **読む順:** 本節 → `docs/bug.md` の B6〜B9 → 22 節 → `docs/spec.md` の §57・§58・§24・§44 →
@@ -1985,14 +1985,14 @@ forwarding の包み直しという、単相化の中の変更である。それ
 - **根が 2 本なので工程を 3 つに切り、同じラウンドで直す。** 工程 0 は B7 を「受理して誤答」から
   「拒否」に変える暫定措置で、初日に入れる。工程 1 は継続、工程 2 は型。工程 1 の緑を指揮者が
   実測してから工程 2 を発注する
-- **yield 地点の後ろを常に継続にする。** 単相化の入口で、`capture` の操作の呼び出しと `resume` を
+- **yield 地点の後ろを常に継続にする。** 単相化の入口で、`again` の操作の呼び出しと `resume` を
   `let t = <呼び出し> -> 残り` の形に持ち上げる（A 正規化）。持ち上げる位置は §44 の評価順に従い、
   適用の引数、パイプの左辺、演算子の被演算子、リストの要素、record の field、`if` の scrutinee。
   持ち上げない位置は 4 つ。分岐の腕（末尾文脈）、`&&` と `||` の右辺（左辺が決まってから評価する）、
   `fn` の本体（持ち上げると定義時に評価してしまう）、`with H ->` の本体（持ち上げると yield が
   handler の外へ出る）。`let` と `do` の右辺は既にこの形である。正規化は `mono.rs` の中、または
   単相化だけが使う新しいモジュールに置く。`normalize.rs` は冗長検査の正準形比較で、別物である
-- **`let t = <capture> -> rest` の継続は `cont : R -> $Outcome`。** `R` は操作の戻り型。今の
+- **`let t = <again> -> rest` の継続は `cont : R -> $Outcome`。** `R` は操作の戻り型。今の
   `capture_do` → `continuation_under` → `make_continuation` の経路を、`do` 以外の位置と値の束縛に
   広げる。末尾位置は `rest` が無いので `λt. $Done(t)`
 - **`resume v` の結果を bind する。** 腕が forwarding の状態（外側に handler がある）で走るとき、
@@ -2038,7 +2038,7 @@ forwarding の包み直しという、単相化の中の変更である。それ
 | 引数位置 `[y 1, y 2]`（B7） | `[1, 2]` | `[1, 2]` |
 | 非 Unit の `ask`（B8） | `[42]` | `[42]` |
 | payload が String と Int（B9） | `["a", "n1"]` | `["a", "n1"]` |
-| 30-k の k3（真ん中に `reply`） | `[5]` | `[5]` |
+| 30-k の k3（真ん中に `once`） | `[5]` | `[5]` |
 | 展開位置の `resume` が外へ yield | `[3, 102]` | `[3, 102]` |
 | payload 混在で外へ yield | `["b", "1"]` | `["b", "1"]` |
 
@@ -2056,7 +2056,7 @@ Koka のソースは `docs/ledger.md` の「B6 の対応方針」にある。`Li
 
 ### 工程
 
-- 工程 0: B7 の暫定拒否。判定 31-0。`do` の右辺と末尾以外の位置に `capture` の操作が現れたら
+- 工程 0: B7 の暫定拒否。判定 31-0。`do` の右辺と末尾以外の位置に `again` の操作が現れたら
   単相化で拒否する。診断は 30-k と同じく §50 のコードを足さない。末尾は構文で決める（`let`・`do` の
   継続、分岐の腕、`with` の本体を辿った先の最後の式）
 - 工程 1: 継続。A 正規化、`R -> $Outcome` の継続、`resume` の bind、`capture_escapes_prompt` の削除、
@@ -2078,10 +2078,10 @@ Koka のソースは `docs/ledger.md` の「B6 の対応方針」にある。`Li
 判定 31-c: `do y 1 -> do z 2 -> do y 3 -> ()`、Outer は `x => x`。実行して `[2, 1, 3]`
 判定 31-d: `with Collect -> [y 1, y 2]`。実行して `[1, 2]`。31-0 の拒否を外す
 判定 31-e: 30-k の k3（`with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()`、
-  `Inner` は `reply b => 2`）。実行して `[5]`
-判定 31-f: `resume` が展開位置。`Inner`（`capture w value => [value + 100, ...resume ()]`、
+  `Inner` は `once b => 2`）。実行して `[5]`
+判定 31-f: `resume` が展開位置。`Inner`（`again w value => [value + 100, ...resume ()]`、
   `return _ => []`）の上に `Outer`（`return x => x`）を置き、`do w 2 -> do z 3 -> ()`。実行して `[3, 102]`
-判定 31-g（負の対照）: 30-k の対照 2 本（`resume` を経ない外側の capture が `[4]`、外側の `reply` が
+判定 31-g（負の対照）: 30-k の対照 2 本（`resume` を経ない外側の again が `[4]`、外側の `once` が
   `[9, 1]`）はそのまま通る
 判定 31-h: 非 Unit の `ask`（B8 の再現例）。実行して `[42]`
 判定 31-i: payload が String と Int（B9 の再現例）。実行して `["a", "n1"]`
@@ -2106,7 +2106,7 @@ Koka のソースは `docs/ledger.md` の「B6 の対応方針」にある。`Li
 - multi-shot resumption と第一級の resumption（17.5 のまま）
 - 効果の推論の最適化
 - 末尾再帰の深さの限界（17.8 の実測のまま。C スタックが束縛条件）
-- `reply` と `abort` の経路の変更
+- `once` と `abort` の経路の変更
 
 ### 中断の条件
 
@@ -2172,7 +2172,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 | ID | 論点 | 決定 | 仕様の節 |
 |---|---|---|---|
 | D1 | 効果 | `Env`（argv / env / cwd）と `Io`（stdin / ファイル / ディレクトリ）。時刻・乱数は入れない | §49, §57 |
-| D2 | 操作 | 全て `reply`。操作の結果の効果行は `{Error}` で、handler が無ければ runtime の既定実装が応え、失敗は `Error` を raise する。利用者は `raise` と同じく無修飾で呼ぶ（包みと `module` は置かない）。handler は差し替えに使え、E605 は全操作の実装を要求する | §49, §57, §58 |
+| D2 | 操作 | 全て `once`。操作の結果の効果行は `{Error}` で、handler が無ければ runtime の既定実装が応え、失敗は `Error` を raise する。利用者は `raise` と同じく無修飾で呼ぶ（包みと `module` は置かない）。handler は差し替えに使え、E605 は全操作の実装を要求する | §49, §57, §58 |
 | D3 | main | E706 の免除を prelude の効果に広げる（`Error` `Env` `Io`） | §5 |
 | D4 | 単位 | stdin とファイルは Bytes、パスと argv は String。非 UTF-8 の名前は `Error` | §36, §57 |
 | D5 | 終了コード | 0 / 1 のまま | §51 |
@@ -2258,7 +2258,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 | R34 | Bytes と String の操作（C2 C4） | `runtime/` `runtime_abi.rs` `stdlib/string.hd` 新 `stdlib/bytes.hd`、§36 §43 §49 §51 | Bytes の型（長さ・変換・索引・of_list / to_list・比較・印字）と String の 5 操作。範囲外は `{Error}`。E2 の集計部（純粋）を `tests/accept/` に置く |
 | R35 | 配列（C3） | `mono.rs` `repr.rs` `emit.rs` 派生パス、§36 §45 §49 §51 | 型多相 intrinsic と要素幅、`of_list` / `to_list` の派生。3 万要素の索引と `set` が SIGSEGV しない。E2 の集計部を通す |
 | R36 | Int.parse（C5） | `stdlib/int.hd` `runtime/`、§49 | 不正と桁溢れが `Error`、`Int.parse "42"` が `Some(42)` 相当（18.2 の例）。E2 の集計部を通す |
-| R37 | 世界との境界（D） | `stdlib/` の効果宣言、`runtime/`、`mono.rs` の既定実装、§5 §47 §51 §57 §58 | `Env` / `Io` の操作（`reply`、結果の効果行 `{Error}`、handler 無しの既定実装）、argv / env / cwd / stdin / ファイル / ディレクトリ、非 UTF-8 は `Error`。E2 が完成して check と build を通る。受理ケースは空 argv・閉じた stdin・ケース内の相対パスで起動する |
+| R37 | 世界との境界（D） | `stdlib/` の効果宣言、`runtime/`、`mono.rs` の既定実装、§5 §47 §51 §57 §58 | `Env` / `Io` の操作（`once`、結果の効果行 `{Error}`、handler 無しの既定実装）、argv / env / cwd / stdin / ファイル / ディレクトリ、非 UTF-8 は `Error`。E2 が完成して check と build を通る。受理ケースは空 argv・閉じた stdin・ケース内の相対パスで起動する |
 | R38 | 仕上げ | E2 の実行、`docs/`、lock、tag | 全門番が満点、`cargo test` 0 failed、oracle 一致、`v0.3` を tag |
 
 ### 24.6 壊すもの
@@ -2331,7 +2331,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
   - `%` を使う未注釈の再帰生成器が E306 になる（R35 の工程 0 で踏んだ。原因未調査。R38 で判断する）
   - 長さが違う Array の `compare` の順序を §45 が定めていない（R35 は python3 のリスト比較に合わせた。R38 で §45 に 1 文足すか判断する）
   - 効果が `dependencies.rs` の宣言に数えられておらず未使用の効果が E513 にならない件（§50 は効果にも当てる。R37 の D で当たったら `docs/bug.md` に置く）
-- R31 の台帳の未確認 3 件（型引数付き効果の重ね、`fn` の本体の `capture`、handler の値引数）は本版の範囲外で、D の設計で当たったら `docs/bug.md` に置く
+- R31 の台帳の未確認 3 件（型引数付き効果の重ね、`fn` の本体の `again`、handler の値引数）は本版の範囲外で、D の設計で当たったら `docs/bug.md` に置く
 
 ## 25. R32 ライブラリ単位の手順書（2026-09-12）
 
@@ -2469,7 +2469,7 @@ R32 の終了時に残ってよい赤は、24.8 のうち R33〜R37 に割り当
 - **印字。** `Display for Ty`（`types.rs:609-631`）は変えない。E305 の `cannot unify {a} with {b}` も、型が解けているので `String` と出る。`--print-type` は `checked.main` が解けた型なのでそのまま
 - **循環。** `check_realization_cycles`（`infer.rs:1732-1747`）の E602 は `shared` の有無によらず当てる（`shared type T = T`、`shared` の相互参照）
 - **codegen は変えない。** `Checked::for_codegen`（`lib.rs:82-100`）は全ての表現を展開してから mono に渡す。`shared` は型検査の性質であり、機械表現は既に解けた型で決まっている
-- **等式の収集は型と効果の登録より前に置く（工程 1 の審査 3 巡目で確定した訂正）。** 当初の決定は「`reveal_shared` を通す場所は 4 つ、5 箇所目が見つかったら中断せず通す」だったが、これは閉じなかった。原因は消費点の網羅ではなく順序である。`shared_realizations` が埋まるのは `infer.rs:579`（`checker.module()` の中、`inference_groups` のループ内）と `functors.rs:155` だが、`register_type`（`infer.rs:163` 付近）と `register_effects`（`:176`）はそのループより前に走る。よって `type Box = { value: Store.T }` の record schema と `capture send(value: Store.T)` の操作型は、`annotation_inner`（`:1672`）の展開を通っても等式が空のまま `Ty::Abstract` で登録される。実装より前のグループで推論される未注釈の定義（`def read box => box.value`）も、`resolve_projections(false)`（`:632` `:714`）の時点で等式が空である。**AST から `shared type T = body` を集める前処理を `register_type` の前に置き、消費点への展開は置かない。** 連鎖は固定点まで反復し、輪は E602（`functors.rs:154` の `introduces_cycle`）。`reveal_shared` の呼び出しとして残すのは入口（`:226` `:660` `:664` `:1672`）と E705 / E702 の検査（`:1805` `:1827`）だけで、消費点の展開を外しても判定器が緑であることを工程 1 の refactor コミットで測る
+- **等式の収集は型と効果の登録より前に置く（工程 1 の審査 3 巡目で確定した訂正）。** 当初の決定は「`reveal_shared` を通す場所は 4 つ、5 箇所目が見つかったら中断せず通す」だったが、これは閉じなかった。原因は消費点の網羅ではなく順序である。`shared_realizations` が埋まるのは `infer.rs:579`（`checker.module()` の中、`inference_groups` のループ内）と `functors.rs:155` だが、`register_type`（`infer.rs:163` 付近）と `register_effects`（`:176`）はそのループより前に走る。よって `type Box = { value: Store.T }` の record schema と `again send(value: Store.T)` の操作型は、`annotation_inner`（`:1672`）の展開を通っても等式が空のまま `Ty::Abstract` で登録される。実装より前のグループで推論される未注釈の定義（`def read box => box.value`）も、`resolve_projections(false)`（`:632` `:714`）の時点で等式が空である。**AST から `shared type T = body` を集める前処理を `register_type` の前に置き、消費点への展開は置かない。** 連鎖は固定点まで反復し、輪は E602（`functors.rs:154` の `introduces_cycle`）。`reveal_shared` の呼び出しとして残すのは入口（`:226` `:660` `:664` `:1672`）と E705 / E702 の検査（`:1805` `:1827`）だけで、消費点の展開を外しても判定器が緑であることを工程 1 の refactor コミットで測る
 
 - **E2 のソースは R33 で `Tally` を契約の抽象型にする。** `tools/gates/report/report.hd` の契約 `Report` に `type T` を足し、実装で `shared type T = Tally` とする。`main.hd` は `Report.T` の値を作って `render` する。`shared` が無ければ `main` が E601 / E705 で書けない形にし、`shared` の効きを E2 で測る
 
@@ -2890,7 +2890,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 ## 30. R37 世界との境界（Env と Io）の手順書（2026-09-13）
 
-24.1 の D 表（D1〜D6）を実装する。prelude が効果 `Env` と `Io` を持ち、操作は `reply` で、handler が無ければ runtime の既定実装が応える。E2（`tools/gates/`）が argv とファイルを読んで完成する。仕上げと tag は R38。
+24.1 の D 表（D1〜D6）を実装する。prelude が効果 `Env` と `Io` を持ち、操作は `once` で、handler が無ければ runtime の既定実装が応える。E2（`tools/gates/`）が argv とファイルを読んで完成する。仕上げと tag は R38。
 
 **読む順:** 本節 → 24.1 の D 表と 24.4 → `docs/spec.md` の §5（167〜173 行。`main` の形と E706 の免除）・§47（1861〜1873 行。名前空間と `__` の解決）・§49（1959〜1994 行。`Env` と `Io` の宣言と失敗の `message` の表）・§51（2078〜2110 行）・§57（2261〜2284 行。操作の可視性、handler 無しの既定実装、E513）・§58（2296〜2298 行。handler の置き場と E605）→ 27 節（R34。`Bytes` と `is_utf8` の形）と 29 節（R36。C の走査と hado 側の `raise` の形）→ `docs/corpus.md` の 40〜60 行と 93〜95 行。
 
@@ -2900,8 +2900,8 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 | 測ったこと | 結果 |
 |---|---|
-| 引数を取る `reply`（`reply greet(name: String): String`）が check・build・実行を通るか | **通る。** `hi x` を印字して終了 0。コーパスに例が無いだけだった |
-| 操作の宣言の効果行（`reply pick: Int {Error}`）が呼び出し位置に届くか | **届かない。** 腕が `raise` しない形で `main` の型を測ると、`{Error}` 付きの宣言でも効果行なしの宣言でも同じ `String` になる。**parser は保持するが infer が捨てている** |
+| 引数を取る `once`（`once greet(name: String): String`）が check・build・実行を通るか | **通る。** `hi x` を印字して終了 0。コーパスに例が無いだけだった |
+| 操作の宣言の効果行（`once pick: Int {Error}`）が呼び出し位置に届くか | **届かない。** 腕が `raise` しない形で `main` の型を測ると、`{Error}` 付きの宣言でも効果行なしの宣言でも同じ `String` になる。**parser は保持するが infer が捨てている** |
 | `effect Io` を書いている既存の場所 | `tests/accept/effect_row/main.hd:6`（コーパス。lock の対象）と `crates/hado/tests/r24_effects.rs` の 8 箇所。`crates/hado/tests/r23_syntax.rs:135` `:137` の `{Io}` は `roundtrip`（parse と canonical 印字の往復だけ。check も prelude も通さない）なので**触らなくてよい** |
 | 受理コーパスを実行する門番 | **`scripts/verify-m6.sh:26` の 1 箇所だけ**（`subprocess.run([str(copied.with_suffix(""))], capture_output=True, timeout=60)`）。**cwd も stdin も固定していない**ので、cwd は門番のシェルのもの（リポジトリの根）を継ぎ、stdin も継ぐ |
 
@@ -2912,7 +2912,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
   - **引数のない操作（`args` `cwd` `read_stdin`）**: infer は `Name` として `value_types` に記録する（`infer.rs:998`）ので `definition_reference`（`mono.rs:494`）の経路でよい
   - **引数を取る操作（`env` `read_file` `write_file` `read_dir`）**: infer は `Apply` として `composite_types` に記録する（`infer.rs:944`）。`definition_reference` は `value_types` を読み（`mono.rs:2864`）、`DefKind::Function` では `MakeClosure` を返して**呼ばない**（`mono.rs:2873-2881`）ので通らない。**`application` と同じ形で `specialize_function` + `call_direct` を使い、期待する結果型は `composite_types` から引く**
   - **既定の `def` の arity は操作と同じにする。** `args` は引数 0 なので `def default_args = ...`（ダミー引数を付けない）
-  - **`handler` を既定実装にする案は採らない（計画審査 3 巡目の致命）。** handler の腕は `with` で被せたときしか推論されない（`infer.rs:1969` の `handler_answer` は `with_handler` からしか呼ばれず、`infer.rs:175` `:186` と `dependencies.rs:17` は `Item::Handler` を無視する）。審査は `handler Foo as H` の `reply pick => "not an int"` が `reply pick: Int` の宣言と食い違っても `check` が終了 0 になることを実測した。腕が推論されないと mono は span の型（`composite_types`）を引けず、`missing list type` / `missing record type` / `missing abort result type` で落ちる。既定実装には argv の分類・`Bytes.to_string`・`raise { message = ... }` が必ず入るので確実に踏む。**E605（`infer.rs:1884-1891`）は腕名しか見ないので型の保証にはならない**
+  - **`handler` を既定実装にする案は採らない（計画審査 3 巡目の致命）。** handler の腕は `with` で被せたときしか推論されない（`infer.rs:1969` の `handler_answer` は `with_handler` からしか呼ばれず、`infer.rs:175` `:186` と `dependencies.rs:17` は `Item::Handler` を無視する）。審査は `handler Foo as H` の `once pick => "not an int"` が `once pick: Int` の宣言と食い違っても `check` が終了 0 になることを実測した。腕が推論されないと mono は span の型（`composite_types`）を引けず、`missing list type` / `missing record type` / `missing abort result type` で落ちる。既定実装には argv の分類・`Bytes.to_string`・`raise { message = ... }` が必ず入るので確実に踏む。**E605（`infer.rs:1884-1891`）は腕名しか見ないので型の保証にはならない**
   - 普通の `def` なら推論は `Item::Def` の既存経路で済み、mono は通常の関数呼び出しになる。`with_params` も `rewriting_return` も `finish_handler` も触らない。既定の `def` の中の `raise` は普通の関数の中の `raise` で、利用者の `handler Error` に届くのは `tests/accept/nested_unrelated_abort` と同じ機構である
   - **既定の `def` の名前は `__` で始めない**（`name_resolution.rs:167` の intrinsic の門に当たる）。対応は名前の規約ではなく `register_effects` が prelude の範囲で `default_<op 名>` を探して `Checked` に載せる。**見つからなければ infer が診断を出す**（黙って mono で落とさない）
   - **既定実装は `module <効果名>Default` と `implement <効果名>Default as <効果名>Default` の中に置く**（`stdlib/string.hd` が手本）。対応は `op 名 → <効果名>Default.<op 名>`。**工程 3 の全走で `verify-m3.sh` の検査 11（`stdlib-types`）が赤になって分かった**: この検査は `stdlib/*.hd` の最初の `module` / `implement` より前に `def` があると落ちる。素の `def` を並べる形がこれに当たる。**門番は変えない**（緩める形になるうえ、赤を出した側が門番を書き換えるのは判定者と作成者の分離に反する）。契約の宣言が効果の宣言の写しになるので、既定の効果行の検査が署名の照合としても書ける。helper は `implement` の中の `def` になり外に出ない（`stdlib/string.hd` の `split` の helper と同じ）。**`<効果名>Default` は契約名の空間に入るので `EnvDefault` と `IoDefault` を予約名に足す**
@@ -2924,10 +2924,10 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
   - `args` は `__argv_count 0` + `__argv_get(Int): Bytes` の再帰で組む（`stdlib/bytes.hd` の `elements` が手本）。`env` は `__env_has(String): Bool` + `__env_get(String): Bytes`
   - **C は `hado_abort_error` を絶対に呼ばない。** 呼ぶと利用者の `handler Error` を飛び越える。失敗は必ず hado 側の `raise { message = ... }` から起こす
   - **I/O の失敗の分類は status を Int で返し、payload は別の intrinsic で取る。** `__io_read_file(path): Int`（0 成功 / 1 NotFound / 2 PermissionDenied / 3 NotADirectory / 4 IoFailure。syscall はここで 1 回だけ）→ 0 なら `__io_take_bytes 0`。`is_valid` + `unchecked` の 2 回 syscall にしない（2 回の間に状態が変わると失敗の分類がずれる）。`read_dir` も同じ形（`__io_read_dir(path): Int` → `__io_dir_count 0` + `__io_dir_get(Int): Bytes`）。status → `message` の対応は hado 側の 1 本の関数に書く
-- **決定 3: 操作の結果の効果行を infer で通す。** 実測のとおり `reply pick: Int {Error}` の `{Error}` は呼び出し位置に届かない。`payload_type`（`infer.rs:892-899`）→ `annotation_inner`（`infer.rs:1627-`）は `Fn` の枝でしか `.effects` を読まず、`unwrap_operation`（`infer.rs:2039-2051`）が `Row::Closed(vec![*effect])` で効果 1 つに固定する。**`register_effects` で `op.ret` の効果行を op ごとに保存し、`unwrap_operation` でその行と合併する。**
+- **決定 3: 操作の結果の効果行を infer で通す。** 実測のとおり `once pick: Int {Error}` の `{Error}` は呼び出し位置に届かない。`payload_type`（`infer.rs:892-899`）→ `annotation_inner`（`infer.rs:1627-`）は `Fn` の枝でしか `.effects` を読まず、`unwrap_operation`（`infer.rs:2039-2051`）が `Row::Closed(vec![*effect])` で効果 1 つに固定する。**`register_effects` で `op.ret` の効果行を op ごとに保存し、`unwrap_operation` でその行と合併する。**
 - **決定 4: `main` の効果の免除を prelude の効果の集合に一般化する。** `types.rs:76-78` の `has_user_effect` は `effect_ctor(ty) != "Error"` の直書きである。`Env` と `Io` を直書きで足すと次に増えたとき同じ穴になるので、**prelude の効果名の集合との照合に変える**。§5（`docs/spec.md:169`）の「`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`）に限る」がそのまま出る。**集合の出所は `lib.rs` の `prelude_items` の範囲から作る**（`infer` に `["Error", "Env", "Io"]` を直書きすると、次に prelude の効果が増えたとき同じ穴になる）。**`Checked` ではなく `Checker` のフィールドに持たせる。** `has_user_effect` は `infer.rs:239` で呼ばれ、`Checked` の構築（`:251`）より前である。`infer_with_diagnostics`（`infer.rs:72`）は今 `prelude_items` を受け取らないので、引数として渡す 1 本が要る。名前は `effect_ctor`（`types.rs:659`。`$` を剥がし `::` は残す）と揃える
 - **決定 4a: ローカル束縛が prelude の操作名を影にできるようにする（工程 0）。** `namespaces.rs:390-397` の `operation` は bare 名が `prelude_operations` にあれば無条件に prelude の操作へ書き換え、呼び出し元の `node`（`:399-402`）はローカルの束縛を見ない。計画審査 3 巡目の実測: `def f (args: Int): Int => args` は `check` を通り、build 後に `unhandled operation args` で落ちる。`raise` でも同じ（`def f (raise: Int): Int => raise`）。**直す場所は `namespaces.rs` ではなく mono である**（計画審査 4 巡目が実測で特定した）。`namespaces.rs:390-397` の `operation` は prelude の操作名に対して `*name = bare` を代入するだけで、bare 名では恒等変換なので、束縛の集合を渡しても影には効かない。実際に操作として扱っているのは **`mono.rs:482-485`（`Name`）と `mono.rs:1424-1427`（application）が `self.operations.get(name)` を `self.scope.contains_key(name)`（`:493` `:1452-1453`）より先に判定している**ところである。審査はこのコピーで mono の 2 箇所だけを scope 優先に変えて再ビルドし、`def f (raise: Int): Int => raise` / `def main = f 3` が `3` を印字して終了 0 になることを実測した（直す前は終了 1 で空メッセージ＝ `abort_raise`）。**`is_abort_node` / `is_capture_node`（`mono.rs:1715-1739`）も `operations` を見るので同じ順序の見直しが要る。** **mono だけでは足りない。infer 側にも影がある**（計画審査 5 巡目の実測）: `infer.rs:996` → `unwrap_operation`（`:2039-2051`）は名前が `operations` にあればローカルの束縛を無視し、`Ty::Fn` を操作の型として解釈する。`def f (pick: Fn(Int => Int)): Int => pick 3`（`pick` が prelude の操作なら）は `E305: cannot unify Int with Fn(Int => t...)` になる。`Int` 型のローカルでは `unwrap_operation` が素通しするので、判定 37-b2 の `def f (raise: Int)` の形では捕まらない。**判定 37-b2 に関数型のローカル（`def f (raise: Fn(Int => Int)): Int => raise 3`）を必ず含める。** **infer 側の直し方は 2 つある。** (a) ローカル束縛の集合を `Checker` に持たせて save / restore する（`values` は `function_body`（`:1360`）・`pattern`（`:1255`）・`bind_param`（`:2021`）で上書きされ、`:996` の時点で操作かローカルかを `values` からは区別できない）。(b) **`unwrap_operation`（`:2039`）で、外側の `Fn` の結果が `self.effects` に載る効果の ADT であることを確かめる**（操作の scheme は `Fn([op_ty], Adt(効果名))` に固定されるので、ローカルはここで弾ける）。計画審査 6 巡目が (b) を 4 行でコピーに入れて再ビルドし、関数型のローカルが `check` を通り `cargo test --offline` が全体で緑のままであることを実測した。**(b) を採る。** `namespaces.rs` の束縛集合の対応は、サブディレクトリで同じディレクトリの効果の操作名を影にする場合にだけ要る（そのとき `operation_key` が `dir$name` に書き換える）。§47 は shadowing を許す。R37 は 7 名を prelude に足すので、増やす前に直す。これは 24.9 の「ローカル束縛が prelude 操作名を shadow すると昇格が崩れる」で、R38 に回していた穴である。**工程 0 で `raise` を使って測れる**（`Env` / `Io` が入る前）
-- **決定 4b: prelude の操作と同名の利用者の宣言を E205 にする（D6、§57 の `docs/spec.md:2274`）。** 今は実装されていない。`namespaces.rs:69-84` の `declarations(item)` が `Item::Def` / `Item::SigDef` を返さないので、`:136-143` の prelude との衝突検査に載らない。しかも `namespaces.rs:390-397` の `operation` は bare 名が `prelude_operations` に一致すると無条件で prelude の操作に書き換えるので、**利用者の `def` は黙って影になる**（実測: 外の `def raise = 1` と `def main = raise` は E205 ではなく E513）。R37 は `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 7 名を prelude に足すので影響が最大になる。**汎用の `declarations` に値の空間を足すのではなく、専用の検査を置く。** 理由は 2 つある（計画審査 2 巡目の指摘）。(1) `file_scopes.rs:40-47` がトップレベルの `def` 名を `file{N}$name` に改名するので、`declarations` に `Item::Def` を足して `has_prelude(Value, name)` と比べても `file0$args` と `args` は一致せず E205 にならない。(2) prelude の操作は `prelude_operations`（`namespaces.rs:126`）にあり `prelude[Space]` には入らないので、汎用経路に載せると比較先が違う。しかも `Item::ModuleImpl` の `def` を足すと `namespaces.rs:136-141` の `directory != root` の比較で、既存の `tests/library/store`（根の `implement Store as Memory` の `def find` とサブディレクトリの `def find`）が新たに E205 になる。**検査は「`Item::Def` と実装の `def` の bare 名（`file_value` で `file{N}$` を剥がす。`namespaces.rs:90-94`）が `prelude_operations` に含まれるなら E205」の 1 本にする。** 根の同名との比較や prelude の通常の `def` は混ぜない。**他の効果の操作（`reply args`）は根では既存の機構で E205 になるが、サブディレクトリでは漏れる**（計画審査 5 巡目の実測: `effect Foo` / `reply raise: Int` を根に置くと E205、同じものを `sub/` に置くと終了 0）。`namespaces.rs:293` が効果の操作名を `operation_key(directory, name)` で `sub$raise` に書き換えるので、後段の `names.rs:456-461` の値の空間の衝突（bare を前提にする）に載らないためである。§57（`docs/spec.md:2274`）と D6 は「外の `def`、実装の `def`、他の効果の操作」を**どのディレクトリでも** E205 と定める。**E205 の検査（`namespaces.rs:136-142`）に、効果の操作名を `prelude_operations` と bare で比べる 1 本を足す。** 計画審査 6 巡目が実測で確かめた: この検査は `resolver.item(item, ...)`（`:144`）より前に走り、`op.name = operation_key(directory, &op.name)`（`:293`）は `item()` の中なので、**検査の時点では `effect.ops[].name` はまだ素の名前である**。コピーに足して再ビルドすると `sub/` の `effect Foo` / `reply raise: Int` が `sub/foo.hd:2:7: error[E205]`（前は終了 0）、衝突しない `reply zap` の対照は終了 0 になった。**根では既存の機構（`names.rs:456-461`）が既に E205 を出すので、新しい検査は `directory` が空でないときだけ出す**（同じ段階で 2 経路から出ても報告は 1 件に畳まれるが、経路を分けておく）。**既存に衝突する宣言は無い**（実測: `raise` `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 8 名で `def` の grep がすべて 0 件）。判定 37-e で固定する
+- **決定 4b: prelude の操作と同名の利用者の宣言を E205 にする（D6、§57 の `docs/spec.md:2274`）。** 今は実装されていない。`namespaces.rs:69-84` の `declarations(item)` が `Item::Def` / `Item::SigDef` を返さないので、`:136-143` の prelude との衝突検査に載らない。しかも `namespaces.rs:390-397` の `operation` は bare 名が `prelude_operations` に一致すると無条件で prelude の操作に書き換えるので、**利用者の `def` は黙って影になる**（実測: 外の `def raise = 1` と `def main = raise` は E205 ではなく E513）。R37 は `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 7 名を prelude に足すので影響が最大になる。**汎用の `declarations` に値の空間を足すのではなく、専用の検査を置く。** 理由は 2 つある（計画審査 2 巡目の指摘）。(1) `file_scopes.rs:40-47` がトップレベルの `def` 名を `file{N}$name` に改名するので、`declarations` に `Item::Def` を足して `has_prelude(Value, name)` と比べても `file0$args` と `args` は一致せず E205 にならない。(2) prelude の操作は `prelude_operations`（`namespaces.rs:126`）にあり `prelude[Space]` には入らないので、汎用経路に載せると比較先が違う。しかも `Item::ModuleImpl` の `def` を足すと `namespaces.rs:136-141` の `directory != root` の比較で、既存の `tests/library/store`（根の `implement Store as Memory` の `def find` とサブディレクトリの `def find`）が新たに E205 になる。**検査は「`Item::Def` と実装の `def` の bare 名（`file_value` で `file{N}$` を剥がす。`namespaces.rs:90-94`）が `prelude_operations` に含まれるなら E205」の 1 本にする。** 根の同名との比較や prelude の通常の `def` は混ぜない。**他の効果の操作（`once args`）は根では既存の機構で E205 になるが、サブディレクトリでは漏れる**（計画審査 5 巡目の実測: `effect Foo` / `once raise: Int` を根に置くと E205、同じものを `sub/` に置くと終了 0）。`namespaces.rs:293` が効果の操作名を `operation_key(directory, name)` で `sub$raise` に書き換えるので、後段の `names.rs:456-461` の値の空間の衝突（bare を前提にする）に載らないためである。§57（`docs/spec.md:2274`）と D6 は「外の `def`、実装の `def`、他の効果の操作」を**どのディレクトリでも** E205 と定める。**E205 の検査（`namespaces.rs:136-142`）に、効果の操作名を `prelude_operations` と bare で比べる 1 本を足す。** 計画審査 6 巡目が実測で確かめた: この検査は `resolver.item(item, ...)`（`:144`）より前に走り、`op.name = operation_key(directory, &op.name)`（`:293`）は `item()` の中なので、**検査の時点では `effect.ops[].name` はまだ素の名前である**。コピーに足して再ビルドすると `sub/` の `effect Foo` / `once raise: Int` が `sub/foo.hd:2:7: error[E205]`（前は終了 0）、衝突しない `once zap` の対照は終了 0 になった。**根では既存の機構（`names.rs:456-461`）が既に E205 を出すので、新しい検査は `directory` が空でないときだけ出す**（同じ段階で 2 経路から出ても報告は 1 件に畳まれるが、経路を分けておく）。**既存に衝突する宣言は無い**（実測: `raise` `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 8 名で `def` の grep がすべて 0 件）。判定 37-e で固定する
 - **決定 4c: prelude の効果の handler をどのディレクトリにも置けるようにする（§58 の `docs/spec.md:2296`）。** `namespaces.rs:300-302` は `declared_directory(&handler.effect) != directory` で全 handler を効果と同じディレクトリに強制し、prelude の効果（bare 名なので `declared_directory` は空）はサブディレクトリで必ず不一致になる。**prelude の効果を除外する。** これは 24.9 に「サブディレクトリの中の `handler Error` が E204」として残していた既知の穴で、R37 の判定 37-e が「`handler Env as X` はどのディレクトリにも置ける」と主張する以上、ここで直す。**除外は E204 の検査だけでは足りない。** `namespaces.rs:308` は handler の腕の名前を無条件に `operation_key(directory, name)`（`:86-88`。`dir$name`）で前置する。prelude の効果の操作は bare のままなので、E204 を外しただけだと腕名が `sub$raise` になり、`infer.rs:1884-1891` の E605 の照合（期待 `("abort", "raise")` 対 実際 `("abort", "sub$raise")`）で落ちる（計画審査 2 巡目が E204 の検査だけを外して再ビルドし、`sub/h.hd:1:1: error[E605]` を実測した）。**`:301-303` の E204 と `:308` の前置の両方を、prelude の効果かどうかで分岐させる**（判定は `has_prelude(Space::Contract, &handler.effect)` で、その箇所で手に入る）
 - **決定 5: `main` は引数を取らない（E206 のまま）。** argv は `Env.args` で取る。`names.rs:419-426` の `entry_form` は触らない
 - **決定 6: C の `int main` だけを `int main(int argc, char **argv)` に変え、`argc` / `argv` をファイルスコープの static に退避する。** `hado_entry(void)` の宣言（`runtime/hado_runtime.c:11`）も `emit.rs:592-595` と `:64-70` の signature も**触らない**。これが最小の変更である。`scripts/verify-m0.sh:94-99` は `GC_INIT` `hado_entry` `hado_alloc` `GC_malloc` の綴りを `runtime/` に求めるだけなので緑のまま
@@ -2968,7 +2968,7 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 | `with H -> args`（`H` は `handler Error`）で argv が非 UTF-8 | `H` の腕が `message` を受け取る | 決定 2（C が `hado_abort_error` を呼ばないことの固定） |
 | `main` の型が `{Env, Error, Io}` | E706 にならない | §5（169 行）、決定 4 |
 | 利用者の `effect Env` / `effect Io` の宣言 | E205 | §47（1865 行）、D6 |
-| `reply pick: Int {Error}` の呼び出し位置 | `{Error, Foo}`（印字は整列順。`types.rs:52-57`） | 決定 3 |
+| `once pick: Int {Error}` の呼び出し位置 | `{Error, Foo}`（印字は整列順。`types.rs:52-57`） | 決定 3 |
 | `handler Io as X` で 4 操作のうち 1 つを落とす | E605 | §58（2298 行） |
 
 **本体では 1 つも通っていないので、期待値は仮説である。実測と食い違ったら、実装を疑う前に期待値を疑うこと。**
@@ -2990,12 +2990,12 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 
 **fixture は判定器が `mktemp -d` に作り、判定器が cwd をその中に移して実行ファイルを起動する**（受理コーパスと同じ条件にする）。非 UTF-8 は bash の `$'\xff'` で argv・env の値・ファイル名の 3 箇所に決定的に入れる。**`main` の値は印字できる型に包む**（R35・R36 と同じ罠。`String List` は印字できるが、`Bytes` は `Bytes.of_list [...]` の形で出る）。
 
-判定 37-a: 操作の結果の効果行。`reply pick: Int {Error}` の呼び出し位置が `{Error, Foo}` になる（`--print-type` で測る）。**効果行の印字はラベルを `BTreeSet` で整列する**（`types.rs:52-57` の `Row::suffix`）ので、期待値は必ず整列順で書くか集合で比べる。`{Foo, Error}` の順で固定文字列と比べると落ちる。**腕が `raise` しない形で測る**（腕の `raise` から来る `{Error}` と区別するため。指揮者の実測ではこれで区別できた）。効果行なしの宣言との対照、効果行が 2 つ以上の形、`abort` の操作（戻り型を書けないので効果行も無い）の対照
+判定 37-a: 操作の結果の効果行。`once pick: Int {Error}` の呼び出し位置が `{Error, Foo}` になる（`--print-type` で測る）。**効果行の印字はラベルを `BTreeSet` で整列する**（`types.rs:52-57` の `Row::suffix`）ので、期待値は必ず整列順で書くか集合で比べる。`{Foo, Error}` の順で固定文字列と比べると落ちる。**腕が `raise` しない形で測る**（腕の `raise` から来る `{Error}` と区別するため。指揮者の実測ではこれで区別できた）。効果行なしの宣言との対照、効果行が 2 つ以上の形、`abort` の操作（戻り型を書けないので効果行も無い）の対照
 判定 37-b（**工程 1**）: `main` の効果の免除。利用者の効果が `main` に残れば E706、prelude の効果なら通る。**`Env` を足した後に `main` の型が `{Env, Error}` で通ることを測る。** 工程 0 では prelude の効果が `Error` 1 つだけなので、集合との照合と `!= "Error"` の直書きを区別できない
 判定 37-b2: ローカル束縛の影（決定 4a）。`def f (raise: Int): Int => raise` が受理されて `f 3` が `3` を印字する。`let raise = 5 -> raise + 1` も同じ（**`let raise = 5 -> raise` は束縛をそのまま返す形なので E501 になる**。審査の実測）。**対照**: 束縛の外の `raise` は prelude の操作のままで、`raise { message = "x" }` が `Error` を起こす。工程 1 以降は `args` `env` `cwd` `read_file` `write_file` `read_dir` `read_stdin` の 7 名でも同じ形を回す
 判定 37-c: `Env` の 3 操作。argv の分類（空 / 1 個 / 複数 / 空文字列の引数 / 非 UTF-8）、`env` の分類（設定 / 未設定 / 値が空文字列 / 値が非 UTF-8 / 名前が非 UTF-8）、`cwd`。期待値は python3 から導く
 判定 37-d: 既定と差し替え。(1) handler 無しで `args` が既定の `def` で応える。(2) 利用者の `handler Env as MyEnv` を `with` で被せると利用者の腕が応える。(3) **`with H -> args`（`H` は `handler Error`）で argv が非 UTF-8 のとき `H` の腕が `message` を受け取る**（C が `hado_abort_error` を呼んでいないことの固定）。(4) 利用者の `handler Env` で 3 操作のうち 1 つを落とすと E605（既存機構）。(5) **prelude の `Reply` 操作すべてに既定の `def` の対応がある**（`crates/hado/tests/r37_world.rs` で `Checked` を直接見る）
-判定 37-e: 予約名と可視性。(1) 利用者の `effect Env` の宣言が E205。(2) **prelude の操作と同名の利用者の宣言が E205**（決定 4b。外の `def args`、実装の `def args`、他の効果の操作 `reply args`。**単一ファイルと複数ファイルの両方で測る**。今は複数ファイルで黙って影になる）。(3) **`handler Env as X` をサブディレクトリに置いても通る**（決定 4c。今は E204）。同じ形の `handler Error as X` も通ることを対照に置く。(4) サブディレクトリからも `args` が無修飾で見える（R34 の `prelude_operations` が `Env` にも効くことの固定）
+判定 37-e: 予約名と可視性。(1) 利用者の `effect Env` の宣言が E205。(2) **prelude の操作と同名の利用者の宣言が E205**（決定 4b。外の `def args`、実装の `def args`、他の効果の操作 `once args`。**単一ファイルと複数ファイルの両方で測る**。今は複数ファイルで黙って影になる）。(3) **`handler Env as X` をサブディレクトリに置いても通る**（決定 4c。今は E204）。同じ形の `handler Error as X` も通ることを対照に置く。(4) サブディレクトリからも `args` が無修飾で見える（R34 の `prelude_operations` が `Env` にも効くことの固定）
 判定 37-f: `Io` の 4 操作。`read_file`（存在する / 空ファイル / バイナリ / 大きいファイル）、`write_file` → `read_file` の往復、`read_dir`（空 / 1 個 / 複数 / 名前が非 UTF-8 / `.` と `..` を除く / 整列）、`read_stdin`（閉じた stdin / 内容がある stdin / 2 回目）
 判定 37-g: `Io` の失敗の分類。**4 分類すべてに決定的な入力を置く。** `NotFound`（存在しないパス）、`NotADirectory`（通常ファイルを `read_dir`）、`IoFailure`（ディレクトリを `read_file`。EISDIR）、`PermissionDenied`（`chmod 000` のファイル）。**`PermissionDenied` は root では起きないので、`id -u` が 0 なら `NG: skipped-as-root` として失敗にする**（skip で緑にしない）。`write_file` の失敗（存在しないディレクトリ → `NotFound`、読み取り専用ディレクトリ → `PermissionDenied`）
 判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "\n"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**`scripts/verify-r32.sh` の 32-j(d) を決定 8b の形に直し、実物の `main.hd` が実行時に生成したディレクトリを引数に受けて動くことを測る。** **行の選び方は R38 のシェル側 oracle と同じ規則にする**（R38 で作る集計スクリプトが `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。**`scripts/run-gates.sh` はまだリポジトリに無い**（指揮者のスクラッチにある同名のものは別物）。E2 も `String.starts_with line "PASSED: "` に一致する**最後の**行を選び、名前はファイル名から作る。`tail -1` と一致させる）。**`Report.parse_line` は `<名前> PASSED: <n>/<N>` の 1 行だけを受ける**（`report.hd` の `fields` が `String.split line " PASSED: "` で 2 分割するので、名前の無い行をそのまま渡すと 1 要素になって `InvalidLine` で落ちる）。**E2 は選んだ行の `PASSED: ` の前にファイル名を付けて組み立ててから `parse_line` に渡す。**空 argv は `MissingDirectory`
@@ -3076,7 +3076,7 @@ Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作�
 | 11 | `%` を使う**効果行を書かない**再帰生成器が E306（計画審査 2 巡目の実測: `def rec generate (n: Int): Int List` でも `E306`。`Int List {Error}` と書けば build できて `5`） | R35 の工程 0 |
 | 12 | 効果が `dependencies.rs` の宣言に数えられておらず、未使用の効果が E513 にならない（§50 は効果にも当てる） | R32 |
 
-**#8 は計画審査 1 巡目で再現しなかった**（`apply (with H -> raise ...) 3` は `7` / `3` を印字して終了 0。利用者効果の `reply` が関数を返す形は E706）。**再現手順を先に 1 本立ててから裁定せよ。立たなければ (c) にして、その旨を台帳に書く。**
+**#8 は計画審査 1 巡目で再現しなかった**（`apply (with H -> raise ...) 3` は `7` / `3` を印字して終了 0。利用者効果の `once` が関数を返す形は E706）。**再現手順を先に 1 本立ててから裁定せよ。立たなければ (c) にして、その旨を台帳に書く。**
 
 **すでに解けているもの（c。確かめて、解けていることを台帳に書くだけ）:**
 
@@ -3089,7 +3089,7 @@ Rust 側: `crates/hado/tests/r37_world.rs` を新設し、C レベルの動作�
 
 **E2 の空 argv の `MissingDirectory`（30 節の疑義）は (c) とする。** `tools/gates/` は利用者のコードなので §49 の失敗の表の外でよい（R34 の `"InvalidLine"` が先例）。**この判断が誤りだと思ったら、変えずに報告せよ。**
 
-**R31 の台帳の未確認 3 件**（型引数付き効果の重ね、`fn` の本体の `capture`、handler の値引数）は本版の範囲外である。**再現するなら `docs/bug.md` に置く。しないなら何も足さない。**
+**R31 の台帳の未確認 3 件**（型引数付き効果の重ね、`fn` の本体の `again`、handler の値引数）は本版の範囲外である。**再現するなら `docs/bug.md` に置く。しないなら何も足さない。**
 
 ### 判定
 
@@ -3543,8 +3543,8 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 ### 決定
 
-- **決定 1: `log` は `effect Io` の `reply` とし、String と改行 1 つを stdout へ書く。**
-  - 宣言は `reply log(contents: String): Unit {Error}`。既定実装は `IoDefault` の `def` に置く（R37 決定 1 の経路。0 引数の操作は `definition_reference`、1 引数以上は `specialize_function` + `call_direct`）。
+- **決定 1: `log` は `effect Io` の `once` とし、String と改行 1 つを stdout へ書く。**
+  - 宣言は `once log(contents: String): Unit {Error}`。既定実装は `IoDefault` の `def` に置く（R37 決定 1 の経路。0 引数の操作は `definition_reference`、1 引数以上は `specialize_function` + `call_direct`）。
   - 本体は `let status = __io_log contents -> if status == 0 => () | raise { message = io_failure_message status }`。status は 0 成功 / 4 失敗で、4 は `io_failure_message` の既定腕により `"IoFailure"` になる。**`io_status_from_errno` は使わない**（EPIPE・ENOSPC が `PermissionDenied` などに化ける）。
   - C は `int64_t hado_io_log(const HadoString *contents)`。`fwrite` で contents、`fputc('\n')`、`fflush(stdout)` の 3 つを 1 つの status に畳む。**`print_failed` は触らない。** log の失敗は言語の `Error` で、利用者の `handler Error` が捕まえられる。終了コードは、捕捉されなければ `main` の raise 経路（stderr と 1）が、捕捉されても `main` 末尾の `check_stdout`（R29）が決める。
   - **R29 の再考:** SIGPIPE の無視と EPIPE の扱いは変えない。log の EPIPE は status 4 → `Error` になる。§54 の終了コードの二値も変えない。
@@ -3560,7 +3560,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
   - `drop` は count ≤ 0 で全件、count ≥ 長さで `[]`。
 - **決定 6: `Int` と `List` の新しい member はコーパスの item を増やさない。** 拒否形が存在しない（全域）ので、coverage は `scripts/verify-r43.sh` が持つ。`String.join` / `trim` は既存 item `String 操作` の受理 1 本、`log` は `Env と Io` の受理 1 本で覆う。**`scripts/verify-m1-corpus.sh` の item の免除の一覧は変えない**（緩めの変更を避ける）。
 - **決定 7: 版と tag は動かさない。** `docs/spec.md` と `docs/spec-coverage.md` の版は `v0.3.1` のまま（`verify-r42.sh` が固定している）。tag は R44 以降で判断する。
-- **決定 8: `scripts/verify-r37.sh` と `crates/hado/tests/r37_world.rs` を追随させる。** `Io` の操作が 4 から 5 になるので、handler の腕に `reply log _ => ()` を足し、既定実装の照合に `log` を足す。`scripts/verify-r37.sh` の「操作を 1 つ落とすと E605」は 5 通りに増える（**緩めではなく強化**）。
+- **決定 8: `scripts/verify-r37.sh` と `crates/hado/tests/r37_world.rs` を追随させる。** `Io` の操作が 4 から 5 になるので、handler の腕に `once log _ => ()` を足し、既定実装の照合に `log` を足す。`scripts/verify-r37.sh` の「操作を 1 つ落とすと E605」は 5 通りに増える（**緩めではなく強化**）。
 - **決定 9: 構造の門番は `scripts/verify-r42.sh` のまま残し、R43 の挙動の門番を `scripts/verify-r43.sh` として新設する。** R39〜R42 は文書のラウンドだったので番号を付け替えたが、R43 は言語のラウンドなので r9〜r38 と同じく自分の門番を足す。`scripts/lib/gate-tiers.sh` の full に `r43` を足す。
 
 ### 仕様への疑義（R43 で判断する。§5 と §54 と §55 が定めていない）
@@ -3569,7 +3569,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 - **`log` の失敗と §54 の関係。** §54 は「印字が失敗したら終了コード 1」を `main` の値の印字について定める。決定 1 は log の失敗を捕捉可能な `Error` とし、終了コードは §54 の経路が決めるとする。R29 の申し送りへの回答である。
 - **`trim` の空白の集合。** §55 は定めていない。決定 2 で ASCII の 6 種とする。全角空白（U+3000）は除かない。
 - **`String` は文字（Unicode スカラ値）の列なのに trim の実装はバイト単位。** 決定 2 の理由のとおり結果は一致するが、実装の単位と仕様の単位が違うことを記録する。
-- **`log` が prelude の操作名になる。** §37 により、以後の利用者の `def log` と `effect Foo` の `reply log` は E205 になる。既存の記述に無いことは実測した。
+- **`log` が prelude の操作名になる。** §37 により、以後の利用者の `def log` と `effect Foo` の `once log` は E205 になる。既存の記述に無いことは実測した。
 
 ### 期待値の根拠
 
@@ -3597,7 +3597,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 ### 工程
 
-- 工程 0: 仕様。§55 に `reply log`、`String.join` / `trim`、`Int.abs` / `min` / `max`、`List.head` / `nth` / `take` / `drop` の型と意味を足し、関数集合の一覧と `Pure` の一覧を追随させる。失敗の `message` の表に stdout への書き込みの失敗の行を足す。`docs/spec-trace.md` に 1 行。**`## 55.1` の見出しは作らない**（`verify-r34.sh:121` と `verify-r36.sh` と `scripts/lint-docs.sh:271` の `^## 55\.` が 2 個目の一致になり、既存の検査が落ちる）。**この時点で `verify-r34.sh` / `verify-r36.sh` / `verify-m7.sh` は赤になる**（spec に member を足して stdlib に無い）。意図した赤である。
+- 工程 0: 仕様。§55 に `once log`、`String.join` / `trim`、`Int.abs` / `min` / `max`、`List.head` / `nth` / `take` / `drop` の型と意味を足し、関数集合の一覧と `Pure` の一覧を追随させる。失敗の `message` の表に stdout への書き込みの失敗の行を足す。`docs/spec-trace.md` に 1 行。**`## 55.1` の見出しは作らない**（`verify-r34.sh:121` と `verify-r36.sh` と `scripts/lint-docs.sh:271` の `^## 55\.` が 2 個目の一致になり、既存の検査が落ちる）。**この時点で `verify-r34.sh` / `verify-r36.sh` / `verify-m7.sh` は赤になる**（spec に member を足して stdlib に無い）。意図した赤である。
 - 工程 1: 判定器。`scripts/verify-r43.sh` を新設し、43-a〜43-h の赤を実測する（43-a〜43-h が NG、`PASSED: n/N` が n < N）。
 - 工程 2: 実装。stdlib の 4 ファイル、`runtime/hado_runtime.c` `.h`、`crates/hado/src/runtime_abi.rs`。新しい `RuntimeFunction` は enum と `ALL` の**末尾**に足して既存の `id()` を動かさない。`bootstrap` と `mono.rs` と `infer.rs` は触らない（R37 の機構がそのまま使える）。判定 43-a〜43-f を緑に。`verify-r34.sh` / `verify-r36.sh` / `verify-m7.sh` も緑に戻る。
 - 工程 3: コーパスと追随。`tests/accept/io_log`（item `Env と Io`）と `tests/accept/string_join_trim`（item `String 操作`）、lock の更新、決定 8 の 2 ファイル。判定 43-g。
@@ -3607,7 +3607,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 `scripts/verify-r43.sh` を新設する。構造は `scripts/verify-r37.sh` に倣う。**入力の形が列挙できる判定は分類から生成する。境界値は乱数任せにせず決定的に含める。期待値は独立した oracle（python3 の `str.strip` / `str.join` / 64 bit wrap の `-n` / スライス）から導く。** 生成器自身の失敗と manifest の欠落・空を非ゼロ終了にし、成功時の stderr と失敗時の stdout が空であることを `wc -c` で測る。探針を絞り込める環境変数を置かない。
 
-判定 43-a: 仕様と stdlib の一致。§55 の関数集合と member の型が、`stdlib/io.hd` `stdlib/string.hd` `stdlib/int.hd` `stdlib/list.hd` の module の宣言と一致し、`effect Io` に `reply log` がある。`verify-m7.sh` と `verify-r34.sh` と `verify-r36.sh` の判定を入れ子で呼ばず、そちらは別の門番として走らせる。
+判定 43-a: 仕様と stdlib の一致。§55 の関数集合と member の型が、`stdlib/io.hd` `stdlib/string.hd` `stdlib/int.hd` `stdlib/list.hd` の module の宣言と一致し、`effect Io` に `once log` がある。`verify-m7.sh` と `verify-r34.sh` と `verify-r36.sh` の判定を入れ子で呼ばず、そちらは別の門番として走らせる。
 
 判定 43-b: `log` の正常系。python3 が生成した String（空・ASCII・`\n` `\t` `"` `\` を含む・マルチバイト UTF-8・長い）を `log` して `main` が値を返す形を build して実行し、stdout が `文字列 + "\n"` と `main` の値の連結に一致し、終了 0、stderr が空であることを測る。
 
