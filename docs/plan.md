@@ -3562,6 +3562,8 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 - **決定 7: 版と tag は動かさない。** `docs/spec.md` と `docs/spec-coverage.md` の版は `v0.3.1` のまま（`verify-r42.sh` が固定している）。tag は R44 以降で判断する。
 - **決定 8: `scripts/verify-r37.sh` と `crates/hado/tests/r37_world.rs` を追随させる。** `Io` の操作が 4 から 5 になるので、handler の腕に `reply log _ => ()` を足し、既定実装の照合に `log` を足す。`scripts/verify-r37.sh` の「操作を 1 つ落とすと E605」は 5 通りに増える（**緩めではなく強化**）。
 - **決定 9: 構造の門番は `scripts/verify-r42.sh` のまま残し、R43 の挙動の門番を `scripts/verify-r43.sh` として新設する。** R39〜R42 は文書のラウンドだったので番号を付け替えたが、R43 は言語のラウンドなので r9〜r38 と同じく自分の門番を足す。`scripts/lib/gate-tiers.sh` の full に `r43` を足す。
+- **決定 10: `scripts/verify-r36.sh` の `prelude inventory: 39/39` の直書きを、導出した件数の一致に置き換える。** §55 に member を 9 本足すと棚卸しは 48 になり、固定は R43 のたびに古くなる。AGENTS の「件数を直書きしない」に従い、`prelude inventory: n/n` の n が一致して 0 でないことを見る。m7 自身の門番（36-f の `full_gate m7`）は変わらない。
+- **決定 11: `scripts/lib/gate-cache.sh` の内容ハッシュから入れ子の git worktree（`.worktrees/`）を除く。** リポジトリの下に別の git worktree（`.git/info/exclude` にある `.worktrees/rename`）が走っており、その `target/gate-cache` が毎秒書かれていた。`hado_gate_fingerprint` は `target/` と `.git/` しか除かないので、鍵が 2 回続けて食い違い（実測）、`verify-gate-cache.sh` が 20/26 になった。別の worktree の `target/` はこのツリーの入力ではないので、`./.worktrees/*` を除く。**門番の判定は変えない。**
 
 ### 仕様への疑義（R43 で判断する。§5 と §54 と §55 が定めていない）
 
@@ -3593,14 +3595,14 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 ### 成果物
 
-`docs/spec.md`、`docs/plan.md`（本節）、`docs/ledger.md`、`docs/spec-trace.md`、`stdlib/io.hd` `stdlib/string.hd` `stdlib/int.hd` `stdlib/list.hd`、`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/runtime_abi.rs`、`crates/hado/tests/r37_world.rs`、`scripts/verify-r43.sh`（新設）、`scripts/verify-r37.sh`（決定 8）、`scripts/lib/gate-tiers.sh`（決定 9）、`tests/accept/io_log/`（新設）`tests/accept/string_join_trim/`（新設）、`tests/corpus.sha256`。
+`docs/spec.md`、`docs/plan.md`（本節）、`docs/ledger.md`、`docs/spec-trace.md`、`stdlib/io.hd` `stdlib/string.hd` `stdlib/int.hd` `stdlib/list.hd`、`runtime/hado_runtime.c` `runtime/hado_runtime.h`、`crates/hado/src/runtime_abi.rs`、`crates/hado/tests/r37_world.rs`、`scripts/verify-r43.sh`（新設）、`scripts/verify-r37.sh`（決定 8）、`scripts/verify-r36.sh`（決定 10）、`scripts/lib/gate-tiers.sh`（決定 9）、`scripts/lib/gate-cache.sh`（決定 11）、`tests/accept/io_log/`（新設）`tests/accept/string_join_trim/`（新設）、`tests/corpus.sha256`。
 
 ### 工程
 
 - 工程 0: 仕様。§55 に `reply log`、`String.join` / `trim`、`Int.abs` / `min` / `max`、`List.head` / `nth` / `take` / `drop` の型と意味を足し、関数集合の一覧と `Pure` の一覧を追随させる。失敗の `message` の表に stdout への書き込みの失敗の行を足す。`docs/spec-trace.md` に 1 行。**`## 55.1` の見出しは作らない**（`verify-r34.sh:121` と `verify-r36.sh` と `scripts/lint-docs.sh:271` の `^## 55\.` が 2 個目の一致になり、既存の検査が落ちる）。**この時点で `verify-r34.sh` / `verify-r36.sh` / `verify-m7.sh` は赤になる**（spec に member を足して stdlib に無い）。意図した赤である。
 - 工程 1: 判定器。`scripts/verify-r43.sh` を新設し、43-a〜43-h の赤を実測する（43-a〜43-h が NG、`PASSED: n/N` が n < N）。
 - 工程 2: 実装。stdlib の 4 ファイル、`runtime/hado_runtime.c` `.h`、`crates/hado/src/runtime_abi.rs`。新しい `RuntimeFunction` は enum と `ALL` の**末尾**に足して既存の `id()` を動かさない。`bootstrap` と `mono.rs` と `infer.rs` は触らない（R37 の機構がそのまま使える）。判定 43-a〜43-f を緑に。`verify-r34.sh` / `verify-r36.sh` / `verify-m7.sh` も緑に戻る。
-- 工程 3: コーパスと追随。`tests/accept/io_log`（item `Env と Io`）と `tests/accept/string_join_trim`（item `String 操作`）、lock の更新、決定 8 の 2 ファイル。判定 43-g。
+- 工程 3: コーパスと追随。`tests/accept/io_log`（item `Env と Io`）と `tests/accept/string_join_trim`（item `String 操作`）、lock の更新、決定 8 と決定 10 の 3 ファイル。判定 43-g。
 - 工程 4: 仕上げ。`scripts/lib/gate-tiers.sh` の full に `r43` を足し、`docs/ledger.md` に R43 を書く。判定 43-i〜43-k と全走。
 
 ### 判定
@@ -3619,7 +3621,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 判定 43-f: `List.head` / `nth` / `take` / `drop`。長さ 0〜3 の全てのリストの形と、count が -1・0・1・長さ-1・長さ・長さ+1・大きい値、nth の index が -1・0・長さ-1・長さ・大きい値を決定的に含める。要素は Int と String の 2 型で回す。期待値は python3 のスライスと添字から導く。
 
-判定 43-g: コーパス。`tests/accept/io_log` と `tests/accept/string_join_trim` のタグ（`spec: §55`、item、expect、needs）と期待 stdout を、lock の照合と受理コーパスの実行で測る。
+判定 43-g: コーパス。**ファイル名を判定器に埋め込まず、新しい member を使う受理コーパスを本文から選ぶ。** 選ばれた各ファイルの札（`spec: §55`、item、`needs: prelude`）と `expect` の 1 行、lock の照合を測り、build と実行で期待 stdout を測る。選ばれた item の集合が `Env と Io` と `String 操作` であることも測る。
 
 判定 43-h: 決定 8。`scripts/verify-r37.sh` が 5 操作で緑。`crates/hado/tests/r37_world.rs` の既定実装の照合が `log` を含む。
 

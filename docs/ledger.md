@@ -2843,3 +2843,57 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 - 該当なし。言語規則は変えていない。
 
+## R43 標準出力と基本関数（2026-09-16）
+
+計画は `docs/plan.md` 39 節。v0.3.1 には実行中の印字が無く、出力は `main` の返り値 1 回だけだった。stdlib も CLI を 1 本書くのに要る基本関数を欠いていた。`Io` の 5 つ目の操作 `log`（String と改行 1 つを stdout へ）と、`String.join` / `trim`、`Int.abs` / `min` / `max`、`List.head` / `nth` / `take` / `drop` を足した。**prelude に操作を 1 つ足すので言語の意味が広がる。** 計画 16 節 Q5 の「出力関数の綴り」は `log` に決まり、R29 の「実行中の print 効果を足すときは再考する」への回答を §55 に書いた。
+
+### 実装
+
+- `stdlib/io.hd` に `reply log(contents: String): Unit {Error}` と `IoDefault` の `def log` を足した。既定実装は `let status = __io_log contents -> if status == 0 => () | raise { message = io_failure_message status }`。R37 の既定実装の経路（1 引数は `specialize_function` と `call_direct`）がそのまま使えた。
+- `runtime/hado_runtime.c` の `hado_io_log` は `fwrite` と `fputc` と `fflush` を 1 つの status に畳み、失敗はすべて 4 にする。`io_status_from_errno` は使わない（EBADF・EPIPE・ENOSPC を同じ `"IoFailure"` にするため）。`print_failed` は触らないので、失敗は捕捉できる値になり、捕捉されなければ `main` の raise 経路が、捕捉されても `main` 末尾の `check_stdout` が終了コードを決める。
+- `stdlib/string.hd` に `join`（区切りは要素の間だけ）と `trim`（ASCII の空白 6 種）、`stdlib/int.hd` に `abs`（i64 の最小値はその値自身）と `min` と `max`、`stdlib/list.hd` に `head` と `nth` と `take` と `drop` を足した。リストの 4 つは腕の深さを 1 に保つ交互再帰で、範囲外は `None` か `[]` にする。
+- `trim` だけは C の `__string_trim` にした。§5 のエスケープに CR が無く、char のコードを取る intrinsic も無いので、hado のソースだけでは CRLF の CR を除けない。除く 6 種は ASCII で、UTF-8 の継続バイトは 0x80 以上なのでバイト単位でも文字を割らない。
+- `crates/hado/src/runtime_abi.rs` の `RuntimeFunction` に `IoLog` と `StringTrim` を足した。enum と `ALL` の末尾に足し、既存の `id()` を動かしていない。`bootstrap`・`mono.rs`・`infer.rs` は触っていない。
+- `docs/spec.md` §55 に member の型と意味、失敗の `message` の表の行、`docs/spec-trace.md` に 4 行を足した。**§55 の見出しは増やしていない**（`^## 55\.` を 1 個と数える門番があるため）。
+
+### 判定の実測
+
+- **43-a（仕様と stdlib の一致）。** `bash scripts/verify-r43.sh` の 43-a は OK。§55 の関数集合と member の型が stdlib の 4 ファイルと一致し、`effect Io` に `reply log` がある。
+- **43-b（`log` の正常系）。** 生成した 10 形（空・ASCII・`\n`・`\t`・`"`・`\`・マルチバイト・長い）で、stdout が `文字列 + "\n"` と `main` の値の連結に一致、終了 0、stderr は空。
+- **43-c（`log` の失敗）。** stdout を閉じた実行・`/dev/full`・読み側を閉じたパイプの 3 つとも終了 1 で stderr は `IoFailure\n`。パイプは 141 でない。`handler Error` で捕まえた場合は `write_file` で書いたファイルが `IoFailure` で、終了コードは `check_stdout` により 1。
+- **43-d（`String.trim` / `join`）。** trim 12 形（空白 6 種の全部・全角空白・内部の空白・空・CRLF・マルチバイト隣接）と join 10 形（空リスト・要素 1 つ・空文字列・空の区切り・制御バイト）。期待値は `python3` の `str.strip(" \t\n\v\f\r")` と `str.join` から導いた。
+- **43-e（`Int.abs` / `min` / `max`）。** i64 の最小値・最小値+1・-1・0・1・最大値-1・最大値を含む 9 値と 7 対。`abs (-9223372036854775808)` はその値自身、`min` と `max` は大小。i64 の最小値は literal に書けない（E112）ので `Int.parse "-9223372036854775808"` で作る。
+- **43-f（`List.head` / `nth` / `take` / `drop`）。** 長さ 0〜4 の Int と String のリスト、count と index の負・0・長さ±1・長さ+2 を決定的に含む形。期待値は `python3` のスライスと添字から導いた。**最初の実装は `nth` が 1 つずれており、生成した探針が `Some(1)` と `None` の食い違いで捕まえた**（`nth_from` が `nth_more` に `index - 1` を渡していた）。
+- **43-g（コーパス）。** 新しい member を使う受理コーパスを本文から選び（ファイル名は判定器に埋め込まない）、`spec: §55`・item・`needs: prelude`・`expect` の 1 行・lock の一致・build と実行の期待 stdout を測った。item の集合は `Env と Io` と `String 操作`。
+- **43-h（`Io` の 5 つ目の操作）。** 5 つの腕を持つ `handler Io` は受理、`log` の腕を落とすと E605。`verify-r37.sh` は 262/262、`crates/hado/tests/r37_world.rs` の既定実装の照合は 5 操作。
+- **43-i（`cargo test`）。** `cargo test --offline --no-fail-fast` は 734 passed、0 failed。
+- **43-j（層別と門番の一覧）。** `verify-gate-cache.sh` は 26/26（r43 を足した一覧が実在の門番と一致し、3 層が重複なく覆う）。3 層の全走は下の「層別の実測」を見よ。
+- **43-k（エラーコード）。** §56 の表は 69 行、拒否コーパスは 69 本、受理コーパスは 106 本。増えていない。
+- 変更した門番の実測: `verify-r43.sh` 12/12、`verify-m1-corpus.sh` 7/7、`verify-m7.sh` 3/3、`verify-r34.sh` 1360/1360、`verify-r36.sh` 388/388、`verify-r37.sh` 262/262。
+
+### 層別の実測
+
+- `bash scripts/run-gates.sh --tier quick target/r43-gates/quick` は 9 秒で exit 0（build 1/1、gate-cache 26/26、m1-spec 1/1）。
+- `bash scripts/run-gates.sh --tier core target/r43-gates/core` は 545 秒で exit 0（gate-cache 26/26、m0 7/7、m1-corpus 7/7、m1-spec 1/1、m2 8/8、m3 12/12、m4 135/135、m5 145/145、m6 71/71、m7 3/3、r38 138/138）。
+- `bash scripts/run-gates.sh --jobs 8 --tier full target/r43-gates/full` は 41 本の門番と `lint-docs` を 746 秒で exit 0。新しい `verify-r43.sh` は 12/12、`lint-docs` は 7/7、`verify-r42.sh` は 5/5。3 走行とも `^NG:` は 0。
+
+### 迷った点
+
+- **`trim` を C の intrinsic にしたこと。** hado のソースだけでは CR を書けず、`String.get` は `{Error}` なので条件列の条件にも置けない（E308）。`__string_get` を使う手もあったが、バイト単位の除算は結果が文字単位と一致するので、C の 1 関数のほうが短く、空白の集合が 1 箇所に閉じる。
+- **`String.get` と条件列。** 実測で `E308: effects are not allowed in branch conditions` を踏んだ。`Pure` でない member は条件列の条件に置けない。stdlib を書くときの一般的な制約として記録する。
+- **コーパスの item を増やさなかったこと。** `Int` と `List` の新しい member は全域で拒否形が無い。item を増やすと `verify-m1-corpus.sh` の免除の一覧を広げることになり、門番を緩める変更になる。coverage は `verify-r43.sh` が持ち、受理側は `String 操作` と `Env と Io` の 2 本に寄せた。
+- **`verify-r36.sh` の件数の固定。** `prelude inventory: 39/39` を直書きしていた。member を足すと 48 になり、以後も古くなる。AGENTS の「件数を直書きしない」に従い、`n/n` の一致と非零を見る形に変えた（計画 39 節 決定 10）。緩めではなく、固定していた数を §55 由来にした。
+- **`verify-r37.sh` の 37-i の対照。** item の札を 1 ファイルから落とす対照は、同じ item のファイルが 2 本までは `expect` と `expect-error` の不在で捕まったが、`log` を足して 3 本になると素通りする。item の札は item の性質なので、全部の札を落として空を拒む対照に変えた。ファイルごとの `needs: prelude` と lock の対照は残っている。
+- **`List.nth` のずれ。** 交互再帰の helper に渡す数を 1 つ間違えていた。手書きの probe では気づきにくく、生成した探針が最初に落ちた所である。
+- **`verify-r43.sh` の 43-g。** 最初は 2 つのファイル名を埋め込んでいたが、AGENTS の「コーパスのファイル名を判定器へ埋め込まない」に反するので、新しい member を使うファイルを本文から選ぶ形に直した。
+- **入れ子の worktree と内容ハッシュ。** リポジトリの下の `.worktrees/rename`（別のブランチの git worktree。`.git/info/exclude` にある）が走っており、その `target/gate-cache` が毎秒書かれていた。`hado_gate_fingerprint` は `target/` と `.git/` しか除かないので、2 回続けた鍵が食い違い、`verify-gate-cache.sh` は 20/26 になった。`./.worktrees/*` を除いて鍵は安定し、26/26 に戻った（計画 39 節 決定 11）。門番の判定は変えていない。
+- **走行中の編集。** `verify-m1-corpus.sh` の検査 7 は `docs` `runtime` `scripts` を開始時に固定し、走行中に変わると赤にする。開発の途中で門番を走らせながら別のファイルを編集し、`protected-files-changed-during-verification` の偽の赤を 2 回出した。門番を回すときは木を触らない。
+
+### 仕様への疑義
+
+- **`Int.abs` の i64 最小値。** §5 は Int の演算の wrap を定めていない。反転が表現できないのでその値自身を返すと §55 に明記した。言語の他の演算（`+` や `*`）の桁溢れも同じく §5 が定めておらず、R43 では触っていない。
+- **`log` の失敗と §54 の関係。** §54 は `main` の値の印字の失敗を終了コード 1 とする。R29 は「実行中の print 効果を足すときはこの決定を再考する」と申し送った。R43 は `log` の失敗を捕捉できる `Error` とし、終了コードは §54 の 2 経路（捕捉されない raise と `main` 末尾の `check_stdout`）が決めるとした。§54 の本文は変えていない。
+- **`trim` の空白の集合。** §55 は定めていない。ASCII の 6 種とし、全角空白は除かないと明記した。
+- **`String` の単位と `trim` の実装の単位。** §55 の `String` は文字（Unicode スカラ値）の列だが、`trim` の実装はバイト単位である。除く 6 種が ASCII なので結果は一致するが、実装の単位が仕様の単位と違うことを記録する。
+- **`log` が予約名になること。** §37 により、以後の利用者の `def log` と他の効果の `reply log` は E205 になる（実測: 前者は `E205`、後者は `E205: duplicate declaration log`）。既存のコーパスと stdlib に `log` の宣言は無かった。
+
