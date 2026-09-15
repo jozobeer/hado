@@ -211,12 +211,12 @@ impl Resolver<'_> {
                 local.values.extend(params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
                 self.expression(body, &local, current, false);
             }
-            NodeKind::PatternBranch { scrutinee, arms, fallback } => {
-                self.expression(scrutinee, scope, current, false);
-                for (pat, body) in arms {
-                    self.pattern(pat, scope);
+            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
+                for scrutinee in scrutinees { self.expression(scrutinee, scope, current, false); }
+                for (pats, body) in arms {
+                    for pat in pats { self.pattern(pat, scope); }
                     let mut local = scope.clone();
-                    local.values.extend(crate::names::bound_names(pat));
+                    for pat in pats { local.values.extend(crate::names::bound_names(pat)); }
                     self.expression(body, &local, current, false);
                 }
                 if let Some(body) = fallback { self.expression(body, scope, current, false); }

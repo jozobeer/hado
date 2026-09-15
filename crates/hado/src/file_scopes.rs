@@ -107,10 +107,14 @@ impl FileScope {
                 self.expression(value, bound);
                 self.pattern_body(pat, body, bound);
             }
-            NodeKind::PatternBranch { scrutinee, arms, fallback } => {
-                self.expression(scrutinee, bound);
-                for (pattern, body) in arms {
-                    self.pattern_body(pattern, body, bound);
+            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
+                for scrutinee in scrutinees { self.expression(scrutinee, bound); }
+                for (patterns, body) in arms {
+                    let mut local = bound.clone();
+                    for pattern in patterns {
+                        local.extend(crate::names::bound_names(pattern));
+                    }
+                    self.expression(body, &local);
                 }
                 self.optional(fallback, bound);
             }

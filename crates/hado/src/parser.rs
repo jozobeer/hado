@@ -123,8 +123,8 @@ pub enum NodeKind {
         fallback: Option<Box<Node>>,
     },
     PatternBranch {
-        scrutinee: Box<Node>,
-        arms: Vec<(Pattern, Node)>,
+        scrutinees: Vec<Node>,
+        arms: Vec<(Vec<Pattern>, Node)>,
         fallback: Option<Box<Node>>,
     },
     Pipe(Box<Node>, Box<Node>),
@@ -1741,25 +1741,39 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Pipe {
             return self.parse_cond_branch(span);
         }
-        // Boolean branch or pattern branch share the scrutinee prefix.
-        let scrutinee = self.parse_branch_expr()?;
+        let first = self.parse_branch_expr()?;
+        if self.kind() == &TokKind::Comma {
+            let mut scrutinees = vec![first];
+            while self.kind() == &TokKind::Comma {
+                self.bump();
+                scrutinees.push(self.parse_branch_expr()?);
+            }
+            match self.kind() {
+                TokKind::Pipe => return self.parse_pattern_branch(span, scrutinees),
+                other => {
+                    return Err(self.error(
+                        None,
+                        format!("expected `|` after scrutinees, found {other}"),
+                    ))
+                }
+            }
+        }
         match self.kind() {
             TokKind::Arrow => {
-                // Boolean branch: `if expr => then | else`.
                 self.bump();
                 let then = self.parse_branch_expr()?;
                 self.expect(&TokKind::Pipe)?;
                 let els = self.parse_branch_expr()?;
                 Ok(Node {
                     kind: NodeKind::BoolBranch {
-                        cond: Box::new(scrutinee),
+                        cond: Box::new(first),
                         then: Box::new(then),
                         els: Box::new(els),
                     },
                     span,
                 })
             }
-            TokKind::Pipe => self.parse_pattern_branch(span, scrutinee),
+            TokKind::Pipe => self.parse_pattern_branch(span, vec![first]),
             other => Err(self.error(
                 None,
                 format!("expected `=>` or `|` after `if`, found {other}"),
@@ -1771,29 +1785,23 @@ impl Parser<'_> {
         // This name cannot occur in source, so lowering cannot capture a user binding.
         let name = "$argument".to_string();
         let scrutinee = Node { kind: NodeKind::Name(name.clone()), span };
-        let body = self.parse_pattern_branch(span, scrutinee)?;
+        let body = self.parse_pattern_branch(span, vec![scrutinee])?;
         Ok((vec![Param { name, ty: None, span }], body))
     }
 
-    fn parse_pattern_branch(&mut self, span: Span, scrutinee: Node) -> Result<Node, Diagnostic> {
+    fn parse_pattern_branch(&mut self, span: Span, scrutinees: Vec<Node>) -> Result<Node, Diagnostic> {
         let first_pipe = self.span();
         let mut arms = Vec::new();
         let mut fallback = None;
+        let columns = scrutinees.len();
         while self.kind() == &TokKind::Pipe {
             let pipe = self.span();
             self.bump();
             let save = self.pos;
-            if let Ok(pat) = self.parse_pattern() {
-                if self.kind() == &TokKind::Arrow {
-                    self.bump();
-                    let body = self.parse_branch_expr()?;
-                    self.branch_anchors.extend([(pat.span, pipe), (body.span, pipe)]);
-                    arms.push((pat, body));
-                    continue;
-                }
+            if let Some(arm) = self.try_parse_pattern_arm(pipe, columns)? {
+                arms.push(arm);
+                continue;
             }
-            // No `=>` after the pattern: it is the fallback
-            // expression (`pattern_fallback := "|" expression`).
             self.pos = save;
             let fb = self.parse_branch_expr()?;
             self.branch_anchors.push((fb.span, pipe));
@@ -1805,7 +1813,7 @@ impl Parser<'_> {
         }
         Ok(Node {
             kind: NodeKind::PatternBranch {
-                scrutinee: Box::new(scrutinee),
+                scrutinees,
                 arms,
                 fallback,
             },
@@ -1813,7 +1821,68 @@ impl Parser<'_> {
         })
     }
 
+    fn try_parse_pattern_arm(
+        &mut self,
+        pipe: Span,
+        columns: usize,
+    ) -> Result<Option<(Vec<Pattern>, Node)>, Diagnostic> {
+        let first = match self.parse_pattern() {
+            Ok(pattern) => pattern,
+            Err(_) => return Ok(None),
+        };
+        let mut patterns = vec![first];
+        while self.kind() == &TokKind::Comma {
+            self.bump();
+            match self.parse_pattern() {
+                // The comma may belong to an enclosing call or `with` list.
+                // Only a following `=>` commits the column row; otherwise rewind.
+                Ok(pattern) => patterns.push(pattern),
+                Err(_) => return Ok(None),
+            }
+        }
+        if self.kind() != &TokKind::Arrow {
+            return Ok(None);
+        }
+        if patterns.len() != columns {
+            return Err(self.error_at(
+                pipe,
+                Some("E125"),
+                "pattern column count must match the scrutinees",
+            ));
+        }
+        self.bump();
+        let body = self.parse_pattern_arm_body()?;
+        self.branch_anchors.extend(patterns.iter().map(|pattern| (pattern.span, pipe)));
+        self.branch_anchors.push((body.span, pipe));
+        Ok(Some((patterns, body)))
+    }
+
+    fn parse_pattern_arm_body(&mut self) -> Result<Node, Diagnostic> {
+        if self.kind() == &TokKind::KwIf && self.next_is(&TokKind::Pipe) {
+            let span = self.span();
+            self.bump();
+            let body = self.parse_condition_column(span, true)?;
+            if let Some(nested) = contains_nested_branch(&body) {
+                return Err(self.error_at(
+                    nested,
+                    Some("E101"),
+                    "branches cannot be nested inside another branch",
+                ));
+            }
+            return Ok(body);
+        }
+        self.parse_branch_expr()
+    }
+
+    fn next_is(&self, kind: &TokKind) -> bool {
+        self.toks.get(self.pos + 1).is_some_and(|tok| &tok.kind == kind)
+    }
+
     fn parse_cond_branch(&mut self, span: Span) -> Result<Node, Diagnostic> {
+        self.parse_condition_column(span, false)
+    }
+
+    fn parse_condition_column(&mut self, span: Span, stop_after_fallback: bool) -> Result<Node, Diagnostic> {
         let mut arms = Vec::new();
         let mut fallback = None;
         while self.kind() == &TokKind::Pipe {
@@ -1829,9 +1898,11 @@ impl Parser<'_> {
                 self.branch_anchors.extend([(head.span, pipe), (body.span, pipe)]);
                 arms.push((head, body));
             } else {
-                // `| expression` — a fallback.
                 self.branch_anchors.push((head.span, pipe));
                 fallback = Some(Box::new(head));
+                if stop_after_fallback {
+                    break;
+                }
                 self.record_fallback_end();
             }
         }
@@ -2105,27 +2176,59 @@ fn bin_node(op: BinOp, left: Node, right: Node) -> Node {
 
 /// Whether `node` (or any expression it contains) is a branch.
 /// Returns the span of the first branch found (§30).
+/// A condition column is itself a branch; call `contains_nested_branch`
+/// to allow a top-level arm-condition column while still rejecting
+/// branches inside it.
 fn contains_branch(node: &Node) -> Option<Span> {
+    contains_branch_in(node, false)
+}
+
+fn contains_nested_branch(node: &Node) -> Option<Span> {
+    contains_branch_in(node, true)
+}
+
+fn contains_branch_in(node: &Node, allow_arm_conditions: bool) -> Option<Span> {
     match &node.kind {
-        NodeKind::BoolBranch { .. }
-        | NodeKind::CondBranch { .. }
-        | NodeKind::PatternBranch { .. } => Some(node.span),
-        NodeKind::Neg(c) | NodeKind::Not(c) => contains_branch(c),
-        NodeKind::Bin(_, l, r) => contains_branch(l).or_else(|| contains_branch(r)),
-        NodeKind::Apply(f, args) => contains_branch(f).or_else(|| args.iter().find_map(contains_branch)),
-        NodeKind::Call(_, args) => args.iter().find_map(contains_branch),
-        NodeKind::Field(l, _) => contains_branch(l),
-        NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => fields.iter().find_map(|(_, v)| contains_branch(v)),
-        NodeKind::List(items, tail) => items.iter().chain(tail.iter().map(Box::as_ref)).find_map(contains_branch),
+        NodeKind::BoolBranch { .. } | NodeKind::PatternBranch { .. } => Some(node.span),
+        NodeKind::CondBranch { arms, fallback } => {
+            let nested = arms
+                .iter()
+                .find_map(|(condition, body)| {
+                    contains_branch_in(condition, false).or_else(|| contains_branch_in(body, false))
+                })
+                .or_else(|| fallback.as_deref().and_then(|body| contains_branch_in(body, false)));
+            if allow_arm_conditions {
+                nested
+            } else {
+                Some(node.span)
+            }
+        }
+        NodeKind::Neg(c) | NodeKind::Not(c) => contains_branch_in(c, false),
+        NodeKind::Bin(_, l, r) => contains_branch_in(l, false).or_else(|| contains_branch_in(r, false)),
+        NodeKind::Apply(f, args) => {
+            contains_branch_in(f, false).or_else(|| args.iter().find_map(|arg| contains_branch_in(arg, false)))
+        }
+        NodeKind::Call(_, args) => args.iter().find_map(|arg| contains_branch_in(arg, false)),
+        NodeKind::Field(l, _) => contains_branch_in(l, false),
+        NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
+            fields.iter().find_map(|(_, v)| contains_branch_in(v, false))
+        }
+        NodeKind::List(items, tail) => items
+            .iter()
+            .chain(tail.iter().map(Box::as_ref))
+            .find_map(|item| contains_branch_in(item, false)),
         NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
-            contains_branch(value).or_else(|| contains_branch(body))
+            contains_branch_in(value, false).or_else(|| contains_branch_in(body, false))
         }
         NodeKind::DoQ { value, body } => {
-            contains_branch(value).or_else(|| contains_branch(body))
+            contains_branch_in(value, false).or_else(|| contains_branch_in(body, false))
         }
-        NodeKind::With { args, body, .. } => args.iter().find_map(contains_branch).or_else(|| contains_branch(body)),
-        NodeKind::Fn { body, .. } => contains_branch(body),
-        NodeKind::Pipe(l, r) => contains_branch(l).or_else(|| contains_branch(r)),
+        NodeKind::With { args, body, .. } => args
+            .iter()
+            .find_map(|arg| contains_branch_in(arg, false))
+            .or_else(|| contains_branch_in(body, false)),
+        NodeKind::Fn { body, .. } => contains_branch_in(body, false),
+        NodeKind::Pipe(l, r) => contains_branch_in(l, false).or_else(|| contains_branch_in(r, false)),
         _ => None,
     }
 }
@@ -2148,6 +2251,39 @@ fn lower_expr(node: &Node) -> Option<Expr> {
         )),
         _ => None,
     }
+}
+
+fn comma_nodes(nodes: &[Node]) -> String {
+    nodes.iter().map(canonical).collect::<Vec<_>>().join(", ")
+}
+
+fn comma_patterns(patterns: &[Pattern]) -> String {
+    patterns.iter().map(|pattern| pattern.to_string()).collect::<Vec<_>>().join(", ")
+}
+
+pub(super) fn pattern_arm_body(node: &Node) -> String {
+    match &node.kind {
+        NodeKind::CondBranch { arms, fallback } => format_condition_column(arms, fallback, false),
+        _ => canonical(node),
+    }
+}
+
+fn format_condition_column(
+    arms: &[(Node, Node)],
+    fallback: &Option<Box<Node>>,
+    parenthesize: bool,
+) -> String {
+    let mut s = if parenthesize { "(if".to_string() } else { "if".to_string() };
+    for (condition, body) in arms {
+        s.push_str(&format!(" | {} => {}", canonical(condition), canonical(body)));
+    }
+    if let Some(body) = fallback {
+        s.push_str(&format!(" | {}", canonical(body)));
+    }
+    if parenthesize {
+        s.push(')');
+    }
+    s
 }
 
 /// Fully parenthesized canonical form of an expression tree.
@@ -2234,24 +2370,16 @@ pub fn canonical(node: &Node) -> String {
             canonical(els)
         ),
         NodeKind::CondBranch { arms, fallback } => {
-            let mut s = "(if".to_string();
-            for (c, b) in arms {
-                s.push_str(&format!(" | {} => {}", canonical(c), canonical(b)));
-            }
-            if let Some(fb) = fallback {
-                s.push_str(&format!(" | {}", canonical(fb)));
-            }
-            s.push(')');
-            s
+            format_condition_column(arms, fallback, true)
         }
         NodeKind::PatternBranch {
-            scrutinee,
+            scrutinees,
             arms,
             fallback,
         } => {
-            let mut s = format!("(if {}", canonical(scrutinee));
-            for (p, b) in arms {
-                s.push_str(&format!(" | {p} => {}", canonical(b)));
+            let mut s = format!("(if {}", comma_nodes(scrutinees));
+            for (patterns, body) in arms {
+                s.push_str(&format!(" | {} => {}", comma_patterns(patterns), pattern_arm_body(body)));
             }
             if let Some(fb) = fallback {
                 s.push_str(&format!(" | {}", canonical(fb)));

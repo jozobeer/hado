@@ -581,7 +581,13 @@ impl Generator {
             }
             _ => {
                 self.mark("pattern_branch", 1, 0);
-                format!("if {} {}", self.pipe(depth, true), self.arms(depth))
+                let columns = if self.choose("scrutinee_column*", 2) == 0 {
+                    1
+                } else {
+                    self.random(2) + 2
+                };
+                let scrutinees = self.list(columns, |g| g.pipe(depth, true), " , ");
+                format!("if {scrutinees} {}", self.pattern_arms(depth, columns))
             }
         }
     }
@@ -596,16 +602,33 @@ impl Generator {
         format!("{arms} | {}", self.arm_body(depth))
     }
 
-    fn arms(&mut self, depth: usize) -> String {
+    fn pattern_arms(&mut self, depth: usize, columns: usize) -> String {
         self.mark("pattern_arms", 1, 0);
         let count = self.random(3) + 1;
-        let arms = self.list(count, |g| {
-            g.mark("pattern_arm", 1, 0);
-            format!("| {} => {}", g.pattern(2), g.arm_body(depth))
-        }, " ");
+        let arms = self.list(count, |g| g.pattern_arm(depth, columns), " ");
         if self.choose("pattern_fallback?", 2) == 0 { return arms; }
         self.mark("pattern_fallback", 1, 0);
         format!("{arms} | {}", self.arm_body(depth))
+    }
+
+    fn arms(&mut self, depth: usize) -> String {
+        self.pattern_arms(depth, 1)
+    }
+
+    fn pattern_arm(&mut self, depth: usize, columns: usize) -> String {
+        self.mark("pattern_column*", 2, usize::from(columns > 1));
+        let patterns = self.list(columns, |g| g.pattern(2), " , ");
+        let body = if self.choose("pattern_arm", 2) == 0 {
+            self.arm_body(depth)
+        } else {
+            self.arm_conditions(depth)
+        };
+        format!("| {patterns} => {body}")
+    }
+
+    fn arm_conditions(&mut self, depth: usize) -> String {
+        self.mark("arm_conditions", 1, 0);
+        format!("if {}", self.condition_arms(depth))
     }
 
     fn arm_body(&mut self, depth: usize) -> String {

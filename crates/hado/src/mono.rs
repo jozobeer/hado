@@ -381,7 +381,7 @@ impl Lowerer {
             List(items, tail) => items.iter_mut().chain(tail.iter_mut().map(Box::as_mut)).collect(),
             Record(fields) | NamedConstructor(_, fields) => fields.iter_mut().map(|(_, value)| value).collect(),
             BoolBranch { cond, .. } => vec![cond],
-            PatternBranch { scrutinee, .. } => vec![scrutinee],
+            PatternBranch { scrutinees, .. } => scrutinees.iter_mut().collect(),
             _ => Vec::new(),
         };
         if !children.iter().any(|child| self.contains_again(child) || self.contains_handled_call(child)) {
@@ -558,12 +558,19 @@ impl Lowerer {
         }
 
         if let NodeKind::PatternBranch {
-            scrutinee,
+            scrutinees,
             arms,
             fallback,
         } = &node.kind
         {
-            return self.literal_branch(scrutinee, arms, fallback.as_deref());
+            if scrutinees.len() != 1 || arms.iter().any(|(patterns, _)| patterns.len() != 1) {
+                return Err("multi-column pattern branch is not implemented".into());
+            }
+            let unary: Vec<(crate::parser::Pattern, crate::parser::Node)> = arms
+                .iter()
+                .map(|(patterns, body)| (patterns[0].clone(), body.clone()))
+                .collect();
+            return self.literal_branch(&scrutinees[0], &unary, fallback.as_deref());
         }
         if let NodeKind::CondBranch { arms, fallback } = &node.kind {
             let fallback = fallback

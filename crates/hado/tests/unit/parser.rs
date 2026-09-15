@@ -215,6 +215,75 @@ fn e101_nested_branch() {
     assert_eq!(d.line, 3, "inner `if` is on line 3 of the source, got {d}");
 }
 
+fn round_trip(source: &str) {
+    let ast = parse_source(source, "t").unwrap();
+    let printed = canonical_program(&ast);
+    let restored = parse_source(&printed, "t").unwrap();
+    assert_eq!(ast.main(), restored.main(), "{source}\n{printed}");
+    assert_eq!(printed, canonical_program(&restored), "{printed}");
+}
+
+#[test]
+fn multi_column_pattern_branch_prints_and_round_trips() {
+    assert_eq!(
+        parse_expr_ok("def main = if a, b | [], _ => b | a"),
+        "(if a, b | [], _ => b | a)"
+    );
+    round_trip("def main = if a, b | [], _ => b | _, [] => a | 0");
+    round_trip("def main = if a, b, c | 1, 2, 3 => 0 | 1");
+}
+
+#[test]
+fn pattern_column_count_is_e125_at_the_arm_pipe() {
+    let source = "def f (a: Int List, b: Int List): Int =>\n  if a, b\n  | [] => 0\n  | [_, ..._], [_, ..._] => 1\n  | 2\ndef main = f [] []";
+    let error = parse_source(source, "t").unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("E125"), "{error}");
+    assert_eq!((error.line, error.col), (3, 3), "{error}");
+    let extra = parse_source("def main = if a, b | [], _, _ => 0 | 1", "t").unwrap_err();
+    assert_eq!(extra.code.as_deref(), Some("E125"), "{extra}");
+    assert_eq!((extra.line, extra.col), (1, 20), "{extra}");
+}
+
+#[test]
+fn arm_conditions_print_as_if_column_and_round_trip() {
+    assert_eq!(
+        parse_expr_ok("def main = if x | Some(v) => if | v > 0 => v | 0 | None => 1"),
+        "(if x | Some(v) => if | (v > 0) => v | 0 | None => 1)"
+    );
+    round_trip("def main = if x | Some(v) => if | v > 0 => v | 0 | None => 1");
+    round_trip("def f | Pass(score) => if | score >= 90 => \"excellent\" | \"pass\" | Fail => \"fail\"\ndef main = f");
+}
+
+#[test]
+fn arm_conditions_end_at_fallback_so_later_pattern_arms_remain() {
+    let ast = parse_source(
+        "def main = if x | Some(v) => if | v > 0 => v | 0 | None => 1",
+        "t",
+    )
+    .unwrap();
+    let NodeKind::PatternBranch { arms, fallback, .. } = &ast.main().unwrap().kind else {
+        panic!("expected pattern branch");
+    };
+    assert_eq!(arms.len(), 2, "{:?}", arms.iter().map(|(p, _)| p.iter().map(|p| p.to_string()).collect::<Vec<_>>()).collect::<Vec<_>>());
+    assert!(fallback.is_none());
+    assert!(matches!(arms[0].1.kind, NodeKind::CondBranch { .. }));
+    assert!(!matches!(arms[1].1.kind, NodeKind::CondBranch { .. }));
+}
+
+#[test]
+fn pattern_shaped_fallback_before_an_arm_still_records_e404() {
+    let source = "def f (x: Int Option): Int =>\n  if x\n  | None\n  | Some(v) => v\ndef main = f None";
+    let ast = parse_source(source, "t").unwrap();
+    assert_eq!(ast.branches_after_fallback.len(), 1, "{:?}", ast.branches_after_fallback);
+    assert_eq!(ast.branches_after_fallback[0], crate::lexer::Span { line: 4, col: 3 });
+}
+
+#[test]
+fn pattern_fallback_does_not_steal_an_enclosing_comma() {
+    round_trip("def main = Cons(if x | None => 1 | 0, xs)");
+    round_trip("def main = with H(if x | None => 1 | 0, 2) -> 3");
+}
+
 #[test]
 fn e102_rec_on_value() {
     let d = parse_source("def rec pi = 3.14159", "t").unwrap_err();

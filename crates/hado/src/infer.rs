@@ -1025,10 +1025,10 @@ impl Checker<'_> {
                 Ok(ty)
             },
             NodeKind::PatternBranch {
-                scrutinee,
+                scrutinees,
                 arms,
                 fallback,
-            } => self.pattern_branch(scrutinee, arms, fallback.as_deref(), node.span),
+            } => self.pattern_branch(scrutinees, arms, fallback.as_deref(), node.span),
             NodeKind::Pipe(value, target) => self.pipe(value, target),
             NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) => {
                 self.apply(callee, args, node.span)
@@ -1184,17 +1184,22 @@ impl Checker<'_> {
 
     fn pattern_branch(
         &mut self,
-        scrutinee: &Node,
-        arms: &[(Pattern, Node)],
+        scrutinees: &[Node],
+        arms: &[(Vec<Pattern>, Node)],
         fallback: Option<&Node>,
         branch_span: Span,
     ) -> Result<Ty, Diagnostic> {
-        let input = self.expression(scrutinee)?;
+        let inputs: Vec<Ty> = scrutinees
+            .iter()
+            .map(|scrutinee| self.expression(scrutinee))
+            .collect::<Result<_, _>>()?;
         let result = self.inference.fresh();
-        for (pattern, body) in arms {
+        for (patterns, body) in arms {
             let saved = self.values.clone();
-            let checked = self
-                .pattern(pattern, &input)
+            let checked = patterns
+                .iter()
+                .zip(&inputs)
+                .try_for_each(|(pattern, input)| self.pattern(pattern, input))
                 .and_then(|()| self.branch_result(body, &result));
             self.values = saved;
             checked?;
@@ -1202,18 +1207,28 @@ impl Checker<'_> {
         if let Some(body) = fallback {
             self.branch_result(body, &result)?;
         }
-        if self.inference.resolve(&input) == Ty::Bool {
-            if let Err(error) = crate::check::boolean_coverage(branch_span, arms, fallback, self.path) {
-                self.deferred.push(error);
-            }
-        }
-        if let Ty::Adt(name, _) = self.inference.resolve(&input) {
-            let groups = self.constructor_groups();
-            let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
-            let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-            let arms: Vec<_> = arms.iter().map(|(pattern, body)| (crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned), body.clone())).collect();
-            if let Err(error) = crate::check::adt_coverage(branch_span, &arms, fallback, &constructors, &families, self.path) {
-                self.deferred.push(error);
+        if let [input] = inputs.as_slice() {
+            let unary: Vec<(Pattern, Node)> = arms
+                .iter()
+                .filter_map(|(patterns, body)| {
+                    patterns.first().cloned().map(|pattern| (pattern, body.clone()))
+                })
+                .collect();
+            if unary.len() == arms.len() {
+                if self.inference.resolve(input) == Ty::Bool {
+                    if let Err(error) = crate::check::boolean_coverage(branch_span, &unary, fallback, self.path) {
+                        self.deferred.push(error);
+                    }
+                }
+                if let Ty::Adt(name, _) = self.inference.resolve(input) {
+                    let groups = self.constructor_groups();
+                    let constructors = groups.get(&name).cloned().unwrap_or_default().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+                    let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
+                    let arms: Vec<_> = unary.iter().map(|(pattern, body)| (crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned), body.clone())).collect();
+                    if let Err(error) = crate::check::adt_coverage(branch_span, &arms, fallback, &constructors, &families, self.path) {
+                        self.deferred.push(error);
+                    }
+                }
             }
         }
         Ok(self.inference.resolve(&result))
