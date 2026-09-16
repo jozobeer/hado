@@ -4037,3 +4037,11 @@ fn is_effect_free(node: &Node) -> bool {
 書き換えはこの判定を通った条件のときだけ出す。共通の本体は `parser::canonical` で作り（`1` と `(1)` が同じ結果と見なされることを実測済み）、腕の本体と fallback のすべてが同じ正準形であることを要求する。範囲は `branch_range(node, Tail::If, …)` の 1 範囲、`Fix` の `line`/`col` は診断の位置。
 
 **掛ける節が 1 つ違う。** E502 の再現は `if x > 1 => 1 | 1` で、条件が `x > 1` の**条件分岐**（`NodeKind::CondBranch`）である。`PatternBranch` だけを見ている今の walk では掛からないので、`CondBranch` の腕の形（条件の列・腕の本体・fallback のフィールド名）を 3 行ほど読んでから `fixes.rs` に入る。`Tail::If` は末尾位置の印なので両方に使える。
+
+### R69 の実装の実測（掛からない）
+
+`CondBranch` の形が分かった（`arms: Vec<(Node, Node)>` の条件と本体の対、`fallback: Option<Box<Node>>`）ので、`is_effect_free`、`identical_branches_fix`（条件がすべて効果を持ち得ないこと、腕の本体と fallback の正準形がすべて同じであること、`branch_range(node, Tail::If, …)` の 1 範囲）、`is_fixable` への `"E502"`、`CondBranch` の腕からの呼び出しを書いた。**ビルドは通った（exit 0）が、門番は `PASSED: 1/5` のままで、`check --fix` はファイルを変えない。** つまり書き換えが 1 つも出ていない。
+
+見込みの原因は `branch_range` に渡す `branches`（`Ast.branch_spans`）に `CondBranch` の範囲が入っていないこと。`fixes.rs` が `CondBranch` を一度も名指ししていないのに対し、`branch_range` は node をその一覧と突き合わせて範囲を出すので、一覧に無ければ `None` が返り、書き換えは黙って出ない。次は「その一覧を作っている場所が `CondBranch` を記録しているか」を確かめるのが最初の 1 歩（`branch_spans` を作る側を grep する）。
+
+**確認できないまま書き換えを commit しない**ため、`fixes.rs` は元に戻した（木は綺麗、門番は 1/5 のまま）。書いた関数は上の設計どおりで、掛ける場所（`branches` の一覧）が分かれば戻せる。
