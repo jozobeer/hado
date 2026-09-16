@@ -445,6 +445,55 @@ fn discard_plain_let_fix(
     })
 }
 
+/// §41: `let x = v -> x` returns the bound value unchanged, so the binding is
+/// redundant and the whole expression becomes that value.
+fn identity_let_fix(
+    node: &Node,
+    pat: &Pattern,
+    value: &Node,
+    body: &Node,
+    source: &str,
+    lines: &LineMap,
+) -> Option<Fix> {
+    let bound = match &pat.kind {
+        PatternKind::Name(name) => name.to_string(),
+        _ => return None,
+    };
+    if bound.is_empty() || !bound.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let start = lines.offset(source, node.span);
+    let value_start = lines.offset(source, value.span);
+    let body_start = lines.offset(source, body.span);
+    if start >= body_start || value_start >= body_start {
+        return None;
+    }
+    let head = source[value_start..body_start].trim_end();
+    let text = head.strip_suffix("->").unwrap_or(head).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    let body_end = body_start + bound.len();
+    if body_end > source.len() || &source[body_start..body_end] != bound.as_str() {
+        return None;
+    }
+    if parser::canonical(body) != bound {
+        return None;
+    }
+    if source[start..body_end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E501",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end: body_end,
+        canonical: flatten(&text),
+        replacement: text,
+    })
+}
+
 fn catch_all_fallback_fix(
     arms: &[(Vec<Pattern>, Node)],
     fallback: Option<&Node>,
@@ -1025,6 +1074,9 @@ fn walk_node(
         }
         NodeKind::Let { pat, value, body, .. } => {
             if let Some(fix) = discard_plain_let_fix(node, pat, value, body, "（束縛を削除）", source, lines) {
+                found.push(fix);
+            }
+            if let Some(fix) = identity_let_fix(node, pat, value, body, source, lines) {
                 found.push(fix);
             }
             walk_pattern(pat, source, lines, tokens, index, found);
