@@ -195,6 +195,8 @@ impl Scope {
 struct Collector<'a> {
     checked: Option<&'a crate::Checked>,
     constructors: BTreeMap<String, Key>,
+    /// §37: the declared effects. A row that names one uses it.
+    effects: BTreeSet<String>,
     /// §37: an operation name to the effect that declares it. A call site spells
     /// the name, so a reference to it is a reference to the effect.
     operations: BTreeMap<String, Key>,
@@ -204,11 +206,13 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn new(checked: Option<&'a crate::Checked>, items: &[Item]) -> Self {
+        let mut effects = BTreeSet::new();
         let mut operations = BTreeMap::new();
         let mut handlers = BTreeMap::new();
         for item in items {
             match item {
                 Item::Effect(effect) => {
+                    effects.insert(effect.name.clone());
                     for op in &effect.ops {
                         operations.insert(op.name.clone(), Key::Effect(effect.name.clone()));
                     }
@@ -219,11 +223,20 @@ impl<'a> Collector<'a> {
                 _ => {}
             }
         }
-        Collector { checked, constructors: constructor_owners(items), operations, handlers }
+        Collector { checked, constructors: constructor_owners(items), effects, operations, handlers }
     }
 
     fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
         let mut graph = self.graph_items(&ast.items, &Scope::default());
+        // §37: a name that denotes a declared effect is a use of that effect
+        // wherever it appears — an effect row, a parameter's type, a signature.
+        for references in graph.values_mut() {
+            let effects: Vec<Key> = references.iter().filter_map(|reference| match reference {
+                Key::Type(name) if self.effects.contains(name) => Some(Key::Effect(name.clone())),
+                _ => None,
+            }).collect();
+            references.extend(effects);
+        }
         let contracts = crate::contract_types::Contracts::collect(&ast.items);
         for (key, references) in &mut graph {
             if matches!(key, Key::Signature(_)) {
