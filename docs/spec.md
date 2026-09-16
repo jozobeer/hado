@@ -2159,6 +2159,12 @@ hado test <file.hd>
 `def name = 式` の形の値の定義の型は、本体の型とその効果行である。検査器はこれを引数 0 の `Fn`（`Fn( => T)`）として持つが、その形は文法で書けない（`Fn( => Int)` は E100）。したがって `def answer = 42` は `Int {A}`、`def fail = raise { message = "..." }` は `A {Error | B}` と印字する。
 
 
+## 58.4. 診断の機械可読な出力
+
+`hado check --format json <file.hd>`（`build` / `run` / `test` でも同じ）は、診断を 1 行に 1 つ、JSON で標準エラーに出す。既定は今までどおりの 1 行である。診断の順と印字先は既定と同じで、終了コードも変えない（第54節）。`--format` に `json` 以外を与えると用法の誤りで終了コード 2 とする。`fmt` と `dump-mono` は `--format` を受けない。
+
+1 行のフィールドは `path` `line` `col` `code` `message` `canonical` `related` の 7 つである。`canonical` は局所的な書き換え（第57節）の正準形で、無ければ `null` とする。`message` に `; canonical form: ...` は混ぜない。`code` はコードを持たない診断では `null`。`related` は関連位置（第56節）で、無ければ `null`、あれば `{"path": ..., "line": ..., "col": ..., "label": ...}` である。`label` は第56節のラベル（`first declared` など）で、無ければ `null` とする。
+
 # 付録
 
 ## 付録A コア構文
