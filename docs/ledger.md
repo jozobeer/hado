@@ -3903,3 +3903,13 @@ E512 に写すとこうなる。最後の腕で、行が変数 1 つ、`fallback
 - **影の判定。** 構文だけで決めるのは保留し、**安全側に倒す**。本体に `let` が現れる形は書き換えない（同名を束縛していなくても書き換えない。過度に保守的だが、誤った置き換えより良い）。68-d の対象外の形には影響しない。
 
 これで工程 3 に必要な材料は揃った。実装は (1) `catch_all_variable_fix` を `catch_all_fallback_fix` の隣に足す（対象は最後の腕・行が変数 1 つ・`fallback.is_none()`・`scrutinees` が `NodeKind::Name` の 1 つ）、(2) 範囲は `lines.offset(source, pattern.span)` から `branch_range(node, Tail::If, ...)?.1` まで、(3) 範囲に `//` があれば書かない、(4) 差し替えは本体のトークンを並べ直して束縛と同じ綴りだけを scrutinee の綴りにする、(5) `Fix { code: "E512", line: pattern.span.line, col: pattern.span.col, start, end, replacement, canonical: "| " + replacement }`、(6) `PatternBranch` の腕（814 行の隣）から呼ぶ。本体に `let` があるときは (1) の条件で外す。
+
+### R68 の実装の実測（工程 3 の途中、`fixes.rs` を書いた）
+
+書いてビルドして門番を回した。`catch_all_variable_fix` を `catch_all_fallback_fix` の隣に足し、`PatternBranch` の腕から呼び、`is_fixable` に E512 を加えた。**ビルドは 1 回で通った**（`cargo build` exit 0）。
+
+門番は `PASSED: 2/5`。`check --fix` は E512 を消し、本体の束縛を scrutinee に置き換えた形（`if t | A => A | t`）を書く。**ところがその形は E507**（`branches reconstruct the value`）で、直したファイルは `check` を通らない。68-a・68-b・68-c が赤で、68-d（対象外の形は触らない）と 68-e（仕様・追跡表・層・corpus lock）は緑。
+
+`crate::check::rewrap_branch(node)` を先に試す畳み込みも入れたが、効かなかった。**置き換える前の木を見ている**ので、束縛 `y` を返す腕（`| y => y`）は「組み直している」と見なされず `None` が返る。E507 の判定は**置き換えた後の木**に要る。
+
+正しい形は見えている。書き換えの文字列を作ったあと、**その文字列を `parser::parse_source` で解析し直し、新しい枝に `rewrap_branch` を当てる**。scrutinee が返れば枝全体を `parser::canonical(scrutinee)` に差し替える 1 範囲を出し、返らなければ今の置き換えの 1 範囲を出す。どちらも 1 範囲なので `check --fix` の制約（1 回に 1 範囲）に合う。次のラウンドはここから書く（読む必要はもう無い）。
