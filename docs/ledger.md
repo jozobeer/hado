@@ -4098,3 +4098,23 @@ main.hd:4:3: error[E502]: identical branch results at 4:15 and 4:19
 次の手は 2 つ。(a) walk がアームの本体へ降りるようにする（他の書き換えにも影響するので全走で確かめる）。(b) `PatternBranch` の腕から、各アームの本体が `CondBranch` のときに `identical_branches_fix` を呼ぶ（入れ子 1 段に限った狭い道）。`E502` は `def`/`fn` の本体にも直接書けるので、(a) のほうが本筋だが影響範囲を測ってから選ぶ。
 
 計器と書き換えは元に戻した（木は綺麗、門番は 1/5 のまま）。
+
+### R69 の計器の結果の確定（walk がアームの本体へ降りていない）
+
+walk の分岐の腕（`fixes.rs` 915〜944 行）の末尾はこうなっている。
+
+```rust
+            for (patterns, _) in arms {
+                for pattern in patterns {
+                    walk_pattern(pattern, source, lines, tokens, index, found);
+                }
+            }
+        }
+        NodeKind::Fn { params, body } => {
+```
+
+**腕の本体（`_`）は捨てられ、pattern だけが降りられる。** 一方 `NodeKind::Fn { params, body }` の本体は降りられる。`def f x => if x > 1 => 1 | 1` はアーム形なので、`if` は `$argument` を scrutinee に持つ `PatternBranch` の**腕の本体**に入れ子になり、そこへ降りる道が無い。だから `identical_branches_fix` が一度も呼ばれない（計器の `P502 entry` が出なかったことと一致する）。`def f (t: T): T => if t | A => A | y => y` で E512/E503 が効いていたのは、あちらが `Fn` の本体として降りられる位置だったからである。
+
+**道は (a) を選ぶ**: 分岐の腕でも本体を降りる（`for (_, body) in arms { walk(body …) }` に相当する再帰を足す）。これは「その枝に掛かる書き換え」ではなく「枝の中の式に掛かる書き換え」を新たに届かせるので、**既存の書き換えの件数が変わり得る**。R57 の門番（E507 の形）と全走で、意図した増分だけであることを確かめる。
+
+実装の手順: (1) 分岐の腕でアームの本体も降りる（`fallback` も同じく降りる）。(2) 計器で `P502 entry` が出ることを確かめてから計器を外す。(3) `fixes.rs` の `is_effect_free` と `identical_branches_fix`、`is_fixable` の `"E502"`、`CondBranch` の腕、`parser.rs` の条件分岐の枝の push を入れる。(4) 門番 5/5、`## 64.`、仕様 §57、全走と `cargo test`。
