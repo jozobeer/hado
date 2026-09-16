@@ -37,10 +37,22 @@ struct FileScope {
     outer: BTreeSet<String>,
 }
 
+/// §50: the internal name of the entry file's own definition. The entry file is
+/// always file 0 (`parse_files` isolates it first), and only `main` keeps its
+/// name; every other outer `def` is file-local, so the key has to be built here
+/// rather than spelled out by a caller.
+pub(crate) fn entry_name(name: &str) -> String {
+    if name == "main" {
+        name.into()
+    } else {
+        format!("file0${name}")
+    }
+}
+
 impl FileScope {
     fn internal_name(&self, name: &str) -> String {
-        if self.index == 0 && name == "main" {
-            name.into()
+        if self.index == 0 {
+            entry_name(name)
         } else {
             format!("file{}${name}", self.index)
         }

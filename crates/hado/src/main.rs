@@ -14,6 +14,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let mut print = false;
+    let mut type_name: Option<&str> = None;
     let mut fix = false;
     let mut check_only = false;
     let mut output: Option<&str> = None;
@@ -30,6 +31,16 @@ fn main() -> ExitCode {
                 break;
             }
             "--print-type" if command == "check" => print = true,
+            // §58.3: `--print-type=<名前>` はその定義の型を出す。
+            value if command == "check" && value.starts_with("--print-type=") => {
+                let name = &value["--print-type=".len()..];
+                if name.is_empty() {
+                    usage();
+                    return ExitCode::from(2);
+                }
+                print = true;
+                type_name = Some(name);
+            }
             "--fix" if command == "check" || command == "build" => fix = true,
             "--check" if command == "fmt" => check_only = true,
             "-o" | "--output" if command == "build" => {
@@ -65,7 +76,7 @@ fn main() -> ExitCode {
         };
     }
     if fix && command == "check" {
-        return check_with_fix(input, print);
+        return check_with_fix(input, type_name);
     }
     if command == "run" {
         return run_program(input, &program_args);
@@ -114,8 +125,10 @@ fn main() -> ExitCode {
     }
     match if print { project.check_for_print() } else { project.check() } {
         Ok(checked) => {
-            if print && !project.is_library() {
-                println!("{}{}", checked.main, checked.effects.suffix());
+            if print {
+                if let Err(code) = print_type(&checked, &project, type_name, input) {
+                    return code;
+                }
             }
             ExitCode::SUCCESS
         }
@@ -129,7 +142,7 @@ fn main() -> ExitCode {
 /// `check --fix` applies the canonical rewrites at the reported anchor and
 /// re-checks, until a check passes or a diagnostic has no local rewrite.
 /// The default `check` / `build` never write to a source file.
-fn check_with_fix(input: &Path, print: bool) -> ExitCode {
+fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
     const LIMIT: usize = 16;
     for _ in 0..LIMIT {
         let project = match Project::load(input) {
@@ -141,8 +154,10 @@ fn check_with_fix(input: &Path, print: bool) -> ExitCode {
         };
         match project.check() {
             Ok(checked) => {
-                if print && !project.is_library() {
-                    println!("{}{}", checked.main, checked.effects.suffix());
+                if let Some(name) = type_name {
+                    if let Err(code) = print_type(&checked, &project, Some(name), input) {
+                        return code;
+                    }
                 }
                 return ExitCode::SUCCESS;
             }
@@ -324,8 +339,37 @@ impl Drop for RunDirectory {
     }
 }
 
+/// §58: `--print-type` prints `main`'s type and effects. §58.3: with a name,
+/// that definition's type is printed instead, and a name that is not there is
+/// an error rather than silence.
+fn print_type(
+    checked: &hado::Checked,
+    project: &Project,
+    type_name: Option<&str>,
+    input: &Path,
+) -> Result<(), ExitCode> {
+    match type_name {
+        Some(name) => match checked.type_of(name) {
+            Some(ty) => {
+                println!("{ty}");
+                Ok(())
+            }
+            None => {
+                eprintln!("check: no definition named {name} in {}", input.display());
+                Err(ExitCode::from(1))
+            }
+        },
+        // ライブラリには `main` が無い（§52）。
+        None if project.is_library() => Ok(()),
+        None => {
+            println!("{}{}", checked.main, checked.effects.suffix());
+            Ok(())
+        }
+    }
+}
+
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd>"
+        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd>"
     );
 }

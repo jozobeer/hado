@@ -652,6 +652,95 @@ fn display_arguments(types: &[Ty]) -> String {
     types.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
 }
 
+// --- 定義の型の印字（§58.3） ---
+
+/// The printer of a scheme's type. It mirrors `Display for Ty` (§16, §41) so
+/// that the two agree on a monomorphic type, and names the variables instead
+/// of printing their inference numbers.
+#[derive(Default)]
+struct Printer {
+    names: HashMap<u32, String>,
+}
+
+impl Printer {
+    fn variable(&mut self, id: u32) -> String {
+        if let Some(name) = self.names.get(&id) {
+            return name.clone();
+        }
+        let name = variable_name(self.names.len());
+        self.names.insert(id, name.clone());
+        name
+    }
+
+    fn ty(&mut self, ty: &Ty) -> String {
+        match ty {
+            Ty::Var(id) => self.variable(*id),
+            // §16 cannot write a nullary `Fn` (`Fn( => Int)` is E100), so the
+            // checker builds one only for a value `def` (§15), where the type
+            // the source means is the body's type with its effects.
+            Ty::Fn(args, ret, row) if args.is_empty() => {
+                format!("{}{}", self.ty(ret), self.row(row))
+            }
+            Ty::Fn(args, ret, row) => {
+                format!("Fn({} => {}{})", self.arguments(args), self.ty(ret), self.row(row))
+            }
+            Ty::Int => "Int".into(),
+            Ty::Float => "Float".into(),
+            Ty::Bool => "Bool".into(),
+            Ty::Char => "Char".into(),
+            Ty::String => "String".into(),
+            Ty::Bytes => "Bytes".into(),
+            Ty::Unit => "Unit".into(),
+            Ty::Error => "Error".into(),
+            Ty::Adt(name, args) | Ty::Abstract(name, args) => {
+                let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
+                match args.as_slice() {
+                    [] => name.to_string(),
+                    [argument] => format!("{} {name}", self.ty(argument)),
+                    _ => format!("({}) {name}", self.arguments(args)),
+                }
+            }
+        }
+    }
+
+    fn arguments(&mut self, types: &[Ty]) -> String {
+        types.iter().map(|ty| self.ty(ty)).collect::<Vec<_>>().join(", ")
+    }
+
+    /// §20: the result's row. The known labels print in alphabetical order; an
+    /// open row adds the variable it still contains (`{Io | A}`, `{A}`).
+    fn row(&mut self, row: &Row) -> String {
+        match row {
+            Row::Closed(labels) => {
+                let labels = self.labels(labels);
+                if labels.is_empty() { String::new() } else { format!(" {{{labels}}}") }
+            }
+            Row::Var(id) => format!(" {{{}}}", self.variable(*id)),
+            Row::Open(id, labels) => {
+                let variable = self.variable(*id);
+                let labels = self.labels(labels);
+                if labels.is_empty() { format!(" {{{variable}}}") } else { format!(" {{{labels} | {variable}}}") }
+            }
+        }
+    }
+
+    fn labels(&mut self, labels: &[Ty]) -> String {
+        let mut names: Vec<String> = labels.iter().map(|label| self.ty(label)).collect();
+        names.sort();
+        names.dedup();
+        names.join(", ")
+    }
+}
+
+/// `A`, `B`, …, `Z`, `A1`, `B1`, … in order.
+fn variable_name(index: usize) -> String {
+    let letter = char::from(b'A' + (index % 26) as u8);
+    match index / 26 {
+        0 => letter.to_string(),
+        round => format!("{letter}{round}"),
+    }
+}
+
 fn label_matches_effect(label: &str, effect: &str) -> bool {
     label == effect || label.ends_with(&format!(" {effect}")) || label.ends_with(&format!(") {effect}"))
 }
@@ -693,6 +782,15 @@ impl Scheme {
     }
 
     pub(crate) fn body(&self) -> &Ty { &self.ty }
+
+    /// §58.3: the canonical print of the scheme's type. The variables are
+    /// renamed `A`, `B`, …, `A1`, … in order of first appearance, so the same
+    /// type reads the same way twice. Unlike `Ty`'s own print (§20), an effect
+    /// row keeps the variables it still contains: hiding them would make an
+    /// effect-polymorphic type look pure.
+    pub(crate) fn canonical(&self) -> String {
+        Printer::default().ty(&self.ty)
+    }
 
     pub fn monomorphic(ty: Ty) -> Self {
         Self {
