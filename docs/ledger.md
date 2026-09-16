@@ -3913,3 +3913,23 @@ E512 に写すとこうなる。最後の腕で、行が変数 1 つ、`fallback
 `crate::check::rewrap_branch(node)` を先に試す畳み込みも入れたが、効かなかった。**置き換える前の木を見ている**ので、束縛 `y` を返す腕（`| y => y`）は「組み直している」と見なされず `None` が返る。E507 の判定は**置き換えた後の木**に要る。
 
 正しい形は見えている。書き換えの文字列を作ったあと、**その文字列を `parser::parse_source` で解析し直し、新しい枝に `rewrap_branch` を当てる**。scrutinee が返れば枝全体を `parser::canonical(scrutinee)` に差し替える 1 範囲を出し、返らなければ今の置き換えの 1 範囲を出す。どちらも 1 範囲なので `check --fix` の制約（1 回に 1 範囲）に合う。次のラウンドはここから書く（読む必要はもう無い）。
+
+### R68 の工程 3〜5 の実測（門番 5/5）
+
+`catch_all_variable_fix` が動いた。ただし**最初の版は直したファイルを E507 で落とした**（`if t | A => A | t` を書いた）。畳み込みを 2 通り試して、2 つ目で通った。
+
+- 元の木で `crate::check::rewrap_branch(node)` を呼ぶ版は効かない。置き換える前の木を見るので、束縛 `y` を返す腕（`| y => y`）は「組み直している」と見なされない。
+- 置き換えたソースを `fixes(&candidate)` に掛けて E507 の書き換えを拾う版も効かない。置き換えた後の腕は **fallback** になり、E507 の書き換えは `fallback.is_some()` を避ける（fallback は scrutinee を再評価し得るため）。**これは正しい拒否**で、この経路では畳めない。
+- 通った版は、**各腕を自分で検査する**。scrutinee が単純な変数であることは対象条件で保証されているので、畳んでも効果の回数は変わらない。コンストラクタの腕（`PatternKind::Name` で大文字参照）は本体の正準形が自分の pattern の綴りと等しいこと、変数・`_` の腕は本体の正準形が scrutinee の正準形と等しいことを要求し、**すべて満たすときだけ**枝全体を `parser::canonical(scrutinee)` に差し替える 1 範囲を出す。判定できない形は畳まない（安全側）。
+
+門番の実測（`bash scripts/verify-r68.sh`）:
+```
+OK: 68-a check --fix makes E512 accepted
+OK: 68-b fmt does the same and is idempotent
+OK: 68-c the value is unchanged
+OK: 68-d the four shapes are left alone
+OK: 68-e spec, trace, tier, corpus lock
+PASSED: 5/5
+```
+
+残りは 2 つ。**仕様の 1 文**（§57 の書き換えの一覧に E512 を足す）と、**全走**（r68 を層に入れて緑に戻すことの確認）。この 2 つは次のラウンドの頭で行う。
