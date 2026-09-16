@@ -4045,3 +4045,9 @@ fn is_effect_free(node: &Node) -> bool {
 見込みの原因は `branch_range` に渡す `branches`（`Ast.branch_spans`）に `CondBranch` の範囲が入っていないこと。`fixes.rs` が `CondBranch` を一度も名指ししていないのに対し、`branch_range` は node をその一覧と突き合わせて範囲を出すので、一覧に無ければ `None` が返り、書き換えは黙って出ない。次は「その一覧を作っている場所が `CondBranch` を記録しているか」を確かめるのが最初の 1 歩（`branch_spans` を作る側を grep する）。
 
 **確認できないまま書き換えを commit しない**ため、`fixes.rs` は元に戻した（木は綺麗、門番は 1/5 のまま）。書いた関数は上の設計どおりで、掛ける場所（`branches` の一覧）が分かれば戻せる。
+
+### R69 の掛からない原因の追測（`branch_spans` の作り手）
+
+`branch_spans` を grep した。**書き込みは 1 箇所だけ**で、`parser.rs:1844` の `self.branch_spans.push((span, first_pipe, self.span()));`（枝の開始・最初の `|`・枝の終わり）。`first_pipe` を一緒に持つ形なので、条件分岐と pattern 分岐が共有する「論理枝」の解析で押されている可能性が高い。読む側は `fixes.rs:53` で `walk_item(..., &ast.branch_spans, ...)` に渡され、`functor_instances.rs:43` では 3 つの span を付け替えているだけである。
+
+したがって**前ラウンドの見込み（`CondBranch` の範囲が一覧に無い）は弱くなった**。一覧に入っているのに書き換えが出ないなら、残る原因は `branch_range` 自身の突き合わせ方である（`Tail::If` と node の種類や span の位置で引いている）。次は `branch_range` の本体（`fixes.rs`、`TokenIndex` の近く）を 15 行ほど読み、`CondBranch` を引けるかを確かめる。引けないなら `CondBranch` 用に枝の範囲を node の span から直接出す道を選ぶ（共有の一覧の契約を壊さない）。
