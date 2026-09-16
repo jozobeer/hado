@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct SingleStagePipeline {
+struct ValueFirstPipeline {
     path: String,
     line: usize,
     column: usize,
@@ -27,7 +27,7 @@ fn source_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn collect_item(item: &Item, path: &str, pipelines: &mut Vec<SingleStagePipeline>) {
+fn collect_item(item: &Item, path: &str, pipelines: &mut Vec<ValueFirstPipeline>) {
     match item {
         Item::Def(definition) => match &definition.kind {
             DefKind::Value(body) | DefKind::Function { body, .. } => {
@@ -60,7 +60,7 @@ fn collect_node(
     node: &Node,
     path: &str,
     is_pipe_left_operand: bool,
-    pipelines: &mut Vec<SingleStagePipeline>,
+    pipelines: &mut Vec<ValueFirstPipeline>,
 ) {
     match &node.kind {
         NodeKind::Apply(callee, arguments) => {
@@ -76,8 +76,10 @@ fn collect_node(
             }
         }
         NodeKind::Pipe(value, target) => {
-            if !is_pipe_left_operand && !matches!(value.kind, NodeKind::Pipe(_, _)) {
-                pipelines.push(SingleStagePipeline {
+            if !is_pipe_left_operand
+                && !matches!(&pipeline_source(node).kind, NodeKind::Apply(_, _))
+            {
+                pipelines.push(ValueFirstPipeline {
                     path: path.to_string(),
                     line: node.span.line,
                     column: node.span.col,
@@ -163,8 +165,15 @@ fn collect_node(
     }
 }
 
+fn pipeline_source(mut node: &Node) -> &Node {
+    while let NodeKind::Pipe(value, _) = &node.kind {
+        node = value;
+    }
+    node
+}
+
 #[test]
-fn distributed_hado_sources_use_pipelines_for_chains() {
+fn distributed_hado_sources_start_pipelines_from_applications() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let roots = ["stdlib", "tools"];
     let appendix_b_examples = [
@@ -203,7 +212,7 @@ fn distributed_hado_sources_use_pipelines_for_chains() {
 
     assert!(
         pipelines.is_empty(),
-        "single-stage pipelines remain:\n{}",
+        "pipelines start from values instead of application results:\n{}",
         pipelines
             .iter()
             .map(|pipeline| format!(
