@@ -4242,3 +4242,20 @@ E502 1
 5. `let p? =` は `Option` 用（E303）。`{Error}` の効果は素の `let x = e ->` で通る。
 
 この 5 つはどれも「書いてみるまで分からなかった」もので、目標の「run で不足を実測で発見する」がそのまま起きた形になっている。
+
+## R70 の門番（工程 4 の実測）
+
+`scripts/verify-r70.sh` を書いて回した。
+
+```
+OK: 70-a the tool passes check
+OK: 70-b the tool's counts match the JSON for E502
+OK: 70-c the tool's counts match the JSON for E511
+OK: 70-d no diagnostics prints nothing
+NG: 70-e tier, trace, plan, corpus lock (missing: tier trace plan)
+PASSED: 4/5
+```
+
+70-e だけが赤で、これは層・系譜・手順書を書く前の実測（R68/R69 と同じ順序）。期待値は門番が JSON を python で独立に数えて導き、道具の出力と整列して比べる。**ファイル名も件数も判定器に書いていない。** 層 `full` への `r70` 登録は済み（70-e の不足が `tier trace plan` から `trace plan` に減って確認できた）。
+
+**`docs/spec-trace.md` と `docs/plan.md` への追記は失敗した。** 前ラウンドで記録した §42 の行をそのまま锚に使ったが一致しなかった（空白か記号の差）。次は行の全文ではなく `verify-r69.sh` のような一意な部分文字列で探し、その行の直後に挿入する。`## 65.` も同時に書く。**木を中途半端に汚さないため、門番と層の登録だけをコミットし、残りは次の 1 回で書く。**
