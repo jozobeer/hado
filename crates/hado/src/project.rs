@@ -74,6 +74,31 @@ impl Project {
         }
     }
 
+    /// §58.4: the diagnostic as one line of JSON, for tooling. The canonical
+    /// form is a field of its own instead of being appended to the message.
+    pub fn report_json(&self, error: &Diagnostic) -> String {
+        let related = match &error.related {
+            Some(related) => format!(
+                "{{\"path\": {}, \"line\": {}, \"col\": {}, \"label\": {}}}",
+                json_string(&related.path),
+                related.line,
+                related.col,
+                option_string(error.code.as_deref().and_then(crate::parser::related_label)),
+            ),
+            None => "null".to_string(),
+        };
+        format!(
+            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
+            json_string(&error.path),
+            error.line,
+            error.col,
+            option_string(error.code.as_deref()),
+            json_string(&error.message),
+            option_string(self.canonical_hint(error).as_deref()),
+            related,
+        )
+    }
+
     /// The canonical form to show next to a diagnostic, when one of the local
     /// rewrites (§57) starts exactly at the diagnostic's anchor. The file is
     /// read only when a diagnostic is already reported.
@@ -382,4 +407,33 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
         error.message = error.message.replace(&format!("file{index}$"), "");
     }
     error
+}
+
+/// A JSON string literal, or `null` when there is nothing to write (§58.4).
+fn option_string(value: Option<&str>) -> String {
+    match value {
+        Some(text) => json_string(text),
+        None => "null".to_string(),
+    }
+}
+
+/// A JSON string literal with the escapes §58.4 needs.
+fn json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            character if (character as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => out.push(character),
+        }
+    }
+    out.push('"');
+    out
 }

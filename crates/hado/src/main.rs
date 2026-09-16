@@ -1,7 +1,19 @@
 use hado::project::Project;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+/// §58.4: `--format json` は診断を出すすべての経路に効くので、ここに置く。
+static FORMAT_JSON: AtomicBool = AtomicBool::new(false);
+
+/// The one place the CLI writes a diagnostic: the human line, or §58.4 JSON.
+fn print_diagnostic(project: &Project, error: &hado::parser::Diagnostic) {
+    if FORMAT_JSON.load(Ordering::Relaxed) {
+        eprintln!("{}", project.report_json(error));
+    } else {
+        eprintln!("{}", project.report(error));
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,6 +54,19 @@ fn main() -> ExitCode {
                 type_name = Some(name);
             }
             "--fix" if command == "check" || command == "build" => fix = true,
+            // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
+            "--format" if matches!(command, "check" | "build" | "run" | "test") => {
+                index += 1;
+                let Some(value) = rest.get(index) else {
+                    usage();
+                    return ExitCode::from(2);
+                };
+                if value != "json" {
+                    usage();
+                    return ExitCode::from(2);
+                }
+                FORMAT_JSON.store(true, Ordering::Relaxed);
+            }
             "--check" if command == "fmt" => check_only = true,
             "-o" | "--output" if command == "build" => {
                 index += 1;
@@ -118,7 +143,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("{}", project.report(&error));
+                print_diagnostic(&project, &error);
                 ExitCode::from(1)
             }
         };
@@ -133,7 +158,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("{}", project.report(&error));
+            print_diagnostic(&project, &error);
             ExitCode::from(1)
         }
     }
@@ -164,11 +189,11 @@ fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
             Err(error) => match project.apply_canonical_fix(&error) {
                 Ok(true) => continue,
                 Ok(false) => {
-                    eprintln!("{}", project.report(&error));
+                    print_diagnostic(&project, &error);
                     return ExitCode::from(1);
                 }
                 Err(message) => {
-                    eprintln!("{}", project.report(&error));
+                    print_diagnostic(&project, &error);
                     eprintln!("fix: {message}");
                     return ExitCode::from(1);
                 }

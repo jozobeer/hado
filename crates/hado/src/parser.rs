@@ -506,7 +506,7 @@ pub struct Related {
 
 /// The label a code writes before its related position (§56). A code without a
 /// label never carries one.
-fn related_label(code: &str) -> Option<&'static str> {
+pub(crate) fn related_label(code: &str) -> Option<&'static str> {
     match code {
         "E205" => Some("first declared"),
         "E305" => Some("expected here"),
