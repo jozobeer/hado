@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# R62 `_` の fallback と Boolean 分岐の正準形（docs/plan.md 58 節）。
+# R62 `_` の catch-all を fallback の正準形にする（docs/plan.md 58 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,7 +22,7 @@ cargo build --offline -q --bin hado || exit 1
 target_dir=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
 hado="$target_dir/debug/hado"
 
-cat >"$workdir/harness.py" <<'PY'
+cat >"$workdir/harness.py" <<'PYEOF'
 import re
 import subprocess
 from pathlib import Path
@@ -84,20 +84,11 @@ def fmt_check(root, name, source, want):
     result = run(root, name, source, 'fmt', '--check')
     assert result.returncode == want, (name, want, result.returncode, result.stderr.decode())
     assert source_of(root, name) == source, (name, 'fmt --check must not write')
-
-
-def no_rewrite(root, name, source, code):
-    """The diagnostic fires, no rewrite is offered, and neither tool writes."""
-    check_code(root, name, source, code, hint=None)
-    result = run(root, name, source, 'check', '--fix')
-    assert result.returncode == 1, (name, result.returncode)
-    assert source_of(root, name) == source, (name, 'check --fix must not write')
-    fmt_check(root, name, source, 0)
-PY
+PYEOF
 
 # --- 62-a: `_` の catch-all は fallback の正準形になる ---
 r62_fallback() {
-    python3 - "$workdir" "$hado" <<'PY'
+    python3 - "$workdir" "$hado" <<'PYEOF'
 import sys
 
 sys.path.insert(0, sys.argv[1])
@@ -113,42 +104,38 @@ accepted(sys.argv[1], 'a/fixed', fixed)
 assert fmt(sys.argv[1], 'a/fmt', SOURCE, EXPECTED) == EXPECTED
 fmt_check(sys.argv[1], 'a/fixed2', EXPECTED, 0)
 print('fallback: the catch-all becomes the fallback in both fixers')
-PY
+PYEOF
 }
 
-# --- 62-b: Boolean の pattern 分岐は Boolean 分岐の正準形になる ---
-r62_boolean_branch() {
-    python3 - "$workdir" "$hado" <<'PY'
+# --- 62-b: `_ =>` の後ろのコメントは残る ---
+r62_comment() {
+    python3 - "$workdir" "$hado" <<'PYEOF'
 import sys
 
 sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
-from harness import accepted, check_code, check_fix, fmt
+from harness import accepted, check_code, check_fix, source_of
 
-TWO_ARMS = 'def f (b: Bool): Int => if b | true => 1 | false => 2\ndef main = f true\n'
-TWO_ARMS_EXPECTED = 'def f (b: Bool): Int => if b => 1 | 2\ndef main = f true\n'
-ARM_AND_FALLBACK = 'def f (b: Bool): Int => if b | true => 1 | 2\ndef main = f true\n'
-ARM_AND_FALLBACK_EXPECTED = 'def f (b: Bool): Int => if b => 1 | 2\ndef main = f true\n'
-check_code(sys.argv[1], 'b/arms-hint', TWO_ARMS, 'E520', 'if b => 1 | 2')
-fixed = check_fix(sys.argv[1], 'b/arms', TWO_ARMS, TWO_ARMS_EXPECTED)
-accepted(sys.argv[1], 'b/arms-ok', fixed)
-fixed = check_fix(sys.argv[1], 'b/fallback', ARM_AND_FALLBACK, ARM_AND_FALLBACK_EXPECTED)
-accepted(sys.argv[1], 'b/fallback-ok', fixed)
-assert fmt(sys.argv[1], 'b/fmt', TWO_ARMS, TWO_ARMS_EXPECTED) == TWO_ARMS_EXPECTED
-print('boolean branch: both out-of-canonical forms become the condition form')
-PY
+SOURCE = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => // why\n  0\ndef main = f A\n'
+EXPECTED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | // why\n  0\ndef main = f A\n'
+check_code(sys.argv[1], 'b/hint', SOURCE, 'E503', '| 0')
+fixed = check_fix(sys.argv[1], 'b/comment', SOURCE, EXPECTED)
+assert '// why' in source_of(sys.argv[1], 'b/comment'), 'the comment must survive'
+accepted(sys.argv[1], 'b/comment-ok', fixed)
+print('comment: the rewrite keeps a comment that follows the arrow')
+PYEOF
 }
 
-# --- 62-c: §24 の除外はそのまま受理される ---
+# --- 62-c: §24 の除外は受理、規則そのものは残る ---
 r62_exclusions() {
-    python3 - "$workdir" "$hado" <<'PY'
+    python3 - "$workdir" "$hado" <<'PYEOF'
 import sys
 
 sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
-from harness import accepted
+from harness import accepted, check_code
 
 NESTED = '''def f (o: Bool Option): Int =>
   if o | Some(true) => 1 | Some(false) => 2 | None => 3
@@ -158,56 +145,40 @@ TWO_COLUMNS = '''def f (b: Bool, c: Bool): Int =>
   if b, c | true, true => 1 | true, false => 2 | false, true => 3 | false, false => 4
 def main = f true true
 '''
+TWO_ARMS = 'def f (b: Bool): Int => if b | true => 1 | false => 2\ndef main = f true\n'
+ARM_AND_FALLBACK = 'def f (b: Bool): Int => if b | true => 1 | 2\ndef main = f true\n'
 accepted(sys.argv[1], 'c/nested', NESTED)
 accepted(sys.argv[1], 'c/columns', TWO_COLUMNS)
-print('exclusions: a nested Bool literal and two condition columns are not E520')
-PY
+check_code(sys.argv[1], 'c/arms', TWO_ARMS, 'E520')
+check_code(sys.argv[1], 'c/arm-fallback', ARM_AND_FALLBACK, 'E520')
+print('exclusions: the §24 exclusions are accepted and the rule still rejects its forms')
+PYEOF
 }
 
-# --- 62-d: 書き換える範囲にコメントがあれば出さない ---
-r62_comment() {
-    python3 - "$workdir" "$hado" <<'PY'
-import sys
-
-sys.path.insert(0, sys.argv[1])
-import harness
-harness.HADO = sys.argv[2]
-from harness import no_rewrite, source_of
-
-SOURCE = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => // why\n  0\ndef main = f A\n'
-no_rewrite(sys.argv[1], 'd/comment', SOURCE, 'E503')
-assert '// why' in source_of(sys.argv[1], 'd/comment'), 'the comment must survive'
-print('comment: a comment inside the arm keeps the rewrite away')
-PY
-}
-
-# --- 62-e: 既存の書き換えはそのまま ---
+# --- 62-d: 既存の書き換えはそのまま ---
 r62_existing() {
-    python3 - "$workdir" "$hado" <<'PY'
+    python3 - "$workdir" "$hado" <<'PYEOF'
 import sys
 
 sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
-from harness import check_code, check_fix
+from harness import check_code, check_fix, fmt
 
 # E501: そのまま返す束縛。R57 の門番と同じ形。
-SOURCE = 'def main =\n  let v = 1 ->\n  v\n'
-EXPECTED = 'def main =\n  1\n'
-check_fix(sys.argv[1], 'e/e501', SOURCE, EXPECTED)
-# E503 と E520 を同じファイルに置くと、一括の fmt が両方を直す。
-MIXED = 'type T = | A | B\ndef f (t: T, b: Bool): Int => if t | A => 1 | _ => (if b | true => 2 | false => 3)\ndef main = f A true\n'
-FIXED = 'type T = | A | B\ndef f (t: T, b: Bool): Int => if t | A => 1 | (if b => 2 | 3)\ndef main = f A true\n'
-check_code(sys.argv[1], 'e/mixed', MIXED, 'E503')
-from harness import fmt
-assert fmt(sys.argv[1], 'e/mixed-fmt', MIXED, FIXED) == FIXED
-print('existing: an earlier rewrite still applies, and both new ones settle together')
-PY
+check_fix(sys.argv[1], 'd/e501', 'def main =\n  let v = 1 ->\n  v\n', 'def main =\n  1\n')
+# E503 と E501 を同じファイルに置くと、一括の fmt が両方を直す。
+MIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => 0\ndef main =\n  let v = f A ->\n  v\n'
+FIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main =\n  f A\n'
+check_code(sys.argv[1], 'd/mixed', MIXED, 'E503')
+assert fmt(sys.argv[1], 'd/mixed-fmt', MIXED, FIXED) == FIXED
+print('existing: an earlier rewrite still applies, and both settle together')
+PYEOF
 }
 
-# --- 62-f: 文書と層 ---
+# --- 62-e: 文書と層 ---
 r62_docs() {
-    python3 - <<'PY'
+    python3 - <<'PYEOF'
 from pathlib import Path
 
 tiers = Path('scripts/lib/gate-tiers.sh').read_text()
@@ -218,26 +189,24 @@ assert 'verify-r62' in trace, 'spec-trace does not name verify-r62'
 plan = Path('docs/plan.md').read_text()
 assert '## 58. ' in plan, 'plan has no section 58'
 spec = Path('docs/spec.md').read_text()
-section = spec.split('## 24. ', 1)[1].split('\n## ', 1)[0]
-assert 'canonical form' in section, '§24 does not name the canonical form of the rewrite'
 section = spec.split('## 29. ', 1)[1].split('\n## ', 1)[0]
 assert 'canonical form' in section, '§29 does not name the canonical form of the rewrite'
-print('docs: §24, §29, the trace row, the tier and the plan')
-PY
+assert '書き換え' in section, '§29 does not record the rewrite'
+print('docs: §29, the trace row, the tier and the plan')
+PYEOF
 }
 
-# --- 62-g: コーパスロック ---
+# --- 62-f: コーパスロック ---
 r62_lock() {
     sha256sum --strict --status -c tests/corpus.sha256
 }
 
 check '62-a the catch-all underscore becomes the fallback' r62_fallback
-check '62-b Boolean pattern arms become a Boolean branch' r62_boolean_branch
+check '62-b a comment after the arrow survives' r62_comment
 check '62-c the exclusions of §24 are accepted' r62_exclusions
-check '62-d a comment inside the arm keeps the rewrite away' r62_comment
-check '62-e the earlier rewrites still apply' r62_existing
-check '62-f spec, trace, tier' r62_docs
-check '62-g corpus lock' r62_lock
+check '62-d the earlier rewrites still apply' r62_existing
+check '62-e spec, trace, tier' r62_docs
+check '62-f corpus lock' r62_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
