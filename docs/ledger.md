@@ -4381,3 +4381,22 @@ main.hd:4:7: error[E504]: use do to discard a success value
 **次はこの入口を読んで条件を確定する**（`walk_item` の本体）。そこが分かれば、E502・E504・E506・E511 と将来の書き換えが**同じ 1 箇所の修正**で届くようになる。影響範囲は R57 の門番と全走で確かめる。
 
 計器は戻した（木は綺麗）。
+
+### R71 の計器の結論を訂正する（入口は毎回 walk_node を呼んでいる）
+
+`walk_item` の入口（`fixes.rs:478`〜515）を読んだ。
+
+```rust
+                DefKind::Value(body) => {
+                    if let Some(fix) = repropagate_fix(body, Tail::If, None, …) { found.push(fix); }
+                    walk_node(body, source, lines, tokens, index, branches, found);
+                }
+                DefKind::Function { body, .. } => {
+                    … rewrap_arm_fix / repropagate_fix …
+                    walk_node(body, source, lines, tokens, index, branches, found);
+                }
+```
+
+**「どの形なら walk するか」の選択は無い。** 値の定義も関数の定義も、本体を**必ず** `walk_node` に渡している。したがって前節の「`walk_node` が一度も呼ばれていない」は**計器の置き場所の誤り**である。`fn walk_node(` の後の最初の `) {` を探して挿入したが、署名が `) -> … {` の形ならその探索は関数の外（別の `) {`）へ飛んでいた。**E504 の再現でも `walk_node` は呼ばれている。** 計器の出力が 1 行も無かったことを「呼ばれていない」と読んだのは誤りで、ここで訂正する。
+
+**次は計器を正しく置き直す。** 署名の終わりを `) {` で探すのをやめ、`fn walk_node(` の行から**最初の `match &node.kind {` の行**を探して、その直後に印字を入れる。加えて `walk_item` の入口（478 行の `DefKind::Value` の腕の直前）にも別の印を置き、**「入口は通ったが walk_node に入っていない」のか「walk_node に入ったが `Let` / `LetQ` の腕に来ていない」のか**を 1 回の実行で切り分ける。推測で埋めない。
