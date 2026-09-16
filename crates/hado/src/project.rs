@@ -203,20 +203,41 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
         code: None, message: error.to_string() }
 }
 
-fn read_files(entry: &Path) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
-    let root = root_directory(entry);
+/// §50: the sources of the project whose entry is `entry`, paired with the
+/// path diagnostics print for them. The entry comes first, then the other
+/// files in byte order of their relative paths. Reading is left to the caller,
+/// so a file that does not lex cannot hide the rest from `hado fmt` (§58.1).
+pub fn source_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
+    let (root, paths, _) = collect_paths(entry)?;
+    Ok(paths
+        .into_iter()
+        .map(|path| (relative_source(&path, &root).to_string_lossy().into_owned(), path))
+        .collect())
+}
+
+/// The paths of the project in reading order, with the root and the namespace
+/// directories `read_files` needs.
+fn collect_paths(
+    entry: &Path,
+) -> Result<(PathBuf, Vec<PathBuf>, BTreeSet<Vec<String>>), LoadError> {
+    let root = root_directory(entry).to_path_buf();
     let mut paths = Vec::new();
     let mut directories = BTreeSet::from([Vec::new()]);
-    collect_sources(root, root, &mut paths, &mut directories)?;
-    let selected = relative_source(entry, root);
-    paths.retain(|path| relative_source(path, root) != selected);
-    paths.sort_by(|a, b| relative_source(a, root).as_os_str().as_encoded_bytes()
-        .cmp(relative_source(b, root).as_os_str().as_encoded_bytes()));
+    collect_sources(&root, &root, &mut paths, &mut directories)?;
+    let selected = relative_source(entry, &root);
+    paths.retain(|path| relative_source(path, &root) != selected);
+    paths.sort_by(|a, b| relative_source(a, &root).as_os_str().as_encoded_bytes()
+        .cmp(relative_source(b, &root).as_os_str().as_encoded_bytes()));
     paths.insert(0, entry.to_path_buf());
+    Ok((root, paths, directories))
+}
+
+fn read_files(entry: &Path) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
+    let (root, paths, directories) = collect_paths(entry)?;
     let mut files = Vec::new();
     let mut offset = 0;
     for path in paths {
-        let file = read_file(&path, root, offset)?;
+        let file = read_file(&path, &root, offset)?;
         offset = file.tokens.last().unwrap().span.line + 1;
         files.push(file);
     }

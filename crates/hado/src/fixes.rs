@@ -78,6 +78,39 @@ pub fn hint(source: &str, code: &str, line: usize, col: usize) -> Option<String>
     fix_at(source, code, line, col).map(|fix| fix.canonical)
 }
 
+/// Apply every local rewrite to the source, in passes, until none applies:
+/// the bulk form `hado fmt` and `build --fix` use (§58.1). `Ok(None)` when the
+/// source is already canonical or does not parse, `Err(limit)` when the
+/// rewrites did not settle within `limit` passes.
+pub fn format(source: &str) -> Result<Option<(String, usize)>, usize> {
+    const LIMIT: usize = 64;
+    let mut text = source.to_string();
+    let mut applied = 0;
+    for _ in 0..LIMIT {
+        let edits = fixes(&text);
+        if edits.is_empty() {
+            return Ok(if applied == 0 { None } else { Some((text, applied)) });
+        }
+        applied += edits.len();
+        text = splice(&text, &edits);
+    }
+    Err(LIMIT)
+}
+
+/// Write the disjoint edits back into the source. `fixes` returns them sorted
+/// by start and never overlapping, so the tail is written first.
+fn splice(source: &str, edits: &[Fix]) -> String {
+    let mut updated = String::with_capacity(source.len());
+    let mut at = 0;
+    for fix in edits {
+        updated.push_str(&source[at..fix.start]);
+        updated.push_str(&fix.replacement);
+        at = fix.end;
+    }
+    updated.push_str(&source[at..]);
+    updated
+}
+
 pub fn is_fixable(code: &str) -> bool {
     matches!(code, "E501" | "E510" | "E515" | "E516" | "E517")
 }
@@ -234,6 +267,15 @@ fn let_identity_fix(
     if !matches!(tokens.get(at)?.kind, TokKind::KwLet) {
         return None;
     }
+    // 綴りが constructor のパターン（`Nil` は `[]` と同じ AST になる）は値の
+    // 束縛ではないので、小文字で始まる名前だけを対象にする。値の綴りも
+    // トークンで確かめる（`[]` を `Nil` と見て 1 文字余分に食わないため）。
+    if !bound.starts_with(char::is_lowercase) {
+        return None;
+    }
+    if !matches!(&tokens.get(at + 1)?.kind, TokKind::Name(name) if name == bound) {
+        return None;
+    }
     let equals = tokens.get(at + 2)?;
     if !matches!(equals.kind, TokKind::Eq) {
         return None;
@@ -276,7 +318,9 @@ fn walk_node(
 ) {
     match &node.kind {
         NodeKind::Name(name) if name == "Nil" => {
-            push_edit(found, "E510", node.span, "[]", source, lines, 3);
+            if spelled(source, lines, node.span, "Nil") {
+                push_edit(found, "E510", node.span, "[]", source, lines, 3);
+            }
         }
         NodeKind::Call(callee, _) | NodeKind::Apply(callee, _) => {
             if matches!(&callee.kind, NodeKind::Name(name) if name == "Cons") {
@@ -328,7 +372,9 @@ fn walk_pattern(
 ) {
     match &pattern.kind {
         PatternKind::Name(name) if name == "Nil" => {
-            push_edit(found, "E516", pattern.span, "[]", source, lines, 3);
+            if spelled(source, lines, pattern.span, "Nil") {
+                push_edit(found, "E516", pattern.span, "[]", source, lines, 3);
+            }
         }
         PatternKind::Constructor(name, args) if name == "Cons" && args.len() == 2 => {
             if let Some(text) = parser::list_pattern_source(pattern) {
@@ -381,6 +427,15 @@ fn list_expression(node: &Node) -> Option<String> {
         }
     }
     Some(format!("[{}]", parts.join(", ")))
+}
+
+/// True when the source at `anchor` spells `text`. The canonical `[]` and the
+/// written `Nil` share one AST node, so an edit must check the spelling before
+/// it fires: `hado fmt` walks the AST without a diagnostic to vouch for it.
+fn spelled(source: &str, lines: &LineMap, anchor: Span, text: &str) -> bool {
+    let start = lines.offset(source, anchor);
+    let end = start + text.len();
+    end <= source.len() && &source[start..end] == text
 }
 
 // --- 編集の組み立て ---
