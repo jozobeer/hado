@@ -26,7 +26,7 @@ hado_tier_minimal_gates() {
             # 節目・夜間。ラウンドごとの生成探針と棚卸しの対象。
             printf '%s\n' record-constructors \
                 r9 r11 r12 r13 r14 r16 r17 r18 r19 r20 r21 r22 \
-                r23 r24 r25 r26 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r42 r43 r44 r45 r46 r47
+                r23 r24 r25 r26 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r42 r43 r44 r45 r46 r47 r48
             ;;
         *)
             printf 'unknown tier: %s\n' "$1" >&2
