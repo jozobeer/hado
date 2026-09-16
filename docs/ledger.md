@@ -4561,3 +4561,78 @@ E506 check-exit=1      ← let _ = x -> のまま（掛けない）
 - **71-e は想定どおりの赤**（層・系譜・手順書が未記入）。`r71` を層 `full` に、§35 の行を系譜に、`## 66.` を手順書に足して緑になった。
 
 検査の内容: 71-a `check --fix` で受理、71-b `fmt` でも受理され冪等、71-c 直した物の実行結果が**再現から導いた手書きの `do` 版**と一致、71-d 対象外（純粋値の `let _ =`、名前のある `let y? =`）は触らない、71-e 層・系譜・手順書・コーパスのロック。**期待値は判定器側で導いており、ファイル名も件数も書き込んでいない。**
+
+## R71 の全走
+
+```
+--- gates ---
+TALLY: 3696/3700 passed; red: verify-r69.log
+gates-exit=1
+--- reds in the tier ---
+verify-r11.log
+verify-r12.log
+verify-r13.log
+verify-r14.log
+verify-r16.log
+verify-r17.log
+verify-r18.log
+verify-r19.log
+verify-r20.log
+verify-r21.log
+verify-r22.log
+verify-r23.log
+verify-r24.log
+verify-r25.log
+verify-r26.log
+verify-r28.log
+verify-r29.log
+verify-r30.log
+verify-r31.log
+verify-r32.log
+verify-r33.log
+verify-r34.log
+verify-r35.log
+verify-r36.log
+verify-r37.log
+verify-r38.log
+verify-r42.log
+verify-r43.log
+verify-r44.log
+verify-r45.log
+verify-r46.log
+verify-r47.log
+verify-r48.log
+verify-r49.log
+verify-r50.log
+verify-r51.log
+verify-r52.log
+verify-r53.log
+verify-r54.log
+verify-r55.log
+verify-r56.log
+verify-r57.log
+verify-r58.log
+verify-r59.log
+verify-r60.log
+verify-r61.log
+verify-r62.log
+verify-r63.log
+verify-r64.log
+verify-r65.log
+verify-r67.log
+verify-r68.log
+verify-r69.log
+verify-r70.log
+verify-r71.log
+verify-r9.log
+--- cargo test (background, bash-96) ---
+cargo-test-exit=0
+--- cargo test (foreground, 16 threads) ---
+fg-exit=0
+--- FAILED lines ---
+0
+--- totals (foreground) ---
+passed=773 failed=0
+```
+
+層別 full の検査は R70 の 3695 から 3700 へ、通過は 3691 から 3696 へ増え、増分 5 は R71 の門番。赤は Park 中の `verify-r69.sh` のみ。**緩めた門番は無い。** `cargo test` は層別の直後に始めた背景ジョブが長く出力を止めたため一度は打ち切りと判断したが、**実際には完走しており（`cargo-test-exit=0`、終了通知が遅れて届いた）**、前景で 16 スレッドで回した追試も `passed=773 failed=0 FAILED 0`。判断を誤ったことをここに記録する。
