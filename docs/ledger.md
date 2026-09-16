@@ -4608,3 +4608,27 @@ def main = f 1
 **`P702` が 1 行も出ない（入口の `P702 enter` すら出ない）。** つまり `identical_cond_fix` は呼ばれておらず、**`NodeKind::CondBranch` の腕に到達していない**。E504 のときの「所有している腕が先に当たる」とは違い、**この形の本体が `CondBranch` として来ていない**か、`CondBranch` に当たる前に別の腕が受けているかのどちらかである。
 
 **次の 1 歩**（E504 で効いた形）: (1) `walk_node` の `match &node.kind {` の直前に「訪れた位置」を印字する計器を戻す（E502 の `if` は 4:3 にあるので、`node 4:3` が出るかで walk に来ているかを判定できる）。(2) 最後の `_ => {}` の腕を印字する腕に変え、4:3 がそこへ落ちるかを見る。(3) `parser.rs` の `NodeKind` から `if` に相当する名前（`If` / `Cond` など）を grep で確かめ、候補ごとに腕を足して二分探索する。**推測は重ねない。**
+
+## E502 は BoolBranch（書き換えは出た。直したファイルの受理が残る）
+
+見込みどおり `NodeKind::BoolBranch { cond, then, els }` の腕で的中した。`identical_bool_fix` を `then` と `els` に掛け、`is_fixable` に `"E502"` を入れて測った。
+
+```
+$ cargo run --offline -q -- check --fix target/e502/main.hd 2>&1 | grep -E "P704|E502"
+P704 boolbranch 4:3
+P704 canonical then [1] els [1]
+P704 emit 42..59
+$ sed -n '3,5p' target/e502/main.hd
+def f x =>
+  1
+def main = f 1
+$ cargo run --offline -q -- check target/e502/main.hd ; echo $?
+1
+```
+
+- **的中**: 診断の 2 箇所（4:15 / 4:19）は `BoolBranch` の `then` と `els` だった。`CondBranch` の腕は一度も呼ばれない（前節）。
+- **書き換えは出る**: 範囲 `42..59` を結果 1 つに置き換え、`def f x =>
+  1` という**門番が導く正準形と同じテキスト**になった。
+- **残る問題**: 直したファイルの `check` がまだ終了 1。**残る診断のメッセージを読むのが次の 1 歩**（`if` を畳んだ結果、別の冗長——例えば引数を使わない定義——が現れている可能性がある）。回避策を推測で足さず、まず読む。
+
+実装の要点: 腕は `NodeKind::BoolBranch { cond, then, els }` を `PatternBranch` の直前に足し、`then`/`els`/`cond` へ降りる。`identical_bool_fix` は `parser::canonical(then)`（`String`）が `els` と一致し、原文がその文字列で始まるときだけ、`branch_range(node, Tail::If, …)`（引けなければ `node.span` から `els` の終わりまで）を結果 1 つに置き換える。範囲に `//` があれば掛けない。**コードは次のラウンドで戻す**（未検証のまま木に残さない方針）。`docs/plan.md` には `## 64.` を足した（69-e の要件）。
