@@ -3075,3 +3075,46 @@ R46・R47 で「書いて、直す」が一巡したので、次は「実行す�
 - **任意の終了コードを言語から返せない。** `raise` は既定実装が 1 を返す。`exit(code)` を足すかは、終了コードを分ける実プログラムが出てから決める（`wants.md` の 25）。
 - **`run` の引数の綴り。** `--` が無いときを「引数無し」とした。`cargo run` に合わせただけなので、仕様が決めるほどの理由は無い。
 - **`build` の既定を一時領域にするか。** コーパスを汚さない利点はあるが、`build` の成果物を人が使う位置が変わる。`-o` を足した R48 では決めない。
+
+## R49 効果行付き関数値の build 失敗を直す（2026-09-16）
+
+### 背景と決定
+
+`docs/bug.md` に 3 件残っていた既知の不具合のうち、「効果行付きの関数値を返す member の build が失敗する」（R33、裁定 #9）を直した。`check` は通り、`build` と `run` は `specialization failed: Mismatch` で落ちる。R48 で `hado run` を入れたので、この穴は「書いて、直して、走らせる」の途中で踏むようになっていた。手順と決定は `docs/plan.md` 45 節。
+
+原因は単相化の型表現にあった。単相化の `Type` は効果行を持たない（`Ty::Fn(args, result, _) → Type::Closure(args, result)` で行を落とす）。逆に `Type::Closure` を `Ty` に戻す `From<&Type> for Ty` は `Ty::fn_of` を使い、行を `Row::pure()` にしていた。`Signature::specialize_result` と呼び出し先を特殊化する `specialize_function` は、呼び出し側の `Type` から作った `Ty` を定義の scheme と単一化するので、scheme の `Fn(String => String {Error})` と `Type` 由来の pure な `Fn` がぶつかっていた。
+
+- `ty_with_fresh_rows` を足し、`Type` から `Ty` へ戻すときの閉包の行を `Row::pure()` ではなく新しい行変数にした。行を決めるのは定義の scheme であり、行を持たない `Type` ではない。
+- 差し替えたのは scheme と単一化する 4 箇所: `Signature::specialize_result`、`specialize_function` の concrete、`constructor_fields`、record の field 取得。`construct` は `Ty` をそのまま `Type` に戻すだけなので `Ty::from` のままにした。
+- 仕様は変えていない。効果は型に現れるという §20 の規則は既にあり、単相化がそれに追いついていなかった。
+
+最小再現は次の形である（`check` は 0、`build` は 1）。ラムダ式を直接渡す形（`apply (fn(t => ...)) "7"`）は落ちない。型が推論の中で閉じ、`Type` へ往復しないためである。`def` の宣言型や `def` が返す関数値を経由したときだけ落ちていた。
+
+```ocaml
+def apply f x => f x
+def make(s: String): Fn(String => String {Error}) Pure => fn(t => String.concat s (Int.to_string (Int.parse t)))
+def main = apply (make "x") "7"
+```
+
+`docs/bug.md` から該当節を消した（同文書の「直したら節を消し、経緯は git 履歴に残す」に従う）。節と再現の 1 対 1 は `verify-r38.sh` が数えるので、節を消しても数は合う。
+
+### 実装
+
+`crates/hado/src/mono.rs` に `ty_with_fresh_rows` を足し、`From<&Type> for Ty` の閉包が `Row::pure()` を作る経路を、scheme と単一化する 4 箇所で置き換えた。`crates/hado/tests/build_cli.rs` に、効果行付きの関数値を `def` から受け取って多相関数へ渡す回帰テストを足した。
+
+### 判定の実測
+
+- **49-a〜49-d（R49 の門番）。** `bash scripts/verify-r49.sh` は 6/6。49-a は seed 49 で 6 本（前置・後置の文字列、`Int.parse` の有無、`let` 経由と直接）を生成し、`check` が緑・`build` が緑・実行の出力が判定器の計算と一致することを測る。49-b は `docs/bug.md` に該当節が無いことと `build_cli` の 6 テスト。49-c は効果行の無い関数値（多相関数へ直接渡す形・ラムダ式）と、効果行付き関数値をフィールドに持つ record の 3 形。49-d は full の層の `r49` と corpus lock。control は `ty_with_fresh_rows` を `Ty::from` に落とす分岐を環境変数で入れて測り、49-a と 49-b（`build_cli`）が赤になることを確かめた。
+- **直した節の再現。** 最小再現は `check` が 0 のまま `build` が 0 になり、`run` が `x7` を印字して終了 0。`build_cli` の回帰テストは 6 passed。
+- **R49 の全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r49` は 47 本を走らせ、47 本のログがすべて `PASSED: n/n`、`^NG:` 0、exit 0。`verify-r49.sh` は 6/6、`docs/bug.md` の節と再現の 1 対 1 を数える `verify-r38.sh` も緑。`lint-docs` は 7/7。`cargo test --offline --no-fail-fast` は 65 target 全て 0 failed（773 passed）、exit 0。
+
+### 迷った点
+
+- **`Type` に効果行を持たせるか。** 単相化の型表現に行を戻す案は、codegen が行を使わないので広い変更になる。行は「定義の scheme が決める」と決め、`Type` から `Ty` へ戻すときだけ新しい行変数を渡した。
+- **受理コーパスへ足すか。** 実装の不具合なので `tests/accept` ではなく CLI の判定と Rust テストに置いた。受理コーパスは仕様の適合を測る場所である。
+- **判定 49-c を 3 形まとめて 1 本にするか。** 効果行の無い関数値と record のフィールドを 1 本にまとめた。数が増えたら分ける。
+
+### 仕様への疑義
+
+- **効果行を持つ関数値がパラメータ型の中に現れる場合。** `Fn(Fn(A => B {Error}) => C)` の単相化は同じ経路で直る見込みだが、R49 の判定には入れていない。動く形が出たら足す。
+- **`Type` が行を持たない設計。** 行を持つようにするかは、効果が codegen に効くようになるときに決める。
