@@ -8,7 +8,7 @@ pub enum Type {
     Char,
     String,
     Bytes,
-    Unit,
+    Void,
     Data(String, Vec<Type>),
     Abstract(String, Vec<Type>),
     Closure(Vec<Type>, Box<Type>),
@@ -28,7 +28,7 @@ impl TryFrom<&Ty> for Type {
             Ty::Char => Self::Char,
             Ty::String => Self::String,
             Ty::Bytes => Self::Bytes,
-            Ty::Unit => Self::Unit,
+            Ty::Void => Self::Void,
             Ty::Var(id) => return Err(UnresolvedType::Variable(*id)),
             Ty::Error => return Err(UnresolvedType::Invalid),
             Ty::Adt(name, args) => Self::Data(name.clone(), convert_types(args)?),
@@ -72,7 +72,7 @@ pub enum Constant {
     Bool(bool),
     Char(char),
     String(String),
-    Unit,
+    Void,
 }
 
 impl Constant {
@@ -83,7 +83,7 @@ impl Constant {
             Self::Bool(_) => Type::Bool,
             Self::Char(_) => Type::Char,
             Self::String(_) => Type::String,
-            Self::Unit => Type::Unit,
+            Self::Void => Type::Void,
         }
     }
 }
@@ -96,7 +96,7 @@ pub fn lower_literal(node: &crate::parser::Node) -> Option<Constant> {
         NodeKind::Bool(value) => Constant::Bool(*value),
         NodeKind::Char(value) => Constant::Char(*value),
         NodeKind::Str(value) => Constant::String(value.clone()),
-        NodeKind::Unit => Constant::Unit,
+        NodeKind::Void => Constant::Void,
         _ => return None,
     })
 }
@@ -735,7 +735,7 @@ fn same_literal(left: &crate::parser::Node, right: &crate::parser::Node) -> bool
         (NodeKind::Bool(left), NodeKind::Bool(right)) => left == right,
         (NodeKind::Char(left), NodeKind::Char(right)) => left == right,
         (NodeKind::Str(left), NodeKind::Str(right)) => left == right,
-        (NodeKind::Unit, NodeKind::Unit) => true,
+        (NodeKind::Void, NodeKind::Void) => true,
         _ => false,
     }
 }
@@ -807,7 +807,7 @@ fn outcome_parts(ty: &Type) -> Result<(Type, Type, Type), String> {
     }
     let success = args.first().cloned().ok_or("outcome missing success type")?;
     let answer = args.get(1).cloned().unwrap_or_else(|| success.clone());
-    let payload = args.get(2).cloned().unwrap_or(Type::Unit);
+    let payload = args.get(2).cloned().unwrap_or(Type::Void);
     Ok((success, answer, payload))
 }
 
@@ -883,7 +883,7 @@ impl From<&Type> for Ty {
             Type::Char => Self::Char,
             Type::String => Self::String,
             Type::Bytes => Self::Bytes,
-            Type::Unit => Self::Unit,
+            Type::Void => Self::Void,
             Type::Data(name, args) => {
                 Self::Adt(name.clone(), args.iter().map(Self::from).collect())
             }
@@ -2142,7 +2142,7 @@ impl Lowerer {
             .ok_or("missing abort result type")?;
         let result = match Type::try_from(&self.specialization.resolve(ty)) {
             Ok(ty) => ty,
-            Err(UnresolvedType::Variable(_)) => Type::Unit,
+            Err(UnresolvedType::Variable(_)) => Type::Void,
             Err(_) => return Err("abort result type is not concrete".into()),
         };
         let call = Expression::call_runtime(
@@ -2307,7 +2307,7 @@ impl Lowerer {
 
     fn outcome_payload(&self, constructor: &str) -> Result<Type, String> {
         let signature = self.operation_types.get(constructor).ok_or("operation type missing")?;
-        Ok(signature.parameters.first().cloned().unwrap_or(Type::Unit))
+        Ok(signature.parameters.first().cloned().unwrap_or(Type::Void))
     }
 
     fn fail_constructor(&mut self, effect: &str) -> String {
@@ -2488,8 +2488,8 @@ impl Lowerer {
             result: input.clone(),
         };
         self.operation_types.insert(constructor.clone(), signature);
-        let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
-        let outcome = Type::Data(OUTCOME.into(), vec![input.clone(), answer, Type::Unit]);
+        let value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Void));
+        let outcome = Type::Data(OUTCOME.into(), vec![input.clone(), answer, Type::Void]);
         let continuation = match rest {
             Some((body, pat)) => self.make_continuation(body, pat, &outcome)?,
             None => {
@@ -2907,14 +2907,14 @@ impl Lowerer {
         arguments: Vec<Expression>,
         effect: &str,
     ) -> Result<Expression, String> {
-        let success = self.node_type(node).unwrap_or(Type::Unit);
+        let success = self.node_type(node).unwrap_or(Type::Void);
         let answer = self.again_answers.last().cloned().ok_or("abort without handler answer")?;
-        let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Unit));
+        let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Void));
         let constructor = self.fail_constructor(effect);
         self.operation_types.insert(constructor.clone(), Signature {
-            parameters: vec![payload_value.ty()], result: Type::Unit,
+            parameters: vec![payload_value.ty()], result: Type::Void,
         });
-        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, Type::Unit]);
+        let outcome = Type::Data(OUTCOME.into(), vec![success, answer, Type::Void]);
         Ok(Expression::Construct {
             constructor,
             fields: vec![payload_value],
@@ -3148,7 +3148,7 @@ impl Lowerer {
 
     fn outcome_of(&self, success: &Type, _body: &crate::parser::Node) -> Result<Type, String> {
         let answer = self.again_answers.last().cloned().ok_or("handler answer missing")?;
-        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Unit]))
+        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Void]))
     }
 
     fn node_type(&self, node: &crate::parser::Node) -> Option<Type> {
@@ -3292,7 +3292,7 @@ impl Lowerer {
     }
 
     fn derive_comparison(&mut self, ty: Type) -> Result<(FunctionId, Signature), String> {
-        if matches!(ty, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::String | Type::Bytes) {
+        if matches!(ty, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Void | Type::String | Type::Bytes) {
             return Ok(self.derive_scalar_compare(ty));
         }
         if matches!(&ty, Type::Data(name, _) if name == ARRAY) {
@@ -3471,7 +3471,7 @@ impl Lowerer {
             signature: signature.clone(),
             parameters: vec![left, right],
             captures: vec![],
-            body: if ty == Type::Unit {
+            body: if ty == Type::Void {
                 Expression::Constant(Constant::Int(0))
             } else {
                 body
@@ -3834,18 +3834,18 @@ pub fn derive_scalar_printer(id: FunctionId, ty: Type) -> Result<Function, Strin
         Type::Char => (RuntimeFunction::PrintChar, value),
         Type::Float => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::CanonicalFloat, vec![value])?),
         Type::Bool => (RuntimeFunction::PrintString, branch(value, text("true"), text("false"))?),
-        Type::Unit => return Ok(Function {
+        Type::Void => return Ok(Function {
             id, name: format!("print_{ty:?}"),
-            signature: Signature { parameters: vec![ty], result: Type::Unit },
+            signature: Signature { parameters: vec![ty], result: Type::Void },
             parameters: vec![0], captures: vec![],
-            body: Expression::Constant(Constant::Unit),
+            body: Expression::Constant(Constant::Void),
         }),
         _ => return Err("scalar printer is not implemented".into()),
     };
     Ok(Function {
         id,
         name: format!("print_{ty:?}"),
-        signature: Signature { parameters: vec![ty.clone()], result: Type::Unit },
+        signature: Signature { parameters: vec![ty.clone()], result: Type::Void },
         parameters: vec![0],
         captures: vec![],
         body: Expression::call_runtime(runtime, vec![argument])?,
@@ -3865,7 +3865,7 @@ fn derive_printer(id: FunctionId, ty: Type, context: &mut DisplayContext<'_>) ->
         return derive_scalar_printer(id, ty);
     }
     let value = context.format(Expression::Variable { id: 0, ty: ty.clone() })?;
-    Ok(Function { id, name: format!("print_{ty:?}"), signature: Signature { parameters: vec![ty], result: Type::Unit }, parameters: vec![0], captures: vec![], body: Expression::call_runtime(crate::runtime_abi::RuntimeFunction::PrintString, vec![value])? })
+    Ok(Function { id, name: format!("print_{ty:?}"), signature: Signature { parameters: vec![ty], result: Type::Void }, parameters: vec![0], captures: vec![], body: Expression::call_runtime(crate::runtime_abi::RuntimeFunction::PrintString, vec![value])? })
 }
 
 struct DisplayContext<'a> {
@@ -3960,7 +3960,7 @@ fn display_value(value: Expression, context: &mut DisplayContext<'_>) -> Result<
         Type::Float => RuntimeFunction::CanonicalFloat,
         Type::Char => RuntimeFunction::QuoteChar,
         Type::Bool => return branch(value, text("true"), text("false")),
-        Type::Unit => return Ok(text("()")),
+        Type::Void => return Ok(text("()")),
         Type::Data(name, parameters) if name == "List" && parameters.len() == 1 => {
             return display_list(value, parameters[0].clone(), context);
         }

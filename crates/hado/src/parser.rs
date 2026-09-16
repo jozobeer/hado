@@ -81,7 +81,7 @@ pub enum NodeKind {
     Char(char),
     Str(String),
     Bool(bool),
-    Unit,
+    Void,
     Name(String),
     Neg(Box<Node>),
     Not(Box<Node>),
@@ -1573,7 +1573,7 @@ impl Parser<'_> {
                 | TokKind::Str(_)
                 | TokKind::True
                 | TokKind::False
-                | TokKind::Unit
+                | TokKind::Void
                 | TokKind::LParen
                 | TokKind::LBrace
                 | TokKind::LBracket
@@ -1626,9 +1626,9 @@ impl Parser<'_> {
                 self.bump();
                 NodeKind::Bool(false)
             }
-            TokKind::Unit => {
+            TokKind::Void => {
                 self.bump();
-                NodeKind::Unit
+                NodeKind::Void
             }
             TokKind::KwFn => return self.parse_fun(),
             TokKind::KwResume => {
@@ -1700,8 +1700,8 @@ impl Parser<'_> {
             self.bump();
             return Ok(Node { kind: NodeKind::NamedConstructor(DeclaredName { name, span }, self.parse_record_fields()?), span });
         }
-        if name == "Ok" && self.kind() == &TokKind::Unit {
-            let unit = Node { kind: NodeKind::Unit, span: self.span() };
+        if name == "Ok" && self.kind() == &TokKind::Void {
+            let unit = Node { kind: NodeKind::Void, span: self.span() };
             self.bump();
             return Ok(Node { kind: NodeKind::Apply(Box::new(node), vec![unit]), span });
         }
@@ -1709,7 +1709,7 @@ impl Parser<'_> {
             self.bump();
             let mut args = Vec::new();
             if self.kind() == &TokKind::RParen && name == "Ok" {
-                let unit = Node { kind: NodeKind::Unit, span: self.span() };
+                let unit = Node { kind: NodeKind::Void, span: self.span() };
                 self.bump();
                 return Ok(Node { kind: NodeKind::Apply(Box::new(node), vec![unit]), span });
             }
@@ -2336,7 +2336,7 @@ pub fn canonical(node: &Node) -> String {
         NodeKind::Char(c) => source_print::literal(&c.to_string(), '\''),
         NodeKind::Str(s) => source_print::literal(s, '"'),
         NodeKind::Bool(b) => b.to_string(),
-        NodeKind::Unit => "()".to_string(),
+        NodeKind::Void => "()".to_string(),
         NodeKind::Name(n) => n.clone(),
         NodeKind::Neg(c) => format!("(-{})", canonical(c)),
         NodeKind::Not(c) => format!("(not {})", canonical(c)),

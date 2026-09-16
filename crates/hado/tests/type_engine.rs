@@ -86,8 +86,8 @@ fn failed_unification_does_not_leave_partial_substitutions() {
     use hado::types::{Inference, Ty, TypeError};
     let mut inference = Inference::default();
     let variable = inference.fresh();
-    let left = Ty::fn_of(vec![variable.clone(), Ty::Bool], Ty::Unit);
-    let right = Ty::fn_of(vec![Ty::Int, Ty::String], Ty::Unit);
+    let left = Ty::fn_of(vec![variable.clone(), Ty::Bool], Ty::Void);
+    let right = Ty::fn_of(vec![Ty::Int, Ty::String], Ty::Void);
     assert_eq!(inference.unify(&left, &right), Err(TypeError::Mismatch));
     assert_eq!(inference.resolve(&variable), variable);
     inference.unify(&variable, &Ty::Float).unwrap();

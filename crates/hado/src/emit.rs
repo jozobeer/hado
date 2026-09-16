@@ -329,7 +329,7 @@ fn build_mono_expr(
         Expression::Constant(Constant::Int(value)) => builder.ins().iconst(clif_types::I64, *value),
         Expression::Constant(Constant::Bool(value)) => builder.ins().iconst(clif_types::I8, i64::from(*value)),
         Expression::Constant(Constant::Char(value)) => builder.ins().iconst(clif_types::I32, i64::from(*value as u32)),
-        Expression::Constant(Constant::Unit) => builder.ins().iconst(clif_types::I64, 0),
+        Expression::Constant(Constant::Void) => builder.ins().iconst(clif_types::I64, 0),
         Expression::Constant(Constant::Float(value)) => builder.ins().f64const(*value),
         Expression::Variable { id, .. } => *variables.get(id).ok_or("unknown IR variable")?,
         Expression::Let { id, value, body } => {

@@ -11,7 +11,7 @@ fn scalar_widths_follow_the_plan() {
         (Type::Float, MachineType::F64),
         (Type::Bool, MachineType::I8),
         (Type::Char, MachineType::I32),
-        (Type::Unit, MachineType::I64),
+        (Type::Void, MachineType::I64),
         (Type::String, MachineType::Pointer),
     ] {
         assert_eq!(machine_type(&ty, &checked).unwrap(), expected);

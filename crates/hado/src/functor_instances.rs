@@ -289,7 +289,7 @@ impl Instance<'_> {
                 }
                 self.optional_node(fallback);
             }
-            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Unit | NodeKind::Name(_) | NodeKind::Resume => {}
+            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Void | NodeKind::Name(_) | NodeKind::Resume => {}
             NodeKind::With { args, body, .. } => {
                 for arg in args { self.node(arg); }
                 self.node(body);

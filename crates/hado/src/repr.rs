@@ -11,7 +11,7 @@ pub enum MachineType {
 
 pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String> {
     Ok(match ty {
-        Type::Int | Type::Unit => MachineType::I64,
+        Type::Int | Type::Void => MachineType::I64,
         Type::Float => MachineType::F64,
         Type::Bool => MachineType::I8,
         Type::Char => MachineType::I32,

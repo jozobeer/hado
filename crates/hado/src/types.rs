@@ -9,7 +9,7 @@ pub enum Ty {
     Char,
     String,
     Bytes,
-    Unit,
+    Void,
     Var(u32),
     Fn(Vec<Ty>, Box<Ty>, Box<Row>),
     Adt(String, Vec<Ty>),
@@ -27,7 +27,7 @@ pub fn builtin_type(name: &str) -> Option<Ty> {
         "Char" => Ty::Char,
         "String" => Ty::String,
         "Bytes" => Ty::Bytes,
-        "Unit" => Ty::Unit,
+        "Unit" => Ty::Void,
         _ => return None,
     })
 }
@@ -634,7 +634,7 @@ impl std::fmt::Display for Ty {
             Ty::Char => write!(f, "Char"),
             Ty::String => write!(f, "String"),
             Ty::Bytes => write!(f, "Bytes"),
-            Ty::Unit => write!(f, "Unit"),
+            Ty::Void => write!(f, "Unit"),
             Ty::Error => write!(f, "Error"),
             Ty::Adt(name, args) | Ty::Abstract(name, args) => {
                 let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
@@ -690,7 +690,7 @@ impl Printer {
             Ty::Char => "Char".into(),
             Ty::String => "String".into(),
             Ty::Bytes => "Bytes".into(),
-            Ty::Unit => "Unit".into(),
+            Ty::Void => "Unit".into(),
             Ty::Error => "Error".into(),
             Ty::Adt(name, args) | Ty::Abstract(name, args) => {
                 let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
