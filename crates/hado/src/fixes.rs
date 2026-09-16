@@ -151,7 +151,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E502" | "E503" | "E504" | "E506" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E502" | "E503" | "E504" | "E506" | "E511" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -491,6 +491,95 @@ fn identity_let_fix(
         end: body_end,
         canonical: flatten(&text),
         replacement: text,
+    })
+}
+
+fn literal_pattern_fix(
+    node: &Node,
+    arms: &[(Node, Node)],
+    fallback: Option<&Node>,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    if arms.is_empty() || fallback.is_none() {
+        return None;
+    }
+    let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    if start >= end || end > source.len() || source[start..end].contains("//") {
+        return None;
+    }
+    let mut name: Option<String> = None;
+    let mut cuts: Vec<(usize, usize)> = Vec::new();
+    for (cond, body) in arms {
+        let cond_start = lines.offset(source, cond.span);
+        let body_start = lines.offset(source, body.span);
+        if cond_start < start || body_start <= cond_start || body_start > end {
+            return None;
+        }
+        let segment = &source[cond_start..body_start];
+        let eq = match segment.find("==") {
+            Some(eq) => eq,
+            None => {
+                return None;
+            }
+        };
+        let lhs = segment[..eq].trim();
+        if lhs.is_empty() || !lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return None;
+        }
+        match &name {
+            None => name = Some(lhs.to_string()),
+            Some(seen) => {
+                if seen != lhs {
+                    return None;
+                }
+            }
+        }
+        let after = &segment[eq + 2..];
+        let spaces = after.len() - after.trim_start().len();
+        cuts.push((cond_start, cond_start + eq + 2 + spaces));
+    }
+    let name = name?;
+    let first = cuts[0].0;
+    let head = source[start..first].trim_end();
+    let head = head.strip_suffix('|').map(|h| h.trim_end()).unwrap_or(head);
+    if !head.starts_with("def ") {
+        return None;
+    }
+    let prefix = match head.strip_suffix(name.as_str()) {
+        Some(prefix) if prefix.ends_with(|c: char| c.is_whitespace()) => prefix.trim_end(),
+        _ => {
+            return None;
+        }
+    };
+    if prefix.len() + 1 >= head.len() {
+        return None;
+    }
+    let line_start = source[..first].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let mut replacement = String::new();
+    replacement.push_str(prefix);
+    replacement.push('\n');
+    replacement.push_str(&source[line_start..first]);
+    let mut cursor = first;
+    for (cut_start, cut_end) in cuts {
+        if cut_start < cursor || cut_end > end {
+            return None;
+        }
+        replacement.push_str(&source[cursor..cut_start]);
+        cursor = cut_end;
+    }
+    replacement.push_str(&source[cursor..end]);
+    Some(Fix {
+        code: "E511",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
     })
 }
 
@@ -1101,6 +1190,20 @@ fn walk_node(
             walk_node(cond, source, lines, tokens, index, branches, found);
             walk_node(then, source, lines, tokens, index, branches, found);
             walk_node(els, source, lines, tokens, index, branches, found);
+        }
+        NodeKind::CondBranch { arms, fallback, .. } => {
+            if let Some(fix) =
+                literal_pattern_fix(node, arms, fallback.as_deref(), source, lines, tokens, index, branches)
+            {
+                found.push(fix);
+            }
+            for (cond, body) in arms {
+                walk_node(cond, source, lines, tokens, index, branches, found);
+                walk_node(body, source, lines, tokens, index, branches, found);
+            }
+            if let Some(fallback) = fallback {
+                walk_node(fallback, source, lines, tokens, index, branches, found);
+            }
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
             if let Some(fix) = catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index) {
