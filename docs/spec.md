@@ -1063,6 +1063,10 @@ fallbackのcanonical formは、
 
 `()` はパターンではない。Unit の値は名前か `_` で受ける。
 
+fallback の canonical form は、書き換えの対象でもある。
+
+catch-all の `_` を使った腕 `| _ => body` は `| body` に書き換える。`=>` の後ろのコメントは消す範囲の外なので残る。この書き換えは `check --fix`、`hado fmt`、`build --fix` が同じ表で使う（第57節、第58.1節）。
+
 ## 30. 分岐のネスト禁止
 
 branch expressionの内部にbranch expressionを書くことは禁止する（E101）。

@@ -120,3 +120,4 @@
 | §38 | handler を使うのは `with` に名前を書くとき。宣言された handler は腕が辿る先と同じく根である | 冗長 | E513 | `verify-r59.sh`（59-b / 59-d） |
 | §15.1 | E305 の 2 形。役割が確定する箇所は expected/found と、書かれている期待の位置 | 型 | E305 | `verify-r60.sh`（60-a / 60-b / 60-c / 60-d / 60-e）、`verify-r56.sh`（56-a / 56-b / 56-c / 56-d） |
 | §56 | E305 の関連位置のラベルは `expected here` | 型 | E305 | `verify-r60.sh`（60-a / 60-b）、`verify-r56.sh`（56-d） |
+| §29 | catch-all の `_` の腕は fallback の正準形 `\| body` に書き換える | 冗長 | E503 | `verify-r62.sh`（62-a / 62-b / 62-d） |
