@@ -191,6 +191,15 @@ accepted(project(root, 'optype', {'main.hd': only}, 'check'))
 control = f'type {ty} = | Mk(Int)\ndef main = ()\n'
 found = diagnostic(project(root, 'optype-control', {'main.hd': control}, 'check'), 'E513')
 assert anchor(found) == ('main.hd', *position(control, f'type {ty}')), found
+
+# (3) 効果行に現れるだけでも効果は使われる（tests/reject/E522 が要求する）。
+# 効果が使われていれば、報告されるのは行の重複の E522 であって E513 ではない。
+row = (f'effect {effect}\n'
+       f'once {op}: Int\n'
+       f'def g (x: Int): Int {{{effect}, {effect}}} => x\n'
+       f'def main = g 1\n')
+found = diagnostic(project(root, 'row', {'main.hd': row}, 'check'), 'E522')
+assert anchor(found) == ('main.hd', *position(row, effect, 3)), found
 print('operation: a reference uses the effect, and its types come along')
 PY
 }
