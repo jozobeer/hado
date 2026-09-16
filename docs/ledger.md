@@ -3937,3 +3937,7 @@ PASSED: 5/5
 ### R68 の全走
 
 `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r68` は `gates-exit=0`、`TALLY: 3685/3685 passed; red: none`。`RUN: verify-r68` が層に入り、r68 の 5 つの検査が 3680 から 3685 への増分そのものである。全走の後も木は綺麗（`git status --short` 空）。同じジョブで `cargo test --offline` も走らせた（結果はジョブの出力に続く）。これで R68 を閉じる。
+
+### R68 の `cargo test`
+
+`cargo test --offline` を**終了コードを保ったまま**回した（出力は `target/cargo-test-r68.log`）。`cargo-test-exit=0`、`test result: FAILED` の行は 0 本、全ターゲットの合計は `passed=773 failed=0`。前のラウンドで `| tail -4` に終了コードを食われて未確認だった点は、これで埋まった。R68 に未確認事項は無い。
