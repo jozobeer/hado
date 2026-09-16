@@ -808,7 +808,7 @@ impl Checker<'_> {
                 let Some(annotation) = ret else { return Ok(ty); };
                 let Ty::Fn(args, result, inferred) = ty else { return Ok(ty); };
                 let expected = self.annotation(annotation, def.span)?;
-                self.unify(&result, &expected, def.span)?;
+                self.expect(&expected, &result, def.span, Some(annotation.span))?;
                 let expected_row = self.row_annotation(&annotation.effects)?;
                 self.contain_row(&inferred, &expected_row, def.span)?;
                 let row = if annotation.effects.is_some() { expected_row } else { *inferred };
@@ -1048,7 +1048,7 @@ impl Checker<'_> {
             NodeKind::BoolBranch { cond, then, els } => {
                 self.condition(cond)?;
                 let result = self.expression(then)?;
-                self.branch_result(els, &result)?;
+                self.branch_result_expect(els, &result, Some(then.span))?;
                 Ok(self.inference.resolve(&result))
             }
             NodeKind::CondBranch { arms, fallback } => self.conditions(arms, fallback.as_deref()),
@@ -1082,7 +1082,7 @@ impl Checker<'_> {
         };
         for (name, ty) in names.iter().zip(&payload) {
             let value = &fields.iter().find(|(field, _)| &field.name == name).unwrap().1;
-            self.branch_result(value, ty)?;
+            self.branch_result_expect(value, ty, None)?;
         }
         Ok(self.inference.resolve(&result))
     }
@@ -1330,7 +1330,7 @@ impl Checker<'_> {
         let row = self.inference.resolve_row(&self.eval_effects);
         self.eval_effects = saved;
         let ty = ty?;
-        self.unify(&ty, &Ty::Bool, node.span)?;
+        self.expect(&Ty::Bool, &ty, node.span, None)?;
         if row.has_known_effects() {
             return Err(self.error(node.span, Some("E308"), "effects are not allowed in branch conditions"));
         }
@@ -1343,18 +1343,41 @@ impl Checker<'_> {
         self.unify(&ty, expected, node.span)
     }
 
+    /// §15.1: at a site whose expectation is determined, the message names the
+    /// pair instead of the two types as equals. `expected_at` is where the
+    /// program spells the expectation out, for the related position (§56): the
+    /// declared return type, or the first arm of a conditional.
+    fn expect(&mut self, expected: &Ty, found: &Ty, span: Span, expected_at: Option<Span>) -> Result<(), Diagnostic> {
+        self.inference.unify(expected, found).map_err(|error| {
+            let code = match error {
+                TypeError::Mismatch => "E305",
+                TypeError::Arity => "E301",
+                TypeError::Occurs => "E306",
+            };
+            let (expected, found) = crate::types::readable_pair(expected, found);
+            let related = expected_at.filter(|at| at.line != span.line || at.col != span.col);
+            self.error_related(span, Some(code), &format!("expected {expected}, found {found}"), related)
+        })
+    }
+
+    fn branch_result_expect(&mut self, node: &Node, expected: &Ty, expected_at: Option<Span>) -> Result<(), Diagnostic> {
+        let ty = self.expression(node)?;
+        self.expect(expected, &ty, node.span, expected_at)
+    }
+
     fn conditions(
         &mut self,
         arms: &[(Node, Node)],
         fallback: Option<&Node>,
     ) -> Result<Ty, Diagnostic> {
         let result = self.inference.fresh();
+        let first = arms.first().map(|(_, body)| body.span);
         for (condition, body) in arms {
             self.condition(condition)?;
-            self.branch_result(body, &result)?;
+            self.branch_result_expect(body, &result, first)?;
         }
         if let Some(body) = fallback {
-            self.branch_result(body, &result)?;
+            self.branch_result_expect(body, &result, first)?;
         }
         Ok(self.inference.resolve(&result))
     }

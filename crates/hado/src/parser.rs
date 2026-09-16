@@ -509,6 +509,7 @@ pub struct Related {
 fn related_label(code: &str) -> Option<&'static str> {
     match code {
         "E205" => Some("first declared"),
+        "E305" => Some("expected here"),
         "E602" => Some("declared in the contract"),
         _ => None,
     }
