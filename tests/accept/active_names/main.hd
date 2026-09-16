@@ -7,4 +7,4 @@ def active_names users =>
   users
   |> List.filter fn(user => user.active)
   |> List.map fn(user => user.name)
-def main = List.length (active_names [{ name = "a"; active = true }])
+def main = [{ name = "a"; active = true }] |> active_names |> List.length

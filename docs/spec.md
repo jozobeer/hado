@@ -2220,19 +2220,19 @@ as
 
 ```ocaml
 def create_user input =>
-  let parsed = parse input ->
-  do validate parsed ->
-  do authorize parsed ->
-  save parsed
+  let parsed = input |> parse ->
+  do parsed |> validate ->
+  do parsed |> authorize ->
+  parsed |> save
 ```
 
 値を返さない処理：
 
 ```ocaml
 def delete_user id =>
-  let user = find_user id ->
-  do authorize_delete user ->
-  delete user
+  let user = id |> find_user ->
+  do user |> authorize_delete ->
+  user |> delete
 ```
 
 失敗を値へ変える処理：
@@ -2244,7 +2244,7 @@ return value => Some(value)
 
 def try_create input =>
   with ToOption ->
-  create_user input
+  input |> create_user
 ```
 
 ADT分岐：
@@ -2319,7 +2319,7 @@ Functor：
 ```ocaml
 implement Store as MakeStore(Id: UserId)
 type T = Payload { id: Id.T; name: String }
-def create name number => Payload { id = Id.make number; name = name }
+def create name number => Payload { id = number |> Id.make; name = name }
 
 implement Store as PlainStore = MakeStore(IntId)
 ```

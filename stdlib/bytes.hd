@@ -6,25 +6,25 @@ def to_list(bytes: Bytes): Int List Pure
 def to_string(bytes: Bytes): String {Error}
 def of_string(value: String): Bytes Pure
 implement Bytes as Bytes
-def length bytes => __bytes_length bytes
+def length bytes => bytes |> __bytes_length
 def get bytes index =>
-  if index >= 0 && index < __bytes_length bytes
-    => __bytes_get bytes index
-    | raise { message = "IndexOutOfRange" }
+  if index >= 0 && index < (bytes |> __bytes_length)
+    => bytes |> __bytes_get index
+    | { message = "IndexOutOfRange" } |> raise
 def of_list values =>
-  if range_ok values
-    => build values 0 (__bytes_alloc (List.length values))
-    | raise { message = "ByteOutOfRange" }
-def to_list bytes => elements bytes 0 (__bytes_length bytes)
+  if values |> range_ok
+    => values |> build 0 (values |> List.length |> __bytes_alloc)
+    | { message = "ByteOutOfRange" } |> raise
+def to_list bytes => bytes |> elements 0 (bytes |> __bytes_length)
 def to_string bytes =>
-  if __bytes_is_utf8 bytes
-    => __bytes_to_string_unchecked bytes
-    | raise { message = "InvalidUtf8" }
-def of_string value => __bytes_of_string value
-def range_ok values => List.fold values true fn(ok, value => ok && value >= 0 && value <= 255)
+  if bytes |> __bytes_is_utf8
+    => bytes |> __bytes_to_string_unchecked
+    | { message = "InvalidUtf8" } |> raise
+def of_string value => value |> __bytes_of_string
+def range_ok values => values |> List.fold true fn(ok, value => ok && value >= 0 && value <= 255)
 def rec build values index target =>
   if values
   | [] => target
-  | [head, ...tail] => build tail (index + 1) (__bytes_fill_unchecked target index head)
+  | [head, ...tail] => tail |> build (index + 1) (target |> __bytes_fill_unchecked index head)
 def rec elements bytes index count =>
-  if index >= count => [] | [__bytes_get bytes index, ...elements bytes (index + 1) count]
+  if index >= count => [] | [bytes |> __bytes_get index, ...bytes |> elements (index + 1) count]

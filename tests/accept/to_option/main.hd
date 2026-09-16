@@ -3,5 +3,5 @@
 handler Error as ToOption
 abort raise _ => None
 return value => Some(value)
-def go (n: Int): Int {Error} => if n > 0 => n | raise { message = "neg" }
-def main = with ToOption -> go 5
+def go (n: Int): Int {Error} => if n > 0 => n | { message = "neg" } |> raise
+def main = with ToOption -> 5 |> go

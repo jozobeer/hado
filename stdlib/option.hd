@@ -5,7 +5,7 @@ def A unwrap_or(value: A Option, fallback: A): A Pure
 def A is_some(value: A Option): Bool Pure
 def A ok_or(value: A Option, error: Exception): A {Error}
 implement Option as Option
-def map value f => let x? = value -> Some(f x)
+def map value f => let x? = value -> Some(x |> f)
 def unwrap_or value fallback => if value | Some(x) => x | None => fallback
 def is_some | Some(_) => true | None => false
-def ok_or value error => if value | Some(x) => x | raise error
+def ok_or value error => if value | Some(x) => x | error |> raise

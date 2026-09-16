@@ -1,17 +1,19 @@
 def last_passed lines =>
-  Option.ok_or
-    (List.fold lines None fn(selected, line =>
-      if String.starts_with line "PASSED: " => Some(line) | selected))
-    { message = "InvalidLine" }
+  lines
+  |> List.fold None fn(selected, line =>
+    if line |> String.starts_with "PASSED: " => Some(line) | selected)
+  |> Option.ok_or { message = "InvalidLine" }
 
 def read_report directory name =>
-  let path = String.concat directory (String.concat "/" name) ->
-  let line = last_passed (String.split (Bytes.to_string (read_file path)) "\n") ->
-  report::Report.parse_line (String.concat name (String.concat " " line))
+  let path = directory |> String.concat ("/" |> String.concat name) ->
+  let line = path |> read_file |> Bytes.to_string |> String.split "\n" |> last_passed ->
+  name |> String.concat (" " |> String.concat line) |> report::Report.parse_line
 
 def summarize directory =>
-  List.fold (read_dir directory) report::Report.empty fn(tally, name =>
-    report::Report.merge tally (read_report directory name))
+  directory
+  |> read_dir
+  |> List.fold report::Report.empty fn(tally, name =>
+    tally |> report::Report.merge (directory |> read_report name))
 
 def choose (tally: report::Report.T): report::Report.T =>
   if tally.passed >= 0 => tally
@@ -19,5 +21,5 @@ def choose (tally: report::Report.T): report::Report.T =>
 
 def main =
   if args
-  | [directory, ..._] => report::Report.render (choose (summarize directory))
-  | [] => raise { message = "MissingDirectory" }
+  | [directory, ..._] => directory |> summarize |> choose |> report::Report.render
+  | [] => { message = "MissingDirectory" } |> raise

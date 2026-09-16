@@ -9,31 +9,31 @@ def contains(s: String, part: String): Bool Pure
 def join(values: String List, separator: String): String Pure
 def trim(s: String): String Pure
 implement String as String
-def length value => __string_length value
-def concat left right => __string_concat left right
+def length value => value |> __string_length
+def concat left right => left |> __string_concat right
 def slice s start end =>
-  if start >= 0 && start <= end && end <= length s
-    => __string_slice s start end
-    | raise { message = "IndexOutOfRange" }
+  if start >= 0 && start <= end && end <= (s |> length)
+    => s |> __string_slice start end
+    | { message = "IndexOutOfRange" } |> raise
 def get s index =>
-  if index >= 0 && index < length s
-    => __string_get s index
-    | raise { message = "IndexOutOfRange" }
+  if index >= 0 && index < (s |> length)
+    => s |> __string_get index
+    | { message = "IndexOutOfRange" } |> raise
 def split s separator =>
-  if length separator == 0
-    => raise { message = "EmptySeparator" }
-    | split_from s separator 0 (length separator) (length s)
+  if (separator |> length) == 0
+    => { message = "EmptySeparator" } |> raise
+    | s |> split_from separator 0 (separator |> length) (s |> length)
 def rec split_from(s: String, separator: String, start: Int, width: Int, count: Int): String List {Error} =>
-  let found = __string_find s separator start ->
+  let found = s |> __string_find separator start ->
   if found < 0
-    => [slice s start count]
-    | [slice s start found, ...split_from s separator (found + width) width count]
+    => [s |> slice start count]
+    | [s |> slice start found, ...s |> split_from separator (found + width) width count]
 def starts_with s prefix =>
-  length prefix <= length s && __string_slice s 0 (length prefix) == prefix
-def contains s part => length part == 0 || __string_find s part 0 >= 0
+  (prefix |> length) <= (s |> length) && (s |> __string_slice 0 (prefix |> length)) == prefix
+def contains s part => (part |> length) == 0 || (s |> __string_find part 0) >= 0
 def rec join values separator =>
   if values
   | [] => ""
   | [value] => value
-  | [head, ...tail] => concat head (concat separator (join tail separator))
-def trim s => __string_trim s
+  | [head, ...tail] => head |> concat (separator |> concat (tail |> join separator))
+def trim s => s |> __string_trim

@@ -1,30 +1,30 @@
 // spec: §58.4
 def code_of line =>
-  let after = Option.unwrap_or (List.nth (String.split line "\"code\": \"") 1) "" ->
-  Option.unwrap_or (List.head (String.split after "\"")) ""
+  let after = line |> String.split "\"code\": \"" |> List.nth 1 |> Option.unwrap_or "" ->
+  after |> String.split "\"" |> List.head |> Option.unwrap_or ""
 
-def same_code line code => code_of line == code
+def same_code line code => (line |> code_of) == code
 
-def count_of lines code => List.length (List.filter lines fn(line => same_code line code))
+def count_of lines code => lines |> List.filter fn(line => line |> same_code code) |> List.length
 
 def rec summarize lines seen =>
   if lines
     | [] => ""
-    | [line, ...rest] => summarize_one line lines rest seen
+    | [line, ...rest] => line |> summarize_one lines rest seen
 
 def rec summarize_one line lines rest seen =>
-  let code = code_of line ->
-  if code == "" => summarize rest seen | emit code lines rest seen
+  let code = line |> code_of ->
+  if code == "" => rest |> summarize seen | code |> emit lines rest seen
 
 def rec emit code lines rest seen =>
-  let known = List.length (List.filter seen fn(one => one == code)) ->
-  if known == 0 => line_for code lines rest seen | summarize rest seen
+  let known = seen |> List.filter fn(one => one == code) |> List.length ->
+  if known == 0 => code |> line_for lines rest seen | rest |> summarize seen
 
 def rec line_for code lines rest seen =>
-  let body = String.concat code " " ->
-  let body = String.concat body (Int.to_string (count_of lines code)) ->
-  String.concat body (String.concat "\n" (summarize rest [code, ...seen]))
+  let body = code |> String.concat " " ->
+  let body = body |> String.concat (lines |> count_of code |> Int.to_string) ->
+  body |> String.concat ("\n" |> String.concat (rest |> summarize [code, ...seen]))
 
 def main =
   let bytes = IoDefault.read_stdin ->
-  IoDefault.log (summarize (String.split (Bytes.to_string bytes) "\n") [])
+  bytes |> Bytes.to_string |> String.split "\n" |> summarize [] |> IoDefault.log
