@@ -104,7 +104,7 @@ assert b'is not canonical (2 rewrites)' in result.stdout, result.stdout
 assert source_of(sys.argv[1], 'a') == TAB, 'fmt --check must not write'
 result = run(sys.argv[1], 'a', TAB, 'fmt')
 assert result.returncode == 0 and result.stderr == b'', (result.returncode, result.stderr)
-assert b'fmt: a (2 rewrites)' in result.stdout, result.stdout
+assert b'fmt: main.hd (2 rewrites)' in result.stdout, result.stdout
 text = source_of(sys.argv[1], 'a')
 assert text == FIXED, (repr(text), repr(FIXED))
 result = run(sys.argv[1], 'a', FIXED, 'fmt')
