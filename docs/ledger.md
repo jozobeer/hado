@@ -4259,3 +4259,18 @@ PASSED: 4/5
 70-e だけが赤で、これは層・系譜・手順書を書く前の実測（R68/R69 と同じ順序）。期待値は門番が JSON を python で独立に数えて導き、道具の出力と整列して比べる。**ファイル名も件数も判定器に書いていない。** 層 `full` への `r70` 登録は済み（70-e の不足が `tier trace plan` から `trace plan` に減って確認できた）。
 
 **`docs/spec-trace.md` と `docs/plan.md` への追記は失敗した。** 前ラウンドで記録した §42 の行をそのまま锚に使ったが一致しなかった（空白か記号の差）。次は行の全文ではなく `verify-r69.sh` のような一意な部分文字列で探し、その行の直後に挿入する。`## 65.` も同時に書く。**木を中途半端に汚さないため、門番と層の登録だけをコミットし、残りは次の 1 回で書く。**
+
+## R70 の締め（5/5）
+
+`docs/spec-trace.md` に §58.4 の行を入れ（`verify-r69.sh` を部分文字列に持つ行の直後）、`docs/plan.md` に `## 65.` を書いた。1 ファイルずつ、失敗しても他を止めない形にしたのが効いて、両方とも 1 回で入った。
+
+```
+$ bash scripts/lint-docs.sh
+PASSED: 7/7
+$ bash scripts/verify-r70.sh
+OK: 70-d no diagnostics prints nothing
+OK: 70-e tier, trace, plan, corpus lock
+PASSED: 5/5
+```
+
+R70 の成果: `tools/diagnostics/main.hd`（Hado で書いた、診断 JSON を標準入力から読みコードごとに数える道具）、`scripts/verify-r70.sh`（期待値を JSON から独立に導く 5 つの検査）、層 `full` への `r70` 登録、系譜 1 行、手順書 `## 65.`。優先順位 2 の「実プログラムを一本運用する」が、`hado run` で 1 本動くところまで来た。

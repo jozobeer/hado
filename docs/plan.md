@@ -5778,3 +5778,39 @@ $ hado check main.hd         → check=0
 
 - 生成した形が E507 を出し、条件ごと畳むと本体の効果の順序が変わり得るとき。
 - 影の判定が構文だけでは決まらないとき。
+
+## 65. R70: 診断を JSON で読む小さな道具
+
+### 背景
+§58.4 の `--format json` を、Hado で書いた道具から実際に読む。優先順位 2（`hado run` で実プログラムを一本運用し、不足だけを次に足す）の最初の 1 本。E502（R69）は材料と設計を台帳に残して Park する。
+
+### 実測した材料
+- `tools/gates/main.hd`（23 行）: `read_file` / `Bytes.to_string` / `String.split` / `String.concat` / `String.starts_with` / `Option.ok_or` / `List.fold` / `read_dir` / `let x = e ->` / `if c => a | b` / 兄弟ディレクトリのモジュール。
+- `stdlib/list.hd`: `nth` / `head`（`Option`）、`fold` / `filter` / `length`、リストパターン `[head, ...tail]`、`def rec`。
+- `stdlib/option.hd`: `unwrap_or`。`stdlib/io.hd`: `IoDefault.read_stdin` / `log`。
+- `--format json`: 1 行 1 件、`"code": "E502"` の形（`:` と `,` の後に空白）。
+- コンパイラが教えた 5 つ: E100（`module` 行があると `def` に注釈が要る）、E105（タプルは式にできない）、E101（枝は入れ子にできない）、E208（相互再帰は全部に `rec`）、E303（`let p? =` は `Option` 用、`{Error}` は素の `let`）。
+
+### 決定
+標準入力から JSON を読み、コードごとの件数を `CODE n` で出す。組は持たず「まだ印字していないコードか」で 1 回だけ印字する。枝ごとに関数を分ける。
+
+### 期待値の根拠
+門番は JSON を python で独立に数え、道具の出力（整列済み）と比べる。ファイル名も件数も判定器に書かない。
+
+### 成果物
+`tools/diagnostics/main.hd`、`scripts/verify-r70.sh`、層 `full` への `r70` 登録、`docs/spec-trace.md` の行。
+
+### 工程
+0. 材料の実測（済）1. 初稿を `check` に掛ける（済）2. コンパイラが教えた 5 つを直す（済）3. 走らせて `E502 1`（済）4. 門番 5/5 5. 台帳と全走。
+
+### 判定
+`bash scripts/verify-r70.sh` が `PASSED: 5/5`。
+
+### 許容される赤
+70-e は層・系譜・手順書を書くまで赤（実測済み）。
+
+### スコープ外
+合計件数・ファイルごとの内訳・`canonical` が `null` でない診断の一覧は、**使ってから**足す。CLI の終了コードは wants 25 で別。
+
+### 中断の条件
+`hado run` が道具を走らせられない、または `--format json` の形が仕様と食い違うとき。
