@@ -4791,3 +4791,15 @@ def f
 
 ### 全走
 次のラウンドで層別と `cargo test` を 1 回回して記録する。
+
+### R74 の全走
+
+```
+TALLY: 3715/3715 passed; red: none
+gates-exit=0
+cargo-test-exit=0
+FAILED lines 0
+passed=773 failed=0
+```
+
+層別は 71 本・検査 3715 で**赤ゼロ**（`r74` の 5 検査が加わった回。E511 の変更が他の門番の前提を上書きしていないことを `red:` 欄で確認した）。
