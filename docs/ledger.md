@@ -3837,4 +3837,4 @@ $ hado run main.hd
 
 ### 見つけた摩擦
 
-- **報告の癖。** `git status --short` のあとに無条件で `(clean)` と出していたため、実際には `fixture` と `ordinary` が未追跡で残っているのに「clean」と報告していた（R67 の門番を回す前の時点で既に残っていた）。中身は `hado build` の副産物（ELF 実行ファイル）で、`-o` を付けずに入力の隣へ書いたものである。削除し、以後は空のときだけ `(clean)` と出す。
+- **報告の癖。** `git status --short` のあとに無条件で `(clean)` と出していたため、実際には `fixture` と `ordinary` が未追跡で残っているのに「clean」と報告していた（R67 の門番を回す前の時点で既に残っていた）。中身は `fixture` が `roundtrip`（9 バイト）、`ordinary` が `file`（4 バイト）のテキストで、ELF ではなかった。`crates/hado/tests/corpus.rs:96` が `std::fs::write(work.join("fixture"), contents)` で書いており、`cargo test` が作業ディレクトリ（リポジトリの根）に残すものである（`ordinary` を書く箇所は見つけていない）。削除した。以後は空のときだけ `(clean)` と出す。
