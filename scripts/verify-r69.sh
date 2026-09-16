@@ -49,7 +49,8 @@ def check(name, fn):
         print('NG: %s (%s)' % (name, str(exc)[:240]))
 
 
-E502 = '// spec: §42\n// error: E502\ndef f x =>\n  if x > 1 => 1 | 1\ndef main = f 1\n'
+# The sample is the corpus fixture itself, so there is one source of truth.
+E502 = Path('tests/reject/E502/main.hd').read_text()
 # The expectation is derived from the source: the common branch body.
 body = E502.split('=> ', 1)[1].split(' | ', 1)[0].strip()
 PLAIN = 'def f x =>\n  %s\ndef main = f 1\n' % body
