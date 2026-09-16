@@ -4642,3 +4642,89 @@ R46・R47 が §57 の局所的な書き換え（E501 / E510 / E515 / E516 / E51
 **テストの合否に新しい言語意味（診断コード、`main` の型の特別扱い、マクロ）が要るなら、止めて報告せよ。**
 
 **`hado run` の既存の振る舞い（終了コード、stderr、`--` の引数）が変わるなら、止めて報告せよ。**
+
+## 51. R55 `--print-type` を任意の `def` に広げる手順書（2026-09-16）
+
+### 背景
+
+`wants.md` の 12（高）が「`--print-type` を任意の `def` に。効果が型に載るので `main` だけでは足りない」としている。`hado check --print-type` はいま `checked.main` の型と効果行だけを印字する（§58、R18）。効果行が編集の主な関心である以上、`main` 以外の `def` の推論結果を見る手段が要る。
+
+`Checked` には既に `definitions`（入口ファイルの外の `def`）と `module_definitions`（実装の member）があり、`Scheme` を持っている。足りないのは (1) 名前で引く道、(2) **全称量化された変数の読みやすい印字**である。推論の変数は内部の番号（`t902`）なので、そのままでは読めない。
+
+### 実測した材料
+
+| 形 | いまの `--print-type` |
+|---|---|
+| `def main = 42` | `Int` |
+| `def reader (path: String): String {Error} => path` を `main` から使う | `String {Error}`（`main` の型） |
+| `--print-type=<名前>` | 無い（`--print-type=<名前>` は usage、終了 2） |
+
+`Checked` の鍵の綴りは実測した（一時的な印字で確認）。入口ファイルは `parse_files` が `isolate(ast, 0)` を呼ぶので常に file 0 である。したがって入口ファイルの外の `def` は `main` だけが `main`、それ以外は `file0$<名前>` で入る。実装の member は `lib::Util.helper` や `List.map` のような利用者に見える綴りで `module_definitions` に入る。
+
+### 決定
+
+- **決定 1: `hado check --print-type=<名前> <file.hd>` を足す。** 名前は入口ファイルの外の `def`、または実装の member（`lib::Util.helper`）。`--print-type`（値を付けない形）は今までどおり `main` の型を印字し、振る舞いを変えない。
+- **決定 2: 変数を `A`, `B`, …, `Z`, `A1`, `B1`, … と出現順に改名する。** 同じ型が同じ文字列になる（印字が決定的になる）。§16 の字句のとおり型変数は大文字で書くので、その綴りに合わせる。
+- **決定 3: 効果行は §20 の印字に、行変数があれば `| A` の形で足す。** 既知のラベルはアルファベット順（§20 のまま）で、開いた行は `{Io | A}`、ラベルが無ければ `{A}` と出す。行変数を隠すと効果多相の型が `Pure` に見えて嘘になるためである。
+- **決定 4: `Ty` 自身の印字（`--print-type` の `main` と診断）は変えない。** 行変数を隠す今の規則のままとし、E305 の `t902` を読める形にするのは別の回（`wants.md` の 3）にする。決定 3 の印字は**定義の型**（`Scheme`）のためのものである。
+- **決定 5: 名前が見つからないときは `check: no definition named <名前> in <入力>` を標準エラーに出して終了 1。** 診断コードは足さない。空の名前（`--print-type=`）は usage（終了 2）。
+- **決定 6: ライブラリ検査でも名前付きなら印字する。** `--print-type` がライブラリで何も印字しない R32 の規則は、値を付けない形のままにする。
+- **決定 7: 仕様は `## 58.3. 定義の型の印字` を §58.2 の直後に足す。** §58 の命令一覧の `check` の行に `--print-type=<名前>` を足す。
+- **決定 8: 名前で引く道は 1 つにする。** `Checked::type_of(name)` が入口ファイルの `def`（`file0$` の規則は `file_scopes` に 1 つだけ置く）と実装の member を順に見る。`main.rs` に綴りの規則を漏らさない。
+
+### 期待値の根拠
+
+| 形 | 期待 | 根拠 |
+|---|---|---|
+| `def answer = 42` | `Int` | 決定 2（変数なし） |
+| `def identity x => x` | `Fn(A => A)` | 決定 2 |
+| `def reader (path: String): String {Error} => path` | `Fn(String => String {Error})` | §20 の印字 |
+| `def twice f x => f (f x)` | `Fn(Fn(A => A {B}), A => A {B})` | 決定 2、決定 3 |
+| `--print-type=main` | `--print-type` と同じバイト | 決定 1（同じ型を 2 つの道で出す） |
+| `lib::Util.helper` | `Fn(Int => Int)` | 決定 1、決定 8 |
+| 見つからない名前 | 標準エラーに 1 行、終了 1 | 決定 5 |
+
+### 成果物
+
+`docs/plan.md`（本節）、`docs/spec.md`（§58 §58.3）、`docs/spec-trace.md`、`docs/wants.md`、`docs/ledger.md`、`crates/hado/src/types.rs`、`crates/hado/src/lib.rs`、`crates/hado/src/file_scopes.rs`、`crates/hado/src/main.rs`、`scripts/verify-r55.sh`（新設）、`scripts/lib/gate-tiers.sh`。
+
+### 工程
+
+- 工程 0: 計画（本節）と材料の実測（鍵の綴りを含む）。
+- 工程 1: 判定器を足して赤を測る。
+- 工程 2: `Scheme::canonical`（改名つきの印字）と `file_scopes::entry_name`、`Checked::type_of` を足す。
+- 工程 3: `main.rs` の `--print-type=<名前>` と、仕様と追跡表と wants、層、台帳、全走。
+
+### 判定
+
+`scripts/verify-r55.sh` を新設し、54 までの門番はそのまま回す。**入力は生成し、期待値は判定器側で仕様の正準形から書く。** control を先に回す。
+
+- 判定 55-a: 値の `def` は型だけを印字する（`Int`）。
+- 判定 55-b: 多相の `def` の型変数が `A` から順に改名される（`Fn(A => A)`）。
+- 判定 55-c: 効果行付きの `def` が §20 の形で出る（`Fn(String => String {Error})`）。効果多相の `def` は行変数を `| B` で出す（`Fn(Fn(A => A {B}), A => A {B})`）。
+- 判定 55-d: 同じ `main` を 2 つの道（`--print-type=main` と `--print-type`）で出した文字列が一致する。`--print-type`（値なし）の既存の出力は変わらない。
+- 判定 55-e: 実装の member（`lib::Util.helper`）を名前で出せる。見つからない名前は標準エラーに 1 行を出して終了 1（control: `--print-type=main` はその根で成功する）。
+- 判定 55-f: 文書（§58.3 と追跡表と wants）・層の `r55`・corpus lock。
+
+### 許容される赤
+
+工程 1 の直後まで 55-a〜55-e は赤でよい（`--print-type=<名前>` が usage）。工程 3 で緑にする。**R55 の終了時に許容される赤は無い。**
+
+### スコープ外
+
+- `Ty` の印字と E305 の型の印字の改名（`wants.md` の 3）
+- 入口ファイル以外のファイルの外の `def` を無修飾の名前で引くこと（§50 のとおり外の `def` はファイル局所なので、引くなら実装の member として引く）
+- 型の印字の往復（印字した型を注釈として書き戻すこと）。§16 の型注釈は書けるが、全称量化された変数の宣言を書く構文が無い
+- `hado explain`、JSON、LSP
+
+### 確認して報告（決定から）
+
+- `--print-type`（値なし）の出力が 1 バイトも変わっていないこと（決定 1）
+- 値の `def` と多相の `def` と効果多相の `def` の印字が、同じ型に対して決定的であること（決定 2）
+- `file0$` の規則が `file_scopes` の 1 箇所にだけあること（決定 8）
+
+### 中断の条件
+
+**`--print-type`（値を付けない形）の出力が変わるなら、止めて報告せよ。**
+
+**改名の規則が §16 の字句（大文字で始まる型変数）と衝突するなら、止めて報告せよ。**
