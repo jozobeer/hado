@@ -3879,3 +3879,19 @@ E512 はこれをそのまま広げられない。`| y => y` から `y => ` を�
 したがって `check --fix` が 1 回に当てるのは **1 範囲だけ**である。E512 を「`y => ` を消す編集」と「本体の `y` を置き換える編集」の 2 つで組むと、1 回目の後に未結合の名前が残り、直したファイルが `check` を通らない（68-a が赤のまま）。**単一編集で組むのが必須**と決まる。
 
 単一編集の形は、pattern の先頭から本体の終わりまでを 1 範囲として、写した本体の名前だけを scrutinee に置き換えた文字列に差し替える。残る不明点は**ノードの終わりのオフセットの求め方**である（`LineMap` は位置からオフセットを出すが、範囲の終わりは span の終わりが要る）。同じ「枝の全体を差し替える」書き換えが既にある（E507 の `rewrap_if_fix`、R57）ので、そこから求め方を写すのが次の 1 歩である。`push_edit`（`found, code, anchor, replacement, source, lines, length`）が範囲に `//` があるとき書かない規則を持っているので、単一編集にすればその規則もそのまま使える。
+
+### R68 の実装レシピ（E507 の枝全体の書き換えから写した）
+
+`fixes.rs` の `rewrap_if_fix`（537 行）が、枝の全体を差し替える書き換えの作り方をそのまま示している。
+
+- `let scrutinee = crate::check::rewrap_branch(node)?;` で「腕が組み直している値」を取り、アーム形（`$argument`）と `fallback.is_some()` を外す。**fallback がある形を避ける**理由がコメントで書いてある（fallback は scrutinee を再評価するので、1 回に畳むと効果の回数が変わり得る）。R63 で測った「fallback 形は `fmt` が書き換えない」はこれで説明がつく。
+- **`let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;`** — 枝の全体の開始と終了のオフセットはこれで取る。`branches` は `Ast.branch_spans`（`&[(Span, Span, Span)]`）。
+- `if source[start..end].contains("//") { return None; }` — コメントを含む範囲は書かない。
+- `let replacement = parser::canonical(scrutinee);` — 差し替える文字列は正準形の印字から作る。
+- `Fix { code, line: node.span.line, col: node.span.col, start, end, replacement, canonical }` — `line` / `col` は**診断の位置**でなければならない（`fix_at` が診断の line / col で突き合わせるため）。E507 の診断は枝を指すので `node.span`、E512 の診断は pattern を指すので `pattern.span` を使う。
+
+E512 に写すとこうなる。最後の腕で、行が変数 1 つ、`fallback.is_none()`、scrutinee が `scrutinees` の 1 つで `NodeKind::Name` のときだけ対象にする。範囲は **pattern の先頭から枝の終わりまで**（腕が最後なので `branch_range(...).1` が本体の終わりになる）。差し替える文字列は、本体のソースを写して束縛の名前を scrutinee の名前に置き換えたもの。`canonical` は `"| "` にそれを足した形（E503 の `| 0` と同じ流儀）。
+
+**残っている不明点は 3 つ。** (1) `PatternKind::Name` / `NodeKind::Name` から名前の文字列を取り出す口（`rewrap_if_fix` は `name == "$argument"` と比較しているので文字列として使えるが、`Display` か field かは未確認）。(2) 本体の置き換えは**トークン単位**でやる必要がある（`y` を素朴に文字列置換すると `yx` の `y` まで置き換わる）。`tokens` と `index` が渡っているので、本体の範囲のトークンを並べ直して束縛のトークンだけ差し替える。(3) 置き換えた名前が本体で影になっていないかの判定（内側の `let` が同名を束縛する場合）を構文だけで決められるか。
+
+この 3 つは `fixes.rs` の他の書き換え（名前を読むもの、トークンを並べ直すもの）を 30 行ほど読めば決まる。次に実装に入るラウンドは、そこから始める。
