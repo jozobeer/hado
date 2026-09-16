@@ -246,28 +246,6 @@ fn catch_all_variable_fix(
     let [scrutinee] = scrutinees.as_slice() else { return None };
     let NodeKind::Name(_) = &scrutinee.kind else { return None };
     let body = &last.1;
-    // When every arm rebuilds the scrutinee, the branch is the scrutinee (§41).
-    // The arm forms carry their own rewrite, and a fallback re-evaluates the
-    // scrutinee, so those are left to the caller (§57).
-    if let Some(value) = crate::check::rewrap_branch(node) {
-        if matches!(&value.kind, NodeKind::Name(name) if name == "$argument") {
-            return None;
-        }
-        let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
-        if start >= end || source[start..end].contains("//") {
-            return None;
-        }
-        let canonical = parser::canonical(value);
-        return Some(Fix {
-            code: "E512",
-            line: pattern.span.line,
-            col: pattern.span.col,
-            start,
-            end,
-            replacement: canonical.clone(),
-            canonical,
-        });
-    }
     let start = lines.offset(source, pattern.span);
     let (_, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
     // A comment would be lost, and a `let` could bind the same name again.
@@ -303,6 +281,43 @@ fn catch_all_variable_fix(
     }
     if replacement.trim().is_empty() {
         return None;
+    }
+    // The substituted form is still redundant when every arm rebuilds the
+    // scrutinee (§41). The checker refuses to fold a fallback because it may
+    // re-evaluate the scrutinee, but this scrutinee is a plain variable, so the
+    // fold cannot change how often an effect runs. Each arm is checked here: a
+    // constructor arm must return its own pattern, a variable arm the scrutinee.
+    let scrutinee_text = parser::canonical(scrutinee);
+    let mut reconstructs = replacement.trim() == scrutinee_text.trim();
+    for (arm_patterns, arm_body) in &arms[..arms.len() - 1] {
+        reconstructs = reconstructs && arm_patterns.len() == 1;
+        if !reconstructs {
+            break;
+        }
+        let arm_pattern = &arm_patterns[0];
+        let Some(at) = index.position(arm_pattern.span) else { reconstructs = false; break };
+        let Some(next) = tokens.get(at + 1) else { reconstructs = false; break };
+        let pattern_text = source[lines.offset(source, arm_pattern.span)..lines.offset(source, next.span)].trim();
+        let body_text = parser::canonical(arm_body);
+        reconstructs = match &arm_pattern.kind {
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => body_text.trim() == pattern_text,
+            PatternKind::Name(_) | PatternKind::Underscore => body_text.trim() == scrutinee_text.trim(),
+            _ => body_text.trim() == pattern_text,
+        };
+    }
+    if reconstructs {
+        let (whole_start, whole_end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+        if whole_start < whole_end && !source[whole_start..whole_end].contains("//") {
+            return Some(Fix {
+                code: "E512",
+                line: pattern.span.line,
+                col: pattern.span.col,
+                start: whole_start,
+                end: whole_end,
+                replacement: scrutinee_text.clone(),
+                canonical: scrutinee_text,
+            });
+        }
     }
     Some(Fix {
         code: "E512",
