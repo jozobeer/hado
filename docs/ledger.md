@@ -3483,3 +3483,44 @@ R46・R47 が §57 の局所的な書き換え（E501 / E510 / E515 / E516 / E51
 - **本体でない位置の E508 の正準形は決まっていない。** §36 は `if find_user id | Some(user) => ... | None => None` を `let user? = ...` にする、と本体の形だけを書いている。本体でない分岐（`let y = if ... ->`）は伝播先が違うので同じ形にできない。`Option.map` のような別の正準形を決めるのか、そのまま許すのかは言語の判断で、実装の都合では決められない。審査の指摘が欲しい。
 - **fallback を持つ E507 の正準形も決まっていない。** §45 の canonical form は `result` だが、`| Some(x) => Some(x) | result` の形を `result` に畳むと scrutinee の評価回数が変わる。効果があるときは意味が変わるので、書き換えを出さないことにした。仕様の側で「畳まない」と書くか、正準形を別に決める必要がある。
 - **`let p? =` に置ける pattern の範囲が §36 からは読めない。** q1〜q4 の探針では `Some(Some(v))`・`P(a, b)`・record は通り、リテラルは E402 になった。E508 の書き換えはこの範囲に依存している（網羅しない pattern は元の分岐も E402 になるので実害は無い）。§35 の `let` の pattern の条件を読めば足りるかは確かめていない。
+
+## R58 E205 と E602 の関連位置（2026-09-16）
+
+### 背景と決定
+
+`wants.md` の 2（高）「関連位置。E205 の 1 回目の宣言、E602 の欠けている member。1 件報告は崩さない」。診断の中身は R46〜R57 が正準形を、R55・R56 が期待型と実型を入れた。残る 3 つ目が関連位置である。
+
+材料の実測で分かったことは 6 つ。(1) E205 の重複は 2 つの検出から出る。`ambiguous_declarations::record`（ディレクトリの名前空間）と `names.rs::register`（ファイルごとの名前空間と、式・型の中の field）で、どちらも `seen: HashSet<String>` しか持たず 1 回目の位置を捨てている。(2) ファイルをまたぐ重複は `other.hd:1:6` のように後ろのファイルを指し、1 回目は entry 側にある。(3) E602 の member の検査は `infer.rs` にあり、契約側の `declaration`（`SigDef` か `TypeDef`）を持っている。(4) 診断の座標は検査の中では全ファイルを連結した行で、`project::source_diagnostic` がパスとファイル内の行に直す。(5) prelude は利用者のソースの外に合成され、組み込み型には位置が無い。(6) 1 件報告なので行を増やせない。
+
+決定は 6 件（計画 54 節）。関連位置はメッセージの続きに `; <ラベル> at <パス>:<行>:<列>` として同じ 1 行に書き、ラベルはコードごとに 1 つ（E205 は `first declared`、E602 は `declared in the contract`）。**メッセージに混ぜず `Diagnostic` の構造として持つ**（座標を `source_diagnostic` で直すため）。E205 は重複した名前・根の名前との衝突・外側の型との衝突・`library` の重複で出し、prelude と組み込み型との衝突と `type_realizations` では出さない。E602 は契約の member の検査 5 つで、契約側の宣言を指す。
+
+### 実装
+
+`parser` に `Related { path, line, col }` と `Diagnostic::related: Option<Related>` を足した。`Display` はコードのラベルがあるときだけ続きを書き、`1 行` は崩さない。`project::source_diagnostic` は `localize(files, path, line)` を切り出し、アンカーと関連位置の両方を同じ規則でファイル内の座標に直す（`file{index}$` の印を消す処理もそのまま効く）。既存の 50 か所の `Diagnostic` の組み立てには `related: None` を機械的に足した（新しい欄の代価である）。
+
+位置を持つようにした表は 4 つ。`ambiguous_declarations` の `seen`、`names.rs` の `Declared`（`Namespaces` と型引数と field の一覧）、`namespaces` の `Symbols`、`project::library_roots` の 1 つ目の `library`。名前から `Span` への表にして、重複を見つけたときに 1 回目の位置を読む。`namespaces` では prelude と組み込み型の名前に `line: 0` の番兵を入れ、`site` がそれを落とす（利用者のソースに無い位置を出さないため）。`error_at` を足して、位置を持つ形だけが関連位置を渡す。
+
+E602 の 5 か所（欠けた member、定義の形、型、多相性、欠けた型）は `error_related` で契約側の `name_span` を渡す。契約が `.hdi` でも `source_diagnostic` がそのパスに直す。
+
+### 判定の実測
+
+- **58-a〜58-i（R58 の門番）。** `bash scripts/verify-r58.sh` は 10/10。58-a は生成した空行と字下げの下で、2 回目の宣言が 1 回目を指す。58-b は `main.hd` と `other.hd` の重複で、後ろのファイルの診断が entry を指す。58-c は値と record の field。58-d は根の名前との衝突（サブディレクトリの宣言が根を指す）と `library` の 2 つ目。58-e は `.hdi` の契約の欠けた member と型の食い違いで、`store.hdi` の member を指す。58-f は契約が entry ファイルにある形。58-g は prelude の操作名との衝突と抽象型の循環が `; ` を出さないこと。58-h は `check --fix` と `fmt` がファイルを変えないこと。58-i は §56・表の 2 行・追跡表・層・wants と corpus lock。
+- **実装前の赤。** `PASSED: 3/10`（58-g・58-h・corpus lock だけが緑）。位置を出さない形の対照と corpus lock は実装前から緑である。
+- **実測した位置。** 同一ファイルの `type Color` 2 つは `main.hd:2:6: ... duplicate declaration Color; first declared at main.hd:1:6`。ファイルをまたぐと同じメッセージで `other.hd:1:6` から `main.hd:1:6` を指す。`.hdi` の契約では `main.hd:1:1: error[E602]: missing signature member; declared in the contract at store.hdi:3:5`。根の名前との衝突は `sub/other.hd:1:6: ... declaration conflicts with root name; first declared at main.hd:1:6`。`library` の 2 つ目は `other.hd:1:1: ... duplicate library declaration; first declared at library.hd:1:1`。
+- **既存のテスト（触ったところ）。** `cargo test --offline --no-fail-fast --test corpus --test check_names --test check_modules --test r22_namespaces --test r32_library` は 14・3・4・19・15 passed、0 failed。
+- **実装の形。** 14 ファイル、203 行の追加と 106 行の削除。うち 7 ファイルは `related: None` の機械的な追加だけである。
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r58` は 56 本を走らせ、56 本のログがすべて `PASSED: n/n`、`^NG:` 0、exit 0。締めは集計自身が出した `TALLY: 3627/3627 passed; red: none`（R57 の 3617 に R58 の 10 件が加わった）。`cargo test --offline --no-fail-fast` は 773 passed、0 failed。
+
+### 迷った点
+
+- **`Diagnostic` の欄にするか、メッセージに混ぜるか。** メッセージに混ぜれば既存の 50 か所を触らずに済むが、座標を `source_diagnostic` で直せない（ファイルをまたぐと行番号が嘘になる）。欄にして、機械的に `related: None` を足す方を選んだ。新しい欄の代価が 7 ファイルの機械的な差分として見えている。
+- **位置の無い宣言の表し方。** prelude と組み込み型は利用者のソースに位置を持たない。`Option<Span>` の表にするか、`line: 0` の番兵にするかを選び、番兵にした（表を 2 つ持つと綴りがずれる）。`site` が番兵を落とすので、`has` の判定はそのままである。
+- **E205 の位置を出す範囲。** `type_realizations` の「実装の中の型が外の型と衝突」は、外の型の位置を呼び出し側から通す必要があるので今回は出さない。同じコードの中で位置が出る形と出ない形が混ざるので、表の行に両方を書いた。
+- **E602 の関連位置は member の名前。** `def` の頭ではなく名前にした（E205 が名前を指すのと揃える）。「多相性が足りない」でも契約側の member の名前を指す。
+- **record の field の重複のメッセージ。** `Payload { left; left = other }` の E205 は `name_resolution` の経路で、メッセージは `invalid name reference left` のままである。E205 には合わないが、メッセージの変更は今回の射程の外なので触っていない。
+
+### 仕様への疑義
+
+- §56 のエラー表の「アンカー」欄が、アンカーの規則と関連位置の規則の 2 つを持つようになった。列を分けるか、関連位置を別の節に置くかは仕様の判断である。
+- prelude の名前との衝突のメッセージは `declaration conflicts with root name` である（prelude の名前しか無い場合も同じ）。関連位置を出さないことが表に書かれたぶん、この食い違いが見えやすくなった。既存の綴りなので変えていない。
+- E305 の関連位置（wants 3 の残り）と、期待型・実型の役割の明示は未着手である。
