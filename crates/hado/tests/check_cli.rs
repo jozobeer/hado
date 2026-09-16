@@ -81,7 +81,7 @@ fn cli_rejects_noncanonical_identity_binding() {
     assert_eq!(
         String::from_utf8(output.stderr).unwrap(),
         format!(
-            "{}:1:12: error[E501]: binding x is returned unchanged at 1:25\n",
+            "{}:1:12: error[E501]: binding x is returned unchanged at 1:25; canonical form: 1\n",
             path.file_name().unwrap().to_string_lossy()
         )
     );

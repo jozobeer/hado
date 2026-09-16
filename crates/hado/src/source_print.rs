@@ -4,6 +4,20 @@ pub(crate) fn item_source(value: &Item) -> String {
     item(value)
 }
 
+/// The `def f | ...` form of a `def` whose sole parameter is only scrutinized
+/// (§31, E515). The parameter is renamed to `$argument`, which is what the
+/// `def f | ...` surface form parses to, so the ordinary printer writes the
+/// canonical tail.
+pub(crate) fn arm_function(def: &Def) -> String {
+    let mut lifted = def.clone();
+    if let DefKind::Function { params, .. } = &mut lifted.kind {
+        if let [parameter] = params.as_mut_slice() {
+            parameter.name = "$argument".to_string();
+        }
+    }
+    item(&Item::Def(lifted))
+}
+
 pub(crate) fn list_pattern(pattern: &Pattern) -> Option<String> {
     match &pattern.kind {
         PatternKind::Name(name) if name == "Nil" => return Some("[]".into()),

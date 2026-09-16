@@ -253,22 +253,29 @@ fn check_unused<'a>(
     }
 }
 
-fn check_sole_parameter_branch(
-    params: &[crate::parser::Param], ret: Option<&crate::parser::TypeExpr>,
-    body: &Node, span: crate::parser::Span, path: &str,
-) -> Result<(), Diagnostic> {
-    let [parameter] = params else { return Ok(()); };
-    if parameter.ty.is_some() || ret.is_some() || parameter.name == "$argument" { return Ok(()); }
-    let NodeKind::PatternBranch { scrutinees, arms, fallback } = &body.kind else { return Ok(()); };
-    let [scrutinee] = scrutinees.as_slice() else { return Ok(()); };
-    if !matches!(&scrutinee.kind, NodeKind::Name(name) if name == &parameter.name) { return Ok(()); };
+/// `def f x => if x | ...` where the sole parameter is only scrutinized:
+/// the canonical form is `def f | ...` (§31, E515). The checker and the
+/// fix-it (§57) share this predicate so a rewrite cannot drift from the code.
+pub(crate) fn sole_parameter_branch(
+    params: &[crate::parser::Param], ret: Option<&crate::parser::TypeExpr>, body: &Node,
+) -> bool {
+    let [parameter] = params else { return false; };
+    if parameter.ty.is_some() || ret.is_some() || parameter.name == "$argument" { return false; }
+    let NodeKind::PatternBranch { scrutinees, arms, fallback } = &body.kind else { return false; };
+    let [scrutinee] = scrutinees.as_slice() else { return false; };
+    if !matches!(&scrutinee.kind, NodeKind::Name(name) if name == &parameter.name) { return false; }
     let referenced_in_arm = arms.iter().any(|(patterns, body)| {
         let bound: std::collections::BTreeSet<_> = patterns.iter().flat_map(crate::names::bound_names).collect();
         !bound.contains(&parameter.name) && crate::names::references(body, &parameter.name)
     });
-    if referenced_in_arm || fallback.as_ref().is_some_and(|body| crate::names::references(body, &parameter.name)) {
-        return Ok(());
-    }
+    !(referenced_in_arm || fallback.as_ref().is_some_and(|body| crate::names::references(body, &parameter.name)))
+}
+
+fn check_sole_parameter_branch(
+    params: &[crate::parser::Param], ret: Option<&crate::parser::TypeExpr>,
+    body: &Node, span: crate::parser::Span, path: &str,
+) -> Result<(), Diagnostic> {
+    if !sole_parameter_branch(params, ret, body) { return Ok(()); }
     Err(Diagnostic { path: path.into(), line: span.line, col: span.col,
         code: Some("E515".into()), message: "use pattern arms directly for the sole parameter".into() })
 }

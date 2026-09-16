@@ -79,7 +79,7 @@ pub fn hint(source: &str, code: &str, line: usize, col: usize) -> Option<String>
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E510" | "E516" | "E517")
+    matches!(code, "E501" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E517: `def f x => if | ...` を `def f x | ...` へ ---
@@ -159,10 +159,15 @@ fn walk_item(
     found: &mut Vec<Fix>,
 ) {
     match item {
-        Item::Def(def) => match &def.kind {
-            DefKind::Value(body) => walk_node(body, source, lines, tokens, index, found),
-            DefKind::Function { body, .. } => walk_node(body, source, lines, tokens, index, found),
-        },
+        Item::Def(def) => {
+            if let Some(fix) = sole_parameter_fix(def, source, lines, tokens, index) {
+                found.push(fix);
+            }
+            match &def.kind {
+                DefKind::Value(body) => walk_node(body, source, lines, tokens, index, found),
+                DefKind::Function { body, .. } => walk_node(body, source, lines, tokens, index, found),
+            }
+        }
         Item::ModuleImpl(module) => {
             for item in &module.items {
                 walk_item(item, source, lines, tokens, index, found);
@@ -170,6 +175,95 @@ fn walk_item(
         }
         _ => {}
     }
+}
+
+// --- E515: `def f x => if x | ...` の引数を腕へ移す ---
+
+fn sole_parameter_fix(
+    def: &parser::Def,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<Fix> {
+    let DefKind::Function { params, ret, body } = &def.kind else { return None };
+    if !crate::check::sole_parameter_branch(params, ret.as_ref(), body) {
+        return None;
+    }
+    let [parameter] = params.as_slice() else { return None };
+    let NodeKind::PatternBranch { scrutinees, .. } = &body.kind else { return None };
+    let [scrutinee] = scrutinees.as_slice() else { return None };
+    let canonical = parser::arm_function_source(def);
+    // 型注釈の無い引数は括弧を取らない（`def f (x)` は E100）ので、綴りは名前だけ。
+    let after_name = tokens.get(index.position(def.name_span)? + 1)?;
+    if !matches!(&after_name.kind, TokKind::Name(name) if name == &parameter.name) {
+        return None;
+    }
+    let mut start = lines.offset(source, after_name.span);
+    let end = lines.offset(source, scrutinee.span) + parameter.name.len();
+    // 空白も範囲に入れ、行末に空白を残さない。
+    while start > 0 && matches!(source.as_bytes()[start - 1], b' ' | b'\t') {
+        start -= 1;
+    }
+    if end > source.len() || source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E515",
+        line: def.span.line,
+        col: def.span.col,
+        start,
+        end,
+        replacement: String::new(),
+        canonical,
+    })
+}
+
+// --- E501: `let x = v -> x` を `v` にする ---
+
+fn let_identity_fix(
+    anchor: Span,
+    bound: &str,
+    body: Span,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<Fix> {
+    let at = index.position(anchor)?;
+    if !matches!(tokens.get(at)?.kind, TokKind::KwLet) {
+        return None;
+    }
+    let equals = tokens.get(at + 2)?;
+    if !matches!(equals.kind, TokKind::Eq) {
+        return None;
+    }
+    // 値の式は入れ子の `let` で `->` を持ち得るので、分離点は本体の直前の
+    // `->` で決める（字句の走査では決まらない）。
+    let body_at = index.position(body)?;
+    if !matches!(tokens.get(body_at - 1)?.kind, TokKind::DashArrow) {
+        return None;
+    }
+    let start = lines.offset(source, anchor);
+    let value_start = lines.offset(source, equals.span) + 1;
+    let value_end = lines.offset(source, tokens[body_at - 1].span);
+    let end = lines.offset(source, body) + bound.len();
+    if value_start > value_end || end > source.len() || source[start..end].contains("//") {
+        return None;
+    }
+    let replacement = source[value_start..value_end].trim().to_string();
+    if replacement.is_empty() {
+        return None;
+    }
+    Some(Fix {
+        code: "E501",
+        line: anchor.line,
+        col: anchor.col,
+        start,
+        end,
+        canonical: replacement.clone(),
+        replacement,
+    })
 }
 
 fn walk_node(
@@ -191,7 +285,17 @@ fn walk_node(
                 }
             }
         }
-        NodeKind::Let { pat, .. } | NodeKind::LetQ { pat, .. } => {
+        NodeKind::Let { pat, body, .. } => {
+            walk_pattern(pat, source, lines, tokens, index, found);
+            if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
+                if bound == returned {
+                    if let Some(fix) = let_identity_fix(node.span, bound, body.span, source, lines, tokens, index) {
+                        found.push(fix);
+                    }
+                }
+            }
+        }
+        NodeKind::LetQ { pat, .. } => {
             walk_pattern(pat, source, lines, tokens, index, found);
         }
         NodeKind::PatternBranch { arms, .. } => {
