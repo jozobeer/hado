@@ -87,15 +87,53 @@ pub fn format(source: &str) -> Result<Option<(String, usize)>, usize> {
     const LIMIT: usize = 64;
     let mut text = source.to_string();
     let mut applied = 0;
+    let mut settled = false;
     for _ in 0..LIMIT {
         let edits = fixes(&text);
         if edits.is_empty() {
-            return Ok(if applied == 0 { None } else { Some((text, applied)) });
+            settled = true;
+            break;
         }
         applied += edits.len();
         text = splice(&text, &edits);
     }
-    Err(LIMIT)
+    if !settled {
+        return Err(LIMIT);
+    }
+    // §58.1: the bulk form lays the text out as well. `check --fix` applies the
+    // diagnostic-anchored rewrites only, so it never comes through here.
+    let (laid_out, layout_applied) = layout(&text);
+    applied += layout_applied;
+    if applied == 0 {
+        return Ok(None);
+    }
+    Ok(Some((laid_out, applied)))
+}
+
+/// §58.1: 行末の空白（スペースとタブ）を消し、ファイルの終わりを改行 1 つにする。
+/// 空のファイルはそのまま。字下げのタブと改行コードは変えない。
+fn layout(source: &str) -> (String, usize) {
+    if source.is_empty() {
+        return (String::new(), 0);
+    }
+    let body = source.trim_end_matches('\n');
+    let mut applied = 0;
+    let mut out = String::with_capacity(source.len() + 1);
+    for (index, line) in body.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let trimmed = line.trim_end_matches([' ', '\t']);
+        if trimmed.len() != line.len() {
+            applied += 1;
+        }
+        out.push_str(trimmed);
+    }
+    out.push('\n');
+    if body.len() + 1 != source.len() {
+        applied += 1;
+    }
+    (out, applied)
 }
 
 /// Write the disjoint edits back into the source. `fixes` returns them sorted
