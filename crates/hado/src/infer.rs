@@ -573,7 +573,7 @@ impl Checker<'_> {
                     _ => None,
                 });
                 let Some(actual) = actual else {
-                    return Err(self.error(module.span, Some("E602"), "missing signature type"));
+                    return Err(self.error_related(module.span, Some("E602"), "missing signature type", Some(def.name_span)));
                 };
                 if def.ty.is_some() {
                     return Err(self.error(
@@ -610,10 +610,10 @@ impl Checker<'_> {
                 ));
             };
             if !definitions.contains_key(&declaration.name) {
-                return Err(self.error(module.span, Some("E602"), "missing signature member"));
+                return Err(self.error_related(module.span, Some("E602"), "missing signature member", Some(declaration.name_span)));
             }
             if matches!(definitions[&declaration.name].kind, DefKind::Value(_)) != declaration.params.is_empty() {
-                return Err(self.error(module.span, Some("E602"), "signature member requires the declared definition form"));
+                return Err(self.error_related(module.span, Some("E602"), "signature member requires the declared definition form", Some(declaration.name_span)));
             }
             let scheme = self.values[&declaration.name].clone();
             let (mut actual, constraints, rows) = self.inference.instantiate_constrained(&scheme);
@@ -627,12 +627,12 @@ impl Checker<'_> {
             let expected = self.signature_type(declaration, &parameters, false)?;
             self.inference
                 .unify(&actual, &expected)
-                .map_err(|_| self.error(module.span, Some("E602"), "signature type mismatch"))?;
+                .map_err(|_| self.error_related(module.span, Some("E602"), "signature type mismatch", Some(declaration.name_span)))?;
             let mut resolved_parameters = Vec::new();
             for parameter in parameters.values() {
                 let resolved = self.inference.resolve(parameter);
                 if !matches!(resolved, Ty::Var(_)) || resolved_parameters.contains(&resolved) {
-                    return Err(self.error(module.span, Some("E602"), "signature implementation is not sufficiently polymorphic"));
+                    return Err(self.error_related(module.span, Some("E602"), "signature implementation is not sufficiently polymorphic", Some(declaration.name_span)));
                 }
                 resolved_parameters.push(resolved);
             }
@@ -920,7 +920,14 @@ impl Checker<'_> {
     }
 
     fn error(&self, span: Span, code: Option<&str>, message: &str) -> Diagnostic {
-        Diagnostic {
+        self.error_related(span, code, message, None)
+    }
+
+    /// §56: `first` is the contract's declaration of the member the report is
+    /// about (a `.hdi` file may hold it; the print path localizes the position).
+    fn error_related(&self, span: Span, code: Option<&str>, message: &str, first: Option<Span>) -> Diagnostic {
+        let related = first.map(|first| crate::parser::Related { path: self.path.into(), line: first.line, col: first.col });
+        Diagnostic { related,
             path: self.path.into(),
             line: span.line,
             col: span.col,

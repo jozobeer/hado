@@ -493,8 +493,30 @@ pub struct HandlerDecl {
     pub span: Span,
 }
 
+/// A second position a diagnostic points at (§56). E205 names the first
+/// declaration of a duplicate, E602 names the contract's member. The line and
+/// column are in the checked coordinates; `project::source_diagnostic` rewrites
+/// them into the file that holds them, exactly like the diagnostic's own anchor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Related {
+    pub path: String,
+    pub line: usize,
+    pub col: usize,
+}
+
+/// The label a code writes before its related position (§56). A code without a
+/// label never carries one.
+fn related_label(code: &str) -> Option<&'static str> {
+    match code {
+        "E205" => Some("first declared"),
+        "E602" => Some("declared in the contract"),
+        _ => None,
+    }
+}
+
 /// One-line diagnostic (`<path>:<line>:<col>: error[CODE]: <message>` for
-/// E1xx, plain `error: <message>` otherwise).
+/// E1xx, plain `error: <message>` otherwise). A related position stays on the
+/// same line, because one run reports one diagnostic (§56).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     pub path: String,
@@ -502,18 +524,19 @@ pub struct Diagnostic {
     pub col: usize,
     pub code: Option<String>,
     pub message: String,
+    pub related: Option<Related>,
 }
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.code {
-            Some(code) => write!(
-                f,
-                "{}:{}:{}: error[{code}]: {}",
-                self.path, self.line, self.col, self.message
-            ),
-            None => write!(f, "{}:{}:{}: error: {}", self.path, self.line, self.col, self.message),
+        let Some(code) = &self.code else {
+            return write!(f, "{}:{}:{}: error: {}", self.path, self.line, self.col, self.message);
+        };
+        write!(f, "{}:{}:{}: error[{code}]: {}", self.path, self.line, self.col, self.message)?;
+        if let (Some(related), Some(label)) = (&self.related, related_label(code)) {
+            write!(f, "; {label} at {}:{}:{}", related.path, related.line, related.col)?;
         }
+        Ok(())
     }
 }
 
@@ -551,7 +574,7 @@ pub fn parse(toks: &[Tok]) -> Result<Program, String> {
 }
 
 fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
-    Diagnostic {
+    Diagnostic { related: None,
         path: path.to_string(),
         line: e.line,
         col: e.col,
@@ -645,7 +668,7 @@ impl Parser<'_> {
         code: Option<&'static str>,
         message: impl Into<String>,
     ) -> Diagnostic {
-        Diagnostic {
+        Diagnostic { related: None,
             path: self.path.to_string(),
             line: s.line,
             col: s.col,

@@ -3,19 +3,19 @@ use crate::parser::{Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, Pat
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     let mut diagnostics = Vec::new();
     for span in &ast.long_condition_functions {
-        diagnostics.push(Diagnostic {
+        diagnostics.push(Diagnostic { related: None,
             path: path.into(), line: span.line, col: span.col,
             code: Some("E517".into()), message: "write condition arms directly after the function parameters".into(),
         });
     }
     for span in &ast.written_list_patterns {
-        diagnostics.push(Diagnostic {
+        diagnostics.push(Diagnostic { related: None,
             path: path.into(), line: span.line, col: span.col,
             code: Some("E516".into()), message: "use List pattern syntax instead of Nil or Cons".into(),
         });
     }
     for span in &ast.branches_after_fallback {
-        diagnostics.push(Diagnostic {
+        diagnostics.push(Diagnostic { related: None,
             path: path.into(), line: span.line, col: span.col,
             code: Some("E404".into()), message: "fallback must be the last branch".into(),
         });
@@ -155,7 +155,7 @@ fn check_definition(def: &crate::parser::Def, contract_member: bool, path: &str,
         DefKind::Function { params, ret, body } => {
             if !contract_member {
                 for param in params.iter().filter(|param| param.name == "_") {
-                    diagnostics.push(Diagnostic { path: path.into(), line: param.span.line, col: param.span.col,
+                    diagnostics.push(Diagnostic { related: None, path: path.into(), line: param.span.line, col: param.span.col,
                         code: Some("E519".into()), message: "underscore parameters require a contract member or anonymous function".into() });
                 }
             }
@@ -177,7 +177,7 @@ fn check_effect_rows(ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic
         for effect in effects {
             let key = effect_key(effect);
             if !seen.insert(key) {
-                diagnostics.push(Diagnostic {
+                diagnostics.push(Diagnostic { related: None,
                     path: path.into(), line: effect.name_span.line, col: effect.name_span.col,
                     code: Some("E522".into()), message: "duplicate effect in row".into(),
                 });
@@ -222,7 +222,7 @@ fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnost
     };
     for parameter in parameters {
         if types.iter().any(|ty| references_type_parameter(ty, &parameter.name)) { continue; }
-        diagnostics.push(Diagnostic { path: path.into(), line: parameter.span.line, col: parameter.span.col,
+        diagnostics.push(Diagnostic { related: None, path: path.into(), line: parameter.span.line, col: parameter.span.col,
             code: Some("E518".into()), message: format!("type parameter {} is unused", parameter.name) });
     }
 }
@@ -248,7 +248,7 @@ fn check_unused<'a>(
 ) {
     for (name, span) in bindings {
         if matches!(name, "$argument" | "_") || crate::names::references(body, name) { continue; }
-        diagnostics.push(Diagnostic { path: path.into(), line: span.line, col: span.col,
+        diagnostics.push(Diagnostic { related: None, path: path.into(), line: span.line, col: span.col,
             code: Some("E505".into()), message: format!("binding {name} is unused") });
     }
 }
@@ -276,7 +276,7 @@ fn check_sole_parameter_branch(
     body: &Node, span: crate::parser::Span, path: &str,
 ) -> Result<(), Diagnostic> {
     if !sole_parameter_branch(params, ret, body) { return Ok(()); }
-    Err(Diagnostic { path: path.into(), line: span.line, col: span.col,
+    Err(Diagnostic { related: None, path: path.into(), line: span.line, col: span.col,
         code: Some("E515".into()), message: "use pattern arms directly for the sole parameter".into() })
 }
 
@@ -292,7 +292,7 @@ pub(crate) fn matrix_coverage(
         (Some(true), Some(body)) => ("E403", body.span, "fallback is unreachable after all constructors"),
         _ => return Ok(()),
     };
-    Err(Diagnostic {
+    Err(Diagnostic { related: None,
         path: path.into(),
         line: location.line,
         col: location.col,
@@ -318,7 +318,7 @@ fn check_boolean_form(node: &Node, path: &str, direct_condition: bool) -> Result
         _ => false,
     };
     if !redundant { return Ok(()); }
-    Err(Diagnostic { path: path.into(), line: node.span.line, col: node.span.col,
+    Err(Diagnostic { related: None, path: path.into(), line: node.span.line, col: node.span.col,
         code: Some("E520".into()), message: "use a Boolean branch instead of Boolean pattern arms or a single condition arm".into() })
 }
 
@@ -369,7 +369,7 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
 fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if let NodeKind::BoolBranch { then, els, .. } = &node.kind {
         if crate::normalize::same_expression(then, els) {
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: node.span.line,
                 col: node.span.col,
@@ -388,7 +388,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
     }
     if let NodeKind::LetQ { pat, .. } = &node.kind {
         if matches!(pat.kind, PatternKind::Underscore) {
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: pat.span.line,
                 col: pat.span.col,
@@ -399,7 +399,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
     }
     if let NodeKind::Let { pat, body, .. } = &node.kind {
         if matches!(pat.kind, PatternKind::Underscore) {
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: pat.span.line,
                 col: pat.span.col,
@@ -409,7 +409,7 @@ fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
         }
         if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
             if bound == returned {
-                return Err(Diagnostic {
+                return Err(Diagnostic { related: None,
                     path: path.into(),
                     line: node.span.line,
                     col: node.span.col,
@@ -444,7 +444,7 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
         let Some(pattern) = patterns.iter().find(|pattern| is_variable_pattern(pattern)) else { return Ok(()); };
         ("E512", pattern, "top-level variable patterns are forbidden")
     };
-    Err(Diagnostic {
+    Err(Diagnostic { related: None,
         path: path.into(),
         line: pattern.span.line,
         col: pattern.span.col,
@@ -478,7 +478,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
     let Some((pattern, body)) = repropagated_arm(node) else {
         return Ok(());
     };
-    Err(Diagnostic {
+    Err(Diagnostic { related: None,
         path: path.into(),
         line: body.span.line,
         col: body.span.col,
@@ -526,7 +526,7 @@ fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
     let Some(scrutinee) = rewrap_branch(node) else {
         return Ok(());
     };
-    Err(Diagnostic {
+    Err(Diagnostic { related: None,
         path: path.into(),
         line: node.span.line,
         col: node.span.col,
@@ -543,7 +543,7 @@ fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     };
     if fallback.is_none() && arms.iter().any(|(patterns, _)| patterns.iter().any(needs_literal_fallback)) {
-        return Err(Diagnostic {
+        return Err(Diagnostic { related: None,
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
@@ -571,7 +571,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     };
     if fallback.is_none() {
-        return Err(Diagnostic {
+        return Err(Diagnostic { related: None,
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
@@ -584,7 +584,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
             crate::normalize::same_expression(previous, condition)
                 || matches!(previous.kind, NodeKind::Bool(true))
         }) {
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: condition.span.line,
                 col: condition.span.col,
@@ -604,7 +604,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
             .iter()
             .all(|(condition, _)| literal_comparison(condition) == Some(name))
         {
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: node.span.line,
                 col: node.span.col,
@@ -654,7 +654,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
         }) {
             let Some(pattern) = patterns.first() else { continue };
             let Some(previous_pattern) = previous.first() else { continue };
-            return Err(Diagnostic {
+            return Err(Diagnostic { related: None,
                 path: path.into(),
                 line: pattern.span.line,
                 col: pattern.span.col,
@@ -671,7 +671,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
 
 fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if matches!(&node.kind, NodeKind::Name(name) if matches!(name.as_str(), "Nil" | "Cons")) {
-        return Err(Diagnostic {
+        return Err(Diagnostic { related: None,
             path: path.into(),
             line: node.span.line,
             col: node.span.col,

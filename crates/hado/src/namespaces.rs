@@ -10,7 +10,10 @@ pub(crate) struct Resolution {
 enum Space { Type, Contract, Implementation, Constructor }
 
 type Directory = Vec<String>;
-type Symbols = BTreeMap<(Directory, Space), BTreeSet<String>>;
+/// §56: each name keeps the position of its first declaration. The prelude and
+/// the builtin types have no position in the user's source, so they carry a
+/// zero line and never become a related position.
+type Symbols = BTreeMap<(Directory, Space), BTreeMap<String, Span>>;
 
 #[derive(Clone, Default)]
 struct Local {
@@ -111,12 +114,16 @@ pub(crate) fn resolve(
         result: Resolution { diagnostics: Vec::new(), error_anchors: Vec::new() },
     };
     resolver.symbols.entry((Vec::new(), Space::Type)).or_default()
-        .extend(crate::names::BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
+        .extend(crate::names::BUILTIN_TYPES.iter().map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })));
     resolver.prelude.entry(Space::Type).or_default()
         .extend(crate::names::BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
     for (index, (item, directory)) in ast.items.iter().zip(&locations).enumerate() {
-        for (space, name, _) in declarations(item) {
-            resolver.symbols.entry((directory.clone(), space)).or_default().insert(name.into());
+        for (space, name, span) in declarations(item) {
+            // §56: only the user's declarations carry a position; the prelude is
+            // synthesized outside the user's source.
+            let span = if index < prelude_items { Span { line: 0, col: 0 } } else { span };
+            resolver.symbols.entry((directory.clone(), space)).or_default()
+                .entry(name.into()).or_insert(span);
             if index < prelude_items { resolver.prelude.entry(space).or_default().insert(name.into()); }
         }
         if let Item::Effect(effect) = item {
@@ -136,9 +143,12 @@ pub(crate) fn resolve(
         if index >= prelude_items {
             resolver.check_prelude_operation_declarations(item, directory);
             for (space, name, span) in declarations(item) {
-                if (directory != root && resolver.has(&resolver.root, space, name))
-                    || resolver.has_prelude(space, name) {
-                    resolver.error(span, "E205", "declaration conflicts with root name");
+                let conflicts_with_root = directory != root && resolver.has(&resolver.root, space, name);
+                if conflicts_with_root || resolver.has_prelude(space, name) {
+                    // §56: the root's declaration is the related position. A name
+                    // that only the prelude has (a builtin type) has none.
+                    let first = if conflicts_with_root { resolver.site(&resolver.root, space, name) } else { None };
+                    resolver.error_at(span, "E205", "declaration conflicts with root name", first);
                 }
             }
         }
@@ -176,7 +186,14 @@ impl Resolver<'_> {
     }
 
     fn has(&self, directory: &[String], space: Space, name: &str) -> bool {
-        self.symbols.get(&(directory.to_vec(), space)).is_some_and(|names| names.contains(name))
+        self.symbols.get(&(directory.to_vec(), space)).is_some_and(|names| names.contains_key(name))
+    }
+
+    /// §56: the first declaration of `name`, or `None` when it has no position
+    /// in the user's source (the builtin types and the prelude).
+    fn site(&self, directory: &[String], space: Space, name: &str) -> Option<Span> {
+        self.symbols.get(&(directory.to_vec(), space))
+            .and_then(|names| names.get(name)).copied().filter(|span| span.line != 0)
     }
 
     fn has_prelude(&self, space: Space, name: &str) -> bool {
@@ -184,7 +201,14 @@ impl Resolver<'_> {
     }
 
     fn error(&mut self, span: Span, code: &str, message: &str) {
-        self.result.diagnostics.push(Diagnostic { path: self.path.into(), line: span.line, col: span.col,
+        self.error_at(span, code, message, None);
+    }
+
+    /// §56: `first` is the first declaration of the name the report is about.
+    fn error_at(&mut self, span: Span, code: &str, message: &str, first: Option<Span>) {
+        let related = first.filter(|first| first.line != 0)
+            .map(|first| crate::parser::Related { path: self.path.into(), line: first.line, col: first.col });
+        self.result.diagnostics.push(Diagnostic { related, path: self.path.into(), line: span.line, col: span.col,
             code: Some(code.into()), message: message.into() });
     }
 
@@ -242,7 +266,9 @@ impl Resolver<'_> {
                     && (self.has(directory, Space::Type, &def.name)
                         || self.has(&self.root, Space::Type, &def.name)
                         || self.has_prelude(Space::Type, &def.name)) {
-                    self.error(def.name_span, "E205", "local data type conflicts with a visible outer type");
+                    let first = self.site(directory, Space::Type, &def.name)
+                        .or_else(|| self.site(&self.root, Space::Type, &def.name));
+                    self.error_at(def.name_span, "E205", "local data type conflicts with a visible outer type", first);
                 }
                 local.types.insert(def.name.clone());
                 if let Some(TypeExpr { kind: TypeKind::Adt(constructors), .. }) = &def.ty {

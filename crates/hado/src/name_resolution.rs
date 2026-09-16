@@ -83,7 +83,17 @@ struct Resolver<'a> {
 
 impl Resolver<'_> {
     fn report(&mut self, span: Span, code: &str, name: &str) {
-        self.diagnostics.push(Diagnostic { path: self.path.into(), line: span.line, col: span.col,
+        self.reported(span, code, name, None);
+    }
+
+    /// §56: a duplicate names the first declaration of the same name.
+    fn report_related(&mut self, span: Span, code: &str, name: &str, first: Span) {
+        self.reported(span, code, name, Some(first));
+    }
+
+    fn reported(&mut self, span: Span, code: &str, name: &str, first: Option<Span>) {
+        let related = first.map(|first| crate::parser::Related { path: self.path.into(), line: first.line, col: first.col });
+        self.diagnostics.push(Diagnostic { related, path: self.path.into(), line: span.line, col: span.col,
             code: Some(code.into()), message: format!("invalid name reference {name}") });
     }
 
@@ -244,10 +254,13 @@ impl Resolver<'_> {
             }
             PatternKind::NamedConstructor(name, fields) => {
                 if !scope.constructors.contains(&name.name) { self.report(name.span, "E204", &name.name); }
-                let mut seen = BTreeSet::new();
+                let mut seen: BTreeMap<String, Span> = BTreeMap::new();
                 for (field, nested) in fields {
                     self.named_field(&name.name, field, scope);
-                    if !seen.insert(&field.name) { self.report(field.span, "E205", &field.name); }
+                    match seen.get(&field.name) {
+                        Some(&first) => self.report_related(field.span, "E205", &field.name, first),
+                        None => { seen.insert(field.name.clone(), field.span); }
+                    }
                     if let Some(nested) = nested { self.pattern(nested, scope); }
                 }
             }

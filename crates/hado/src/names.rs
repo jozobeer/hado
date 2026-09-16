@@ -170,14 +170,18 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
     }
 }
 
+/// §56: the tables keep the first declaration's position, so a duplicate can
+/// name it as its related position.
+type Declared = BTreeMap<String, crate::parser::Span>;
+
 #[derive(Default)]
 struct Namespaces {
-    types: BTreeSet<String>,
-    modules: BTreeSet<String>,
-    constructors: BTreeSet<String>,
-    values: BTreeSet<String>,
-    signatures: BTreeSet<String>,
-    effects: BTreeSet<String>,
+    types: Declared,
+    modules: Declared,
+    constructors: Declared,
+    values: Declared,
+    signatures: Declared,
+    effects: Declared,
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
@@ -214,7 +218,7 @@ fn record_field_duplicates(items: &[Item], path: &str, diagnostics: &mut Vec<cra
 
 fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
     if let NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) = &node.kind {
-        let mut names = BTreeSet::new();
+        let mut names = Declared::new();
         for (name, _) in fields {
             if let Err(error) = register(&mut names, &name.name, name.span, path) {
                 diagnostics.push(error);
@@ -368,7 +372,7 @@ fn resolve_type_names(
     match &ty.kind {
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !types.contains(name) {
-                diagnostics.push(crate::parser::Diagnostic {
+                diagnostics.push(crate::parser::Diagnostic { related: None,
                     path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
                     code: Some("E204".into()), message: format!("unknown type {name}"),
                 });
@@ -402,7 +406,7 @@ fn resolve_effect_label(
     match &ty.kind {
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !effects.contains(name) {
-                diagnostics.push(crate::parser::Diagnostic {
+                diagnostics.push(crate::parser::Diagnostic { related: None,
                     path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
                     code: Some("E204".into()), message: format!("unknown effect {name}"),
                 });
@@ -425,7 +429,7 @@ fn entry_form(ast: &Ast, path: &str, inspection: crate::Inspection) -> Result<()
     // `main` is still E206 (§10).
     if inspection == crate::Inspection::Library && main.is_none() { return Ok(()); }
     let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
-    Err(crate::parser::Diagnostic { path: path.into(), line: span.line, col: span.col,
+    Err(crate::parser::Diagnostic { related: None, path: path.into(), line: span.line, col: span.col,
         code: Some("E206".into()), message: "main must be a value definition".into() })
 }
 
@@ -448,7 +452,7 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
             Item::ModuleImpl(module) => {
                 register(&mut names.modules, &module.name, module.name_span, path)?;
                 if let crate::parser::ImplementationForm::Functor(params) = &module.form {
-                    let mut parameters = BTreeSet::new();
+                    let mut parameters = Declared::new();
                     for param in params { register(&mut parameters, &param.name, param.name_span, path)?; }
                 }
                 declarations(&module.items, path)?;
@@ -474,14 +478,14 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
 }
 
 fn register_parameters(parameters: &[crate::parser::DeclaredName], path: &str) -> Result<(), crate::parser::Diagnostic> {
-    let mut names = BTreeSet::new();
+    let mut names = Declared::new();
     for parameter in parameters { register(&mut names, &parameter.name, parameter.span, path)?; }
     Ok(())
 }
 
 fn register_type_members(
     body: &crate::parser::TypeExpr,
-    names: &mut BTreeSet<String>,
+    names: &mut Declared,
     path: &str,
 ) -> Result<(), crate::parser::Diagnostic> {
     use crate::parser::TypeKind;
@@ -490,13 +494,13 @@ fn register_type_members(
             for variant in variants {
                 register(names, &variant.name.name, variant.name.span, path)?;
                 if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
-                    let mut fields_seen = BTreeSet::new();
+                    let mut fields_seen = Declared::new();
                     for field in fields { register(&mut fields_seen, &field.name.name, field.name.span, path)?; }
                 }
             }
         }
         TypeKind::Record(fields) => {
-            let mut names = BTreeSet::new();
+            let mut names = Declared::new();
             for field in fields { register(&mut names, &field.name.name, field.name.span, path)?; }
         }
         _ => {}
@@ -505,13 +509,14 @@ fn register_type_members(
 }
 
 fn register(
-    names: &mut BTreeSet<String>,
+    names: &mut Declared,
     name: &str,
     span: crate::parser::Span,
     path: &str,
 ) -> Result<(), crate::parser::Diagnostic> {
-    if !names.insert(name.into()) {
+    if let Some(&first) = names.get(name) {
         return Err(crate::parser::Diagnostic {
+            related: Some(crate::parser::Related { path: path.into(), line: first.line, col: first.col }),
             path: path.into(),
             line: span.line,
             col: span.col,
@@ -519,6 +524,7 @@ fn register(
             message: format!("duplicate declaration {name}"),
         });
     }
+    names.insert(name.into(), span);
     Ok(())
 }
 
@@ -534,7 +540,7 @@ pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::D
                 Some(("E208", "every mutually recursive function requires rec"))
             } else { None };
             if let Some((code, message)) = violation {
-                diagnostics.push(crate::parser::Diagnostic { path: path.into(), line: def.span.line, col: def.span.col,
+                diagnostics.push(crate::parser::Diagnostic { related: None, path: path.into(), line: def.span.line, col: def.span.col,
                     code: Some(code.into()), message: format!("{message}: {}", group.join(", ")) });
             }
         }

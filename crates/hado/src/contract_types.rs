@@ -57,7 +57,7 @@ impl Contracts {
     fn check_type(&self, ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic>) {
         match &ty.kind {
             TypeKind::Name(name) | TypeKind::Apply(name, _) if self.types.get(name) == Some(&None) => {
-                diagnostics.push(Diagnostic { path: path.into(), line: ty.span.line, col: ty.span.col,
+                diagnostics.push(Diagnostic { related: None, path: path.into(), line: ty.span.line, col: ty.span.col,
                     code: Some("E603".into()), message: "contract type requires exactly one implementation".into() });
             }
             _ => {}

@@ -42,13 +42,13 @@ fn check_module(module: &ModuleImpl, signature: &ModuleSig, outer: &HashSet<&str
             if let Some(ty) = &definition.ty {
                 if matches!(ty.kind, TypeKind::Adt(_) | TypeKind::Record(_))
                     && (outer.contains(definition.name.as_str()) || (matches!(ty.kind, TypeKind::Record(_)) && abstracts.contains(definition.name.as_str()))) {
-                    errors.push(Diagnostic {
+                    errors.push(Diagnostic { related: None,
                         path: path.into(), line: definition.name_span.line, col: definition.name_span.col,
                         code: Some("E205".into()), message: "local data type conflicts with an existing type".into(),
                     });
                 }
                 if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(..)) && !abstracts.contains(definition.name.as_str()) {
-                    errors.push(Diagnostic {
+                    errors.push(Diagnostic { related: None,
                         path: path.into(), line: definition.name_span.line, col: definition.name_span.col,
                         code: Some("E204".into()),
                         message: "unknown abstract type realization".into(),

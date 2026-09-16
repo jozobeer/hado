@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use crate::lexer::{Tok, TokKind};
-use crate::parser::{Ast, Diagnostic, Span};
+use crate::parser::{Ast, Diagnostic, Related, Span};
 
 #[derive(Clone)]
 struct SourceFile {
@@ -27,7 +27,7 @@ impl Project {
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
-        let library_error = library_main.map(|span| Diagnostic {
+        let library_error = library_main.map(|span| Diagnostic { related: None,
             path: files[0].path.clone(), line: span.line, col: span.col,
             code: Some("E206".into()),
             message: "a library directory cannot declare main".into(),
@@ -205,7 +205,7 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
 }
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
-    Diagnostic { path: path.to_string_lossy().into_owned(), line: 1, col: 1,
+    Diagnostic { related: None, path: path.to_string_lossy().into_owned(), line: 1, col: 1,
         code: None, message: error.to_string() }
 }
 
@@ -269,7 +269,7 @@ fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagn
     let relative = relative_source(path, root);
     let display = relative.to_string_lossy().into_owned();
     let text = std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?;
-    let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+    let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic { related: None,
         path: display.clone(), line: error.line, col: error.col,
         code: error.code.map(str::to_owned), message: error.message,
     })?;
@@ -315,7 +315,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
         let invalid = (interface && matches!(token.kind, TokKind::KwImplement | TokKind::KwLibrary))
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
-            return Some(Diagnostic { path: path.to_string_lossy().into_owned(), line: token.span.line,
+            return Some(Diagnostic { related: None, path: path.to_string_lossy().into_owned(), line: token.span.line,
                 col: token.span.col, code: Some("E100".into()),
                 message: "declaration is not allowed in this file".into() });
         }
@@ -336,13 +336,17 @@ fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<S
 /// the diagnostic is returned rather than raised so the caller can order it with E206.
 fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnostic>) {
     let mut roots = BTreeSet::new();
+    // §56: the first `library` of a directory is the related position.
+    let mut firsts: BTreeMap<Vec<String>, (String, Span)> = BTreeMap::new();
     let mut duplicate: Option<Diagnostic> = None;
     for file in files {
         let mut declared = false;
         for token in &file.tokens {
             if token.kind != TokKind::KwLibrary { continue; }
             if declared || roots.contains(&file.source.directory) {
-                let error = Diagnostic { path: file.source.path.clone(), line: token.span.line,
+                let related = firsts.get(&file.source.directory)
+                    .map(|(path, first)| Related { path: path.clone(), line: first.line, col: first.col });
+                let error = Diagnostic { related, path: file.source.path.clone(), line: token.span.line,
                     col: token.span.col, code: Some("E205".into()),
                     message: "duplicate library declaration".into() };
                 if duplicate.as_ref().map_or(true, |current| crate::diagnostic_order(&error) < crate::diagnostic_order(current)) {
@@ -352,16 +356,28 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
             }
             declared = true;
             roots.insert(file.source.directory.clone());
+            firsts.entry(file.source.directory.clone())
+                .or_insert_with(|| (file.source.path.clone(), token.span));
         }
     }
     (roots, duplicate)
 }
 
-fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic {
-    if let Some(file) = files.iter().rev().find(|file| file.offset < error.line) {
-        error.path = file.path.clone();
-        error.line -= file.offset;
+/// §56: a position is written with the path of the file that holds it and with
+/// the line counted inside that file. Every file was lexed with the previous
+/// files' line counts added, so the checked line picks the file (§50).
+fn localize(files: &[SourceFile], path: &mut String, line: &mut usize) {
+    if let Some(file) = files.iter().rev().find(|file| file.offset < *line) {
+        *path = file.path.clone();
+        *line -= file.offset;
     }
+}
+
+fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic {
+    if let Some(related) = &mut error.related {
+        localize(files, &mut related.path, &mut related.line);
+    }
+    localize(files, &mut error.path, &mut error.line);
     for index in 0..files.len() {
         error.message = error.message.replace(&format!("file{index}$"), "");
     }

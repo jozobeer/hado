@@ -63,7 +63,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
                 matches!(item, Item::ModuleImpl(module) if &module.sig == name && !matches!(module.form, ImplementationForm::Functor(_)))),
             _ => used.contains(&key),
         };
-        (!referenced).then(|| Diagnostic { path: path.into(), line: span.line, col: span.col,
+        (!referenced).then(|| Diagnostic { related: None, path: path.into(), line: span.line, col: span.col,
             code: Some("E513".into()), message: "unused top-level declaration".into() })
     }).collect();
     for item in ast.items.iter().skip(prelude_items) {
@@ -74,7 +74,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
                 collector.items(&module.items, &Scope::default(), &mut references);
                 for parameter in parameters {
                     if !references.contains(&Key::Module(parameter.name.clone())) {
-                        diagnostics.push(Diagnostic { path: path.into(), line: parameter.name_span.line,
+                        diagnostics.push(Diagnostic { related: None, path: path.into(), line: parameter.name_span.line,
                             col: parameter.name_span.col, code: Some("E521".into()),
                             message: "unused functor parameter".into() });
                     }
@@ -107,7 +107,7 @@ fn local_data_diagnostics(ast: &Ast, module: &crate::parser::ModuleImpl, checked
         let Item::TypeDef(def) = item else { return None; };
         if !matches!(def.ty.as_ref().map(|ty| &ty.kind), Some(TypeKind::Record(_) | TypeKind::Adt(_)))
             || used.contains(&Key::Type(def.name.clone())) { return None; }
-        Some(Diagnostic { path: path.into(), line: def.span.line, col: def.span.col,
+        Some(Diagnostic { related: None, path: path.into(), line: def.span.line, col: def.span.col,
             code: Some("E513".into()), message: "unused implementation-local type".into() })
     }).collect()
 }

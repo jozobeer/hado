@@ -30,7 +30,7 @@ pub(super) fn duplicate_applications(ast: &Ast, path: &str) -> Vec<Diagnostic> {
         let Item::ModuleImpl(module) = item else { return None; };
         let ImplementationForm::Application { functor, arguments } = &module.form else { return None; };
         let key = (functor.name.clone(), arguments.iter().map(|arg| arg.name.clone()).collect::<Vec<_>>());
-        (!seen.insert(key)).then(|| Diagnostic { path: path.into(), line: module.span.line,
+        (!seen.insert(key)).then(|| Diagnostic { related: None, path: path.into(), line: module.span.line,
             col: module.span.col, code: Some("E604".into()), message: "duplicate functor application".into() })
     }).collect()
 }

@@ -271,7 +271,7 @@ pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic>
 }
 
 pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
-    parser::Diagnostic { path: path.into(), line: 1, col: 1, code: Some("E206".into()),
+    parser::Diagnostic { related: None, path: path.into(), line: 1, col: 1, code: Some("E206".into()),
         message: "build requires an entry file with main; check treats this directory as a library".into() }
 }
 
@@ -297,11 +297,11 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
     }
     let checked = check_parsed(parsed, path)?;
     let ast = &parsed.ast;
-    let main = ast.main().ok_or_else(|| parser::Diagnostic {
+    let main = ast.main().ok_or_else(|| parser::Diagnostic { related: None,
         path: path.into(), line: ast.span.line, col: ast.span.col, code: None,
         message: "main must be a value definition for lowering".into(),
     })?;
-    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic {
+    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic { related: None,
         path: path.into(), line: main.span.line, col: main.span.col, code: None, message,
     })?;
     let mut output = format!("fn main() -> {}\n{:?}\n", checked.main, program.entry);
