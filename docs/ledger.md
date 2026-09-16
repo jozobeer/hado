@@ -2938,3 +2938,43 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - **旧綴りが名前になることを §49 は明記していない。** 決定 2 は外す側を選んだ。§49 に一文を足すかは R45 以降に送る。
 - **`once` / `again` をキーワードにすることの既存コードへの影響は 0 件**（`tests/` `stdlib/` `tools/` の `.hd` を実測）。
 
+
+## R45 複数の scrutinee とパターンの腕の条件列（2026-09-16）
+
+### 背景と決定
+
+パターン分岐は scrutinee を 1 つしか取れず、腕の中に分岐を置けなかった。2 つの値の構造で分岐した後に先頭同士を比較する `merge` は 3 定義に割れ、`merge_heads` は位置引数を 7 つ運んでいた。`if left, right | [], _ => ...` の scrutinee の列と、腕の本体に `=> if | c => x | y` の条件列だけを置ける形を足した。手順と決定は `docs/plan.md` 41 節。
+
+`=>` を省く形を取らなかった理由（fallback との曖昧さ）と、ネストの上限が「パターンの下に条件列 1 段」で止まることは計画 41 節の背景と決定 2 にある。
+
+### 実装
+
+- コミットは計画（docs）→ 仕様（docs）→ 判定器とコーパス（test、赤の実測 2/8）→ 構文と印字（feat）→ 探針の修正（test）→ 検査（feat）→ 単相化（feat）→ gate-tiers（test）→ 追跡表と wants（docs）→ merge。実装の 3 工程は `.worktrees/r45`（branch `r45-pattern-columns`）で cursor grok 4.6 xhigh が書き、指揮者が審査してコミットした。
+- AST は `PatternBranch { scrutinees: Vec<Node>, arms: Vec<(Vec<Pattern>, Node)>, fallback }`。腕の条件列は本体が `CondBranch` である形で、新しい `NodeKind` は無い。列の数が合わない腕は E125（腕の `|`）。**列のカンマは外側の呼び出しの引数のカンマと区別できないので、`=>` が続くまで列に確定しない**（`| A, 3` は fallback `A` と呼び出しの引数 `3` にもなる）。腕の条件列は最初の fallback で終わり、その後の `|` は外側の腕（`record_fallback_end` を呼ばない）。
+- 網羅性は Bool と ADT で分かれていた入口を `matrix_coverage` に統一し、行ごとに列の数だけ Cell を並べて `coverage::covers` に渡す。`covers` は元から行列の左からの特殊化だったので、判定の中身は変わっていない。E512 / E503 は行の全列が変数か `_` のときだけ。E520・E507・E508・E515 は 1 列のまま。
+- 単相化は列が 2 つ以上のときだけ行列を左から特殊化して `Switch` を入れ子にし、`_` と変数の行を各 constructor の特殊化に持ち込む。1 列は既存の `constructor_switch` を残した（入れ子パターンの failure 継続の形を固定するテストが IR を見ているため）。Bool の列は `Switch` ではなく `Branch`。`_` の行の本体の複製は 2 列 × 3 行で 2、3 列 × 4 行で 3（上限は constructor 数の列数乗）。
+- `stdlib/list.hd` の `merge` を 1 定義にし、`merge_right` `merge_heads` を消した。`List.sort` を使う受理コーパスが 0 本だったので `tests/accept/list_sort/` を足した。受理は `columns_merge` `arm_conditions` と合わせて 3 本、拒否は `E125` の 1 本。lock は 219 本。
+- `scripts/verify-r45.sh` を新設し、full に `r45` を足した。45-a は判定器が同じ行列で網羅性を計算し、45-b と 45-f は Python の並べ替えと照合する。
+
+### 判定の実測
+
+- **45-a〜45-f（R45 の門番）。** `bash scripts/verify-r45.sh` は 8/8。45-a は seed 45 で受理 16、E402 16、E403 4 の 36 本、45-b は乱数の 12 組の merge の実行と E401 のアンカー（腕の `if`）、1 本の条件の受理、3 つの入れ子の E101、45-c は E125 の両方向（腕の `|`）と E512 / E503 の行規則、45-d は `| None | Some(v) => ...` の E404、45-f は 12 本のリストの昇順と降順の `List.sort`。
+- **45-g（全テスト）。** `cargo test --offline --no-fail-fast` は 63 target 全て 0 failed（作業ツリーで実測）。
+- **45-h（層別）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full` は 41 本を走らせ、39 本が `^NG:` 0。`verify-r45.sh` 8/8、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`verify-r37.sh` 262/262、`verify-m3.sh` 12/12。赤は 2 本。`lint-docs` 6/7 は台帳の R45 節が未記入のため（この節を書いた後に単独で緑）。`verify-r42.sh` 4/5 は §56 の行数を `69` と直書きしていたためで（E125 で 70 行）、拒否コーパスのディレクトリ数から導く形に直して単独で 5/5。
+- **工程 2 の赤。** 判定器を足した直後の `bash scripts/verify-r45.sh` は PASSED 2/8 で、赤は全て `if` の後のカンマが E100 になるため。工程 3 の直後は 4/8（E125、文法生成器、45-d、lock）で `cargo test` は corpus と prelude の 2 target が多列未実装で赤、工程 4 の直後は 6/8 で同じ 2 target、工程 5 で 8/8 と 0 failed。
+
+### 経緯
+
+- **cursor grok の headless 実行は使えなかった。** `cursor-agent -p` は xhigh も high も、ファイルを 1 つ読む探針から `RetriableError: [resource_exhausted]` で出力 0 バイト（一語の応答だけの探針は通る。gpt-5.3-codex の headless は通る）。同じ xhigh を Herdr の対話セッション（`herdr agent start ... -- --model cursor-grok-4.6-xhigh --force`）で起動し、依頼書の絶対パスを `agent prompt` で渡すと、3 工程とも完走した（構文 約 30 分、検査 約 25 分、単相化 約 30 分）。
+- 探針の欠陥が 2 つあった。45-a は使わない型まで宣言して E513 が先に当たり、45-d は fallback の `None` が戻り型 `Int` と合わず E305（型）が E404（網羅性）より先に当たった。どちらも工程 3 の報告で判明し、探針を直した。
+- `git merge -F -` は標準入力を読めない（`could not read file '-'`）。merge が失敗したまま門番を起動してしまい、止めてから merge をやり直した。止めた走行の probe は木に残っていなかった。
+
+### 迷った点
+
+- **Bool の E402 / E403 の文言。** 1 列の Bool 専用の文言（`Boolean patterns do not cover both values`）を ADT と同じ `not all constructor values are covered` に揃えた。コードだけを見るテストは赤にならなかった。
+- **末尾呼び出しの探針の条件。** `n == 0` は腕の条件列が E511（リテラル比較の列）になるので `n <= 0` にした。
+
+### 仕様への疑義
+
+- **入れ子パターンと列をまたぐ同名束縛。** `Pair(x, x)` は今も受理される（実測）。`| x, x =>` も同じ。§26 に規則が無く、R46 以降に送る。
+- **fallback を持たない腕の条件列が続く腕を飲む形。** `| Some(x) => if | x > 0 => x | None => 0` は `None` を条件として読み E305 になる。§26.1 に書いた。専用の診断は頻発してから。
