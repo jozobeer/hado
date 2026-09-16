@@ -1469,7 +1469,13 @@ impl Checker<'_> {
         if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
         let result = self.inference.fresh();
         let row = self.inference.fresh_row();
-        self.unify(&function, &Ty::fn_with(argument_types.clone(), result.clone(), row.clone()), span).map_err(|mut error| {
+        // §20: a definition that omits its row gets an implicit effect variable,
+        // so a call to a recursive definition must not tie that definition's row
+        // to the effects of this one call. The call's effects are their own row,
+        // and they reach the definition's row through the body's row, which is
+        // what the definition unifies with at the end of its group.
+        let callee_row = if recursive { self.inference.fresh_row() } else { row.clone() };
+        self.unify(&function, &Ty::fn_with(argument_types.clone(), result.clone(), callee_row), span).map_err(|mut error| {
             if recursive && error.code.as_deref() == Some("E306") {
                 error.code = Some("E307".into());
                 error.message = "recursive calls change the argument type".into();
