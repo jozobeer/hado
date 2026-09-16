@@ -4887,3 +4887,14 @@ test:   test: a_test.hd ok / test: 1/1 passed / test-exit=0
 
 ### 全走
 次のラウンドで層別と `cargo test` を 1 回回して記録する。
+
+### R77 の全走
+
+```
+TALLY: 3730/3730 passed; red: none
+red: none
+gates-exit=0
+cargo test: 記録時に走行中（層別は上記で確定）
+```
+
+層別は 74 本・検査 3730 で**赤ゼロ**（`r77` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
