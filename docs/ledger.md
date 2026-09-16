@@ -4155,3 +4155,27 @@ exit=1
 ```
 
 この形を見てから、道具（`tools/` の下の Hado プログラム）の入力を決める。診断は 1 行 1 件の JSON なので、行に分けて読み、`"code"` を取り出して数える形が最小の縦切りになる。
+
+### R70 の道具の下敷き（`tools/gates/main.hd`、23 行）
+
+既に動いている道具から、使える API と書き方をそのまま取る。
+
+```
+1:def last_passed lines =>
+2:  Option.ok_or
+4:      if String.starts_with line "PASSED: " => Some(line) | selected))
+7:def read_report directory name =>
+8:  let path = String.concat directory (String.concat "/" name) ->
+9:  let line = last_passed (String.split (Bytes.to_string (read_file path)) "\n") ->
+10:  report::Report.parse_line (String.concat name (String.concat " " line))
+12:def summarize directory =>
+13:  List.fold (read_dir directory) report::Report.empty fn(tally, name =>
+16:def choose (tally: report::Report.T): report::Report.T =>
+20:def main =
+```
+
+読み取れること。ファイルは `read_file path` でバイト列として読み、`Bytes.to_string` で文字列にする。`String.split s "\n"`、`String.concat`、`String.starts_with` がある。`let x = e ->` の形で値を次へ渡し、分岐は `if 条件 => a | b`、集計は `List.fold list init fn(acc, x => …)` と `Option.ok_or`。モジュールは同じディレクトリの下に置く（`report::Report.parse_line` がその例）。
+
+**道具の設計（この下敷きに合わせる）。** `tools/diagnostics/main.hd` は引数のファイルを `read_file` して行に分け、各行からコードを取り出して `List.fold` でコードごとの件数を数える。JSON は 1 行 1 件で `"code": "E502"` の形（前ラウンドの実測）なので、`String.split line "\"code\": \""` の 2 番目を、さらに `"` で割った先頭がコードになる。
+
+**残る不明点は 1 つだけ。** `split` が返すリストから**要素を 1 つ選ぶ**書き方（`List` のどの関数を使うか、リストパターンが書けるか）がまだ分からない。次は `grep -n "def " stdlib/List.hd` で `at` / `nth` / `head` の有無を見る（1 回で決まる）。それ以外（読み・分割・集計・印字・呼び出し）は下敷きで分かっている。
