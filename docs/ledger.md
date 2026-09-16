@@ -4415,3 +4415,48 @@ main.hd:4:7: error[E504]: use do to discard a success value
 **次は、E504/E506 の書き換え（`pat` 版、台帳に逐語で残っている）を戻した状態で同じ計器を回す。** そのとき `P601` が出て `P602` に 4:3（`let` の位置）が含まれれば到達している。含まれなければ入口の条件、含まれれば `discard_let_fix` の門を次に測る。
 
 計器は戻した（木は綺麗）。
+
+## R71 の到達性の実測（節は来ているが、種類が違う）
+
+書き換え（`pat` 版）と計器を**同時に**入れて、条件を揃えて回した。
+
+```
+$ cargo run --offline -q -- check --fix target/fix-probe/main.hd 2>&1 | grep -E "P60|error"
+P601 item
+P602 node 4:3
+P602 node 4:12
+P602 node 4:12
+P602 node 4:17
+P602 node 5:3
+P602 node 5:3
+P602 node 5:8
+P601 item
+P602 node 6:12
+P602 node 6:12
+P602 node 6:14
+P601 item
+P602 node 4:3
+P602 node 4:12
+P602 node 4:12
+P602 node 4:17
+P602 node 5:3
+P602 node 5:3
+P602 node 5:8
+P601 item
+P602 node 6:12
+P602 node 6:12
+P602 node 6:14
+main.hd:4:7: error[E504]: use do to discard a success value
+```
+
+読み取れること。
+
+- **`P601 item` が出る** → 入口は `walk_node` を呼んでいる（前々節の「呼ばれていない」は条件の揃わない測定だった）。
+- **`P602 node 4:3` が出る** → `let` の文（4 行 3 列）は walk に**来ている**。
+- **`P603 enter let fix` が出ない** → `NodeKind::Let` / `NodeKind::LetQ` の腕が**選ばれていない**。つまり 4:3 の node は `Let` でも `LetQ` でもない。
+
+訪れた位置は `4:3, 4:12, 4:12, 4:17, 5:3, 5:3, 5:8`（同じ位置が複数回あるので、同じ node が複数の腕の検査を通っている）。`4:3` の node が **`let … ->` の連なりを表す別の種類**である可能性が高い（`DoQ` など。`Let` / `LetQ` は別の用途かもしれない）。
+
+**次の 1 歩**: (1) `parser.rs` の `NodeKind` の定義から `Let` / `LetQ` / `DoQ` の在り処を grep で確かめる。(2) `walk_node` の**最後の `_ => {}` を印字する腕に変えて**、4:3 の node がどの腕にも当たらないことを確かめる（当たれば種類が分かる）。(3) 分かった種類に `discard_let_fix` を結び直す。**今度は書き換えも計器も残したまま測る。**
+
+計器と書き換えは戻した（木は綺麗）。
