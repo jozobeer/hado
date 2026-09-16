@@ -4967,3 +4967,36 @@ exit 0
 
 ### 仕様への疑義
 なし。
+
+## R80 パイプラインを関数適用結果から始める
+
+### 境界と実装
+- `prefer_pipelines` は最大のパイプ式を左へ辿り、左端が並置の関数適用であることを検査する。
+- `value |> f |> g` を `f value |> g` へ変え、二つ目以降の適用はパイプラインのまま残した。対象は `stdlib/`、`tools/`、付録Bと対応する受理ケースで、12 ファイルを変更した。
+- §14 は `x |> f` と `f x` の同値規則を維持し、連続変換の推奨例を `f x |> g` へ変更した。
+- corpus lock は収録パスの実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test prelude --test corpus --test check_modules --no-fail-fast
+prefer_pipelines 1/1、prelude 4/4、corpus 4/4、check_modules 14/14
+$ bash scripts/run-gates.sh --jobs 1 --tier quick /tmp/hado-r80-quick
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+775 passed / 0 failed
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ bash scripts/lint-docs.sh
+PASSED: 7/7
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 新しい `prefer_pipelines` は値から始まる最大パイプ式を 27 箇所列挙して赤になった。先頭の適用だけを並置へ変えた後は 1/1。
+- 最終 quick、全 Rust テスト、配布 CLI の門番、文書検査に赤はない。
+
+### 仕様への疑義
+なし。
