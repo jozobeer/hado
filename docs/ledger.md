@@ -4061,3 +4061,15 @@ fn is_effect_free(node: &Node) -> bool {
 道は 2 つ。(a) 条件分岐の解析側にも同じ形で `branch_spans` を押す。この場合、`rewrap_if_fix`（E507）など範囲を引く側が条件分岐でも範囲を得られるようになるので、**既存の書き換えの振る舞いが変わる**（R57 の門番と全走で確かめる必要がある）。(b) `CondBranch` 用に枝の範囲を node の span から直接出す。共有の一覧に触れないが、終わりの求め方（本体の終わり）を自分で持つことになる。
 
 次は (a) の影響範囲を先に測る（条件分岐の枝が範囲を持つと、どの検査・どの書き換えが変わるか）。(a) が安全なら (a)、(b) のほうが狭いなら (b)。
+
+### R69 の道の選択（条件分岐の枝の範囲を登録する）
+
+`branch_spans` / `branch_entry` / `branch_range` の読み手を grep した。**すべて `fixes.rs` の中**で、他のモジュールは読んでいない（`functor_instances.rs` は span を付け替えるだけ）。書き換え関数はそれぞれ自分の節で node の種類を縛っている。
+
+- `rewrap_if_fix`（E507）は `let NodeKind::PatternBranch { fallback, .. } = &node.kind else { return None };` で **pattern 分岐を要求**するので、条件分岐の範囲が登録されても E507 は条件分岐に掛からない。
+- `catch_all_fallback_fix`（E503/E512）は最後の腕の pattern を見るので同じく pattern 分岐が前提。
+- つまり、条件分岐の枝の範囲を登録して新たに掛かり得るのは、**`CondBranch` を明示的に受け取る書き換えだけ**である。
+
+したがって道は **(a) を選ぶ**: 条件分岐の解析の終わりにも `parse_pattern_branch` と同じ形で `self.branch_spans.push((span, first_pipe, self.span()));` を足す。影響は fixes の中に閉じ、`CondBranch` を受ける書き換え（E502）だけが新たに掛かる。全走と R57 の門番で、他の書き換えの件数が変わらないことを確かめる。
+
+実装の手順: (1) 条件分岐の解析関数（`if 条件 => 本体 | 本体` を読む側）の終わりに push を 1 行足す。(2) 台帳に残した `is_effect_free` と `identical_branches_fix` を `fixes.rs` に戻す（`branch_range(node, Tail::If, …)` が今度は条件分岐でも範囲を返す）。(3) `is_fixable` に `"E502"`、walk の `CondBranch` の腕から呼ぶ。(4) 門番 5/5、`## 64.`、仕様 §57、全走。
