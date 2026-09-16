@@ -1,9 +1,9 @@
 // spec: §38
 // expect: [2, 1, 3]
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return x => x

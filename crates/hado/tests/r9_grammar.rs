@@ -518,7 +518,7 @@ impl Generator {
     }
 
     fn literal(&mut self, choice: usize) -> String {
-        const RULES: &[&str] = &["int", "float", "char", "string", "bool", "unit"];
+        const RULES: &[&str] = &["int", "float", "char", "string", "bool", "void"];
         if choice != 4 { self.mark(RULES[choice], 1, 0); }
         match choice {
             0 => self.random(100000).to_string(),

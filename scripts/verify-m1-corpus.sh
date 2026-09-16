@@ -168,14 +168,14 @@ while IFS= read -r name || [ -n "$name" ]; do
     # Reject-exempt (no rejectable form by definition):
     # - 冗長の対象外: permission ("eta expansion is not redundant"), §2
     # - 末尾呼び出し: guarantee ("tail calls consume no stack"), §47
-    # - Unit payload: E509 (Ok(())) は Result と共に消え、§49 に拒否コードが無い。
+    # - Void payload: E509 (Ok(())) は Result と共に消え、§49 に拒否コードが無い。
     #   近くの拒否へ item: を寄せると被覆が嘘になる。
     # - 24.2 の runtime 失敗（Bytes・配列・String 操作・Int.parse・Env と Io）:
     #   違反は実行時の Error で、拒否コーパスに当たるコンパイルコードが無い。
     # - 複数の入口: 拒否形（main 無しの check）は A1 でライブラリ受理に変わった。
     # - 型の共有: 違反は E100 / E204 で、そのコードは他の項目が使っている。
     # - ライブラリ単位は R32 で E206 を拒否に使う。
-    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ] && [ "$name" != "Unit payload" ] \
+    if [ "$name" != "冗長の対象外" ] && [ "$name" != "末尾呼び出し" ] && [ "$name" != "Void payload" ] \
         && [ "$name" != "Bytes" ] && [ "$name" != "配列" ] && [ "$name" != "String 操作" ] \
         && [ "$name" != "Int.parse" ] && [ "$name" != "Env と Io" ] \
         && [ "$name" != "複数の入口" ] && [ "$name" != "型の共有" ]; then

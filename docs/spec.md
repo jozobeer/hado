@@ -221,7 +221,7 @@ String は `"..."` の形とする。エスケープは `\n` `\t` `\\` `\"` に�
 
 Bool は `true` と `false` とする。
 
-Unit は `()` とする。
+Void は `()` とする。
 
 コメントは `//` による行コメントのみとする。`--`（v0.1 の記法）と `#` を含む他の記法によるコメントは E104 とする。
 
@@ -707,7 +707,7 @@ constructorが1つだけで名前付きfieldを持つ型は `user.name` でfield
 最低限：
 
 ```text
-Unit
+Void
 Bool
 Int
 Float
@@ -724,7 +724,7 @@ Int の `/` と `%` は `{Error}`。String、Bytes、Array の範囲を要求す
 
 Float は f64 とする。Float の `/` は Float を返す。Float に `%` は置かない。
 
-Bool は i8、Char は i32、Unit は i64 の 0 とする。Cranelift に i1 はない。
+Bool は i8、Char は i32、Void は i64 の 0 とする。Cranelift に i1 はない。
 
 Char は Unicode スカラ値とする。String は不変の UTF-8 とする。Bytes は不変のバイト列とする。`String.length` はスカラ値の個数、`Bytes.length` はバイト数である。Array は要素型を 1 つ取る不変の列で、`get` は O(1)、`set` は新しい Array を返す。
 
@@ -1065,7 +1065,7 @@ fallbackのcanonical formは、
 
 列が 2 つ以上の pattern 分岐（第26節）では、一部の列の `_` は入れ子の一部と同じ扱いで許可し、全列が `_` の行だけを E503 とする。
 
-`()` はパターンではない。Unit の値は名前か `_` で受ける。
+`()` はパターンではない。Void の値は名前か `_` で受ける。
 
 fallback の canonical form は、書き換えの対象でもある。
 
@@ -1368,7 +1368,7 @@ effect Error
 abort raise(error: Exception)
 
 effect A Yield
-again yield(value: A): Unit
+again yield(value: A): Void
 
 effect Ask
 once ask: String
@@ -1465,7 +1465,7 @@ next
 
 E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第29節）。
 
-引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 3 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => ()`、`def save(_: T): Unit {Error} => ()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）と、handler の腕（第38節。`abort raise _ => None`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
+引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 3 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => ()`、`def save(_: T): Void {Error} => ()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）と、handler の腕（第38節。`abort raise _ => None`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
 
 未使用の判定は、外の `def` と `type`、契約、実装、functor、効果（第37節）、handler（第38節）、`implement` 節の中の ADT と record にも適用する（E513）。外の `def` はそのファイルの中だけで見える（第50節）ので、ファイルの中で数える。契約の抽象型の実体化（`shared type T = User` やconstructor付き本体）は契約が使うので対象外である。`implement` 節の中の `def` は E514（第47節）。functor の引数は E521（第48節）。型変数は E518（第16節）。`main` は例外である。
 
@@ -1588,7 +1588,7 @@ OCamlのmodule systemの思想を取り入れる。`module` は契約であり�
 module UserStore
 type T
 def find(id: Int): T Option
-def save(user: T): Unit {Error}
+def save(user: T): Void {Error}
 ```
 
 ここでの `Error` は prelude の失敗効果である（第33節）。契約の中の型名は、実装があるかどうかによらず解決される。
@@ -1854,7 +1854,7 @@ def find(id: Int): T Option
 | Bool | `true` `false` |
 | Char | 入れ子では `'a'` の形。エスケープは第5節の 4 つ |
 | String | 入れ子では `"..."` の形。エスケープは第5節の 4 つ |
-| Unit | 入れ子では `()` |
+| Void | 入れ子では `()` |
 | ADT | `Some(1)` `Guest` |
 | List | `[1, 2]` `[]`。`Cons` の形では出さない |
 | Bytes | `Bytes.of_list [72, 105]`。10 進の Int のリスト |
@@ -1862,7 +1862,7 @@ def find(id: Int): T Option
 | record | `{ name = "a"; age = 3 }` |
 | 名前付きfieldのconstructor | `Payload { id = 3; name = "a" }`。fieldは宣言順 |
 
-最上位（`main` が返した値そのものと、stderr へ出す `message`）だけ 2 つの例外を置く。String と Char は引用符もエスケープも付けずに生の文字列を出す。Unit は何も出さない（改行も出さない）。
+最上位（`main` が返した値そのものと、stderr へ出す `message`）だけ 2 つの例外を置く。String と Char は引用符もエスケープも付けずに生の文字列を出す。Void は何も出さない（改行も出さない）。
 
 # 第X部 prelude
 
@@ -1957,8 +1957,8 @@ once cwd: String {Error}
 
 effect Io
 once read_file(path: String): Bytes {Error}
-once write_file(path: String, contents: Bytes): Unit {Error}
-once log(contents: String): Unit {Error}
+once write_file(path: String, contents: Bytes): Void {Error}
+once log(contents: String): Void {Error}
 once read_dir(path: String): String List {Error}
 once read_stdin: Bytes {Error}
 ```
@@ -2304,8 +2304,8 @@ def active_names users =>
 module UserStore
 type T
 def find(id: Int): T Option
-def save(user: T): Unit {Error}
-def delete(user: T): Unit {Error}
+def save(user: T): Void {Error}
+def delete(user: T): Void {Error}
 
 implement UserStore as UserStore
 type T = User
@@ -2338,7 +2338,7 @@ char_escape     := "\n" | "\t" | "\\" | "\'"
 string          := '"' (string_escape | 文字)* '"'
 string_escape   := "\n" | "\t" | "\\" | '\"'           これ以外は E110
 bool            := "true" | "false"
-unit            := "()"
+void            := "()"
 name            := lower (letter | digit | "_")*       値・field・引数・名前空間の名前
 upper_name      := upper (letter | digit | "_")*       型・constructor・契約・実装・型変数の名前
 dunder_name     := "__" name                           stdlib 限定の組み込み名（第49節）
@@ -2454,7 +2454,7 @@ multiplicative  := unary (("*" | "/" | "%") unary)*
 unary           := "-" unary | "not" unary | application
 application     := postfix postfix*                                        並置。先頭が constructor なら E106
 postfix         := primary ("." name)*                                     field access
-primary         := int | float | char | string | bool | unit
+primary         := int | float | char | string | bool | void
                  | name
                  | dunder_name                                            呼び出しの先頭に限る（E203）
                  | path? upper_name "." name                              実装の値（List.map、store::MemoryStore.find）

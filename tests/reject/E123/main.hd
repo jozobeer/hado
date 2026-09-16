@@ -3,4 +3,4 @@
 // item: 効果の宣言
 def main = 1
 effect E
-abort stop: Unit
+abort stop: Void

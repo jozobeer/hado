@@ -1,7 +1,7 @@
 // spec: §38
 // expect: [103]
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as CollectOuter
 again y value => let rest = resume () -> [value, ...rest]
 return x => x

@@ -92,8 +92,8 @@ fn spec_effect_and_handler_examples_parse() {
 #[test]
 fn abort_return_type_is_e123_on_the_colon() {
     for source in [
-        "def main = 1\neffect E\nabort stop: Unit",
-        "def main = 1\neffect E\nabort raise(error: Exception): Unit",
+        "def main = 1\neffect E\nabort stop: Void",
+        "def main = 1\neffect E\nabort raise(error: Exception): Void",
     ] {
         reject(source, "E123", abort_return_colon(source));
     }
@@ -114,9 +114,9 @@ fn resume_outside_again_is_e124_on_resume() {
 #[test]
 fn again_arm_may_contain_resume() {
     for source in [
-        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => resume",
-        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => let rest = resume () -> rest",
-        "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as H\nagain yield value => fn(x => resume)",
+        "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => resume",
+        "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => let rest = resume () -> rest",
+        "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => fn(x => resume)",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
@@ -126,7 +126,7 @@ fn again_arm_may_contain_resume() {
 fn once_and_again_may_write_a_result() {
     for source in [
         "effect Ask\nonce ask: String",
-        "effect A Yield\nagain yield(value: A): Unit",
+        "effect A Yield\nagain yield(value: A): Void",
         "effect Ask\nonce ask",
         "effect E\nabort raise(error: Exception)",
     ] {

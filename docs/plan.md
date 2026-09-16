@@ -47,8 +47,8 @@
 | tuple | 持たない。`Fn<(Int, Int), Int>` の `( )` は引数列 |
 | 演算子 | 算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&& \|\| not`。算術と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相で、単相化時に確定し、未確定なら Int（`/` `%` の戻り型は 2.3）。`==` `!=` は Fn を含まない全型の構造比較で、M5 の派生パスが型ごとに合成する。Fn を含む型への `==` `!=` `compare` は単相化時に判明するので `E7xx`。`&&` `\|\|` は短絡評価で、左辺が結果を決めるとき右辺を評価しない。文字列連結演算子は置かない。優先順位は高い方から 適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`\|\|`、`\|>`。比較は非結合 |
 | リテラル | Int は 10 進。Float は小数点の両側に数字必須。Char は `'a'`。String は `"..."`、エスケープは `
- \t \\ \"`。Bool は `true` `false`。Unit は `()` |
-| Unit payload | `Ok()` が canonical。`Ok(())` は拒否 |
+ \t \\ \"`。Bool は `true` `false`。Void は `()` |
+| Void payload | `Ok()` が canonical。`Ok(())` は拒否 |
 | コメント | `--` 行コメントのみ |
 | 変数パターン | 最上位の `\| x => ...` は禁止。入れ子内は許可 |
 | リテラルパターン | 持つ。Int / Float / Char / String / Bool と入れ子で使える。Bool 以外は fallback 必須。条件列の全条件が「同一変数 `==` リテラル」ならパターン分岐で書けるため拒否 |
@@ -70,7 +70,7 @@
 | `main` の型 | 単相で、Fn を含まない型でなければならない。`def main = Nil` は型変数が残るため、`def main = inc` は印字できないため、どちらも `E7xx` |
 | 文字 | Char は Unicode スカラ値。String は不変の UTF-8。`String.length` はスカラ値の個数 |
 | top-level の未使用 `def` | エラー（仕様 §27 の適用範囲を top-level にも広げる）。`main` は例外 |
-| スカラの機械語型 | Int は i64、Float は f64、Bool は i8、Char は i32、Unit は i64 の 0。Cranelift に i1 はない |
+| スカラの機械語型 | Int は i64、Float は f64、Bool は i8、Char は i32、Void は i64 の 0。Cranelift に i1 はない |
 | ADT のレイアウト | constructor が全て payload なしの型は素の整数。payload を一つでも持つ型は全 constructor を一律に GC ヒープの box にする。一つの型の中で即値と pointer を混在させない |
 | `/` `%` の戻り型 | Int では `Result<Int, DivisionError>`。Float の `/` は `Float`。Float に `%` は置かない |
 | 除算の端 | `i64::MIN / -1` は wrap して `Ok(i64::MIN)`、`i64::MIN % -1` は `Ok(0)`。除数 0 と併せて `sdiv` `srem` の前に分岐で除く（Cranelift の `sdiv` は両方でトラップする） |
@@ -310,7 +310,7 @@ M3〜M7 の成果物を実測して見つかった未決事項を、grilling 形
 | Q5 | ADT の先頭 `\|` | 必須。E108 | §11 |
 | Q6 | record 型の `;` | 区切り形に統一 | §12 |
 | Q7 | `main` の印字 | Result の外側だけ剥がし、中身は canonical なソース表記。最上位の String と Char は生 | §51 |
-| Q7' | 最上位の Unit | 無印字 | §51 |
+| Q7' | 最上位の Void | 無印字 | §51 |
 | Q8 | 検査の段階順序 | §50 に規範として書く | §50 |
 | Q9 | record 型が 0 件 | E304 を「一意に決まらない」に広げる | §12 |
 | Q10 | 未使用の `type` `module type` `module` | E513 に含める。prelude は免除 | §27, §49 |
@@ -483,7 +483,7 @@ R8 の審査合格後に実行者が `tests/corpus.sha256` を新設する（`sh
 2. **検査順**（`lib.rs` `check_source`）: §50 の段階順。同一段階内はアンカー位置順。判定器: 型エラーと冗長欠陥を同居させた `def` を 20 本生成し、全件 E305 か E204。位置順は、同一段階の欠陥 2 つを位置を入れ替えて生成し、先の方が報告されること。`%` を Int 専用に型付けし、Float への適用が E305 になること。
 3. **名前解決**（`names.rs` `infer.rs`）: 実装されない `module type` 内の型名も E204。E205（同名宣言。record の field と sig の型変数を含む）。E206（`main` が無い・引数を持つ）。E513 を `type` `module type` `module` に広げ、prelude の免除を E513 に閉じる。E602（sig の不一致 4 種類）。constructor を `Fn` に型付けせず、payload の数と引数の数の不一致を E301 に（単独の `Some` を含む）。判定器: 乱数の型名で sig を生成、乱数の名前で重複を生成、乱数の arity の constructor に 0 個と arity+1 個の引数を渡して全件 E301。
 4. **網羅性と冗長**（`coverage.rs` `check.rs`）: `let` `let?` のパターンに網羅性（E402）。E505 を pattern 束縛と引数に（束縛を考慮した参照計数）。E515（自由な参照の計数は `names::references` 系を使う）。E304 の 0 件。E303 を `do?` に。判定器: E515 の 4 条件を 1 つずつ外した 4 プローブ、refutable な `let` の生成。
-5. **印字**（`mono.rs` の `print_T`、`emit.rs`、`runtime/`）: §51。List、入れ子の String と Char、最上位 Unit、Float。判定器: 型ごとの値を乱数で作り、期待文字列を判定器側で組み立てて実行結果と照合する。
+5. **印字**（`mono.rs` の `print_T`、`emit.rs`、`runtime/`）: §51。List、入れ子の String と Char、最上位 Void、Float。判定器: 型ごとの値を乱数で作り、期待文字列を判定器側で組み立てて実行結果と照合する。
 6. **コーパス走行**（`corpus.rs`）: `-- expect:` 空、`-- expect-error:`。
 7. **門番**: 件数の直書き（`verify-m2` 23/39、`parse_corpus.rs` 7/39、`verify-m3` 20）を §50 の行数とディスクの実数から導く形に。`verify-m3.sh` チェック 10 を `tests/corpus.sha256` との照合に、チェック 8 の暗記排除（コーパスのファイル名と 20 文字以上の行が現れない）の走査に `crates/shin/tests/corpus.rs` を含める。`verify-m4.sh` `verify-m7.sh` の末尾を `PASSED: n/N` に。`verify-m6.sh` の生成プローブ 4 本を消す。上記 1〜5 の判定器を `scripts/verify-r9.sh` に置く。
 
@@ -1353,7 +1353,7 @@ Koka 3.2.3 で、`again` に相当する `ctl` 操作を含む末尾再帰ルー
 `align_switch_arms` に**元の Outcome をそのまま fallback として渡す**（`:1758`）。
 `align_switch_arms` は fallback の型を基準に、Outcome でない腕を `done()` で包む（`:1915-1917`）。
 `done()` は `value.ty() != success` で拒否する（`:1935-1937`）。元の Outcome の success 欄は
-中の計算の成功型（`Unit`）のままで、handler の答えは `List Int` なので、ここで必ず落ちる。
+中の計算の成功型（`Void`）のままで、handler の答えは `List Int` なので、ここで必ず落ちる。
 **forwarding が Outcome を変換していないことが原因で、包み方の細部ではない。**
 
 `continuation result type mismatch` の側は `make_continuation` の `body.ty() != *answer`
@@ -1401,14 +1401,14 @@ one-shot 継続になり、§58 の「`resume` は捕まえた継続を 1 回だ
 **`resume` の中から `H` より外側の handler が扱う効果を起こす形は、`under` でも畳めない。**
 モデルは外側のフレームを再開時の探索対象から外しているのでこの結果になるが、
 これはモデル固有の制限ではなく、本体の表現からも同じ結論が出る。
-`interpret_outcome` は継続を `Closure([Unit], answer)`（`:1747-1753`）として射影する。
-つまり `resume : Unit -> A_H` で、**答えの型そのものを返す**。
+`interpret_outcome` は継続を `Closure([Void], answer)`（`:1747-1753`）として射影する。
+つまり `resume : Void -> A_H` で、**答えの型そのものを返す**。
 
 境界は「内側か外側か」で決まる。**`H` 自身への yield は閉じる** — `H` の解釈が再帰的に
 処理して `A_H` を作る（単独 handler の yield 2 回がこれで、実測でも通っている）。
 **`H` より内側の handler への yield も閉じる** — 内側の解釈を合成すれば `A_H` に届く。
 **`H` より外側へ yield したときだけ、`A_H` の値が存在しない。** 一般化するには継続が
-Outcome を返す形（`Unit -> Outcome<A_H, ...>`）が要り、腕の本体が Outcome を扱う形を
+Outcome を返す形（`Void -> Outcome<A_H, ...>`）が要り、腕の本体が Outcome を扱う形を
 要求する。R30 のスコープ外とし、22 節に記す。
 
 **その他。** 継続は one-shot なので、フレーム列を複製する必要はない。中断した生成器を
@@ -1472,7 +1472,7 @@ def main =>
 
 ```ocaml
 effect A Yield
-again yield(value: A): Unit
+again yield(value: A): Void
 
 handler A Yield as Collect
 again yield value =>
@@ -1480,7 +1480,7 @@ again yield value =>
   Cons(value, rest)
 return _ => Nil
 
-def rec each(values: Int List): Unit {Int Yield}
+def rec each(values: Int List): Void {Int Yield}
 | [] => ()
 | [head, ...tail] =>
     do yield head ->
@@ -1848,8 +1848,8 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
   （最内の答えを要する handler、`mono.rs:1579`）ではない。単独 handler では両者が一致するので
   現状が通り、入れ子で乖離する
 - **継続の型の仮説:** `$Yield#e(payload, k)` の内部の `k` は、囲んでいる計算と同じ Outcome を
-  返す（`Unit -> Outcome<S, ...>`）ものとし、各 handler の解釈が `k` を 1 段ずつ変換する。
-  利用者から見える `resume : Unit -> A_H`（`mono.rs:1747-1753` の射影）は、`e` を扱う handler の
+  返す（`Void -> Outcome<S, ...>`）ものとし、各 handler の解釈が `k` を 1 段ずつ変換する。
+  利用者から見える `resume : Void -> A_H`（`mono.rs:1747-1753` の射影）は、`e` を扱う handler の
   位置で、内側の変換を合成して作る。**この仮説が成り立たないと分かったら、そこで止めて
   報告すること**（17.9 のモデルは畳み方の意味論を確かめただけで、型付けは確かめていない）
 - **`resume` は 1 回限りのまま。** 17.9 で、フレーム列を複製せず中断点を 1 回だけ再開する形で
@@ -1938,8 +1938,8 @@ B4 の再現 1 と 3 は継続を伴わない素の `abort` なので 17.5 で�
   tail-resumptive で、単相化の時点で腕がその場に展開され `$Yield` を作らないためである。
   当初この節は `once` も含めていたが、実測で誤りと分かった。
   `hado check` は通るので §58 はこれを禁じていない。
-  `interpret_outcome` は継続を `Closure([Unit], answer)`（`mono.rs:1747-1753`）として射影する。
-  つまり `resume : Unit -> A_H` で答えの型そのものを返す。
+  `interpret_outcome` は継続を `Closure([Void], answer)`（`mono.rs:1747-1753`）として射影する。
+  つまり `resume : Void -> A_H` で答えの型そのものを返す。
   **`H` 自身への yield（判定 30-a の 2 回目の `y`、単独 handler の yield 2 回）と、
   `H` より内側の handler への yield（判定 30-a の `b`）は閉じる** — 前者は `H` の解釈が
   再帰的に処理し、後者は内側の解釈を合成すれば `A_H` に届く。**閉じないのは `H` より
@@ -1966,7 +1966,7 @@ forwarding の包み直しという、単相化の中の変更である。それ
 
 4 件の根は 2 本である。**継続** — yield 地点の後ろの計算を継続に切り出す
 仕組みが `do <again> -> rest` の形にしか無い（B6・B7）。**型** — `$Outcome` が payload の型を
-1 つしか持たず、継続の引数型が Unit に固定されている（B8・B9）。B8 は両方に当たる。
+1 つしか持たず、継続の引数型が Void に固定されている（B8・B9）。B8 は両方に当たる。
 
 **読む順:** 本節 → `docs/bug.md` の B6〜B9 → 22 節 → `docs/spec.md` の §57・§58・§24・§44 →
 17.7 の p.71:11 §2.10（bind-inlining）。
@@ -2038,7 +2038,7 @@ forwarding の包み直しという、単相化の中の変更である。それ
 | 同、Outer `return x => x` | `[2, 1]` | `[2, 1]` |
 | 外へ渡った後にもう一度 `y 3` | `[2, 1, 3]` | `[2, 1, 3]` |
 | 引数位置 `[y 1, y 2]`（B7） | `[1, 2]` | `[1, 2]` |
-| 非 Unit の `ask`（B8） | `[42]` | `[42]` |
+| 非 Void の `ask`（B8） | `[42]` | `[42]` |
 | payload が String と Int（B9） | `["a", "n1"]` | `["a", "n1"]` |
 | 30-k の k3（真ん中に `once`） | `[5]` | `[5]` |
 | 展開位置の `resume` が外へ yield | `[3, 102]` | `[3, 102]` |
@@ -2054,7 +2054,7 @@ Koka のソースは `docs/ledger.md` の「B6 の対応方針」にある。`Li
 `docs/bug.md`、tag。
 
 受理コーパスの `// spec:` は、B6 の 3 形・k3・展開位置・payload 混在の 2 形が §58、引数位置が §24、
-非 Unit が §57。
+非 Void が §57。
 
 ### 工程
 
@@ -2085,7 +2085,7 @@ Koka のソースは `docs/ledger.md` の「B6 の対応方針」にある。`Li
   `return _ => []`）の上に `Outer`（`return x => x`）を置き、`do w 2 -> do z 3 -> ()`。実行して `[3, 102]`
 判定 31-g（負の対照）: 30-k の対照 2 本（`resume` を経ない外側の again が `[4]`、外側の `once` が
   `[9, 1]`）はそのまま通る
-判定 31-h: 非 Unit の `ask`（B8 の再現例）。実行して `[42]`
+判定 31-h: 非 Void の `ask`（B8 の再現例）。実行して `[42]`
 判定 31-i: payload が String と Int（B9 の再現例）。実行して `["a", "n1"]`
 判定 31-j: B6 の再現例の `z` を `String` にし、Outer を `x => x`、Collect の腕を
   `[Int.to_string value, ...rest]`、本体を `do y 1 -> do z "b" -> ()`。実行して `["b", "1"]`
@@ -2285,7 +2285,7 @@ R26・R28・R30 と同じく、止めることは正常な終了経路である�
 | functor 無し。`implement Monoid as StringMonoid` の `type T = String` で `StringMonoid.combine "a" "b"` | `E305: cannot unify Fn(StringMonoid.T, StringMonoid.T => StringMonoid.T) with Fn(String, String => t307)` |
 | 同上の functor に `StringMonoid.of "a"` を渡す | `E305: cannot unify Fn(StringFold.T List => StringFold.T) with Fn(StringMonoid.T List => t342)` |
 
-組み込みは `runtime_abi.rs` の 16 本（印字 5、変換 3、String 3、他）で、`mono::Type` は `Int Float Bool Char String Unit Data Abstract Closure` の 9 variant。配列と Bytes の variant は無い。
+組み込みは `runtime_abi.rs` の 16 本（印字 5、変換 3、String 3、他）で、`mono::Type` は `Int Float Bool Char String Void Data Abstract Closure` の 9 variant。配列と Bytes の variant は無い。
 
 ### 24.8 文書改訂後の門番（2026-09-12 実測）
 
@@ -3548,7 +3548,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 ### 決定
 
 - **決定 1: `log` は `effect Io` の `once` とし、String と改行 1 つを stdout へ書く。**
-  - 宣言は `once log(contents: String): Unit {Error}`。既定実装は `IoDefault` の `def` に置く（R37 決定 1 の経路。0 引数の操作は `definition_reference`、1 引数以上は `specialize_function` + `call_direct`）。
+  - 宣言は `once log(contents: String): Void {Error}`。既定実装は `IoDefault` の `def` に置く（R37 決定 1 の経路。0 引数の操作は `definition_reference`、1 引数以上は `specialize_function` + `call_direct`）。
   - 本体は `let status = __io_log contents -> if status == 0 => () | raise { message = io_failure_message status }`。status は 0 成功 / 4 失敗で、4 は `io_failure_message` の既定腕により `"IoFailure"` になる。**`io_status_from_errno` は使わない**（EPIPE・ENOSPC が `PermissionDenied` などに化ける）。
   - C は `int64_t hado_io_log(const HadoString *contents)`。`fwrite` で contents、`fputc('
 ')`、`fflush(stdout)` の 3 つを 1 つの status に畳む。**`print_failed` は触らない。** log の失敗は言語の `Error` で、利用者の `handler Error` が捕まえられる。終了コードは、捕捉されなければ `main` の raise 経路（stderr と 1）が、捕捉されても `main` 末尾の `check_stdout`（R29）が決める。
@@ -3706,7 +3706,7 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 | `effect E reply x: Int` | E100 | 決定 2。`reply` は `name` で、`effect_item` の先頭の `op_kind` ではない |
 | `def reply = 1` | 受理 | 決定 2 |
 | `effect Ask` / `once ask: String` | 受理、`ask` が `{Ask}` を運ぶ | §37 |
-| `effect A Y` / `again y(value: A): Unit` / handler の `again` 腕 | 受理 | §37、§38 |
+| `effect A Y` / `again y(value: A): Void` / handler の `again` 腕 | 受理 | §37、§38 |
 | 受理コーパスの `once` → `reply`、`again` → `capture` の写し | check が非 0 | 決定 2。別名が残っていれば通ってしまう |
 
 ### 成果物
@@ -4576,12 +4576,12 @@ R46・R47 が §57 の局所的な書き換え（E501 / E510 / E515 / E516 / E51
 
 | 形 | `hado run` |
 |---|---|
-| `def main = check 1`（`check` が `Unit {Error}` を返し、合格） | 何も印字せず終了 0 |
+| `def main = check 1`（`check` が `Void {Error}` を返し、合格） | 何も印字せず終了 0 |
 | `def main = raise { message = "boom" }`（不合格） | stderr に `boom`、終了 1 |
 | `def main = 1 + true`（ビルドが通らない） | stderr に E305、終了 1 |
 | 下位ディレクトリの `module` を使うテスト（`library` と `implement`） | 期待どおり 0 / 1（§50 の参照の綴りで書ける） |
 
-`main` の値が `Unit` のときは何も印字されない（§55）。`tests/accept/abort_effect/main.hd` が `def main = raise { message = "stopped" }` で、`main` が `{Error}` を持てることを既に固定している。
+`main` の値が `Void` のときは何も印字されない（§55）。`tests/accept/abort_effect/main.hd` が `def main = raise { message = "stopped" }` で、`main` が `{Error}` を持てることを既に固定している。
 
 ### 決定
 
@@ -5017,7 +5017,7 @@ R46・R47 が §57 の局所的な書き換え（E501 / E510 / E515 / E516 / E51
 
 - `def main = 0` の後に `effect Unused` と `once unused: Int` を置くと、無診断で終了コード 0（bug.md の例そのもの）。
 - 効果と handler を置き、handler を `with` に書かない形も無診断で終了 0。
-- `type Money = | Yen(Int)` を `once charge (m: Money): Unit` の中だけで使い、handler の腕は `_` で受ける形は `main.hd:1:1: error[E513]: unused top-level declaration` になる。効果の操作の型を誰も見ていないためである（`Item::Effect(_) => {}`）。
+- `type Money = | Yen(Int)` を `once charge (m: Money): Void` の中だけで使い、handler の腕は `_` で受ける形は `main.hd:1:1: error[E513]: unused top-level declaration` になる。効果の操作の型を誰も見ていないためである（`Item::Effect(_) => {}`）。
 - 操作を呼び、handler を `with` に書いた形（`once ask: Int` と `once ask => 1` と `def main = with H -> ask`）は終了 0 で通る。
 - 未使用の効果と handler は `tests/accept/effect_forms/main.hd` と `tests/accept/again_inner_a/main.hd` にある。どちらも操作は handler の腕に**実装**されているだけで、呼ばれてはいない。効果を使ったと数える規則が「操作の参照」だけだと、この受理コーパスが E513 になって壊れる。handler の見出し（`handler A as Inner`）が効果を使うという規則が要る。
 - 未使用の効果は `tests/reject/E123`・`E124`・`E308`・`E522`・`E605` にもあるが、期待するコードはどれも E513 より前の段階（構文と契約）である。
@@ -6098,18 +6098,18 @@ def main = f 1` は受理される（`check` 終了 0、ラウンド 106 で実�
 - 隔離の有無が根の成否を分けること。
 - 赤が正準形を伴い、有限回の修正で緑になり、`fmt --check` も 0 になること。
 
-## 73. R78 Unit 型を Void 型に改名する手順書（2026-09-16）
+## 73. R78 型名 Unit を Void に改名する手順書（2026-09-16）
 
 ### 背景
 
-プリミティブ型の名前は `Unit` である（§5、§19）。値の綴りは `()`、印字は入れ子で `()`、最上位では無印字、機械語型は i64 の 0 である。名前だけを `Void` にする。値の綴り・印字・機械語型・検査の段階・エラーコードは動かさない。
+プリミティブ型の旧名は Unit である（§5、§19）。値の綴りは `()`、印字は入れ子で `()`、最上位では無印字、機械語型は i64 の 0 である。名前だけを `Void` にする。値の綴り・印字・機械語型・検査の段階・エラーコードは動かさない。
 
 ### 決定
 
 - **決定 1: 型の名前を `Void` にする。** §5 の「Void は `()`」、§19 のプリミティブ一覧、§19 の機械語型、§29 の「Void の値は名前か `_`」、§54 の印字表と最上位の例外、prelude と契約の戻り型、付録C の `void := "()"`（`bool` / `Bool` と同じ大小の対）を改名する。`()` の意味は変えない。
 - **決定 2: 旧綴りを型として残さない。** 別名は置かない。`: Unit` は E204。`type Unit = | U` は利用者の型名として受理する（第49節の型名前空間。組み込みから外れるため）。
 - **決定 3: 実装の内部識別子を揃える。** `Ty::Void` `Type::Void` `TokKind::Void` `NodeKind::Void` `Constant::Void`、印字の `"Void"`、`BUILTIN_TYPES` の `"Void"`。派生名 `eq_Void` `compare_Void` `print_Void` は Debug に従う。
-- **決定 4: コーパスのディレクトリ名を揃える。** `tests/accept/unit` → `tests/accept/void`、`tests/accept/again_non_unit_result` → `tests/accept/again_non_void_result`。`git mv` し、lock は改名後のパスで作り直す。計画 2.2 の項目名 `Unit payload` は現行版なので `Void payload` にする。
+- **決定 4: コーパスのディレクトリ名を揃える。** `tests/accept/unit` → `tests/accept/void`、`tests/accept/again_non_unit_result` → `tests/accept/again_non_void_result`。`git mv` し、lock は改名後のパスで作り直す。計画 2.2 の項目名は現行版なので `Void payload` にする。
 - **決定 5: `docs/ledger.md` の過去のラウンドの記述は当時の語のまま残す。** `docs/plan.md` は現行版なので改名する。版と tag は動かさない。
 - **決定 6: `scripts/verify-r78.sh` を新設し、`scripts/lib/gate-tiers.sh` の full に `r78` を足す。**
 
@@ -6126,12 +6126,12 @@ def main = f 1` は受理される（`check` 終了 0、ラウンド 106 で実�
 
 ### 成果物
 
-`docs/plan.md`（本節）、`docs/spec.md`、`docs/spec-trace.md`、`docs/spec-coverage.md`、`docs/corpus.md`、`docs/ledger.md`、`crates/hado/src/{lexer,parser,types,names,infer,mono,repr,emit,runtime_abi,file_scopes,functor_instances}.rs`、`crates/hado/tests/`、`tests/accept/`、`tests/reject/`、`stdlib/*.hd`、`scripts/verify-*.sh`（Unit を探す既存門番）、`scripts/verify-r78.sh`（新設）、`scripts/lib/gate-tiers.sh`、`tests/corpus.sha256`。
+`docs/plan.md`（本節）、`docs/spec.md`、`docs/spec-trace.md`、`docs/spec-coverage.md`、`docs/corpus.md`、`docs/ledger.md`、`crates/hado/src/{lexer,parser,types,names,infer,mono,repr,emit,runtime_abi,file_scopes,functor_instances}.rs`、`crates/hado/tests/`、`tests/accept/`、`tests/reject/`、`stdlib/*.hd`、`scripts/verify-*.sh`（旧名を探す既存門番）、`scripts/verify-r78.sh`（新設）、`scripts/lib/gate-tiers.sh`、`tests/corpus.sha256`。
 
 ### 工程
 
 - 工程 0: 計画（本節）。
-- 工程 1: 構造。決定 3 の識別子を改名する。型の綴り `"Unit"` は残す。`cargo test --offline --lib` が緑のままであることを測る。
+- 工程 1: 構造。決定 3 の識別子を改名する。型の綴りは旧名のまま。`cargo test --offline --lib` が緑のままであることを測る。
 - 工程 2: 仕様と見える面。決定 1・2・4・5 の文書・コーパス・stdlib・診断の印字・既存門番を切り替え、lock を更新する。
 - 工程 3: 判定器。`scripts/verify-r78.sh` を新設して緑にする。層・系譜・台帳。全走。
 
@@ -6140,14 +6140,14 @@ def main = f 1` は受理される（`check` 終了 0、ラウンド 106 で実�
 `scripts/verify-r78.sh` を新設する。**入力は生成し、期待値は判定器側で計算する。コーパスのファイル名や行を埋め込まない。**
 
 - 判定 78-a: `()` の `--print-type` が `Void`。`: Void` は受理、`: Unit` は E204。
-- 判定 78-b: 仕様に型名としての `\bUnit\b` が無く、§19 の一覧・§54 の表・付録C の `void := "()"` が `Void` / `void` である。`()` は残る。
+- 判定 78-b: 仕様に型名としての旧名が無く、§19 の一覧・§54 の表・付録C の `void := "()"` が `Void` / `void` である。`()` は残る。
 - 判定 78-c: 入れ子の印字は `Some(())`、最上位の `()` は無印字。
-- 判定 78-d: 受理コーパスのうち `Void` を含む各本について、その語を `Unit` に戻した写しが check を通らない（別名が残っていない）。
+- 判定 78-d: 受理コーパスのうち `Void` を含む各本について、その語を旧名に戻した写しが check を通らない（別名が残っていない）。
 - 判定 78-e: 文書（追跡表と 2.2 の項目名）・層の `r78`・corpus lock。
 
 ### 許容される赤
 
-工程 1 の直後まで 78-a〜78-d は赤でよい（綴りがまだ `Unit`）。工程 2 の直後に既存門番のうち仕様の `Unit` を探すものは赤になる（意図した赤。工程 2 で追随する）。**R78 の終了時に許容される赤は無い。**
+工程 1 の直後まで 78-a〜78-d は赤でよい（綴りがまだ旧名）。工程 2 の直後に既存門番のうち仕様の旧名を探すものは赤になる（意図した赤。工程 2 で追随する）。**R78 の終了時に許容される赤は無い。**
 
 ### スコープ外
 
@@ -6162,7 +6162,7 @@ def main = f 1` は受理される（`check` 終了 0、ラウンド 106 で実�
 
 - `: Unit` が E204 になり、別名が残っていないこと（決定 2、判定 78-d）
 - 最上位と入れ子の印字が 1 バイトも変わっていないこと（決定 1）
-- `docs/ledger.md` の過去の `Unit` が残っていること（決定 5）
+- `docs/ledger.md` の過去の旧名が残っていること（決定 5）
 
 ### 中断の条件
 

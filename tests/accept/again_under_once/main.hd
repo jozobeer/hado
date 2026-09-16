@@ -3,7 +3,7 @@
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect

@@ -65,7 +65,7 @@ check_prints() {
 
 write_source a "$(cat <<EOF
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
@@ -79,9 +79,9 @@ EOF
 
 write_source a2 "$(cat <<EOF
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect W
-again w(value: Int): Unit
+again w(value: Int): Void
 handler Y as Collect
 again y value => let rest = resume () -> [value, ...rest]
 return x => x
@@ -94,7 +94,7 @@ EOF
 
 write_source b "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
@@ -109,7 +109,7 @@ EOF
 
 write_source c "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
@@ -125,7 +125,7 @@ write_source d "$(cat <<'EOF'
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as Collect
 again y value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -139,7 +139,7 @@ write_source e "$(cat <<EOF
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
@@ -151,9 +151,9 @@ EOF
 
 write_source f "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 handler Y as CollectY
 again y value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -166,7 +166,7 @@ EOF
 
 write_source g "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect E
 abort e(reason: Int)
 handler Y as Collect
@@ -183,7 +183,7 @@ write_source h "$(cat <<EOF
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler A as Outer
@@ -199,7 +199,7 @@ EOF
 
 write_source i "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as CollectOuter
 again y value => let rest = resume () -> [value, ...rest]
 return x => x
@@ -212,7 +212,7 @@ EOF
 
 write_source j1 "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as Collect
 again y value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -222,7 +222,7 @@ EOF
 
 write_source j2 "$(cat <<'EOF'
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as Collect
 again y value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -232,9 +232,9 @@ EOF
 
 write_source k2 "$(cat <<'EOF'
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -247,9 +247,9 @@ EOF
 
 write_source k3 "$(cat <<'EOF'
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer
@@ -266,9 +266,9 @@ EOF
 
 write_source ok_outer "$(cat <<'EOF'
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -283,7 +283,7 @@ write_source ok_once "$(cat <<'EOF'
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect

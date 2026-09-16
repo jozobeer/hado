@@ -50,14 +50,14 @@ for arity in (0, 1):
         add(f'37-a(3) arity={arity} labels={len(labels)}', declarations + f'def use (n: Int): Int{suffix(labels + ["Foo"])} => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
         add(f'37-a(3) inferred arity={arity} labels={len(labels)}', declarations + f'def use (n: Int) => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
 add('37-a(5) abort', 'effect Stop\nabort stop\nhandler Stop as H\nabort stop => 9\ndef main = Int.to_string (with H -> stop)\n', 9, 'print')
-add('37-a(5) again', 'effect Ask\nagain ask(value: Int): Unit\nhandler Ask as H\nagain ask _ => resume ()\ndef main = Int.to_string (with H -> do ask 7 -> 8)\n', 8, 'print')
+add('37-a(5) again', 'effect Ask\nagain ask(value: Int): Void\nhandler Ask as H\nagain ask _ => resume ()\ndef main = Int.to_string (with H -> do ask 7 -> 8)\n', 8, 'print')
 values = [-1, 0, 3, 5, 2147483647, rng.randrange(10, 10000)]
 for value in values:
     add('37-b2(1) parameter', f'def f (raise: Int): Int => raise\ndef main = Int.to_string (f ({value}))\n', value, 'print')
     add('37-b2(2) function', f'def inc (n: Int): Int => n + 1\ndef f (raise: Fn(Int => Int)): Int => raise ({value})\ndef main = Int.to_string (f inc)\n', value + 1, 'print')
     add('37-b2(3) let', f'def main = Int.to_string (let raise = {value} -> raise + 1)\n', value + 1, 'print')
     add('37-b2(5) user operation', f'effect Foo\nonce tick: Int\ndef f (tick: Int): Int => tick\ndef main = Int.to_string (f ({value}))\n', value, 'print')
-add('37-b2(5) again let', 'effect Foo\nagain tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n', 9, 'print')
+add('37-b2(5) again let', 'effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n', 9, 'print')
 add('37-b2(4) unshadowed', 'def main = Int.to_string (raise { message = "x" })\n', 'x', 'error')
 
 def quote(value):
@@ -197,7 +197,7 @@ for operation, path, message in failures:
         directory = runtime(group+' '+operation+' '+path+' '+kind, source, expected, error=error)
         if kind=='success' and operation=='write_file':
             (directory/'expect').write_bytes(b'')
-            (directory/'unit-output').touch()  # Unit prints nothing at the top level (§54)
+            (directory/'unit-output').touch()  # Void prints nothing at the top level (§54)
         (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
@@ -206,7 +206,7 @@ for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'),
     directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
     if expected=='':
         (directory/'expect').write_bytes(b'')
-        (directory/'unit-output').touch()  # Unit prints nothing at the top level (§54)
+        (directory/'unit-output').touch()  # Void prints nothing at the top level (§54)
 for missing in range(len(io_arms)):
     reject('37-d Io missing-arm', 'handler Io as H\n'+'\n'.join(arm for i,arm in enumerate(io_arms) if i!=missing)+'\ndef main = 0\n', 'E605', 'handler Io')
 for sub in (False, True):
@@ -317,7 +317,7 @@ def validate(rows):
         unit = (base / ident / 'unit-output').exists()
         # An empty expect is allowed only when the oracle fills it at run time
         # (the runner asserts the oracle produced non-empty stdout), or when the
-        # probe deliberately returns Unit, which prints nothing at the top level.
+        # probe deliberately returns Void, which prints nothing at the top level.
         assert (base / ident / 'expect').stat().st_size > 0 or oracle or unit, ident
         if unit: units.add(label)
     assert seen == {p.name for p in base.iterdir() if p.is_dir() and p.name.isdecimal()}

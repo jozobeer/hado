@@ -2,9 +2,9 @@
 // expect: ["a", "n1"]
 // needs: prelude
 effect S
-again s(value: String): Unit
+again s(value: String): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler S as Names
 again s value => let rest = resume () -> [value, ...rest]
 return x => x

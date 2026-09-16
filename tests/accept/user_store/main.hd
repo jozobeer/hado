@@ -12,10 +12,10 @@ def main =
 module UserStore
 type T
 def find(id: Int): T Option
-def save(user: T): Unit {Error}
-def delete(user: T): Unit {Error}
+def save(user: T): Void {Error}
+def delete(user: T): Void {Error}
 implement UserStore as UserStore
 type T = User
 def find id => if id > 0 => Some({ id = id }) | None
-def save(_: T): Unit {Error} => ()
+def save(_: T): Void {Error} => ()
 def delete user => if user.id > 0 => () | raise { message = "NotFound" }

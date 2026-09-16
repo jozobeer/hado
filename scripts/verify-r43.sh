@@ -99,7 +99,7 @@ for path, signatures in members.items():
         assert signature in source, f'{path}: {signature}'
         assert signature in section, f'docs/spec.md §55: {signature}'
 
-log = 'once log(contents: String): Unit {Error}'
+log = 'once log(contents: String): Void {Error}'
 assert log in section, log
 assert log in Path('stdlib/io.hd').read_text(), log
 print('spec and stdlib: ' + ', '.join(f'{module}.{member}' for module, items in expected.items() for member in items) + ', Io.log')
