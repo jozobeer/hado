@@ -4320,3 +4320,38 @@ cargo test --offline: exit 0, passed=773 failed=0, "test result: FAILED" の行�
 6. 手順書 `## 66.`、系譜の行、全走。
 
 **次に確かめる 1 点**: `_` と `_?` が AST でどの `PatternKind` になるか（`catch_all_row`（`check.rs:436`）が `_` と変数を区別しているので、そこを読めば分かる）。
+
+## R71 の実装の実測（ビルドは通る、書き換えは出ない）
+
+`fixes.rs` に `discard_let_fix` と `Let` / `LetQ` の腕を足し、`is_fixable` に `"E504" | "E506"` を入れた。
+
+- 束縛のパターンのフィールド名は **`pat`** だった（`NodeKind::Let { pat, value, .. }` / `LetQ { pat, value, .. }`。最初 `pattern` で書いて E0026 が出たので、`parser.rs` の定義から正規表現で取り出して直した）。
+- パターンは `PatternKind::Underscore`（`check.rs:428` の `is_wildcard_pattern` が実測。`_` と `_?` は同じ種類で、`let` と `let?` の区別は `Let` / `LetQ` の節が持つ）。
+
+**ビルドは通り（エラー 0）、`check --fix` を写しに掛けても書き換えが出ない**（`E504` / `E506` とも `check-exit=1` のまま、行は変わらない）。E502 と同じ「掛からない」一族である。
+
+**入れたコード（次ラウンドでそのまま戻せる形）。**
+
+```rust
+fn discard_let_fix(
+    node: &Node, pat: &Pattern, value: &Node,
+    code: &'static str, canonical: &str, source: &str, lines: &LineMap,
+) -> Option<Fix> {
+    if !matches!(pat.kind, PatternKind::Underscore) { return None; }
+    let start = lines.offset(source, node.span);
+    let end = lines.offset(source, value.span);
+    if start >= end || source[start..end].contains("//") { return None; }
+    Some(Fix { code, line: pat.span.line, col: pat.span.col, start, end,
+               replacement: "do ".to_string(), canonical: canonical.to_string() })
+}
+
+// walk_node の PatternBranch の腕の直前:
+        NodeKind::Let { pat, value, .. } => {
+            if let Some(fix) = discard_let_fix(node, pat, value, "E506", "do", source, lines) { found.push(fix); }
+        }
+        NodeKind::LetQ { pat, value, .. } => {
+            if let Some(fix) = discard_let_fix(node, pat, value, "E504", "do", source, lines) { found.push(fix); }
+        }
+```
+
+**次の 1 歩は E502 と同じ計器。** `walk_node` の入口で訪れた node の種類を 1 行印字し、`check --fix` を写しに直接掛けて、この `let` が walk に来ているか、来ているならどの門で落ちるかを見る。1 回の実行で切り分けられる。**推測は重ねない。**
