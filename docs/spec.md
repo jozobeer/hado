@@ -877,6 +877,10 @@ Boolean branchでは、`|` の右側は必ずelse側の式であり、fallback�
 
 Bool の値を分岐する形はこの 1 つに限る。同じ意味になる Bool リテラルの pattern 分岐（`if b | true => x | false => y`、`if b | true => x | y`）と、腕が 1 本だけの条件列（`if | b => x | y`）は E520 とする。第31節の形（`def f | true => x | false => y`）も同じである。入れ子の中の Bool リテラルパターン（`Some(true)`）と、列が 2 つ以上の pattern 分岐の Bool リテラル（第26節）は対象外である。
 
+Bool リテラルの腕を持つこの形は、書き換えの対象でもある。
+
+`if b | true => x | false => y` と `if b | true => x | y` は `if b => x | y` に書き換える。腕は真偽で選び直すので、書かれた順が逆でも値は変わらない。この書き換えは `check --fix`、`hado fmt`、`build --fix` が同じ表で使う（第57節、第58.1節）。
+
 ## 25. 条件列
 
 複数条件の分岐には、フラットな条件列を使う。
