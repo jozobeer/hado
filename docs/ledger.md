@@ -4547,3 +4547,17 @@ E506 check-exit=1      ← let _ = x -> のまま（掛けない）
 ```
 
 **コミット `d5fa81b`（`feat:`）**: `discard_let_fix` を E504 に掛ける。呼び出しは `LetQ` を所有している既存の腕（921 行）の中。腕を後方に足すと dead になるという 9 ラウンドの教訓をコードのコメントに残す価値がある。
+
+## R71 の門番（5/5）
+
+`scripts/verify-r71.sh` を書いた。1 回目の実測は 3/5 で、2 つとも直した。
+
+```
+1 回目: NG 71-c (want=[error: could not find `Cargo.toml` …]) / NG 71-e (missing: tier trace plan)
+2 回目: OK 71-a / OK 71-b / OK 71-c / OK 71-d / OK 71-e  →  PASSED: 5/5
+```
+
+- **71-c は判定器の誤りだった**: `hado` を `cargo run` の関数で包んでいたので、再現のディレクトリへ `cd` すると cargo が `Cargo.toml` を見つけられない。`cargo build --offline --bin hado` で作ったバイナリ（`${CARGO_TARGET_DIR:-$HOME/.cargo/target}/debug/hado`）を絶対パスで使う形に直した。
+- **71-e は想定どおりの赤**（層・系譜・手順書が未記入）。`r71` を層 `full` に、§35 の行を系譜に、`## 66.` を手順書に足して緑になった。
+
+検査の内容: 71-a `check --fix` で受理、71-b `fmt` でも受理され冪等、71-c 直した物の実行結果が**再現から導いた手書きの `do` 版**と一致、71-d 対象外（純粋値の `let _ =`、名前のある `let y? =`）は触らない、71-e 層・系譜・手順書・コーパスのロック。**期待値は判定器側で導いており、ファイル名も件数も書き込んでいない。**
