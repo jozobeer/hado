@@ -10,7 +10,8 @@
 //!
 //! 対象は §41・§44・§46・§53 の正準形のうち、まわりの木を変えずに書ける
 //! ものだけ: E510（式の `Nil` / `Cons`）、E516（パターンの `Nil` / `Cons`）、
-//! E517（`=> if | ...` の条件列を引数の腕へ）。
+//! E517（`=> if | ...` の条件列を引数の腕へ）、E507（腕がすべて自分の pattern を
+//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `let p? =`）。
 
 use crate::lexer::{lex_full, Span, Tok, TokKind};
 use crate::parser::{self, Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
@@ -49,7 +50,7 @@ pub fn fixes(source: &str) -> Vec<Fix> {
         }
     }
     for item in &ast.items {
-        walk_item(item, source, &lines, &tokens, &index, &mut found);
+        walk_item(item, source, &lines, &tokens, &index, &ast.branch_spans, &mut found);
     }
 
     // 同じ開始位置では外側（終わりが後ろ）を先に残し、重なる編集を落とす。
@@ -112,7 +113,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E507" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E517: `def f x => if | ...` を `def f x | ...` へ ---
@@ -183,12 +184,14 @@ fn def_at<'a>(items: &'a [Item], span: Span) -> Option<&'a parser::Def> {
 
 // --- E510 / E516: 書かれた List 形 ---
 
+#[allow(clippy::too_many_arguments)]
 fn walk_item(
     item: &Item,
     source: &str,
     lines: &LineMap,
     tokens: &[Tok],
     index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
     found: &mut Vec<Fix>,
 ) {
     match item {
@@ -196,18 +199,63 @@ fn walk_item(
             if let Some(fix) = sole_parameter_fix(def, source, lines, tokens, index) {
                 found.push(fix);
             }
+            let arms = match &def.kind {
+                DefKind::Function { params, .. } => arm_form(params),
+                _ => false,
+            };
             match &def.kind {
-                DefKind::Value(body) => walk_node(body, source, lines, tokens, index, found),
-                DefKind::Function { body, .. } => walk_node(body, source, lines, tokens, index, found),
+                DefKind::Value(body) => {
+                    // 値の定義の本体は末尾なので、`let p? =` の伝播先はこの定義。
+                    if let Some(fix) = repropagate_fix(
+                        body,
+                        Tail::If,
+                        None,
+                        source,
+                        lines,
+                        tokens,
+                        index,
+                        branches,
+                    ) {
+                        found.push(fix);
+                    }
+                    walk_node(body, source, lines, tokens, index, branches, found);
+                }
+                DefKind::Function { body, .. } => {
+                    if arms {
+                        let identity = format!(
+                            "def {}{} value => value",
+                            if def.rec { "rec " } else { "" },
+                            def.name
+                        );
+                        if let Some(fix) =
+                            rewrap_arm_fix(body, &identity, Tail::Def, source, lines, tokens, index, branches)
+                        {
+                            found.push(fix);
+                        }
+                    }
+                    let tail = if arms { Tail::Def } else { Tail::If };
+                    if let Some(fix) =
+                        repropagate_fix(body, tail, Some(def), source, lines, tokens, index, branches)
+                    {
+                        found.push(fix);
+                    }
+                    walk_node(body, source, lines, tokens, index, branches, found);
+                }
             }
         }
         Item::ModuleImpl(module) => {
             for item in &module.items {
-                walk_item(item, source, lines, tokens, index, found);
+                walk_item(item, source, lines, tokens, index, branches, found);
             }
         }
         _ => {}
     }
+}
+
+/// The §31 / §32 arm forms (`def f | ...`, `fn(| ...)`) lower to one parameter
+/// named `$argument`, which cannot be written in source.
+fn arm_form(params: &[parser::Param]) -> bool {
+    matches!(params, [parameter] if parameter.name == "$argument")
 }
 
 // --- E515: `def f x => if x | ...` の引数を腕へ移す ---
@@ -308,12 +356,267 @@ fn let_identity_fix(
     })
 }
 
+// --- E507 / E508: Option の再包装と再伝播 ---
+
+/// The shape of the function whose body is the branch (§57). `let p? =`
+/// propagates absence out of the enclosing function, so a rewrite is only
+/// offered where the branch is that function's body.
+#[derive(Clone, Copy, PartialEq)]
+enum Tail {
+    /// A branch in tail position: the branch itself is replaced.
+    If,
+    /// The §31 `def f | ...` form: the definition is rewritten with `value`.
+    Def,
+    /// The §31 `fn(| ...)` form.
+    Fn,
+}
+
+/// E507: `if E | ...` is `E` when every arm rebuilds its own pattern.
+#[allow(clippy::too_many_arguments)]
+fn rewrap_if_fix(
+    node: &Node,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let scrutinee = crate::check::rewrap_branch(node)?;
+    // The arm forms carry their own rewrite: their scrutinee is `$argument` and
+    // the branch spans the whole definition.
+    if matches!(&scrutinee.kind, NodeKind::Name(name) if name == "$argument") {
+        return None;
+    }
+    let NodeKind::PatternBranch { fallback, .. } = &node.kind else { return None };
+    // A fallback re-evaluates the scrutinee; folding it into one evaluation can
+    // change how often an effect runs.
+    if fallback.is_some() {
+        return None;
+    }
+    let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    if source[start..end].contains("//") {
+        return None;
+    }
+    let replacement = parser::canonical(scrutinee);
+    Some(Fix {
+        code: "E507",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
+}
+
+/// E507 for the §31 arm forms: every arm rebuilds the value, so the definition
+/// is the identity function.
+#[allow(clippy::too_many_arguments)]
+fn rewrap_arm_fix(
+    node: &Node,
+    replacement: &str,
+    tail: Tail,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    if crate::check::rewrap_branch(node).is_none() {
+        return None;
+    }
+    let NodeKind::PatternBranch { fallback, .. } = &node.kind else { return None };
+    if fallback.is_some() {
+        return None;
+    }
+    let (start, end) = branch_range(node, tail, source, lines, tokens, index, branches)?;
+    if source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E507",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        replacement: replacement.into(),
+        canonical: replacement.into(),
+    })
+}
+
+/// E508: `if E | Some(p) => body | None => None` in tail position is
+/// `let p? = E -> body` (§36). The rewrite needs a binder that the body uses:
+/// with none, or with one the body ignores, `do` is the canonical form.
+#[allow(clippy::too_many_arguments)]
+fn repropagate_fix(
+    node: &Node,
+    tail: Tail,
+    def: Option<&parser::Def>,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let NodeKind::PatternBranch {
+        scrutinees,
+        arms,
+        fallback,
+    } = &node.kind
+    else {
+        return None;
+    };
+    if fallback.is_some() {
+        return None;
+    }
+    let [scrutinee] = scrutinees.as_slice() else { return None };
+    let [(patterns, body), (absence_patterns, absence_body)] = arms.as_slice() else {
+        return None;
+    };
+    let ([pattern], [absence]) = (patterns.as_slice(), absence_patterns.as_slice()) else {
+        return None;
+    };
+    if !matches!(&absence.kind, PatternKind::Name(name) if name == "None")
+        || !crate::normalize::rebuilds_pattern(absence, absence_body)
+    {
+        return None;
+    }
+    // `let p? = E` matches `p` against the value inside the Option (§36), so the
+    // first arm must be `Some(p)` with one argument.
+    let PatternKind::Constructor(name, arguments) = &pattern.kind else { return None };
+    if name != "Some" || arguments.len() != 1 {
+        return None;
+    }
+    let inner = &arguments[0];
+    let binders = crate::names::bindings(inner);
+    if binders.is_empty()
+        || !binders
+            .iter()
+            .all(|(binder, _)| crate::names::references(body, binder))
+    {
+        return None;
+    }
+    // With every arm rebuilding, E507 is reported and its rewrite is shorter.
+    if crate::check::rewrap_branch(node).is_some() {
+        return None;
+    }
+    // The anchor is the `None` arm's `|`, the position the checker reports
+    // (check::arm_diagnostic moves the code there through branch_anchors).
+    let pipe = tokens.get(index.position(absence.span)?.checked_sub(1)?)?;
+    if !matches!(pipe.kind, TokKind::Pipe) {
+        return None;
+    }
+    let (_, first_pipe, _) = *branch_entry(node.span, branches)?;
+    let (start, end) = branch_range(node, tail, source, lines, tokens, index, branches)?;
+    if source[start..end].contains("//") {
+        return None;
+    }
+    // The scrutinee ends where the first arm's `|` begins; the first arm's body
+    // ends where the `None` arm's `|` begins.
+    let value_end = trim_back(source, lines.offset(source, first_pipe));
+    let body_end = trim_back(source, lines.offset(source, pipe.span));
+    let value = match tail {
+        Tail::If => source[lines.offset(source, scrutinee.span)..value_end].trim(),
+        Tail::Def | Tail::Fn => "value",
+    };
+    let body_text = &source[lines.offset(source, body.span)..body_end];
+    let let_form = format!("let {}? = {} -> {}", pattern_text(inner), value, body_text);
+    let replacement = match tail {
+        Tail::If => let_form,
+        Tail::Def => {
+            let def = def?;
+            format!(
+                "def {}{} value => {let_form}",
+                if def.rec { "rec " } else { "" },
+                def.name
+            )
+        }
+        Tail::Fn => format!("fn(value => {let_form})"),
+    };
+    Some(Fix {
+        code: "E508",
+        line: pipe.span.line,
+        col: pipe.span.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
+}
+
+/// The byte range of one branch: its first token through its last arm. `None`
+/// when the parser recorded no branch at that span.
+fn branch_range(
+    node: &Node,
+    tail: Tail,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<(usize, usize)> {
+    let (_, _, after) = *branch_entry(node.span, branches)?;
+    let start = lines.offset(source, node.span);
+    // The `fn` arm form is parenthesized and the parser stops before the `)`
+    // that closes it, so the range has to include that `)`.
+    let end = if tail == Tail::Fn {
+        let mut depth = 0i32;
+        let mut close = None;
+        for token in &tokens[index.position(node.span)?..] {
+            match token.kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(lines.offset(source, token.span) + 1);
+                        break;
+                    }
+                }
+                TokKind::Eof => break,
+                _ => {}
+            }
+        }
+        close?
+    } else {
+        trim_back(source, lines.offset(source, after))
+    };
+    (start <= end).then_some((start, end))
+}
+
+/// The parser's record for one branch: its start, its first `|`, and the token
+/// after it.
+fn branch_entry(span: Span, branches: &[(Span, Span, Span)]) -> Option<&(Span, Span, Span)> {
+    branches.iter().find(|(start, _, _)| *start == span)
+}
+
+/// Blanks between the branch and the next token stay out of the range, so the
+/// rewrite leaves the next token where it was.
+fn trim_back(source: &str, end: usize) -> usize {
+    let mut at = end.min(source.len());
+    while at > 0 && source.as_bytes()[at - 1].is_ascii_whitespace() {
+        at -= 1;
+    }
+    at
+}
+
+/// A diagnostic prints on one line; the written text keeps the author's breaks.
+fn flatten(text: &str) -> String {
+    text.replace('\n', " ")
+}
+
+/// The canonical spelling of a pattern, with the list forms of E516.
+fn pattern_text(pattern: &Pattern) -> String {
+    parser::list_pattern_source(pattern).unwrap_or_else(|| pattern.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn walk_node(
     node: &Node,
     source: &str,
     lines: &LineMap,
     tokens: &[Tok],
     index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
     found: &mut Vec<Fix>,
 ) {
     match &node.kind {
@@ -343,10 +646,31 @@ fn walk_node(
             walk_pattern(pat, source, lines, tokens, index, found);
         }
         NodeKind::PatternBranch { arms, .. } => {
+            // §57: 腕がすべて自分の pattern を組み直す分岐は scrutinee ちょうど。
+            // この書き換えは位置を選ばない（式の値が変わらない）。
+            if let Some(fix) = rewrap_if_fix(node, source, lines, tokens, index, branches) {
+                found.push(fix);
+            }
             for (patterns, _) in arms {
                 for pattern in patterns {
                     walk_pattern(pattern, source, lines, tokens, index, found);
                 }
+            }
+        }
+        NodeKind::Fn { params, body } => {
+            let arms = arm_form(params);
+            if arms {
+                if let Some(fix) =
+                    rewrap_arm_fix(body, "fn(value => value)", Tail::Fn, source, lines, tokens, index, branches)
+                {
+                    found.push(fix);
+                }
+            }
+            // `fn` の本体もその `fn` の末尾なので、伝播先はこの `fn`（§36）。
+            let tail = if arms { Tail::Fn } else { Tail::If };
+            if let Some(fix) = repropagate_fix(body, tail, None, source, lines, tokens, index, branches)
+            {
+                found.push(fix);
             }
         }
         _ => {}
@@ -358,7 +682,7 @@ fn walk_node(
         if cons_call && position == 0 {
             continue;
         }
-        walk_node(child, source, lines, tokens, index, found);
+        walk_node(child, source, lines, tokens, index, branches, found);
     }
 }
 

@@ -345,7 +345,7 @@ impl Checker<'_> {
         let offset = self.next_instance_line;
         let instance = crate::functor_instances::instantiate(&template.module, application, module_names, offset);
         let ast = Ast { items: vec![Item::ModuleImpl(instance.clone())], span: instance.span, library: None,
-            branch_anchors: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new(),
+            branch_anchors: Vec::new(), branch_spans: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new(),
             written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), branches_after_fallback: Vec::new() };
         self.next_instance_line = crate::functor_instances::max_line(&ast) + 1;
         self.instantiated_modules.push(instance);

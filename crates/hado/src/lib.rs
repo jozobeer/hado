@@ -177,6 +177,7 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);
+            ast.branch_spans.extend(parsed.branch_spans);
             ast.equality_anchors.extend(parsed.equality_anchors);
             ast.qualified_type_anchors.extend(parsed.qualified_type_anchors);
             ast.name_sites.extend(parsed.name_sites);

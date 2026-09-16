@@ -40,6 +40,11 @@ pub(crate) fn max_line(ast: &Ast) -> usize {
         instance.span(first);
         instance.span(second);
     }
+    for (start, pipe, after) in &mut ast.branch_spans {
+        instance.span(start);
+        instance.span(pipe);
+        instance.span(after);
+    }
     for (first, second, operator) in &mut ast.equality_anchors {
         instance.span(first);
         instance.span(second);

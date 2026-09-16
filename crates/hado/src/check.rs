@@ -453,48 +453,61 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
     })
 }
 
-fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
+/// §36 / §57: the single `None` arm of a single-scrutinee branch rebuilds the
+/// absence it binds. The checker (E508) and the local rewrite (§57) share this
+/// predicate, so a rewrite cannot drift from the reported code.
+pub(crate) fn repropagated_arm(node: &Node) -> Option<(&Pattern, &Node)> {
     let NodeKind::PatternBranch { scrutinees, arms, .. } = &node.kind else {
-        return Ok(());
+        return None;
     };
     if scrutinees.len() != 1 {
-        return Ok(());
+        return None;
     }
     for (patterns, body) in arms {
         let [pattern] = patterns.as_slice() else { continue };
         if matches!(&pattern.kind, PatternKind::Name(name) if name == "None")
             && crate::normalize::rebuilds_pattern(pattern, body)
         {
-            return Err(Diagnostic {
-                path: path.into(),
-                line: body.span.line,
-                col: body.span.col,
-                code: Some("E508".into()),
-                message: format!(
-                    "absence bound at {}:{} is propagated unchanged; use let p? = or do",
-                    pattern.span.line, pattern.span.col
-                ),
-            });
+            return Some((pattern, body));
         }
     }
-    Ok(())
+    None
 }
 
-fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
+fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let Some((pattern, body)) = repropagated_arm(node) else {
+        return Ok(());
+    };
+    Err(Diagnostic {
+        path: path.into(),
+        line: body.span.line,
+        col: body.span.col,
+        code: Some("E508".into()),
+        message: format!(
+            "absence bound at {}:{} is propagated unchanged; use let p? = or do",
+            pattern.span.line, pattern.span.col
+        ),
+    })
+}
+
+/// §45 / §57: every arm of a single-scrutinee branch rebuilds its own pattern,
+/// and any fallback is the scrutinee unchanged. The checker (E507) and the local
+/// rewrite (§57) share this predicate, so a rewrite cannot drift from the code.
+pub(crate) fn rewrap_branch(node: &Node) -> Option<&Node> {
     let NodeKind::PatternBranch {
         scrutinees,
         arms,
         fallback,
     } = &node.kind
     else {
-        return Ok(());
+        return None;
     };
     let [scrutinee] = scrutinees.as_slice() else {
-        return Ok(());
+        return None;
     };
-    let fallback_unchanged = fallback.as_ref().map_or(true, |body| {
-        crate::normalize::same_expression(scrutinee, body)
-    });
+    let fallback_unchanged = fallback
+        .as_ref()
+        .map_or(true, |body| crate::normalize::same_expression(scrutinee, body));
     if !arms.is_empty()
         && arms.iter().all(|(patterns, _)| matches!(patterns.as_slice(), [pattern]
             if !matches!(&pattern.kind, PatternKind::Underscore)
@@ -504,18 +517,25 @@ fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
             matches!(patterns.as_slice(), [pattern] if crate::normalize::rebuilds_pattern(pattern, body))
         })
     {
-        return Err(Diagnostic {
-            path: path.into(),
-            line: node.span.line,
-            col: node.span.col,
-            code: Some("E507".into()),
-            message: format!(
-                "branches reconstruct the value at {}:{}",
-                scrutinee.span.line, scrutinee.span.col
-            ),
-        });
+        return Some(scrutinee);
     }
-    Ok(())
+    None
+}
+
+fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let Some(scrutinee) = rewrap_branch(node) else {
+        return Ok(());
+    };
+    Err(Diagnostic {
+        path: path.into(),
+        line: node.span.line,
+        col: node.span.col,
+        code: Some("E507".into()),
+        message: format!(
+            "branches reconstruct the value at {}:{}",
+            scrutinee.span.line, scrutinee.span.col
+        ),
+    })
 }
 
 fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {

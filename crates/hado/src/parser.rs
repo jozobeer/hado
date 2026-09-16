@@ -305,6 +305,9 @@ pub struct Ast {
     pub library: Option<Span>,
     pub branches_after_fallback: Vec<Span>,
     pub branch_anchors: Vec<(Span, Span)>,
+    /// §57: (branch start, first `|`, first token after the branch) for every
+    /// pattern branch, so a rewrite can address the whole branch.
+    pub branch_spans: Vec<(Span, Span, Span)>,
     pub equality_anchors: Vec<(Span, Span, Span)>,
     pub qualified_type_anchors: Vec<(DeclaredName, Span)>,
     pub written_list_patterns: Vec<Span>,
@@ -317,6 +320,7 @@ impl Ast {
         self.library = self.library.or(other.library);
         self.branches_after_fallback.extend(other.branches_after_fallback);
         self.branch_anchors.extend(other.branch_anchors);
+        self.branch_spans.extend(other.branch_spans);
         self.equality_anchors.extend(other.equality_anchors);
         self.qualified_type_anchors.extend(other.qualified_type_anchors);
         self.name_sites.extend(other.name_sites);
@@ -567,6 +571,7 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         path,
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
+        branch_spans: Vec::new(),
         equality_anchors: Vec::new(),
         qualified_type_anchors: Vec::new(),
         name_sites: Vec::new(),
@@ -589,6 +594,7 @@ struct Parser<'a> {
     path: &'a str,
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
+    branch_spans: Vec<(Span, Span, Span)>,
     equality_anchors: Vec<(Span, Span, Span)>,
     qualified_type_anchors: Vec<(DeclaredName, Span)>,
     name_sites: Vec<NameSite>,
@@ -653,7 +659,7 @@ impl Parser<'_> {
     fn parse_program(&mut self) -> Ast {
         let span = self.span();
         let items = self.parse_items(TypeContext::TopLevel);
-        Ast { library: self.library, items, span, name_sites: self.name_sites.clone(), branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), equality_anchors: self.equality_anchors.clone(), qualified_type_anchors: self.qualified_type_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
+        Ast { library: self.library, items, span, name_sites: self.name_sites.clone(), branches_after_fallback: self.branches_after_fallback.clone(), branch_anchors: self.branch_anchors.clone(), branch_spans: self.branch_spans.clone(), equality_anchors: self.equality_anchors.clone(), qualified_type_anchors: self.qualified_type_anchors.clone(), written_list_patterns: self.written_list_patterns.clone(), long_condition_functions: self.long_condition_functions.clone() }
     }
 
     fn section_boundary(&self) -> bool {
@@ -1811,6 +1817,7 @@ impl Parser<'_> {
         if arms.is_empty() {
             return Err(self.error_at(first_pipe, None, "pattern branch requires at least one arm"));
         }
+        self.branch_spans.push((span, first_pipe, self.span()));
         Ok(Node {
             kind: NodeKind::PatternBranch {
                 scrutinees,
