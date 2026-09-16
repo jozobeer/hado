@@ -3760,3 +3760,51 @@ R62（58 節）が落とした E520 の書き換えを入れた。R62 は「E520
 ### 仕様への疑義
 
 - **`label` が引けないとき。** `related` を持つのに `related_label` が `None` を返すコードは、いまのところ無い（§56 の 3 つはすべてラベルを持つ）。仕様では `null` と書いたが、そのような診断を作らないことを門番で固定してはいない。
+
+## R66 一巡の通し確認（2026-09-16）
+
+### 目的
+
+依頼の「書いて、直して、実行し続けられる一巡」が実際に通ることを、実バイナリで最初から最後まで測る。コードは変えないので、この節は実測の記録である。
+
+### 実測
+
+わざと冗長なプログラムを書いた（タブの字下げ、行末の空白、`| _ => 0` の catch-all、`if b | true => 1 | false => 2`、`let v = ... ->` の束縛）。
+
+```
+$ hado check main.hd
+main.hd:4:18: error[E503]: use a fallback instead of a catch-all underscore pattern; canonical form: | 0
+$ hado check --format json main.hd        # 1 行目
+{"path": "main.hd", "line": 4, "col": 18, "code": "E503", "message": "use a fallback instead of a catch-all underscore pattern", "canonical": "| 0", ...
+$ hado fmt main.hd
+fmt: main.hd (3 rewrites)
+$ cat main.hd                             # 直った後
+type T = | A | B
+
+def pick (t: T): Int =>
+	if t | A => 1 | 0
+
+def choose (b: Bool): Int => if b => 1 | 2
+
+def main =
+  let v = pick A ->
+  log (Int.to_string (v + choose true))
+$ hado check main.hd ; echo accepted=$?
+accepted=0
+$ hado run main.hd
+2
+```
+
+### 分かったこと
+
+- `check` は 1 件だけを canonical form 付きで出し（§56 の 1 件報告）、同じ内容が `--format json` で機械可読に読める（§58.4）。
+- `fmt` は canonical の書き換え 2 件（E503、E520）とレイアウト 1 件を一括で当て、`3 rewrites` と報告した（§57、§58.1）。
+- 直したファイルは `check` を終了コード 0 で通り、`run` が期待どおり `2` を出力した（`pick A` が 1、`choose true` が 1）。argv・stdio・終了コードは門番 r48 / r54 が固定している。
+- タブの字下げは残る（§58.1 で「字下げのタブは変えない」と決めたとおり）。
+- `let v = pick A ->` の束縛は E501 にならない（`v` を本体で使っているため）。E501 は「そのまま返す束縛」だけである。
+
+### 残り
+
+- E512 の書き換え（設計は `docs/wants.md` の 1 に確定。条件ごと scrutinee に畳む）。
+- `tools/gates/main.hd` を `--format json` に食わせて、Hado 側で見つかる不足を出す（依頼の「一本の実用 CLI を継続運用」）。
+- 終了コード（wants 25、§54 の二値の反転になる）。
