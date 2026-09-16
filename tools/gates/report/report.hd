@@ -31,13 +31,11 @@ def add tally name passed total =>
 def merge left right =>
   { passed = left.passed + right.passed; total = left.total + right.total; red = List.append left.red right.red }
 def render tally =>
-  tally.passed
-  |> Int.to_string
+  Int.to_string tally.passed
   |> String.concat
     (String.concat
       "/"
-      (tally.total
-        |> Int.to_string
+      (Int.to_string tally.total
         |> String.concat (String.concat " passed; red: " (join tally.red))))
 def fields line =>
   if String.split line " PASSED: "

@@ -520,16 +520,15 @@ f x
 
 と同義。
 
-パイプは第 1 引数を埋める。`x |> f a b` は `f x a b` である。標準ライブラリの引数順は data-first とする。
+パイプは第 1 引数を埋める。`x |> f a b` は `f x a b` である。標準ライブラリの引数順は data-first とする。連続した変換は最初の関数適用を並置で書き、その結果を次の関数へ渡す地点からパイプラインにする。
 
 ```ocaml
-users
-|> List.filter is_active
+List.filter users is_active
 |> List.map display_name
 |> List.sort compare
 ```
 
-`x |> f a b` は `f x a b` なので、`users |> List.map fn(u => u.name)` は `List.map users fn(u => u.name)` である。
+`x |> f a b` は `f x a b` なので、最初の適用を `List.map users fn(u => u.name)` と書ける。
 
 `|>` にOptionや効果の特殊意味は持たせない。
 
@@ -2293,8 +2292,7 @@ pipeline：
 
 ```ocaml
 def active_names users =>
-  users
-  |> List.filter fn(user => user.active)
+  List.filter users fn(user => user.active)
   |> List.map fn(user => user.name)
 ```
 

@@ -1,17 +1,15 @@
 def last_passed lines =>
-  lines
-  |> List.fold None fn(selected, line =>
+  List.fold lines None fn(selected, line =>
     if String.starts_with line "PASSED: " => Some(line) | selected)
   |> Option.ok_or { message = "InvalidLine" }
 
 def read_report directory name =>
   let path = String.concat directory (String.concat "/" name) ->
-  let line = path |> read_file |> Bytes.to_string |> String.split "\n" |> last_passed ->
-  name |> String.concat (String.concat " " line) |> report::Report.parse_line
+  let line = read_file path |> Bytes.to_string |> String.split "\n" |> last_passed ->
+  String.concat name (String.concat " " line) |> report::Report.parse_line
 
 def summarize directory =>
-  directory
-  |> read_dir
+  read_dir directory
   |> List.fold report::Report.empty fn(tally, name =>
     report::Report.merge tally (read_report directory name))
 
@@ -21,5 +19,5 @@ def choose (tally: report::Report.T): report::Report.T =>
 
 def main =
   if args
-  | [directory, ..._] => directory |> summarize |> choose |> report::Report.render
+  | [directory, ..._] => summarize directory |> choose |> report::Report.render
   | [] => raise { message = "MissingDirectory" }
