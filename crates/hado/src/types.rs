@@ -732,6 +732,17 @@ impl Printer {
     }
 }
 
+/// §15.1: two types as one readable pair for a diagnostic. `Display for Ty`
+/// prints the inference numbers (`t902`), which are neither readable nor
+/// stable. The pair is walked with one table, so a variable that appears in
+/// both types keeps one name.
+pub(crate) fn readable_pair(left: &Ty, right: &Ty) -> (String, String) {
+    let mut printer = Printer::default();
+    let left = printer.ty(left);
+    let right = printer.ty(right);
+    (left, right)
+}
+
 /// `A`, `B`, …, `Z`, `A1`, `B1`, … in order.
 fn variable_name(index: usize) -> String {
     let letter = char::from(b'A' + (index % 26) as u8);

@@ -935,7 +935,8 @@ impl Checker<'_> {
                 TypeError::Arity => "E301",
                 TypeError::Occurs => "E306",
             };
-            self.error(span, Some(code), &format!("cannot unify {a} with {b}"))
+            let (left, right) = crate::types::readable_pair(a, b);
+            self.error(span, Some(code), &format!("cannot unify {left} with {right}"))
         })
     }
 
@@ -1442,9 +1443,17 @@ impl Checker<'_> {
                 error.code = Some("E307".into());
                 error.message = "recursive calls change the argument type".into();
             } else if matches!(error.code.as_deref(), Some("E305" | "E306")) {
-                let anchor = self.application_argument_span(&function, &argument_types, args, callee.span);
+                let (anchor, pair) = self.application_mismatch(&function, &argument_types, args, callee.span);
                 error.line = anchor.line;
                 error.col = anchor.col;
+                // §15.1: at an argument the roles are certain, so the message
+                // names the pair instead of the two function types.
+                if error.code.as_deref() == Some("E305") {
+                    if let Some((parameter, argument)) = pair {
+                        let (expected, found) = crate::types::readable_pair(&parameter, &argument);
+                        error.message = format!("expected {expected}, found {found}");
+                    }
+                }
             }
             error
         })?;
@@ -1452,18 +1461,27 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&result))
     }
 
-    fn application_argument_span(&self, function: &Ty, types: &[Ty], args: &[Node], fallback: Span) -> Span {
+    /// §15.1: the argument a mismatch is at, with its parameter's type and its
+    /// own type, so the message can name that pair instead of the two function
+    /// types. The probe is a copy of the inference, and the pair is resolved
+    /// before the unification it is about is attempted, so a failed
+    /// unification's partial state is never printed.
+    fn application_mismatch(&self, function: &Ty, types: &[Ty], args: &[Node], fallback: Span) -> (Span, Option<(Ty, Ty)>) {
         let mut probe = self.inference.clone();
         let parameters: Vec<_> = types.iter().map(|_| probe.fresh()).collect();
         let result = probe.fresh();
         let row = probe.fresh_row();
         if probe.unify(function, &Ty::fn_with(parameters.clone(), result, row)).is_err() {
-            return fallback;
+            return (fallback, None);
         }
         for ((parameter, actual), argument) in parameters.iter().zip(types).zip(args) {
-            if probe.unify(parameter, actual).is_err() { return argument.span; }
+            let expected = probe.resolve(parameter);
+            let found = probe.resolve(actual);
+            if probe.unify(&expected, &found).is_err() {
+                return (argument.span, Some((expected, found)));
+            }
         }
-        fallback
+        (fallback, None)
     }
 
     fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
