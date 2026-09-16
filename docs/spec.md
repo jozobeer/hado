@@ -1,8 +1,8 @@
-# hado 言語仕様 v0.3.1
+# hado 言語仕様 v0.4
 
-この文書は hado v0.3.1 の言語仕様である。処理系、`stdlib/`、`tests/accept`・`tests/reject`・`tests/library` のコーパスは、この文書の規則に従う。規則の根拠を別の文書に置かず、食い違ったときはこの文書を正とする。
+この文書は hado v0.4 の言語仕様である。処理系、`stdlib/`、`tests/accept`・`tests/reject`・`tests/library` のコーパスは、この文書の規則に従う。規則の根拠を別の文書に置かず、食い違ったときはこの文書を正とする。
 
-版 v0.3.1 は git tag `v0.3.1` に対応する。
+版 v0.4 は git tag `v0.4` に対応する。
 
 ## 規範性
 

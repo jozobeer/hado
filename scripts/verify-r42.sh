@@ -61,7 +61,7 @@ assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
 front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
 assert 'spec-map' not in front, 'the front matter mentions spec-map'
 versions = set(re.findall(r'v[0-9]+(?:\.[0-9]+)+', front))
-assert versions == {'v0.3.1'}, versions
+assert versions == {'v0.4'}, versions
 bad = []
 for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md']:
     if 'spec-map' in Path(rel).read_text():
@@ -140,15 +140,15 @@ print('live document references resolve')
 PY
 }
 
-# --- 42-a(5): 版が v0.3.1 で、spec と spec-coverage が同じ版を名乗る ---
+# --- 42-a(5): 版が v0.4 で、spec と spec-coverage が同じ版を名乗る ---
 spec_version() {
     python3 - <<'PY'
 import re
 from pathlib import Path
 spec = re.search(r'v[0-9]+(?:\.[0-9]+)+', Path('docs/spec.md').read_text().splitlines()[0])
 coverage = re.search(r'v[0-9]+(?:\.[0-9]+)+', Path('docs/spec-coverage.md').read_text().splitlines()[0])
-assert spec and coverage and spec.group(0) == coverage.group(0) == 'v0.3.1', (spec, coverage)
-print('version: v0.3.1')
+assert spec and coverage and spec.group(0) == coverage.group(0) == 'v0.4', (spec, coverage)
+print('version: v0.4')
 PY
 }
 
@@ -156,7 +156,7 @@ check 'body sections §1..§56 and 付録A.. are in reading order under parts' s
 check 'the current spec is the only snapshot (no spec-map, no older version)' spec_current_only
 check 'corpus tags match the §56 table and resolve' spec_tags
 check 'section and appendix references in the live documents resolve' spec_refs
-check 'spec and spec-coverage name v0.3.1' spec_version
+check 'spec and spec-coverage name v0.4' spec_version
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

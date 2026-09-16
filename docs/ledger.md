@@ -2954,6 +2954,7 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - 網羅性は Bool と ADT で分かれていた入口を `matrix_coverage` に統一し、行ごとに列の数だけ Cell を並べて `coverage::covers` に渡す。`covers` は元から行列の左からの特殊化だったので、判定の中身は変わっていない。E512 / E503 は行の全列が変数か `_` のときだけ。E520・E507・E508・E515 は 1 列のまま。
 - 単相化は列が 2 つ以上のときだけ行列を左から特殊化して `Switch` を入れ子にし、`_` と変数の行を各 constructor の特殊化に持ち込む。1 列は既存の `constructor_switch` を残した（入れ子パターンの failure 継続の形を固定するテストが IR を見ているため）。Bool の列は `Switch` ではなく `Branch`。`_` の行の本体の複製は 2 列 × 3 行で 2、3 列 × 4 行で 3（上限は constructor 数の列数乗）。
 - `stdlib/list.hd` の `merge` を 1 定義にし、`merge_right` `merge_heads` を消した。`List.sort` を使う受理コーパスが 0 本だったので `tests/accept/list_sort/` を足した。受理は `columns_merge` `arm_conditions` と合わせて 3 本、拒否は `E125` の 1 本。lock は 219 本。
+- 版を `v0.4` に上げ、軽量 tag `v0.4` を最終コミットに打った（`docs/spec.md` `docs/spec-coverage.md` `docs/spec-trace.md` と `scripts/verify-r42.sh` の版の固定）。言語意味が増えたので小数第 2 位ではなく第 1 位を上げた。`v0.3.1` は動かさない。
 - `scripts/verify-r45.sh` を新設し、full に `r45` を足した。45-a は判定器が同じ行列で網羅性を計算し、45-b と 45-f は Python の並べ替えと照合する。
 
 ### 判定の実測
