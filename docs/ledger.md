@@ -4179,3 +4179,28 @@ exit=1
 **道具の設計（この下敷きに合わせる）。** `tools/diagnostics/main.hd` は引数のファイルを `read_file` して行に分け、各行からコードを取り出して `List.fold` でコードごとの件数を数える。JSON は 1 行 1 件で `"code": "E502"` の形（前ラウンドの実測）なので、`String.split line "\"code\": \""` の 2 番目を、さらに `"` で割った先頭がコードになる。
 
 **残る不明点は 1 つだけ。** `split` が返すリストから**要素を 1 つ選ぶ**書き方（`List` のどの関数を使うか、リストパターンが書けるか）がまだ分からない。次は `grep -n "def " stdlib/List.hd` で `at` / `nth` / `head` の有無を見る（1 回で決まる）。それ以外（読み・分割・集計・印字・呼び出し）は下敷きで分かっている。
+
+### R70 の最後の不明点（`stdlib/list.hd`）
+
+`stdlib/List.hd` ではなく **小文字の `stdlib/list.hd`** である（`array` / `bytes` / `env` / `error` / `float` / `int` / `io` / `list` / `option` / `string`）。
+
+```
+2:module List
+3:def (A, B) map(values: A List, f: Fn(A => B)): B List
+5:def (A, B) fold(values: A List, initial: B, f: Fn(B, A => B)): B
+6:def A length(values: A List): Int Pure
+10:def A head(values: A List): A Option Pure
+11:def A nth(values: A List, index: Int): A Option Pure
+15:def rec map values f => if values | [] => [] | [head, ...tail] => [f he
+19:def rec length | [] => 0 | [_, ...tail] => 1 + length tail
+```
+
+**要素は `List.nth values index`（`Option`）か、リストパターン `| [head, ...tail]` で取れる。** 再帰は `def rec`。これで道具を書くのに足りないものは無い。
+
+**道具の形（確定）。**
+1. 引数のファイルを `Bytes.to_string (read_file path)` で読み、`String.split … "\n"` で行にする。
+2. 各行を `String.split line "\"code\": \""` し、`List.nth … 1`（`Option`）→ それを `String.split … "\""` して `List.head` がコード。診断行でなければ飛ばす。
+3. `List.fold` でコードごとの件数を積む（`Option` の値を扱うので `Option.ok_or` を下敷きと同じように使う）。
+4. 合計と、コードごとの件数を印字する。
+
+**まだ確かめていない 1 点**は、タプルのリスト（`(code, count)`）の作り方と、同値の比較（`==`）が使えるかどうか。どちらもコンパイルすれば分かる（通らなければ `String` の比較関数を `stdlib/string.hd` で見る）。次ラウンドはここから書く。
