@@ -3524,3 +3524,43 @@ E602 の 5 か所（欠けた member、定義の形、型、多相性、欠け�
 - §56 のエラー表の「アンカー」欄が、アンカーの規則と関連位置の規則の 2 つを持つようになった。列を分けるか、関連位置を別の節に置くかは仕様の判断である。
 - prelude の名前との衝突のメッセージは `declaration conflicts with root name` である（prelude の名前しか無い場合も同じ）。関連位置を出さないことが表に書かれたぶん、この食い違いが見えやすくなった。既存の綴りなので変えていない。
 - E305 の関連位置（wants 3 の残り）と、期待型・実型の役割の明示は未着手である。
+
+## R59 未使用の効果と handler の E513（2026-09-16）
+
+### 背景と決定
+
+`docs/bug.md` の 1 件目「未使用の効果に E513 が出ない（R32、裁定 #12）」。§37 は効果を、§38 は handler を使わなければ E513 とし、§39 は未使用の判定を効果と handler にも当て、§56 の表の E513 の行もそう書いている。計画 18.5 は「E513 を effect と handler に広げる」を既存コードの変更として挙げていた。実装は無く、`def main = 0` の後に `effect Unused` と `once unused: Int` を置いても終了 0 だった。
+
+材料の実測で穴は 2 つあった。1 つは診断が出ないこと。もう 1 つは、効果の操作の型にしか現れない名前が偽の E513 になること（`type Money` を `once charge (m: Money): Unit` の中でだけ使うと `main.hd:1:1: error[E513]`）。受理コーパスの `effect_forms` と `again_inner_a` は、操作が handler の腕に**実装**されているだけで呼ばれていないので、効果を使ったと数える規則に「handler の見出し」が要る。拒否コーパスの `tests/reject/E522` は、効果を効果行に書くだけで操作を呼ばない形で、期待する唯一の欠陥が行の重複の E522 なので、規則に「型や効果行に現れる名前」も要る。これは計画 55 節の決定 9（行に現れるだけでは数えない）と衝突したので、決定を差し替えた。
+
+決定は 9 件（計画 55 節）。`Key` に `Effect` と `Handler` を足し、未使用のアンカーは宣言の見出しにする。効果を使うのは、名前が型や効果行に現れるか、操作の名前を参照するか、handler の見出しが効果を指すとき。handler を使うのは `with` が名前を書くとき。効果を使えばその操作の型に出る名前も到達で使われる。宣言された handler は腕が辿る先と同じく根にする。ライブラリ検査では効果と handler を公開面の根にする。名前で数え（ディレクトリで分けない）、型推論のまとまりの鍵の集合は変えない。
+
+### 実装
+
+`dependencies.rs` の 1 ファイル。`Key` に `Effect` と `Handler` を足し、`declaration()` が `effect.span` と `handler.span` を返すようにした。`Collector::new` が `checked` と要素から、constructor の表に加えて効果の名前の集合・操作の名前から効果への表・handler の名前から宣言への表を作る。`Item::Effect` の枝が操作の引数の型と戻り型を辿り、`Item::Handler` の枝が効果を参照してから腕を辿る。`expression` は操作の名前を効果に読み替え、`with` の handler の名前を handler に読み替える。`graph()` の最後で、型の参照が宣言された効果の名前なら効果の参照を足す（決定 9）。`diagnostics` は宣言された handler の見出しの効果を根に足し、ライブラリ検査の公開面に効果と handler を足す。`inference_groups` は `graph.retain` で効果と handler を外し、推論の順序を動かさない。
+
+### 判定の実測
+
+- **59-a〜59-i（R59 の門番）。** `bash scripts/verify-r59.sh` は 10/10。59-a は生成した空行と字下げの下で未使用の効果が `effect` の見出しを指し、効果の無い対照は受理。59-b は未使用の handler が `handler` の見出しを指し、`with` で使う形は build と実行値が一致。59-c は到達できる def からの操作の参照、操作の型にだけ現れる型（診断なし。effect を外した対照は E513）、効果行に名前が現れる形（E522 であって E513 ではない）。59-d は `library` の公開面では受理、同じ 2 つを entry に置くと E513。59-e は prelude の免除。59-f は到達しない def からの操作の参照が効果を救わないこと。59-g は 2 つの未使用の効果で 1 行。59-h は `check --fix` と `fmt` が書かないこと。59-i は §37・追跡表・層・bug.md と corpus lock。
+- **実装前の赤。** `PASSED: 2/10`（59-e の prelude の免除と corpus lock だけが緑）。
+- **実装で見つけた門番の誤り 2 件。** 59-c の探針は `def f (): Int {Ef} => op` としたが、hado の関数は引数が要る（`error[E100]: function requires a parameter`）。引数を使う `def f (x: Int): Int {Ef} => x + op` に直して赤を測り直した。もう 1 つは操作の型の探針で、`with H -> ()` とすると本体が効果を使わないため `error[E706]: main cannot have a user-defined effect` になり、E513 の代わりに E706 を測っていた。`tests/accept/handler_forms/main.hd` と同じく handler の腕の中の `with` で handler を使う形に直した。どちらも直した門番で赤を測り直している（2/10）。
+- **コーパスが見つけた制約。** 実装後に `cargo test --offline --no-fail-fast --test corpus` が `tests/reject/E522/main.hd: expected E522, got main.hd:4:1: error[E513]: unused top-level declaration` で落ちた。E513 は E522 と同じ冗長の段階なので、位置の早い効果の宣言が勝っていた。決定 9 を差し替え（型や効果行の名前も使ったと数える）、corpus 判定は 4 passed に戻った。
+- **決定の差し替えの実測。** `tests/reject/E522` と同じ形（`effect Ask` / `once ask: Int` / `def g (x: Int): Int {Ask, Ask} => x` / `def main = g 1`）は、行を数えない実装で `main.hd:1:1: error[E513]`、数える実装で `main.hd:3:27: error[E522]: duplicate effect in row`。
+- **射程外の既存の振る舞い。** `def main = with H -> 0` のように本体が効果を使わない `with` は、効果が `main` に残って `main.hd:5:1: error[E706]` になる（効果の型を使わない最小の形でも再現する。このラウンドの変更の前後で同じ）。
+- **効果と handler を持つ門番の予備走。** `verify-r32`（45/45）`verify-r33`（73/73）`verify-r34`（1360/1360）`verify-r35`（714/714）`verify-r36`（388/388）`verify-r37`（262/262）`verify-r43`（12/12）`verify-r44`（6/6）`verify-r50`（6/6）`verify-r52`（7/7）`verify-r55`（7/7）。
+- **全走（1 回目、中断）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r59` は m0 の検査 2 で `NG: 2 cargo-test status=101 passed=772 (<2 or nonzero)` になった。`crates/hado/tests/r37_world.rs` の探針が、宣言するだけで誰も名指ししない `effect Bar` を持っていたためである（§37 の E513 が正しく出た）。探針を、注釈の行が `Bar` を名指しする場合にだけ `effect Bar` と `once other` を置く形に直した（判定と場合分けは変えていない）。`cargo test` は 773 passed に戻った。この走行は他の門番の判定を待たずに中断し、走行の記録は `target/gates-full-r59` に残っている。
+- **全走（2 回目）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r59b` は 56 本を走らせ、56 本のログがすべて `PASSED: n/n`、`^NG:` 0、exit 0。締めは集計自身が出した `TALLY: 3637/3637 passed; red: none`（R58 の 3627 に R59 の 10 件が加わった）。`cargo test --offline --no-fail-fast` は 773 passed、0 failed。
+
+### 迷った点
+
+- **handler の見出しを根にした。** 効果を「handler の見出しが使う」と決めただけでは足りなかった。未使用の handler は `main` からの到達に入らないので、その handler の参照は閉包に入らず、効果の E513 が先に出る（59-b と 59-d が最初これで落ちた）。既存の「宣言された handler はプログラムの一部で、腕が辿る先は根と同じ」という規則に合わせ、見出しの効果も根に足した。
+- **型の参照から効果への読み替え。** 効果行は `TypeExpr` の `effects` に入っているので、`type_expression` が既に辿っている。`graph()` の最後で型の参照を読み替える形にすると、署名・実装・functor のどの行でも同じ規則が当たる。
+- **名前で数える。** 同じ操作名を 2 つのディレクトリの効果が宣言していても、参照が 1 つあれば両方を使ったと数える。偽の E513 を出さない側に倒した。
+- **推論の順序。** 効果と handler を推論のまとまりに入れると形が変わるので、`graph.retain` で外した。外しても推論の順序は今までと同じである。
+- **既存の探針が未使用の効果を持っていた。** 規則を実装するまで、効果は未使用でも咎められなかったので、R37 の探針は「装飾のための `Bar`」を置いていた。規則を狭めるのではなく探針を直した。§37 と、1 ファイル 1 欠陥を固定する拒否コーパスが正で、探針の方が仕様から離れていたためである。緩めたのは探針の入力だけで、判定は同じである。
+
+### 仕様への疑義
+
+- §37 は「一度も使わなければ」とだけ書き、効果の「使う」を定めていなかった。今回「名前が型や効果行に現れるか、操作を参照するか、handler を宣言すること」と書いた。この境界（とくに、別のディレクトリの同名の操作を参照したときに両方を数える粗さ）は審査の対象である。
+- `with H -> rest` の本体が `H` の効果を使わないとき、`main` に効果が残って E706 になる。§38 は「`rest` を `H` の下で評価する」とだけ書くので、実装が余分に効果を足しているのか、仕様に「使わない `with` は効果を消さない」と書くべきなのかが決まらない。仕様を変えず、ここに書く。
+- E513 のメッセージは未使用の `def`・`type`・契約・実装・効果・handler で同じ `unused top-level declaration` である。表の行は「未使用の宣言」なので揃っているが、効果と handler だけ別のメッセージにする余地はある。
