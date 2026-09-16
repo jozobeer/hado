@@ -1916,8 +1916,12 @@ impl Parser<'_> {
     fn parse_condition_column(&mut self, span: Span, stop_after_fallback: bool) -> Result<Node, Diagnostic> {
         let mut arms = Vec::new();
         let mut fallback = None;
+        let mut branch_first_pipe: Option<Span> = None;
         while self.kind() == &TokKind::Pipe {
             let pipe = self.span();
+            if branch_first_pipe.is_none() {
+                branch_first_pipe = Some(pipe);
+            }
             self.bump();
             let head = self.parse_branch_expr()?;
             if arms.is_empty() && self.kind() != &TokKind::Arrow {
@@ -1936,6 +1940,9 @@ impl Parser<'_> {
                 }
                 self.record_fallback_end();
             }
+        }
+        if let Some(first_pipe) = branch_first_pipe {
+            self.branch_spans.push((span, first_pipe, self.span()));
         }
         Ok(Node {
             kind: NodeKind::CondBranch { arms, fallback },
