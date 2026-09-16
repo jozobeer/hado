@@ -4460,3 +4460,28 @@ main.hd:4:7: error[E504]: use do to discard a success value
 **次の 1 歩**: (1) `parser.rs` の `NodeKind` の定義から `Let` / `LetQ` / `DoQ` の在り処を grep で確かめる。(2) `walk_node` の**最後の `_ => {}` を印字する腕に変えて**、4:3 の node がどの腕にも当たらないことを確かめる（当たれば種類が分かる）。(3) 分かった種類に `discard_let_fix` を結び直す。**今度は書き換えも計器も残したまま測る。**
 
 計器と書き換えは戻した（木は綺麗）。
+
+### R71 の種類の実測（`Let` は在る。腕の順序が疑わしい）
+
+`parser.rs` を grep した。
+
+```
+== enum ==
+98:    Let {
+103:    LetQ {
+108:    DoQ {
+== 構築箇所 ==
+2014:            NodeKind::LetQ {
+2020:            NodeKind::Let {
+2036:            kind: NodeKind::DoQ {
+== 消費者（フィールドの形）==
+2385:        NodeKind::Let { pat, value, body } => {
+2388:        NodeKind::LetQ { pat, value, body } => {
+2391:        NodeKind::DoQ { value, body } => {
+```
+
+**`let … ->` は `LetQ { pat, value, body }` / `Let { pat, value, body }` として作られている**（`DoQ { value, body }` は `do` の形）。つまり 4:3 の node の種類は `LetQ` のはずで、私の腕は `NodeKind::LetQ { pat, value, .. }` を確かに含んでいた。それでも `P603 enter let fix` が出なかった。
+
+**残る説明は腕の順序である。** 私の腕は `NodeKind::PatternBranch { … }` の腕の**直前**に挿入した。walk の `match` は 900 行から始まり、`Fn` の腕が 945 行、`PatternBranch` が 915 行にある。**900〜915 行の間に `Let` / `LetQ` / `DoQ` を扱う腕が既にあり**（同じ消費者が 2251 / 2254 行に `Let{..} | LetQ{..}` と `DoQ{..}` を並べているのと同じ形）、その腕が先に当たって私の腕に到達していない、という見込みが立つ。
+
+**次の 1 歩**: walk の `match` の 900〜918 行を読み、既存の `Let` / `LetQ` / `DoQ` の腕を確かめる。在るなら、**新しい腕を足すのではなく、その腕の中に `discard_let_fix` の呼び出しを入れる**（`repropagate_fix` の隣）。それが正しい直し方で、E502 の `CondBranch` も同じ形で扱える見込み。
