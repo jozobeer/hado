@@ -4081,3 +4081,20 @@ fn is_effect_free(node: &Node) -> bool {
 掛からない理由は `identical_branches_fix` の 4 つの門のどれか（(1) すべての条件が効果を持ち得ない、(2) 結果が 2 つ以上、(3) 正準形がすべて同じ、(4) `branch_range` が範囲を返す）か、そもそも walk がその node に来ていないかである。**推測を重ねずに計器を入れる**のが次の 1 歩: `identical_branches_fix` の入口と 4 つの門の直前に一時的な `eprintln!` を置いて 1 回走らせ、どこで `None` になるかを見る（分かったら消す）。この形なら 1 回の実行で 4 つの候補を切り分けられる。
 
 確認できない書き換えを残さないため、`fixes.rs` と `parser.rs` は戻した（木は綺麗、門番は 1/5 のまま）。関数の設計は前のラウンドの台帳にある。
+
+### R69 の計器の実測（書き換えは呼ばれていない）
+
+`identical_branches_fix` の入口と 4 つの門の前に一時的な `eprintln!`（`P502 …`）を置き、条件分岐の枝の push も入れて、拒否コーパスの再現を一時ディレクトリに写して `check --fix` を直接走らせた（門番は stderr を捕まえるので、直接走らせないと計器が見えない）。
+
+```
+$ cargo run --offline -q -- check --fix target/e502-probe/main.hd 2>&1 | grep -E "P502|error"
+main.hd:4:3: error[E502]: identical branch results at 4:15 and 4:19
+```
+
+**`P502 entry` が 1 行も出ない。** つまり `identical_branches_fix` は**一度も呼ばれていない**。4 つの門のどれかで `None` になっているのではなく、**walk がその node に来ていない**。読みで候補を絞るより計器が速いという判断は当たり、1 回の実行で 5 つの候補が 1 つに絞れた。
+
+理由の見込み: 再現は `def f x => if x > 1 => 1 | 1` で、`def f x => …` は**アーム形**（`parse_pattern_branch` を `$argument` で呼ぶ形）なので、`if` はアームの本体として **`PatternBranch` の中に入れ子**になる。walk の `PatternBranch` の腕は書き換え関数を呼ぶだけで、**アームの本体へ降りていない**ため、入れ子の `CondBranch` に到達しない。E512/E503 が同じ位置で効いていたのは、あちらがその `PatternBranch` 自体に掛かる書き換えだったからである。
+
+次の手は 2 つ。(a) walk がアームの本体へ降りるようにする（他の書き換えにも影響するので全走で確かめる）。(b) `PatternBranch` の腕から、各アームの本体が `CondBranch` のときに `identical_branches_fix` を呼ぶ（入れ子 1 段に限った狭い道）。`E502` は `def`/`fn` の本体にも直接書けるので、(a) のほうが本筋だが影響範囲を測ってから選ぶ。
+
+計器と書き換えは元に戻した（木は綺麗、門番は 1/5 のまま）。
