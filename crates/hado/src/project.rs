@@ -182,6 +182,12 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
+        // §50: `.` で始まる名前は読まない。名前空間の字句（§51）になり得ない
+        // ので、拒否するのではなく黙って外す。git の倉庫の根でも検査でき、
+        // 試し書きの隔離先になる。
+        if entry.file_name().as_encoded_bytes().starts_with(b".") {
+            continue;
+        }
         let kind = entry.file_type().map_err(|error| io_error(&path, error))?;
         if kind.is_dir() {
             let name = entry.file_name();
