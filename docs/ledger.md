@@ -4136,3 +4136,22 @@ walk の分岐の腕（`fixes.rs` 915〜944 行）の末尾はこうなってい
 **次は `walk_node` の入口で、訪れた node の種類を 1 行だけ印字する計器**を入れる（`std::mem::discriminant` か、`match` で種類名を返す小さな関数）。1 回の実行で候補が 2 つに絞れる。推測を重ねない。
 
 計器と書き換えは戻した（木は綺麗、門番は 1/5 のまま）。
+
+## R70 診断を JSON で読む小さな道具（優先順位 2 へ切り替え）
+
+### 背景
+
+目標の優先順位 2 は「`hado run` と安全な出力先を作り、実プログラムを一本運用する」。`--format json`（§58.4）は R65 で入っているので、次は**その JSON を実際に Hado のプログラムから読む**縦切りを作る。E502 は台帳に材料と設計を残したまま、いったん離れる（`verify-r69.sh` と赤もそのまま残す）。
+
+### 実測（`--format json` の出力の形）
+
+```
+== tests/reject/E502/main.hd
+{"path": "main.hd", "line": 4, "col": 3, "code": "E502", "message": "identical branch results at 4:15 and 4:19", "canonical": null, "related": null}
+exit=1
+== tests/reject/E511/main.hd
+{"path": "main.hd", "line": 4, "col": 1, "code": "E511", "message": "use literal patterns for equality tests of one variable", "canonical": null, "related": null}
+exit=1
+```
+
+この形を見てから、道具（`tools/` の下の Hado プログラム）の入力を決める。診断は 1 行 1 件の JSON なので、行に分けて読み、`"code"` を取り出して数える形が最小の縦切りになる。
