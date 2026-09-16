@@ -3837,4 +3837,4 @@ $ hado run main.hd
 
 ### 見つけた摩擦
 
-- **報告の癖。** `git status --short` のあとに無条件で `(clean)` と出していたため、実際には `fixture` と `ordinary` が未追跡で残っているのに「clean」と報告していた（R67 の門番を回す前の時点で既に残っていた）。中身は `fixture` が `roundtrip`（9 バイト）、`ordinary` が `file`（4 バイト）のテキストで、ELF ではなかった。`crates/hado/tests/corpus.rs:96` が `std::fs::write(work.join("fixture"), contents)` で書いており、`cargo test` が作業ディレクトリ（リポジトリの根）に残すものである（`ordinary` を書く箇所は見つけていない）。削除した。以後は空のときだけ `(clean)` と出す。
+- **報告の癖。** `git status --short` のあとに無条件で `(clean)` と出していたため、実際には `fixture` と `ordinary` が未追跡で残っているのに「clean」と報告していた（R67 の門番を回す前の時点で既に残っていた）。中身は `fixture` が `roundtrip`（9 バイト）、`ordinary` が `file`（4 バイト）のテキストで、ELF ではなかった。はじめ `crates/hado/tests/corpus.rs:96` の `std::fs::write(work.join("fixture"), contents)` を原因と書いたが、同テストの `observe_launch` は `Scratch`（一時ディレクトリ、`Drop` で削除）の中の `work` に書き、中身も `root.file_name()` なので、これは誤りだった（中身が `roundtrip` である時点で一致しない）。`cargo test --offline` の後に `git status --short` が空であることを実測したので、リポジトリのテストは根に書き残さない。中身の語（`roundtrip`、`file`）から見て、このセッションの前半に私が手で置いた探り書きの残りである。削除した。以後は空のときだけ `(clean)` と出す。
