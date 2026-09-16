@@ -108,3 +108,4 @@
 | §30 | 腕の本体に置ける分岐は条件列だけで、条件列の腕には分岐を置けない | 構文 | E101 / 受理 | `verify-r45.sh`（45-b (4)、45-e）、EBNF 生成器 |
 | §57 | `check --fix` は報告したアンカーの局所的な書き換えを当ててやり直す。範囲に `//` を含む書き換えは出さない。既定の `check` / `build` はソースを書き換えない | CLI | — | `verify-r46.sh`（E510 / E516 / E517）、`verify-r47.sh`（E515 / E501）、`crates/hado/tests/r46_fixes.rs` `r47_fixes.rs` |
 | §58 | `hado run` は一時ディレクトリで作って実行し、子プロセスの終了コードを返す。`build -o` は出力先を明示する。`build` と `run` の失敗にも `canonical form:` を付ける | CLI | — | `verify-r48.sh`、`crates/hado/tests/run_cli.rs` |
+| §58.1 | `hado fmt` は入力根のソースの局所的な書き換えを診断を待たずに一括で当て、`--check` は書かずに門番になる。`build --fix` は作る前に同じ整形をする | CLI | — | `verify-r52.sh` |
