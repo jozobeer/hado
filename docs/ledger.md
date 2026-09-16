@@ -3628,7 +3628,7 @@ self.unify(&function, &Ty::fn_with(argument_types.clone(), result.clone(), calle
 - **61-a〜61-g（R61 の門番）。** `bash scripts/verify-r61.sh` は 61-f を除いて緑。61-a bug.md の形（`check` が受理、`build` して実行すると `5`、`--print-type=generate` が `Fn(Int => Int List {Error | A})`）、61-b 非再帰と相互再帰の受理、61-c 書いた `{Io}` と本体の `Error` は `E305` のまま・`{Error}` は受理、61-d 省略した行のユーザー効果は main で `E706`・handler で囲むと `15` を出して終了 0、61-e `def rec poly x => poly [x]` は `E307`、61-g corpus lock。
 - **実装前の赤。** 実装を `git stash push -- crates/hado/src/infer.rs` で戻して測り、`PASSED: 3/7`。61-a・61-b・61-d が NG で、61-c と 61-e は実装前から緑だった（計画 57 節の予想どおり）。
 - **修正の中身の確認。** 省略した行は開いた行として出る。`--print-type=generate` は `Fn(Int => Int List {Error | A})` を出し、非再帰の `def f (n: Int): Int List => [n % 7]` も同じ開いた行を出す（省略した行の印字は非再帰でもこうである）。効果は消えない。省略した行のユーザー効果は main まで届き `E706` になり、handler で囲めば受理されて `15` を出す。
-- **全走。** （次の工程で測る。）
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r61` は 57 本を走らせ、すべて `PASSED: n/n`、`^NG:` 0、exit 0。締めは `TALLY: 3654/3654 passed; red: none`（R60 の 3647 に R61 の 7 件）。`verify-m0.sh` の `cargo-test` は `passed=773`。効果の推論に触ったので効果の門番を個別に見ると、r24（2/2）r32（45/45）r33（73/73）r34（1360/1360）r35（714/714）r36（388/388）r37（262/262）r52（7/7）r55（7/7）r59（10/10）r60（10/10）r61（7/7）で、赤は無い。`verify-r38.sh`（138/138）は `bug.md` の節が 0 でも再現の数と一致する。`verify-r49.sh` の「直した節が消えている」検査も緑である。
 
 ### 迷った点
 
