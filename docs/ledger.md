@@ -4274,3 +4274,15 @@ PASSED: 5/5
 ```
 
 R70 の成果: `tools/diagnostics/main.hd`（Hado で書いた、診断 JSON を標準入力から読みコードごとに数える道具）、`scripts/verify-r70.sh`（期待値を JSON から独立に導く 5 つの検査）、層 `full` への `r70` 登録、系譜 1 行、手順書 `## 65.`。優先順位 2 の「実プログラムを一本運用する」が、`hado run` で 1 本動くところまで来た。
+
+## R70 の全走
+
+```
+TALLY: 3691/3695 passed; red: verify-r69.log
+gates-exit=1
+cargo test --offline: exit 0, passed=773 failed=0, "test result: FAILED" の行数=0
+```
+
+層別 full の赤は `verify-r69.log` **ただ 1 本**（Park 中の R69 が 1/5 で 4 件）。R70 の門番はこの層の中で走っており、赤の一覧に無いので通っている。`cargo test --offline` は終了コード 0、`test result: FAILED` の行は 0。
+
+**R70 の締め。** 優先順位 2 の「`hado run` で実プログラムを一本運用する」が、`tools/diagnostics/main.hd`（診断 JSON を標準入力から読み、コードごとに数える）として 1 本動き、門番 5/5、層 `full` に登録され、系譜と手順書 `## 65.` が付いた。次の fix-it（E504 + E506）の材料もラウンド 65 で実測済み（正準形は `do e ->`、受理コーパスに `let _` は無い、仕様は §35 が 1235 行・§40 が 1474 行、エラー表は 2061 / 2063）。
