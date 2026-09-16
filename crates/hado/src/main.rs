@@ -9,12 +9,13 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
-    if !matches!(command, "check" | "dump-mono" | "build" | "run") {
+    if !matches!(command, "check" | "dump-mono" | "build" | "run" | "fmt") {
         usage();
         return ExitCode::from(2);
     }
     let mut print = false;
     let mut fix = false;
+    let mut check_only = false;
     let mut output: Option<&str> = None;
     let mut path: Option<&str> = None;
     let mut program_args: Vec<String> = Vec::new();
@@ -29,7 +30,8 @@ fn main() -> ExitCode {
                 break;
             }
             "--print-type" if command == "check" => print = true,
-            "--fix" if command == "check" => fix = true,
+            "--fix" if command == "check" || command == "build" => fix = true,
+            "--check" if command == "fmt" => check_only = true,
             "-o" | "--output" if command == "build" => {
                 index += 1;
                 let Some(value) = rest.get(index) else {
@@ -55,11 +57,25 @@ fn main() -> ExitCode {
         eprintln!("input must have the .hd extension");
         return ExitCode::from(1);
     }
-    if fix {
+    if command == "fmt" {
+        return match format_sources(input, check_only) {
+            Ok(changed) if check_only && changed => ExitCode::from(1),
+            Ok(_) => ExitCode::SUCCESS,
+            Err(code) => code,
+        };
+    }
+    if fix && command == "check" {
         return check_with_fix(input, print);
     }
     if command == "run" {
         return run_program(input, &program_args);
+    }
+    if fix && command == "build" {
+        // §58.1: `build --fix` writes the canonical form before reading the
+        // project, so the build sees the formatted sources.
+        if let Err(code) = format_sources(input, false) {
+            return code;
+        }
     }
     let project = match Project::load(input) {
         Ok(project) => project,
@@ -145,6 +161,50 @@ fn check_with_fix(input: &Path, print: bool) -> ExitCode {
     ExitCode::from(1)
 }
 
+/// `hado fmt` and `build --fix` write every local rewrite (§57) the project's
+/// sources offer, in bulk and until none applies (§58.1). `check_only` reports
+/// instead of writing. The result says whether any file would change; an error
+/// is the exit code to return.
+fn format_sources(input: &Path, check_only: bool) -> Result<bool, ExitCode> {
+    let files = match hado::project::source_paths(input) {
+        Ok(files) => files,
+        Err(error) => {
+            eprintln!("{error}");
+            return Err(ExitCode::from(1));
+        }
+    };
+    let mut changed = false;
+    for (display, physical) in files {
+        let source = match std::fs::read_to_string(&physical) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!("fmt: {display}: {error}");
+                return Err(ExitCode::from(1));
+            }
+        };
+        match hado::fixes::format(&source) {
+            Ok(None) => {}
+            Ok(Some((updated, count))) => {
+                changed = true;
+                if check_only {
+                    println!("fmt: {display} is not canonical ({count} rewrites)");
+                } else {
+                    if let Err(error) = std::fs::write(&physical, updated) {
+                        eprintln!("fmt: {display}: {error}");
+                        return Err(ExitCode::from(1));
+                    }
+                    println!("fmt: {display} ({count} rewrites)");
+                }
+            }
+            Err(limit) => {
+                eprintln!("fmt: {display}: the rewrites did not settle after {limit} passes");
+                return Err(ExitCode::from(1));
+            }
+        }
+    }
+    Ok(changed)
+}
+
 /// `run` links the program into a private directory, runs it with the given
 /// arguments, and returns the program's exit code (§58). The directory is
 /// removed afterwards, so nothing is written next to the source.
@@ -215,6 +275,6 @@ impl Drop for RunDirectory {
 
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] <file.hd> | run <file.hd> [-- <arg>...]"
+        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd>"
     );
 }
