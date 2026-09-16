@@ -4073,3 +4073,11 @@ fn is_effect_free(node: &Node) -> bool {
 したがって道は **(a) を選ぶ**: 条件分岐の解析の終わりにも `parse_pattern_branch` と同じ形で `self.branch_spans.push((span, first_pipe, self.span()));` を足す。影響は fixes の中に閉じ、`CondBranch` を受ける書き換え（E502）だけが新たに掛かる。全走と R57 の門番で、他の書き換えの件数が変わらないことを確かめる。
 
 実装の手順: (1) 条件分岐の解析関数（`if 条件 => 本体 | 本体` を読む側）の終わりに push を 1 行足す。(2) 台帳に残した `is_effect_free` と `identical_branches_fix` を `fixes.rs` に戻す（`branch_range(node, Tail::If, …)` が今度は条件分岐でも範囲を返す）。(3) `is_fixable` に `"E502"`、walk の `CondBranch` の腕から呼ぶ。(4) 門番 5/5、`## 64.`、仕様 §57、全走。
+
+### R69 の実装の再測（まだ掛からない）
+
+条件分岐の解析（`parser.rs:1912` の `parse_cond_branch` と `parse_condition_column`）の `Ok(Node { kind: NodeKind::CondBranch … })` の直前に `self.branch_spans.push((span, self.span(), self.span()));` を足し、`is_effect_free`、`identical_branches_fix`、`is_fixable` の `"E502"`、walk の `CondBranch` の腕（`fixes.rs:984`、`PatternBranch` の腕の直前）を入れた。**ビルドは通り（exit 0）、walk の腕も所定の位置にあるのに、門番は `PASSED: 1/5` のまま**で書き換えが 1 つも出ない。
+
+掛からない理由は `identical_branches_fix` の 4 つの門のどれか（(1) すべての条件が効果を持ち得ない、(2) 結果が 2 つ以上、(3) 正準形がすべて同じ、(4) `branch_range` が範囲を返す）か、そもそも walk がその node に来ていないかである。**推測を重ねずに計器を入れる**のが次の 1 歩: `identical_branches_fix` の入口と 4 つの門の直前に一時的な `eprintln!` を置いて 1 回走らせ、どこで `None` になるかを見る（分かったら消す）。この形なら 1 回の実行で 4 つの候補を切り分けられる。
+
+確認できない書き換えを残さないため、`fixes.rs` と `parser.rs` は戻した（木は綺麗、門番は 1/5 のまま）。関数の設計は前のラウンドの台帳にある。
