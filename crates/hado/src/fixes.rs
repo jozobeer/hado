@@ -151,7 +151,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E503" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E503" | "E504" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -327,6 +327,34 @@ fn catch_all_variable_fix(
         end,
         canonical: format!("| {}", replacement.trim()),
         replacement,
+    })
+}
+
+fn discard_let_fix(
+    node: &Node,
+    pat: &Pattern,
+    value: &Node,
+    code: &'static str,
+    canonical: &str,
+    source: &str,
+    lines: &LineMap,
+) -> Option<Fix> {
+    if !matches!(pat.kind, PatternKind::Underscore) {
+        return None;
+    }
+    let start = lines.offset(source, node.span);
+    let end = lines.offset(source, value.span);
+    if start >= end || source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code,
+        line: pat.span.line,
+        col: pat.span.col,
+        start,
+        end,
+        replacement: "do ".to_string(),
+        canonical: canonical.to_string(),
     })
 }
 
@@ -918,7 +946,10 @@ fn walk_node(
                 }
             }
         }
-        NodeKind::LetQ { pat, .. } => {
+        NodeKind::LetQ { pat, value, .. } => {
+            if let Some(fix) = discard_let_fix(node, pat, value, "E504", "do", source, lines) {
+                found.push(fix);
+            }
             walk_pattern(pat, source, lines, tokens, index, found);
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
