@@ -12,41 +12,41 @@ def A nth(values: A List, index: Int): A Option Pure
 def A take(values: A List, count: Int): A List Pure
 def A drop(values: A List, count: Int): A List Pure
 implement List as List
-def rec map values f => if values | [] => [] | [head, ...tail] => [head |> f, ...tail |> map f]
+def rec map values f => if values | [] => [] | [head, ...tail] => [f head, ...map tail f]
 def retain head tail keep => if keep => [head, ...tail] | tail
-def rec filter values predicate => if values | [] => [] | [head, ...tail] => head |> retain (tail |> filter predicate) (head |> predicate)
-def rec fold values initial f => if values | [] => initial | [head, ...tail] => tail |> fold (initial |> f head) f
-def rec length | [] => 0 | [_, ...tail] => 1 + (tail |> length)
-def reverse values => values |> fold [] fn(reversed, value => [value, ...reversed])
-def rec append left right => if left | [] => right | [head, ...tail] => [head, ...tail |> append right]
-def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...tail |> odds]
-def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...tail |> evens]
+def rec filter values predicate => if values | [] => [] | [head, ...tail] => retain head (filter tail predicate) (predicate head)
+def rec fold values initial f => if values | [] => initial | [head, ...tail] => fold tail (f initial head) f
+def rec length | [] => 0 | [_, ...tail] => 1 + length tail
+def reverse values => fold values [] fn(reversed, value => [value, ...reversed])
+def rec append left right => if left | [] => right | [head, ...tail] => [head, ...append tail right]
+def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
+def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
 def rec merge left right comparator =>
   if left, right
   | [], _ => right
   | _, [] => left
   | [a, ...rest_a], [b, ...rest_b] => if
-    | (a |> comparator b) <= 0 => [a, ...rest_a |> merge right comparator]
-    | [b, ...left |> merge rest_b comparator]
+    | comparator a b <= 0 => [a, ...merge rest_a right comparator]
+    | [b, ...merge left rest_b comparator]
 def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => values |> odds |> sort comparator |> merge (values |> evens |> sort comparator) comparator
 def head
 | [] => None
 | [value, ..._] => Some(value)
-def nth values index | index < 0 => None | values |> nth_from index
+def nth values index | index < 0 => None | nth_from values index
 def rec nth_from values index =>
   if values
   | [] => None
-  | [head, ...tail] => head |> nth_more tail index
-def rec nth_more head tail remaining | remaining <= 0 => Some(head) | tail |> nth_from (remaining - 1)
-def take values count | count <= 0 => [] | values |> take_from count
+  | [head, ...tail] => nth_more head tail index
+def rec nth_more head tail remaining | remaining <= 0 => Some(head) | nth_from tail (remaining - 1)
+def take values count | count <= 0 => [] | take_from values count
 def rec take_from values count =>
   if values
   | [] => []
-  | [head, ...tail] => head |> take_more tail (count - 1)
-def rec take_more head tail remaining | remaining <= 0 => [head] | [head, ...tail |> take_from remaining]
-def drop values count | count <= 0 => values | values |> drop_from count
+  | [head, ...tail] => take_more head tail (count - 1)
+def rec take_more head tail remaining | remaining <= 0 => [head] | [head, ...take_from tail remaining]
+def drop values count | count <= 0 => values | drop_from values count
 def rec drop_from values count =>
   if values
   | [] => []
-  | [_, ...tail] => tail |> drop_more (count - 1)
-def rec drop_more tail remaining | remaining <= 0 => tail | tail |> drop_from remaining
+  | [_, ...tail] => drop_more tail (count - 1)
+def rec drop_more tail remaining | remaining <= 0 => tail | drop_from tail remaining

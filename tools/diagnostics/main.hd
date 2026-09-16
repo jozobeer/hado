@@ -3,27 +3,27 @@ def code_of line =>
   let after = line |> String.split "\"code\": \"" |> List.nth 1 |> Option.unwrap_or "" ->
   after |> String.split "\"" |> List.head |> Option.unwrap_or ""
 
-def same_code line code => (line |> code_of) == code
+def same_code line code => code_of line == code
 
-def count_of lines code => lines |> List.filter fn(line => line |> same_code code) |> List.length
+def count_of lines code => lines |> List.filter fn(line => same_code line code) |> List.length
 
 def rec summarize lines seen =>
   if lines
     | [] => ""
-    | [line, ...rest] => line |> summarize_one lines rest seen
+    | [line, ...rest] => summarize_one line lines rest seen
 
 def rec summarize_one line lines rest seen =>
-  let code = line |> code_of ->
-  if code == "" => rest |> summarize seen | code |> emit lines rest seen
+  let code = code_of line ->
+  if code == "" => summarize rest seen | emit code lines rest seen
 
 def rec emit code lines rest seen =>
   let known = seen |> List.filter fn(one => one == code) |> List.length ->
-  if known == 0 => code |> line_for lines rest seen | rest |> summarize seen
+  if known == 0 => line_for code lines rest seen | summarize rest seen
 
 def rec line_for code lines rest seen =>
-  let body = code |> String.concat " " ->
-  let body = body |> String.concat (lines |> count_of code |> Int.to_string) ->
-  body |> String.concat ("\n" |> String.concat (rest |> summarize [code, ...seen]))
+  let body = String.concat code " " ->
+  let body = String.concat body (lines |> count_of code |> Int.to_string) ->
+  String.concat body (String.concat "\n" (summarize rest [code, ...seen]))
 
 def main =
   let bytes = IoDefault.read_stdin ->

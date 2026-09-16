@@ -4,7 +4,7 @@
 // needs: prelude
 type User = { id: Int }
 def saved
-| Some(user) => do user |> UserStore.save -> true
+| Some(user) => do UserStore.save user -> true
 | false
 def main =
   let ok = 1 |> UserStore.find |> saved ->
@@ -18,4 +18,4 @@ implement UserStore as UserStore
 type T = User
 def find id => if id > 0 => Some({ id = id }) | None
 def save(_: T): Unit {Error} => ()
-def delete user => if user.id > 0 => () | { message = "NotFound" } |> raise
+def delete user => if user.id > 0 => () | raise { message = "NotFound" }

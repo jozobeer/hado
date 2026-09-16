@@ -6,4 +6,4 @@ def display_name user =>
   if user.name
   | Some(name) => name
   | "anonymous"
-def main = { name = None } |> display_name
+def main = display_name { name = None }

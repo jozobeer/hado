@@ -5,4 +5,4 @@ type User = | Guest | Member(Profile)
 def name
   | Member(user) => user.name
   | "guest"
-def main = Guest |> name
+def main = name Guest

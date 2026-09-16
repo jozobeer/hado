@@ -8,4 +8,4 @@ def classify score
   | score >= 70 => Good
   | score >= 50 => Pass
   | Fail
-def main = 75 |> classify
+def main = classify 75

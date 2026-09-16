@@ -2,12 +2,12 @@
 // expect: ok
 // item: 関数適用
 def parse (input: Int List): Int List {Error} => input
-def validate | [] => () | [_, ..._] => { message = "invalid" } |> raise
-def authorize | [] => () | [_, ..._] => { message = "denied" } |> raise
-def save | [] => "ok" | [_, ..._] => { message = "save failed" } |> raise
+def validate | [] => () | [_, ..._] => raise { message = "invalid" }
+def authorize | [] => () | [_, ..._] => raise { message = "denied" }
+def save | [] => "ok" | [_, ..._] => raise { message = "save failed" }
 def create_user input =>
-  let parsed = input |> parse ->
-  do parsed |> validate ->
-  do parsed |> authorize ->
-  parsed |> save
-def main = [] |> create_user
+  let parsed = parse input ->
+  do validate parsed ->
+  do authorize parsed ->
+  save parsed
+def main = create_user []

@@ -5,12 +5,12 @@ type Tally = { passed: Int; total: Int; red: String List }
 def rec join
   | [] => "none"
   | [head] => head
-  | [head, ...tail] => head |> String.concat (" " |> String.concat (tail |> join))
+  | [head, ...tail] => String.concat head (String.concat " " (join tail))
 
 def count_fields name counts =>
-  if counts |> String.split "/"
+  if String.split counts "/"
   | [passed, total] => [name, passed, total]
-  | { message = "InvalidLine" } |> raise
+  | raise { message = "InvalidLine" }
 
 module Report
 type T
@@ -26,24 +26,24 @@ shared type T = Tally
 def empty = { passed = 0; total = 0; red = [] }
 def add tally name passed total =>
   if passed < total
-  => { passed = tally.passed + passed; total = tally.total + total; red = tally.red |> List.append [name] }
+  => { passed = tally.passed + passed; total = tally.total + total; red = List.append tally.red [name] }
   | { passed = tally.passed + passed; total = tally.total + total; red = tally.red }
 def merge left right =>
-  { passed = left.passed + right.passed; total = left.total + right.total; red = left.red |> List.append right.red }
+  { passed = left.passed + right.passed; total = left.total + right.total; red = List.append left.red right.red }
 def render tally =>
   tally.passed
   |> Int.to_string
   |> String.concat
-    ("/"
-      |> String.concat
-        (tally.total
-          |> Int.to_string
-          |> String.concat (" passed; red: " |> String.concat (tally.red |> join))))
+    (String.concat
+      "/"
+      (tally.total
+        |> Int.to_string
+        |> String.concat (String.concat " passed; red: " (join tally.red))))
 def fields line =>
-  if line |> String.split " PASSED: "
-  | [name, counts] => name |> count_fields counts
-  | { message = "InvalidLine" } |> raise
+  if String.split line " PASSED: "
+  | [name, counts] => count_fields name counts
+  | raise { message = "InvalidLine" }
 def parse_line line =>
-  if line |> fields
-  | [name, passed, total] => empty |> add name (passed |> Int.parse) (total |> Int.parse)
-  | { message = "InvalidLine" } |> raise
+  if fields line
+  | [name, passed, total] => add empty name (Int.parse passed) (Int.parse total)
+  | raise { message = "InvalidLine" }

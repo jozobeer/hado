@@ -5,27 +5,27 @@ def A set(xs: A Array, index: Int, value: A): A Array {Error}
 def A of_list(xs: A List): A Array Pure
 def A to_list(xs: A Array): A List Pure
 implement Array as Array
-def length xs => xs |> __array_length
+def length xs => __array_length xs
 def get xs index =>
-  if index >= 0 && index < (xs |> length)
-    => xs |> __array_get index
-    | { message = "IndexOutOfRange" } |> raise
+  if index >= 0 && index < length xs
+    => __array_get xs index
+    | raise { message = "IndexOutOfRange" }
 def set xs index value =>
-  if index >= 0 && index < (xs |> length)
+  if index >= 0 && index < length xs
     => xs |> to_list |> replace index value |> of_list
-    | { message = "IndexOutOfRange" } |> raise
-def of_list xs => xs |> build 0 (xs |> List.length |> __array_alloc)
-def to_list xs => xs |> elements 0 (xs |> length)
+    | raise { message = "IndexOutOfRange" }
+def of_list xs => build xs 0 (xs |> List.length |> __array_alloc)
+def to_list xs => elements xs 0 (length xs)
 // target は構築中だけに閉じ込め、全 slot を埋めた後で公開する。
 def rec build xs index target =>
   if xs
   | [] => target
-  | [head, ...tail] => tail |> build (index + 1) (target |> __array_fill_unchecked index head)
+  | [head, ...tail] => build tail (index + 1) (__array_fill_unchecked target index head)
 def rec elements xs index count =>
-  if index >= count => [] | [xs |> __array_get index, ...xs |> elements (index + 1) count]
+  if index >= count => [] | [__array_get xs index, ...elements xs (index + 1) count]
 def rec replace xs index value =>
   if xs
   | [] => []
-  | [head, ...tail] => head |> replace_head tail index value
+  | [head, ...tail] => replace_head head tail index value
 def rec replace_head head tail index value =>
-  if index == 0 => [value, ...tail] | [head, ...tail |> replace (index - 1) value]
+  if index == 0 => [value, ...tail] | [head, ...replace tail (index - 1) value]
