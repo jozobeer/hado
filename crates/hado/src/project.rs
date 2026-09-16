@@ -125,7 +125,16 @@ impl Project {
     }
 
     pub fn build(&self, output: &Path) -> Result<(), String> {
-        crate::build::executable_with(output, |object| self.compile_to_object(object))
+        if self.is_library() {
+            return Err(self.report(&crate::entry_required(&self.files[0].path)));
+        }
+        // Diagnostics go through `report` so `build` and `run` show the same
+        // `canonical form:` hint as `check` (§57, §58).
+        let checked = self.check().map_err(|error| self.report(&error))?;
+        crate::build::executable_with(output, |object| {
+            let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
+            crate::emit::compile_mono_to_object(&program, &checked, object)
+        })
     }
 }
 

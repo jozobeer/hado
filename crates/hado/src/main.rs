@@ -1,6 +1,7 @@
 use hado::project::Project;
-use std::path::Path;
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -8,23 +9,42 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
+    if !matches!(command, "check" | "dump-mono" | "build" | "run") {
+        usage();
+        return ExitCode::from(2);
+    }
     let mut print = false;
     let mut fix = false;
+    let mut output: Option<&str> = None;
     let mut path: Option<&str> = None;
-    for arg in &args[1..] {
-        match arg.as_str() {
+    let mut program_args: Vec<String> = Vec::new();
+    let rest = &args[1..];
+    let mut index = 0;
+    while index < rest.len() {
+        let arg = rest[index].as_str();
+        match arg {
+            // `run` の `--` の後だけが子プロセスの引数である。
+            "--" if command == "run" => {
+                program_args.extend(rest[index + 1..].iter().cloned());
+                break;
+            }
             "--print-type" if command == "check" => print = true,
             "--fix" if command == "check" => fix = true,
-            value if !value.starts_with("--") && path.is_none() => path = Some(value),
+            "-o" | "--output" if command == "build" => {
+                index += 1;
+                let Some(value) = rest.get(index) else {
+                    usage();
+                    return ExitCode::from(2);
+                };
+                output = Some(value.as_str());
+            }
+            value if !value.starts_with('-') && path.is_none() => path = Some(value),
             _ => {
                 usage();
                 return ExitCode::from(2);
             }
         }
-    }
-    if !matches!(command, "check" | "dump-mono" | "build") {
-        usage();
-        return ExitCode::from(2);
+        index += 1;
     }
     let Some(path) = path else {
         usage();
@@ -38,6 +58,9 @@ fn main() -> ExitCode {
     if fix {
         return check_with_fix(input, print);
     }
+    if command == "run" {
+        return run_program(input, &program_args);
+    }
     let project = match Project::load(input) {
         Ok(project) => project,
         Err(error) => {
@@ -46,7 +69,11 @@ fn main() -> ExitCode {
         }
     };
     if command == "build" {
-        return match project.build(&input.with_extension("")) {
+        let target = match output {
+            Some(output) => PathBuf::from(output),
+            None => input.with_extension(""),
+        };
+        return match project.build(&target) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("{message}");
@@ -118,8 +145,76 @@ fn check_with_fix(input: &Path, print: bool) -> ExitCode {
     ExitCode::from(1)
 }
 
+/// `run` links the program into a private directory, runs it with the given
+/// arguments, and returns the program's exit code (§58). The directory is
+/// removed afterwards, so nothing is written next to the source.
+fn run_program(input: &Path, args: &[String]) -> ExitCode {
+    let project = match Project::load(input) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(1);
+        }
+    };
+    let directory = match RunDirectory::create() {
+        Ok(directory) => directory,
+        Err(message) => {
+            eprintln!("run: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    let binary = directory.path().join("program");
+    if let Err(message) = project.build(&binary) {
+        eprintln!("{message}");
+        return ExitCode::from(1);
+    }
+    match Command::new(&binary).args(args).status() {
+        Ok(status) => match status.code() {
+            Some(code) => ExitCode::from(code as u8),
+            None => {
+                eprintln!("run: the program was terminated by a signal");
+                ExitCode::from(1)
+            }
+        },
+        Err(error) => {
+            eprintln!("run: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// A private directory for the executable that `run` links. It is removed on
+/// drop, so a faulty program cannot leave a binary behind.
+struct RunDirectory(PathBuf);
+
+impl RunDirectory {
+    fn create() -> Result<Self, String> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let base = std::env::temp_dir();
+        loop {
+            let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = base.join(format!("hado-run-{}-{serial}", std::process::id()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for RunDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build <file.hd>"
+        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] <file.hd> | run <file.hd> [-- <arg>...]"
     );
 }

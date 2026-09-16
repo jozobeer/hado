@@ -9,7 +9,7 @@ fn cli_usage_and_basic_types() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build <file.hd>\n");
+        assert_eq!(output.stderr, b"usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] <file.hd> | run <file.hd> [-- <arg>...]\n");
     }
     let dir = std::env::temp_dir().join(format!("hado-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
