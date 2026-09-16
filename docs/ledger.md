@@ -4485,3 +4485,26 @@ main.hd:4:7: error[E504]: use do to discard a success value
 **残る説明は腕の順序である。** 私の腕は `NodeKind::PatternBranch { … }` の腕の**直前**に挿入した。walk の `match` は 900 行から始まり、`Fn` の腕が 945 行、`PatternBranch` が 915 行にある。**900〜915 行の間に `Let` / `LetQ` / `DoQ` を扱う腕が既にあり**（同じ消費者が 2251 / 2254 行に `Let{..} | LetQ{..}` と `DoQ{..}` を並べているのと同じ形）、その腕が先に当たって私の腕に到達していない、という見込みが立つ。
 
 **次の 1 歩**: walk の `match` の 900〜918 行を読み、既存の `Let` / `LetQ` / `DoQ` の腕を確かめる。在るなら、**新しい腕を足すのではなく、その腕の中に `discard_let_fix` の呼び出しを入れる**（`repropagate_fix` の隣）。それが正しい直し方で、E502 の `CondBranch` も同じ形で扱える見込み。
+
+### R71 の腕の所有者が確定（`Let` は 911 行の腕が持っている）
+
+walk の `match` の先頭（900〜919 行）を読んだ。
+
+```rust
+910:        }
+911:        NodeKind::Let { pat, body, .. } => {
+912:            walk_pattern(pat, source, lines, tokens, index, found);
+913:            if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
+914:                if bound == returned {
+915:                    if let Some(fix) = let_identity_fix(node.span, bound, body.span, source, lines, tokens, index) {
+916:                        found.push(fix);
+917:                    }
+918:                }
+919:            }
+```
+
+**`NodeKind::Let` は 911 行の腕が既に持っている。** 私が足した腕は `NodeKind::PatternBranch` の直前（もっと後ろ）だったので、**先にこの腕が当たり、私の腕には到達しない**。見込みは当たった。
+
+**正しい直し方**: 911 行の腕の中（`let_identity_fix` の隣）に `discard_let_fix` の呼び出しを入れる。`LetQ` にも同じ形の腕が近くにあるはずなので（920 行以降）、そこにも入れる。**新しい腕を足すのは誤り**だった。E502 の `CondBranch` も同じ事情（分岐の腕が既に在って、私の腕が dead になっている）である可能性が高い。
+
+次の 1 回: (1) 920 行以降で `LetQ` の腕を確かめる。(2) 911 行の `Let` の腕と `LetQ` の腕の中に `discard_let_fix` を入れる。(3) 計器も残したまま測り、`P603 emitting` と「直った写しが `check` を通る」ことを確かめる。(4) 門番 `verify-r71.sh`、手順書 `## 66.`、系譜、全走。
