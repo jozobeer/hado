@@ -3750,7 +3750,7 @@ R62（58 節）が落とした E520 の書き換えを入れた。R62 は「E520
 
 - **65-a〜65-g（R65 の門番）。** `bash scripts/verify-r65.sh` は 7/7。65-a 1 行で `json.loads` が読め、path が `main.hd` で終わり、line / col が `1 25`、code が `E520`、message が `use a Boolean branch` で始まる。65-b `canonical` が `if b => 1 | 2` で message に混ざらず、`related` が `null`。65-c E205 の `related` が line 1 と `first declared`。65-d 既定の 1 行が `error[E520]` と `; canonical form: if b => 1 | 2` を含み `{` で始まらない。65-e `--format yaml` と値を付けない `--format` が終了コード 2。65-f 仕様と追跡表と層、65-g corpus lock。
 - **実装前の赤。** `PASSED: 3/7`（65-a・65-b・65-c・65-f が NG）。計画は 65-e も赤いと見ていたが、未知の引数は元から用法の誤りで終了コード 2 なので緑だった。予想が外れた 1 件として記録する。
-- **全走。** （次の工程で測る。）
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r65` は 62 本を走らせ、exit 0、締めは `TALLY: 3679/3679 passed; red: none`（R64 の 3672 に R65 の 7 件）。`verify-m0.sh` の `cargo-test` は `passed=773`。診断の印字を変えたので、診断の 1 行を期待値に持つ門番（r57 / r60 / r62 / r63 / r64）も緑である。
 
 ### 迷った点
 
