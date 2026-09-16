@@ -4204,3 +4204,21 @@ exit=1
 4. 合計と、コードごとの件数を印字する。
 
 **まだ確かめていない 1 点**は、タプルのリスト（`(code, count)`）の作り方と、同値の比較（`==`）が使えるかどうか。どちらもコンパイルすれば分かる（通らなければ `String` の比較関数を `stdlib/string.hd` で見る）。次ラウンドはここから書く。
+
+### R70 の道具の初稿と、コンパイラが教えた 2 つのこと
+
+`tools/diagnostics/main.hd` の初稿を書いて `check` に掛けた（下敷きから写した API だけを使い、標準入力から JSON を読む形にした。argv の API を知らなくても、`hado check --format json f | hado run tools/diagnostics/main.hd` で繋げられるため）。
+
+```
+$ cargo run --offline -q -- check tools/diagnostics/main.hd
+main.hd:4:13: error[E100]: expected a value type or annotated contract parameters
+```
+**E100**: `module Diagnostics` を書くと、そのファイルの `def` は型注釈が要る。下敷き（`tools/gates/main.hd`）が注釈なしで通っているのは `module` を書いていないからで、**道具は `module` 行を書かない**のが正しい（ファイル名が `main.hd` であることもあり、`module` 名と食い違う）。
+
+```
+$ cargo run --offline -q -- check tools/diagnostics/main.hd
+main.hd:8:14: error[E105]: tuples are not supported; `(a, b)` is not an expression
+```
+**E105**: タプルは式として使えない。`(code, 1)` で数える設計はそのままでは書けない。**コードと件数の組はレコードか名前付き構築子にする**必要がある。下敷きの `tools/gates/report/report.hd` が `Report.T` という型で集計を持っているので、**その書き方を次に読んで写す**のが一番速い（同じ「集計を持つ小さな型」である）。
+
+初稿は `tools/diagnostics/main.hd` に未追跡のまま置いた（次ラウンドでレコードに直して `check` を通してからコミットする）。台帳にはこの 2 つのエラーを実測として残す。
