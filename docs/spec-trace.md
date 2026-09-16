@@ -109,7 +109,7 @@
 | §30 | 腕の本体に置ける分岐は条件列だけで、条件列の腕には分岐を置けない | 構文 | E101 / 受理 | `verify-r45.sh`（45-b (4)、45-e）、EBNF 生成器 |
 | §57 | `check --fix` は報告したアンカーの局所的な書き換えを当ててやり直す。範囲に `//` を含む書き換えは出さない。既定の `check` / `build` はソースを書き換えない | CLI | — | `verify-r46.sh`（E510 / E516 / E517）、`verify-r47.sh`（E515 / E501）、`verify-r57.sh`（E507 / E508）、`crates/hado/tests/r46_fixes.rs` `r47_fixes.rs` |
 | §57 | E507 の正準形は scrutinee。第31節の形は `def f value => value` / `fn(value => value)`。fallback を持つ形は対象外 | 冗長 | E507 | `tests/reject/E507/main.hd`、`verify-r57.sh`（57-a / 57-b / 57-e） |
-| §57 | E508 は関数の本体ちょうどの分岐だけ `let <内側>? = <scrutinee> -> <本体>` にする。束縛名が本体で使われる形に限る | 冗長 | E508 | `tests/reject/E508/main.hd`、`verify-r57.sh`（57-c / 57-d / 57-e） |
+| §57 | E508 は関数の本体ちょうどの分岐だけ `let <内側>? = <scrutinee> -> <本体>` にする。束縛名が本体で使われ、本体が `value` を参照しない形に限る | 冗長 | E508 | `tests/reject/E508/main.hd`、`verify-r57.sh`（57-c / 57-d / 57-e） |
 | §58 | `hado run` は一時ディレクトリで作って実行し、子プロセスの終了コードを返す。`build -o` は出力先を明示する。`build` と `run` の失敗にも `canonical form:` を付ける | CLI | — | `verify-r48.sh`、`crates/hado/tests/run_cli.rs` |
 | §58.1 | `hado fmt` は入力根のソースの局所的な書き換えを診断を待たずに一括で当て、`--check` は書かずに門番になる。`build --fix` は作る前に同じ整形をする | CLI | — | `verify-r52.sh` |
 | §58.2 | `hado test` は根の直下の `*_test.hd` を順に走らせ、終了コードで合否を決めて 1 本ごととまとめを出す。落ちても残りを走らせる | CLI | — | `verify-r54.sh` |
