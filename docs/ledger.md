@@ -3962,3 +3962,19 @@ def main = f 1
 ```
 
 腕と fallback の本体が同じで、正準形は分岐全体をその本体にすること。**枝の全体を 1 範囲で差し替える形なので、E507 の畳み込みと同じ道具（`branch_range(node, Tail::If, ...)` と `parser::canonical`、`Fix` の `line`/`col` は診断の位置）がそのまま使える。** 4 つのうち次に着手するのは E502 が最短（E504 と E506 は `_` の位置、E511 は腕の条件列に関わるので、対象条件の実測がもう少し要る）。
+
+### R69 の赤の実測（E502）
+
+拒否コーパスの再現を一時ディレクトリ（`target/e502-probe`、測定後に削除）に写して測った。
+
+```
+$ hado check target/e502-probe/main.hd
+main.hd:4:3: error[E502]: identical branch results at 4:15 and 4:19
+check-exit=1
+$ hado check --fix target/e502-probe/main.hd
+main.hd:4:3: error[E502]: identical branch results at 4:15 and 4:19
+fix-exit=1
+-- file after --fix --     4 行目は if x > 1 => 1 | 1 のまま
+```
+
+E502 はまだ書き換えを持たないので `--fix` は何も変えず、`check` は 1 のまま。診断には**同じ結果の 2 つの位置**（4:15 と 4:19）が関連位置として出ており、正準形のヒント（`; canonical form:`）は書き換えが無いため出ていない。R69 の門番はここを赤の起点にする（R68 の 68-a と同じく、「E502 が消えた」ではなく「直したファイルが `check` を通る」ことを判定に入れる）。
