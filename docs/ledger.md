@@ -4933,3 +4933,37 @@ exit 0
 
 ### 仕様への疑義
 なし。
+
+## R79 パイプラインを連続適用に限定する
+
+### 境界と実装
+- 対象は R78 と同じ `stdlib/`、`tools/`、付録Bと対応する受理ケースにした。
+- `prefer_pipelines` を「直接適用を列挙する検査」から「最大のパイプ式が一段だけの箇所を列挙する検査」へ変更した。二段以上の左結合パイプの内側は単段と数えない。
+- 検査を先に赤にし、列挙された `value |> f args` を `f value args` へ戻した。23 ファイルで 152 行を置換し、検査は緑になった。
+- `value |> f |> g` のような連続適用は維持した。配列・Bytes の確保、List の sort、Env・Io の変換、二つの配布 CLI、付録Bのデータ変換が該当する。
+- corpus lock は収録パスの実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test prelude --no-fail-fast
+prefer_pipelines 1/1、prelude 4/4
+$ cargo test --offline --test corpus --test check_modules --no-fail-fast
+corpus 4/4、check_modules 14/14
+$ bash scripts/run-gates.sh --jobs 1 --tier quick /tmp/hado-r79-quick
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+exit 0
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 新しい `prefer_pipelines` は移行前の単段パイプを列挙して赤になった。直接適用へ戻した後は 1/1。
+- 最終 quick、全 Rust テスト、配布 CLI の門番に赤はない。
+
+### 仕様への疑義
+なし。
