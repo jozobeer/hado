@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct DirectApplication {
+struct SingleStagePipeline {
     path: String,
     line: usize,
     column: usize,
@@ -27,21 +27,21 @@ fn source_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn collect_item(item: &Item, path: &str, applications: &mut Vec<DirectApplication>) {
+fn collect_item(item: &Item, path: &str, pipelines: &mut Vec<SingleStagePipeline>) {
     match item {
         Item::Def(definition) => match &definition.kind {
             DefKind::Value(body) | DefKind::Function { body, .. } => {
-                collect_node(body, path, false, applications)
+                collect_node(body, path, false, pipelines)
             }
         },
         Item::ModuleSig(module) => {
             for item in &module.items {
-                collect_item(item, path, applications);
+                collect_item(item, path, pipelines);
             }
         }
         Item::ModuleImpl(module) => {
             for item in &module.items {
-                collect_item(item, path, applications);
+                collect_item(item, path, pipelines);
             }
         }
         Item::Handler(handler) => {
@@ -49,7 +49,7 @@ fn collect_item(item: &Item, path: &str, applications: &mut Vec<DirectApplicatio
                 let body = match arm {
                     HandlerArm::Operation { body, .. } | HandlerArm::Return { body, .. } => body,
                 };
-                collect_node(body, path, false, applications);
+                collect_node(body, path, false, pipelines);
             }
         }
         Item::SigDef(_) | Item::TypeDef(_) | Item::Effect(_) => {}
@@ -59,76 +59,76 @@ fn collect_item(item: &Item, path: &str, applications: &mut Vec<DirectApplicatio
 fn collect_node(
     node: &Node,
     path: &str,
-    pipe_target: bool,
-    applications: &mut Vec<DirectApplication>,
+    is_pipe_left_operand: bool,
+    pipelines: &mut Vec<SingleStagePipeline>,
 ) {
     match &node.kind {
         NodeKind::Apply(callee, arguments) => {
-            if !pipe_target {
-                applications.push(DirectApplication {
+            collect_node(callee, path, false, pipelines);
+            for argument in arguments {
+                collect_node(argument, path, false, pipelines);
+            }
+        }
+        NodeKind::Call(callee, arguments) => {
+            collect_node(callee, path, false, pipelines);
+            for argument in arguments {
+                collect_node(argument, path, false, pipelines);
+            }
+        }
+        NodeKind::Pipe(value, target) => {
+            if !is_pipe_left_operand && !matches!(value.kind, NodeKind::Pipe(_, _)) {
+                pipelines.push(SingleStagePipeline {
                     path: path.to_string(),
                     line: node.span.line,
                     column: node.span.col,
                     expression: parser::canonical(node),
                 });
             }
-            collect_node(callee, path, false, applications);
-            for argument in arguments {
-                collect_node(argument, path, false, applications);
-            }
-        }
-        NodeKind::Call(callee, arguments) => {
-            collect_node(callee, path, false, applications);
-            for argument in arguments {
-                collect_node(argument, path, false, applications);
-            }
-        }
-        NodeKind::Pipe(value, target) => {
-            collect_node(value, path, false, applications);
-            collect_node(target, path, true, applications);
+            collect_node(value, path, true, pipelines);
+            collect_node(target, path, false, pipelines);
         }
         NodeKind::Neg(value) | NodeKind::Not(value) => {
-            collect_node(value, path, false, applications)
+            collect_node(value, path, false, pipelines)
         }
         NodeKind::Bin(_, left, right) => {
-            collect_node(left, path, false, applications);
-            collect_node(right, path, false, applications);
+            collect_node(left, path, false, pipelines);
+            collect_node(right, path, false, pipelines);
         }
-        NodeKind::Field(value, _) => collect_node(value, path, false, applications),
+        NodeKind::Field(value, _) => collect_node(value, path, false, pipelines),
         NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
             for (_, value) in fields {
-                collect_node(value, path, false, applications);
+                collect_node(value, path, false, pipelines);
             }
         }
         NodeKind::List(values, tail) => {
             for value in values {
-                collect_node(value, path, false, applications);
+                collect_node(value, path, false, pipelines);
             }
             if let Some(tail) = tail {
-                collect_node(tail, path, false, applications);
+                collect_node(tail, path, false, pipelines);
             }
         }
         NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
-            collect_node(value, path, false, applications);
-            collect_node(body, path, false, applications);
+            collect_node(value, path, false, pipelines);
+            collect_node(body, path, false, pipelines);
         }
         NodeKind::DoQ { value, body } => {
-            collect_node(value, path, false, applications);
-            collect_node(body, path, false, applications);
+            collect_node(value, path, false, pipelines);
+            collect_node(body, path, false, pipelines);
         }
-        NodeKind::Fn { body, .. } => collect_node(body, path, false, applications),
+        NodeKind::Fn { body, .. } => collect_node(body, path, false, pipelines),
         NodeKind::BoolBranch { cond, then, els } => {
-            collect_node(cond, path, false, applications);
-            collect_node(then, path, false, applications);
-            collect_node(els, path, false, applications);
+            collect_node(cond, path, false, pipelines);
+            collect_node(then, path, false, pipelines);
+            collect_node(els, path, false, pipelines);
         }
         NodeKind::CondBranch { arms, fallback } => {
             for (condition, body) in arms {
-                collect_node(condition, path, false, applications);
-                collect_node(body, path, false, applications);
+                collect_node(condition, path, false, pipelines);
+                collect_node(body, path, false, pipelines);
             }
             if let Some(fallback) = fallback {
-                collect_node(fallback, path, false, applications);
+                collect_node(fallback, path, false, pipelines);
             }
         }
         NodeKind::PatternBranch {
@@ -137,20 +137,20 @@ fn collect_node(
             fallback,
         } => {
             for scrutinee in scrutinees {
-                collect_node(scrutinee, path, false, applications);
+                collect_node(scrutinee, path, false, pipelines);
             }
             for (_, body) in arms {
-                collect_node(body, path, false, applications);
+                collect_node(body, path, false, pipelines);
             }
             if let Some(fallback) = fallback {
-                collect_node(fallback, path, false, applications);
+                collect_node(fallback, path, false, pipelines);
             }
         }
         NodeKind::With { args, body, .. } => {
             for argument in args {
-                collect_node(argument, path, false, applications);
+                collect_node(argument, path, false, pipelines);
             }
-            collect_node(body, path, false, applications);
+            collect_node(body, path, false, pipelines);
         }
         NodeKind::Int(_)
         | NodeKind::Float(_)
@@ -164,7 +164,7 @@ fn collect_node(
 }
 
 #[test]
-fn distributed_hado_sources_prefer_pipelines() {
+fn distributed_hado_sources_use_pipelines_for_chains() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let roots = ["stdlib", "tools"];
     let appendix_b_examples = [
@@ -180,14 +180,14 @@ fn distributed_hado_sources_prefer_pipelines() {
         "tests/accept/to_option/main.hd",
         "tests/accept/user_store/main.hd",
     ];
-    let mut applications = Vec::new();
+    let mut pipelines = Vec::new();
     for root in roots {
         for file in source_files(&repository.join(root)) {
             let relative = file.strip_prefix(&repository).unwrap().to_string_lossy();
             let source = fs::read_to_string(&file).unwrap();
             let ast = parser::parse_source(&source, &relative).unwrap();
             for item in &ast.items {
-                collect_item(item, &relative, &mut applications);
+                collect_item(item, &relative, &mut pipelines);
             }
         }
     }
@@ -196,19 +196,19 @@ fn distributed_hado_sources_prefer_pipelines() {
         let source = fs::read_to_string(&file).unwrap();
         let ast = parser::parse_source(&source, relative).unwrap();
         for item in &ast.items {
-            collect_item(item, relative, &mut applications);
+            collect_item(item, relative, &mut pipelines);
         }
     }
-    applications.sort();
+    pipelines.sort();
 
     assert!(
-        applications.is_empty(),
-        "direct applications remain outside pipeline targets:\n{}",
-        applications
+        pipelines.is_empty(),
+        "single-stage pipelines remain:\n{}",
+        pipelines
             .iter()
-            .map(|application| format!(
+            .map(|pipeline| format!(
                 "{}:{}:{} {}",
-                application.path, application.line, application.column, application.expression
+                pipeline.path, pipeline.line, pipeline.column, pipeline.expression
             ))
             .collect::<Vec<_>>()
             .join("\n")
