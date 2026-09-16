@@ -113,7 +113,69 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E507" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E503" | "E507" | "E508" | "E510" | "E515" | "E516" | "E517")
+}
+
+// --- E503: `| _ => body` を fallback `| body` へ ---
+
+/// §29: the canonical form of a catch-all `_` is the fallback. Removing `_ =>`
+/// leaves the arm's body as the fallback; a comment after the arrow is outside
+/// the removed range, so it stays.
+fn catch_all_fallback_fix(
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: Option<&Node>,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<Fix> {
+    // A real fallback has no pattern to remove, and the diagnostic is not about
+    // a nested `_` such as `Member(name, _)`.
+    let last = arms.last()?;
+    if fallback.is_some() || last.0.len() != 1 {
+        return None;
+    }
+    let pattern = &last.0[0];
+    if !matches!(pattern.kind, PatternKind::Underscore) {
+        return None;
+    }
+    let body = &last.1;
+    let start = lines.offset(source, pattern.span);
+    // The `_` pattern cannot contain an arrow, so the first one at the top level
+    // after it ends the arm.
+    let mut at = index.position(pattern.span)?;
+    let mut depth = 0i32;
+    let mut end = None;
+    while let Some(token) = tokens.get(at) {
+        match token.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth -= 1,
+            TokKind::Arrow if depth == 0 => {
+                end = Some(lines.offset(source, token.span) + 2);
+                break;
+            }
+            TokKind::Eof => break,
+            _ => {}
+        }
+        at += 1;
+    }
+    let mut end = end?;
+    // Leave the blank before `_` as the one space after `|`.
+    while end < source.len() && matches!(source.as_bytes()[end], b' ' | b'\t') {
+        end += 1;
+    }
+    if end > source.len() || source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E503",
+        line: pattern.span.line,
+        col: pattern.span.col,
+        start,
+        end,
+        replacement: String::new(),
+        canonical: format!("| {}", parser::canonical(body)),
+    })
 }
 
 // --- E517: `def f x => if | ...` を `def f x | ...` へ ---
@@ -650,7 +712,10 @@ fn walk_node(
         NodeKind::LetQ { pat, .. } => {
             walk_pattern(pat, source, lines, tokens, index, found);
         }
-        NodeKind::PatternBranch { arms, .. } => {
+        NodeKind::PatternBranch { arms, fallback, .. } => {
+            if let Some(fix) = catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index) {
+                found.push(fix);
+            }
             // §57: 腕がすべて自分の pattern を組み直す分岐は scrutinee ちょうど。
             // この書き換えは位置を選ばない（式の値が変わらない）。
             if let Some(fix) = rewrap_if_fix(node, source, lines, tokens, index, branches) {
