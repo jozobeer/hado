@@ -151,7 +151,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E503" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E503" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -220,6 +220,101 @@ fn boolean_branch_fix(
 /// §29: the canonical form of a catch-all `_` is the fallback. Removing `_ =>`
 /// leaves the arm's body as the fallback; a comment after the arrow is outside
 /// the removed range, so it stays.
+/// §26 / §57: the last arm's whole row is one variable pattern, so the value is
+/// still bound there and the arm is the fallback with a name. A `check --fix` run
+/// applies only one range, so the rewrite is one edit: the pattern through the end
+/// of the arm becomes the body with the binding replaced by the scrutinee.
+fn catch_all_variable_fix(
+    node: &Node,
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: Option<&Node>,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let last = arms.last()?;
+    if fallback.is_some() || last.0.len() != 1 {
+        return None;
+    }
+    let pattern = &last.0[0];
+    if !matches!(&pattern.kind, PatternKind::Name(name) if !crate::names::is_upper_reference(name)) {
+        return None;
+    }
+    let NodeKind::PatternBranch { scrutinees, .. } = &node.kind else { return None };
+    let [scrutinee] = scrutinees.as_slice() else { return None };
+    let NodeKind::Name(_) = &scrutinee.kind else { return None };
+    let body = &last.1;
+    // When every arm rebuilds the scrutinee, the branch is the scrutinee (§41).
+    // The arm forms carry their own rewrite, and a fallback re-evaluates the
+    // scrutinee, so those are left to the caller (§57).
+    if let Some(value) = crate::check::rewrap_branch(node) {
+        if matches!(&value.kind, NodeKind::Name(name) if name == "$argument") {
+            return None;
+        }
+        let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+        if start >= end || source[start..end].contains("//") {
+            return None;
+        }
+        let canonical = parser::canonical(value);
+        return Some(Fix {
+            code: "E512",
+            line: pattern.span.line,
+            col: pattern.span.col,
+            start,
+            end,
+            replacement: canonical.clone(),
+            canonical,
+        });
+    }
+    let start = lines.offset(source, pattern.span);
+    let (_, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    // A comment would be lost, and a `let` could bind the same name again.
+    if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
+        return None;
+    }
+    let pattern_at = index.position(pattern.span)?;
+    let binding = source[start..lines.offset(source, tokens.get(pattern_at + 1)?.span)].trim();
+    let scrutinee_at = index.position(scrutinee.span)?;
+    let scrutinee_start = lines.offset(source, scrutinee.span);
+    let value = source[scrutinee_start..lines.offset(source, tokens.get(scrutinee_at + 1)?.span)].trim();
+    if binding.is_empty() || value.is_empty() {
+        return None;
+    }
+    let mut replacement = String::new();
+    let mut at = index.position(body.span)?;
+    while let Some(token) = tokens.get(at) {
+        let token_start = lines.offset(source, token.span);
+        if token_start >= end || matches!(token.kind, TokKind::Eof) {
+            break;
+        }
+        let token_end = match tokens.get(at + 1) {
+            Some(next) => lines.offset(source, next.span).min(end),
+            None => end,
+        };
+        let text = &source[token_start..token_end];
+        if text.trim() == binding {
+            replacement.push_str(value);
+        } else {
+            replacement.push_str(text);
+        }
+        at += 1;
+    }
+    if replacement.trim().is_empty() {
+        return None;
+    }
+    Some(Fix {
+        code: "E512",
+        line: pattern.span.line,
+        col: pattern.span.col,
+        start,
+        end,
+        canonical: format!("| {}", replacement.trim()),
+        replacement,
+    })
+}
+
 fn catch_all_fallback_fix(
     arms: &[(Vec<Pattern>, Node)],
     fallback: Option<&Node>,
@@ -813,6 +908,9 @@ fn walk_node(
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
             if let Some(fix) = catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index) {
+                found.push(fix);
+            }
+            if let Some(fix) = catch_all_variable_fix(node, arms, fallback.as_deref(), source, lines, tokens, index, branches) {
                 found.push(fix);
             }
             if let Some(fix) = boolean_branch_fix(node, arms, fallback.as_deref(), source, lines, tokens, index, branches) {
