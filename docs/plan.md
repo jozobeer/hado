@@ -4903,3 +4903,94 @@ R46・R47 が §57 の局所的な書き換え（E501 / E510 / E515 / E516 / E51
 **書き換えのあとのソースが解析できない形を 1 つでも見つけたら、止めて報告せよ。**
 
 **E507 と E508 の書き換えが同じ範囲を取り合う形を見つけたら、止めて報告せよ。**
+
+## 54. R58 E205 と E602 の関連位置の手順書（2026-09-16）
+
+### 背景
+
+`wants.md` の 2（高）「関連位置。E205 の 1 回目の宣言、E602 の欠けている member。1 件報告は崩さない」。診断の中身は R46〜R57 が正準形（1）を、R55・R56 が期待型と実型（3）を入れた。残る 3 つ目がこの関連位置である。E205 は 2 回目の宣言だけを指すので、1 回目がどこかは利用者が探すことになる。E602 は `implement` を指すので、契約のどの member の話かはメッセージの種類からしか分からない。
+
+### 実測した材料
+
+- 同一ファイルの重複宣言は `main.hd:2:6: error[E205]: duplicate declaration Color`（`type Color = | Red(Int)` を 2 行）。アンカーは 2 回目の名前である。
+- ファイルをまたぐと `other.hd:1:6: error[E205]: duplicate declaration Color`。ファイルの順序は entry が先、残りが相対パスのバイト順（§50）。`main.hd` の宣言が 1 回目である。
+- `.hdi` の契約に `write` があり実装に無いと `main.hd:1:1: error[E602]: missing signature member`。アンカーは `implement`。契約と実装を同じファイルに置く形は `tests/reject/E602/main.hd` にある。
+- 重複の検出は 2 つある。`ambiguous_declarations::record`（ディレクトリの名前空間）と `names.rs::register`（ファイルごとの名前空間と式の中の field）で、どちらも `seen: HashSet<String>` しか持たず 1 回目の位置を捨てている。`namespaces` の `symbols` も名前だけの表である。
+- E602 の member の検査は `infer.rs` にあり、契約側の `declaration`（`SigDef` か `TypeDef`）を持っている。位置は `name_span` にある。
+- 診断の座標は検査の中では全ファイルを連結した行で、`project::source_diagnostic` がパスとファイル内の行に直す（`file{index}$` の印もここで消す）。1 行の書式は `Display` が作り、`Project::report` が `canonical form:` を最後に足す。
+- prelude の名前との衝突も E205 だが、prelude は利用者のソースの外に合成されるので利用者に見せられる位置が無い（出すと entry のファイルの行番号として嘘になる）。
+- E602 の functor の食い違い（`functors.rs`）と抽象型の循環（`infer.rs`）も E602 だが、位置の出どころが別なので今回は触らない。
+- 門番とテストはコードとアンカーだけを固定している（`crates/hado/tests/check_cli.rs` の corpus 判定は ` error[<コード>]: ` の接頭辞一致）。E205 / E602 のメッセージを丸ごと比べる箇所は無い。
+
+### 決定
+
+- **決定 1: 関連位置は同じ 1 行に足す。** 形は `; <ラベル> at <パス>:<行>:<列>`。1 件報告は崩さない（行を増やさない）。ラベルはコードごとに 1 つで、E205 は `first declared`、E602 は `declared in the contract`。`canonical form:` は今までどおり最後である。
+- **決定 2: `Diagnostic` に `related: Option<Related>`（`path`・`line`・`col`）を足す。** メッセージに混ぜないのは、座標を `source_diagnostic` で直すためである（メッセージの中の数は直せない）。行と列はアンカーと同じ座標系で入れ、`source_diagnostic` が同じ規則でパスとファイル内の行に直す。
+- **決定 3: E205 の関連位置を出す形。** 宣言の並びの 2 回目（`ambiguous_declarations::record`、`names.rs::register`、record の field、名前付き constructor の field）と、見える名前との衝突（同じディレクトリの根の名前との衝突、外側の型との衝突）、`library` の 2 つ目。関連位置はその名前の 1 回目の宣言である。
+- **決定 4: E205 の関連位置を出さない形。** prelude の名前との衝突（利用者のソースに 1 回目が無い）と `type_realizations` の衝突（今回は触らない）。同じコードなので、表に「位置を出さない形」を書く。
+- **決定 5: E602 の関連位置は契約の member の宣言。** 欠けた member、定義の形、型、多相性、欠けた型の 5 つ。契約が `.hdi` にあっても行は同じ座標系なので、`source_diagnostic` がそのパスに直す。
+- **決定 6: 名前だけの表を名前から位置への表にする。** `ambiguous_declarations` と `names.rs` の `seen`、`namespaces` の `symbols`、`project::library_roots` の 1 つ目の `library`。`namespaces` には `has` を残し、位置を引く `site` を足す。
+
+### 期待値の根拠
+
+| 形 | 診断 | 関連位置 | 根拠 |
+|---|---|---|---|
+| 同じファイルの `type Color` 2 つ | E205（2 回目） | 1 回目の `Color` | 決定 3、§49 |
+| `main.hd` と `other.hd` の `type Color` | E205（`other.hd`） | `main.hd` の `Color` | 決定 3、§50 |
+| 同じファイルの `def color` 2 つ | E205（2 回目） | 1 回目の `color` | 決定 3、§49 |
+| `type R = { a: Int; a: Int }` | E205（2 回目の `a`） | 1 回目の `a` | 決定 3、§33 |
+| サブディレクトリの宣言が根の名前と同じ | E205（宣言） | 根の宣言 | 決定 3、§51 |
+| `library` の 2 つ目 | E205（2 つ目） | 1 つ目の `library` | 決定 3、§52 |
+| `.hdi` の契約の `write` が実装に無い | E602（`implement`） | 契約の `write` | 決定 5、§47 |
+| 契約の member の型が違う | E602（`implement`） | 契約の member | 決定 5、§47 |
+| prelude の操作名と衝突する宣言 | E205（宣言） | 出さない | 決定 4、§55 |
+| `implement` の中の抽象型の循環 | E602（`implement`） | 出さない | 決定 4、§47 |
+
+### 成果物
+
+`docs/plan.md`（本節）、`docs/spec.md`（§56 の書式の文と、エラー表の E205・E602 の行）、`docs/spec-trace.md`、`docs/wants.md`、`docs/ledger.md`、`crates/hado/src/parser.rs`（`Related` と `Diagnostic::related` と `Display`）、`crates/hado/src/project.rs`（`source_diagnostic`、`library_roots`）、`crates/hado/src/ambiguous_declarations.rs`、`crates/hado/src/names.rs`、`crates/hado/src/name_resolution.rs`、`crates/hado/src/namespaces.rs`、`crates/hado/src/infer.rs`、`scripts/verify-r58.sh`（新設）、`scripts/lib/gate-tiers.sh`。
+
+### 工程
+
+- 工程 0: 計画（本節）と材料の実測。
+- 工程 1: 判定器を足して赤を測る。
+- 工程 2: `Related` と印字と `source_diagnostic` の写像を足す（位置はまだ入れない）。
+- 工程 3: E205 と E602 の位置を入れる（表を位置つきにする）。
+- 工程 4: 仕様と追跡表と wants、層、台帳、全走。
+
+### 判定
+
+`scripts/verify-r58.sh` を新設し、57 までの門番はそのまま回す。**入力は生成し、期待値は判定器側で生成から計算する。** control を先に回す。
+
+- 判定 58-a: 同一ファイルの重複宣言。空行と字下げを生成し、診断が 1 行で、アンカーが 2 回目、`; first declared at <パス>:<行>:<列>` が 1 回目を指す。
+- 判定 58-b: ファイルをまたぐ重複。アンカーは後ろのファイル、関連位置は entry のファイル。
+- 判定 58-c: 同じファイルの `def` の重複と、record の field の重複。関連位置は 1 回目である。
+- 判定 58-d: 根の名前との衝突と `library` の 2 つ目。関連位置は根の宣言と 1 つ目の `library`。
+- 判定 58-e: `.hdi` の契約の member が欠けている E602。関連位置は契約の member で、パスは `.hdi`。
+- 判定 58-f: 契約と実装が同じファイルの E602（corpus の形）。関連位置は同じファイルである。
+- 判定 58-g: 位置を出さない形。prelude の操作名との衝突、抽象型の循環、正常なプログラムのどれも `; ` を出さない。
+- 判定 58-h: `fmt` と `check --fix` は E205 / E602 のファイルを変えない。
+- 判定 58-i: 文書（§56 の書式の文と表の 2 行）・追跡表・層の `r58`・corpus lock。
+
+### 許容される赤
+
+工程 1 の直後は 58-a〜58-g が赤でよい（`; ` が出ない）。**R58 の終了時に許容される赤は無い。**
+
+### スコープ外
+
+- `type_realizations` の E205 の関連位置（外側の型の位置を呼び出し側まで通す必要がある）
+- E602 の functor の食い違いと抽象型の循環の関連位置
+- E305 の関連位置（wants 3 の残り）
+- ソース抜粋と caret（wants 8）、`--format json`（wants 6）、`hado explain`（wants 5）
+
+### 確認して報告（決定から）
+
+- 関連位置が 1 件報告を崩していないこと（行が増えていないこと。決定 1）
+- ファイルをまたぐ関連位置が entry のファイルを指すこと（決定 2、`source_diagnostic`）
+- prelude との衝突で位置を出していないこと（決定 4）
+
+### 中断の条件
+
+**関連位置の行・列が、利用者に見えるファイルの中で 1 から数えた位置にならない形を 1 つでも見つけたら、止めて報告せよ。**
+
+**1 件報告が崩れる（診断が 2 行になる）形を見つけたら、止めて報告せよ。**
