@@ -4717,3 +4717,15 @@ $ check --fix <効果形>  → effect-fix-exit=1 / effectful shape untouched OK
 
 ### 全走
 次のラウンドで層別と `cargo test` を 1 回回して記録する。
+
+### R72 の全走
+
+```
+TALLY: 3704/3705 passed; red: verify-r71.log
+gates-exit=0
+cargo-test-exit=0
+FAILED lines 0
+passed=773 failed=0
+```
+
+層別は 69 本の門番で検査 3705、`gates-exit=0`。赤は `verify-r71.log` の 71-d 1 つ（`pure/named changed`）。原因は **R72 が E506 を修正可能にしたこと**で、71-d が前提にしていた「純粋破棄の形は対象外」という当時の期待値が上書きされたため。71-d を named の形だけを見るように更新し（担保は `verify-r72.sh` の 72-a〜72-d が持つ旨をコメントで明示）、`verify-r71.sh` を 5/5 に戻した。**検査を緩めたのではなく、上書きされた期待値を担保の所在つきで引退させた。**
