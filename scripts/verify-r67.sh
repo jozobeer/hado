@@ -17,9 +17,9 @@ tmp = tempfile.mkdtemp()
 reds, compared, errored, untagged = [], 0, 0, 0
 
 
-def run(args, timeout=30):
+def run(args, timeout=30, cwd=None):
     try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired:
         return None
 
@@ -44,7 +44,10 @@ for path in files:
     if build is None or build.returncode != 0:
         reds.append((name, 'build', (build.stderr.strip()[:90] if build else 'timeout')))
         continue
-    result = run([binary])
+    # §58 の run と同じで、実行は一時ディレクトリを作業ディレクトリにする。ファイル I/O の受理ファイルがリポジトリの根に書き残さないようにする。
+    work = os.path.join(tmp, name + '-work')
+    os.makedirs(work, exist_ok=True)
+    result = run([binary], cwd=work)
     if result is None:
         reds.append((name, 'run timeout', ''))
     elif result.returncode < 0:
