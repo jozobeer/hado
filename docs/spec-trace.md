@@ -122,3 +122,4 @@
 | §56 | E305 の関連位置のラベルは `expected here` | 型 | E305 | `verify-r60.sh`（60-a / 60-b）、`verify-r56.sh`（56-d） |
 | §29 | catch-all の `_` の腕は fallback の正準形 `\| body` に書き換える | 冗長 | E503 | `verify-r62.sh`（62-a / 62-b / 62-d） |
 | §24 | Bool リテラルの腕の分岐は Boolean 分岐に書き換える | 冗長 | E520 | `verify-r63.sh`（63-a / 63-b / 63-c / 63-d） |
+| §58.1 | fmt は行末の空白を消し、ファイルの終わりに改行を 1 つ置く | 整形 | 受理 | `verify-r64.sh`（64-a / 64-b / 64-c） |
