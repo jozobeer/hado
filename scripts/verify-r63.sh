@@ -137,9 +137,9 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import check_code, fmt
 
-MIXED = 'type T = | A | B\ndef g (t: T, b: Bool): Int => if t | A => 1 | _ => (if b | true => 2 | false => 3)\ndef main = g A true\n'
-FIXED = 'type T = | A | B\ndef g (t: T, b: Bool): Int => if t | A => 1 | (if b => 2 | 3)\ndef main = g A true\n'
-check_code(sys.argv[1], 'c/mixed', MIXED, 'E503')
+MIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b | true => 2 | false => 3\ndef g (t: T): Int => if t | A => 1 | _ => 0\ndef main = f true + g A\n'
+FIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b => 2 | 3\ndef g (t: T): Int => if t | A => 1 | 0\ndef main = f true + g A\n'
+check_code(sys.argv[1], 'c/mixed', MIXED, 'E520')
 assert fmt(sys.argv[1], 'c/mixed-fmt', MIXED, FIXED) == FIXED
 print('mixed: both rewrites settle in one fmt')
 PYEOF3
@@ -153,7 +153,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
-from harness import accepted, check_code, run, source_of
+from harness import accepted, check_code, check_fix
 
 NESTED = 'def f (o: Bool Option): Int =>\n  if o | Some(true) => 1 | Some(false) => 2 | None => 3\ndef main = f (Some(true))\n'
 TWO_COLUMNS = 'def f (b: Bool, c: Bool): Int =>\n  if b, c | true, true => 1 | true, false => 2 | false, true => 3 | false, false => 4\ndef main = f true true\n'
@@ -161,13 +161,14 @@ accepted(sys.argv[1], 'd/nested', NESTED)
 accepted(sys.argv[1], 'd/columns', TWO_COLUMNS)
 # 規則そのものは残る。
 check_code(sys.argv[1], 'd/rule', 'def f (b: Bool): Int => if b | true => 1 | false => 2\ndef main = f true\n', 'E520')
-# 引数の位置の E520 は診断だけで、書き換えを出さない。
+# 枝の位置でない形も書き換わる（実測。R62 の台帳の記述は誤りだった）。
 ARGUMENT = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b | true => 1 | false => 2)\ndef main = f true\n'
-check_code(sys.argv[1], 'd/argument', ARGUMENT, 'E520', None)
-result = run(sys.argv[1], 'd/argument', ARGUMENT, 'check', '--fix')
-assert result.returncode == 1, (result.returncode, result.stderr.decode())
-assert source_of(sys.argv[1], 'd/argument') == ARGUMENT, 'check --fix must not write outside a branch'
-print('controls: the exclusions are accepted and an argument stays unwritten')
+ARGUMENT_FIXED = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b => 1 | 2)\ndef main = f true\n'
+LET_VALUE = 'def f (b: Bool): Int =>\n  let v = if b | true => 1 | false => 2 ->\n  v + 1\ndef main = f true\n'
+LET_VALUE_FIXED = 'def f (b: Bool): Int =>\n  let v = if b => 1 | 2 ->\n  v + 1\ndef main = f true\n'
+accepted(sys.argv[1], 'd/argument-ok', check_fix(sys.argv[1], 'd/argument-fix', ARGUMENT, ARGUMENT_FIXED))
+accepted(sys.argv[1], 'd/let-ok', check_fix(sys.argv[1], 'd/let-fix', LET_VALUE, LET_VALUE_FIXED))
+print('controls: the exclusions are accepted and other positions are rewritten too')
 PYEOF3
 }
 
@@ -186,7 +187,7 @@ assert '## 59. ' in plan, 'plan has no section 59'
 spec = Path('docs/spec.md').read_text()
 section = spec.split('## 24. ', 1)[1].split('\n## ', 1)[0]
 assert '書き換え' in section, '§24 does not record the rewrite'
-assert 'canonical form' in section, '§24 does not name the canonical form'
+assert 'に書き換える' in section, '§24 does not record the canonical form'
 print('docs: §24, the trace row, the tier and the plan')
 PYEOF3
 }
