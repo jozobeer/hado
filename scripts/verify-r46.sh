@@ -277,13 +277,14 @@ from harness import check_fix, digest
 
 root = Path(sys.argv[1]) / 'e'
 root.mkdir(parents=True, exist_ok=True)
+# R47 で E501 は直せるようになったので、正準形を持つがまだ直せない E507 を使う。
 path = root / 'unfixable' / 'main.hd'
 path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text('def main = let x = 5 -> x\n')
+path.write_text('def f (slot: Int Option) =>\n  if slot\n  | Some(x) => Some(x)\n  | None => None\ndef main = f (Some(3))\n')
 before = digest(path)
 result = check_fix(str(root), 'unfixable', path.read_text())
 assert result.returncode == 1, result.returncode
-assert b'error[E501]' in result.stderr, result.stderr.decode()
+assert b'error[E507]' in result.stderr, result.stderr.decode()
 assert digest(path) == before, 'a diagnostic without a rewrite must not change the file'
 
 # コメントを含む範囲の書き換えは出ない。報告されるアンカーは外側なので
@@ -296,7 +297,7 @@ result = check_fix(str(root), 'commented', source)
 assert result.returncode == 1, result.returncode
 assert b'error[E510]' in result.stderr, result.stderr.decode()
 assert commented.read_text() == source, commented.read_text()
-print('unfixable: exit 1, E501 and a comment range both leave the file unchanged')
+print('unfixable: exit 1, E507 and a comment range both leave the file unchanged')
 PY
 }
 
