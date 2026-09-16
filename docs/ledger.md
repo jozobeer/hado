@@ -4051,3 +4051,13 @@ fn is_effect_free(node: &Node) -> bool {
 `branch_spans` を grep した。**書き込みは 1 箇所だけ**で、`parser.rs:1844` の `self.branch_spans.push((span, first_pipe, self.span()));`（枝の開始・最初の `|`・枝の終わり）。`first_pipe` を一緒に持つ形なので、条件分岐と pattern 分岐が共有する「論理枝」の解析で押されている可能性が高い。読む側は `fixes.rs:53` で `walk_item(..., &ast.branch_spans, ...)` に渡され、`functor_instances.rs:43` では 3 つの span を付け替えているだけである。
 
 したがって**前ラウンドの見込み（`CondBranch` の範囲が一覧に無い）は弱くなった**。一覧に入っているのに書き換えが出ないなら、残る原因は `branch_range` 自身の突き合わせ方である（`Tail::If` と node の種類や span の位置で引いている）。次は `branch_range` の本体（`fixes.rs`、`TokenIndex` の近く）を 15 行ほど読み、`CondBranch` を引けるかを確かめる。引けないなら `CondBranch` 用に枝の範囲を node の span から直接出す道を選ぶ（共有の一覧の契約を壊さない）。
+
+### R69 の掛からない原因の確定（`branch_range` と `parse_pattern_branch`）
+
+`fixes.rs` の `branch_range`（825 行）は `let (_, _, after) = *branch_entry(node.span, branches)?;` で一覧を引き、`start = lines.offset(source, node.span)`、`end` は `Tail::Fn` のときだけ `)` を探して伸ばす。**`branch_entry` が `None` なら書き換えは出ない。**
+
+その一覧を押しているのは `parser.rs:1844` の 1 行で、これは **`parse_pattern_branch` の中**にある。つまり **pattern 分岐のときだけ枝の範囲が登録され、条件分岐（`CondBranch`）は登録されない。** 前々ラウンドの「`CondBranch` の範囲が無いのが原因」はこれで**確定**した（間で「弱まった」と書いたのは、push の所在を確かめずに三つ組の形から推したためで、直接読んで訂正した）。
+
+道は 2 つ。(a) 条件分岐の解析側にも同じ形で `branch_spans` を押す。この場合、`rewrap_if_fix`（E507）など範囲を引く側が条件分岐でも範囲を得られるようになるので、**既存の書き換えの振る舞いが変わる**（R57 の門番と全走で確かめる必要がある）。(b) `CondBranch` 用に枝の範囲を node の span から直接出す。共有の一覧に触れないが、終わりの求め方（本体の終わり）を自分で持つことになる。
+
+次は (a) の影響範囲を先に測る（条件分岐の枝が範囲を持つと、どの検査・どの書き換えが変わるか）。(a) が安全なら (a)、(b) のほうが狭いなら (b)。
