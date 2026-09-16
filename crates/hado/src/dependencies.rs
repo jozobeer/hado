@@ -4,7 +4,7 @@ use crate::parser::ImplementationForm;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Key { Value(String), Type(String), Signature(String), Module(String) }
+enum Key { Value(String), Type(String), Signature(String), Module(String), Effect(String), Handler(String) }
 
 type References = BTreeSet<Key>;
 
@@ -14,12 +14,14 @@ fn declaration(item: &Item) -> Option<(Key, Span)> {
         Item::TypeDef(d) => (Key::Type(d.name.clone()), d.span),
         Item::ModuleSig(d) => (Key::Signature(d.name.clone()), d.span),
         Item::ModuleImpl(d) => (Key::Module(d.name.clone()), d.span),
-        Item::SigDef(_) | Item::Effect(_) | Item::Handler(_) => return None,
+        Item::Effect(d) => (Key::Effect(d.name.clone()), d.span),
+        Item::Handler(d) => (Key::Handler(d.name.clone()), d.span),
+        Item::SigDef(_) => return None,
     })
 }
 
 pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: usize, other_entry_roots: &[String], inspection: crate::Inspection, path: &str) -> Vec<Diagnostic> {
-    let collector = Collector { checked: Some(checked), constructors: constructor_owners(&ast.items) };
+    let collector = Collector::new(Some(checked), &ast.items);
     let graph = collector.graph(ast);
     let mut used = References::new();
     match inspection {
@@ -37,6 +39,8 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
                     Item::ModuleImpl(module) => Key::Module(module.name.clone()),
                     Item::ModuleSig(contract) => Key::Signature(contract.name.clone()),
                     Item::TypeDef(def) => Key::Type(def.name.clone()),
+                    Item::Effect(effect) => Key::Effect(effect.name.clone()),
+                    Item::Handler(handler) => Key::Handler(handler.name.clone()),
                     _ => continue,
                 };
                 used.extend(transitive_references(&key, &graph));
@@ -47,6 +51,9 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
     let mut handler_references = References::new();
     for item in &ast.items {
         if let Item::Handler(handler) = item {
+            // §38: a declared handler is part of the program, so the effect its
+            // head names is used, just like what its arms reach below.
+            handler_references.insert(Key::Effect(handler.effect.clone()));
             collector.handler(handler, &scope, &mut handler_references);
         }
     }
@@ -86,7 +93,7 @@ pub(crate) fn diagnostics(ast: &Ast, checked: &crate::Checked, prelude_items: us
 }
 
 fn local_data_diagnostics(ast: &Ast, module: &crate::parser::ModuleImpl, checked: &crate::Checked, path: &str) -> Vec<Diagnostic> {
-    let collector = Collector { checked: Some(checked), constructors: constructor_owners(&module.items) };
+    let collector = Collector::new(Some(checked), &module.items);
     let scope = Scope { local_module: Some(module.name.clone()), ..Scope::default() };
     let graph = collector.graph_items(&module.items, &scope);
     let mut used = References::new();
@@ -113,8 +120,11 @@ fn local_data_diagnostics(ast: &Ast, module: &crate::parser::ModuleImpl, checked
 }
 
 pub(crate) fn inference_groups(ast: &Ast) -> Vec<Vec<&Item>> {
-    let collector = Collector { checked: None, constructors: constructor_owners(&ast.items) };
+    let collector = Collector::new(None, &ast.items);
     let mut graph = collector.graph(ast);
+    // §37 / §38: the unused judgment needs the effects and the handlers, but
+    // the inference order does not (55 節 決定 8).
+    graph.retain(|key, _| !matches!(key, Key::Effect(_) | Key::Handler(_)));
     let keys: Vec<_> = ast.items.iter().filter_map(|item| declaration(item).map(|(key, _)| key)).collect();
     let mut groups = Vec::new();
     while !graph.is_empty() {
@@ -185,9 +195,33 @@ impl Scope {
 struct Collector<'a> {
     checked: Option<&'a crate::Checked>,
     constructors: BTreeMap<String, Key>,
+    /// §37: an operation name to the effect that declares it. A call site spells
+    /// the name, so a reference to it is a reference to the effect.
+    operations: BTreeMap<String, Key>,
+    /// §38: a handler name to its declaration, for the names `with` spells.
+    handlers: BTreeMap<String, Key>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
+    fn new(checked: Option<&'a crate::Checked>, items: &[Item]) -> Self {
+        let mut operations = BTreeMap::new();
+        let mut handlers = BTreeMap::new();
+        for item in items {
+            match item {
+                Item::Effect(effect) => {
+                    for op in &effect.ops {
+                        operations.insert(op.name.clone(), Key::Effect(effect.name.clone()));
+                    }
+                }
+                Item::Handler(handler) => {
+                    handlers.insert(handler.name.clone(), Key::Handler(handler.name.clone()));
+                }
+                _ => {}
+            }
+        }
+        Collector { checked, constructors: constructor_owners(items), operations, handlers }
+    }
+
     fn graph(&self, ast: &Ast) -> BTreeMap<Key, References> {
         let mut graph = self.graph_items(&ast.items, &Scope::default());
         let contracts = crate::contract_types::Contracts::collect(&ast.items);
@@ -244,8 +278,24 @@ impl Collector<'_> {
                 }
                 self.items(&def.items, &body_scope, references);
             }
-            Item::Effect(_) => {}
-            Item::Handler(handler) => self.handler(handler, scope, references),
+            Item::Effect(effect) => {
+                // §37 / 55 節 決定 4: what the operations' types name is used as
+                // soon as the effect itself is.
+                let mut scope = scope.clone();
+                scope.types.extend(effect.type_params.iter().map(|p| p.name.clone()));
+                for op in &effect.ops {
+                    for param in &op.params { if let Some(ty) = &param.ty { type_expression(ty, &scope, references); } }
+                    if let Some(ty) = &op.ret { type_expression(ty, &scope, references); }
+                }
+            }
+            Item::Handler(handler) => {
+                // §38: the head names the effect it handles, so the effect is used.
+                let mut scope = scope.clone();
+                scope.types.extend(handler.type_params.iter().map(|p| p.name.clone()));
+                references.insert(Key::Effect(handler.effect.clone()));
+                for param in &handler.params { if let Some(ty) = &param.ty { type_expression(ty, &scope, references); } }
+                self.handler(handler, &scope, references)
+            }
         }
     }
 
@@ -299,8 +349,15 @@ impl Collector<'_> {
             inferred_type(ty, scope, references);
         }
         match &node.kind {
-            NodeKind::Name(name) if !scope.constructors.contains(name) => {
-                if let Some(owner) = self.constructors.get(name) { references.insert(owner.clone()); }
+            NodeKind::Name(name) => {
+                if !scope.constructors.contains(name) {
+                    if let Some(owner) = self.constructors.get(name) { references.insert(owner.clone()); }
+                }
+                // §37: an operation is called by its bare name.
+                if let Some(effect) = self.operations.get(name) { references.insert(effect.clone()); }
+            }
+            NodeKind::With { handler, .. } => {
+                if let Some(key) = self.handlers.get(&handler.name) { references.insert(key.clone()); }
             }
             NodeKind::NamedConstructor(name, _) if !scope.constructors.contains(&name.name) => {
                 if let Some(owner) = self.constructors.get(&name.name) { references.insert(owner.clone()); }
