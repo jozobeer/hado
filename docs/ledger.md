@@ -3842,3 +3842,24 @@ $ hado run main.hd
 - **未追跡ファイルの本当の出どころ（追測）。** R67 の全走をもう一度回すと `run-gates: the working tree changed during the parallel phase` で exit 1 になった（TALLY は `3680/3680 passed; red: none` のまま）。走行の後に `fixture` と `ordinary` が再び現れていた。**書き手が分かった。** 全走を回しながら 0.5 秒ごとにツリーを見張り（背景ジョブ。前景では呼び出しの時間上限に当たる）、`fixture` と `ordinary` が現れた瞬間（21:32:56）に `ps` で走っていた門番を出すと `scripts/verify-r67.sh` だけであった。原因はこの門番が `hado build -o <一時ディレクトリ>` で作った実行ファイルを**リポジトリの根を作業ディレクトリにして走らせていた**ことで、ファイル I/O の受理ファイルが `fixture` / `ordinary` を根に書いていた。実行を作業ディレクトリごとの一時ディレクトリで行うように直し（第58節の `run` と同じ隔離）、判定は同じ（`fixtures=109 compared=101 errored=8 untagged=0 red=0`）のまま、走行の後に根が汚れないことを確かめた。`cargo test --offline` だけなら根は汚れない（実測）。処方は、この種の fixture を一時ディレクトリへ書くことである（`scripts/verify-r36.sh` と同型の門番を洗う）。`ordinary` の書き手はまだ特定していない。
 
 - **修正後の全走（追測）。** 実行を作業ディレクトリで行うように直した後、`bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r67c` は `TALLY: 3680/3680 passed; red: none` で **exit 0**、走行の後に `git status --short` は空であった。修正の前は同じ TALLY で exit 1（並行相でツリーが変わった）になり、根に `fixture` と `ordinary` が残っていた。緑の走行が緑で終わるようになった。
+
+## R68 E512 の書き換え（2026-09-16、工程 2 まで）
+
+### 背景と決定
+
+`docs/plan.md` の 63 節。E512（`top-level variable patterns are forbidden`、§26）は `check.rs` の `catch_all_row`（436 行）が、腕の pattern がすべて `_` か変数で、どれかが変数のとき出す。正準形は fallback だが、fallback の形は E507（`branches reconstruct the value`）を出し、`hado fmt` はその形を書き換えない（R57 の E507 の書き換えは fallback のある形を避ける。実測）。決定は 4 つ。腕が 1 本で pattern がすべて `_` か変数、どれかが変数、scrutinee が単純な変数のときだけ対象にする。本体の束縛を scrutinee の名前に置き換える（重ならない複数の編集でよい。範囲に `//` があれば書かない）。生成した形が E507 を出すなら条件ごと scrutinee に畳む。`fmt` と `check --fix` で同じ書き換えを共有する。
+
+### 門番（工程 2）
+
+`scripts/verify-r68.sh` を新設し、full 層に登録した。判定は「E512 が消えた」ではなく「**直したファイルが `check` を通る**」まで見る（68-a）。68-c は直す前後の実行結果を比べるが、期待値は判定器に書かず、手で書いた冗長でない版（`def f (t: T): T => t`）と同じ出力になることで導く。68-d は対象外の形（束縛を使わない・scrutinee が関数呼び出し・範囲にコメント）を書き換えないことを見る。実行は作業ディレクトリごとの一時ディレクトリで行う（R67 で直した隔離と同じ）。
+
+### 実測
+
+- **実装前の赤:** `PASSED: 1/5`。68-a は `check --fix` が終了コード 1 のまま（`main.hd:2:36: error[E512]: top-level variable patterns are forbidden`）、68-b は `fmt` の後も受理されず、68-c は `check --fix` が 1 を返すため実行の比較に届かない。68-e は追跡表と仕様の記述が無い。
+- **68-d は緑である。** まだ何も書き換えないので当然の緑で、実装の後も緑でなければならない（対象外の形を書き換え始めたら赤になる）。
+- **`lint-docs` の一時的な赤:** 工程 2 のコミットの直後に 6/7 になった（そのラウンドの台帳の節が無いという既知の規則）。この節を書いて 7/7 に戻した。
+
+### 次の工程
+
+- 工程 3: `fixes.rs` に E512 の書き換えを足す。生成した形が E507 を出すなら、決定 3 の畳み込みまで入れる（測ってから決める）。
+- 工程 4・5: 仕様の 1 文と追跡表、台帳の追測と全走。
