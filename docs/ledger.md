@@ -4222,3 +4222,23 @@ main.hd:8:14: error[E105]: tuples are not supported; `(a, b)` is not an expressi
 **E105**: タプルは式として使えない。`(code, 1)` で数える設計はそのままでは書けない。**コードと件数の組はレコードか名前付き構築子にする**必要がある。下敷きの `tools/gates/report/report.hd` が `Report.T` という型で集計を持っているので、**その書き方を次に読んで写す**のが一番速い（同じ「集計を持つ小さな型」である）。
 
 初稿は `tools/diagnostics/main.hd` に未追跡のまま置いた（次ラウンドでレコードに直して `check` を通してからコミットする）。台帳にはこの 2 つのエラーを実測として残す。
+
+### R70 の道具が動いた（`E502 1`）
+
+`tools/diagnostics/main.hd` は `check` を通り、実際に走った。
+
+```
+$ cargo run --offline -q -- check --format json tests/reject/E502/main.hd 2>&1 | cargo run --offline -q -- run tools/diagnostics/main.hd
+E502 1
+```
+
+標準入力から JSON の診断を読み、コードごとの件数を出す。実プログラムを一本、`hado run` で運用する最初の縦切りである（優先順位 2）。
+
+**コンパイラが教えたこと（すべて実測、初稿からの 5 つ）。**
+1. `module` 行を書くと、そのファイルの `def` には型注釈が要る（E100）。道具は `module` を書かない。
+2. タプルは式として使えない（E105）。コードと件数の組は持てないので、**数える側を「まだ印字していないコードか」で判定する**形にして、組そのものを不要にした。
+3. **枝を枝の中に入れられない（E101）。** 枝ごとに関数を分ける（`summarize` / `summarize_one` / `emit` / `line_for`）。
+4. 相互再帰は関係する関数すべてに `rec` が要る（E208）。
+5. `let p? =` は `Option` 用（E303）。`{Error}` の効果は素の `let x = e ->` で通る。
+
+この 5 つはどれも「書いてみるまで分からなかった」もので、目標の「run で不足を実測で発見する」がそのまま起きた形になっている。
