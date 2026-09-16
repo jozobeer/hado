@@ -4591,3 +4591,20 @@ passed=773 failed=0
 - 実装の要点（次に戻すための記録）: 範囲は `branch_range(node, Tail::If, …)`、置換は `let text = parser::canonical(first_body);`（`String`）を `source[body_start..].starts_with(&text)` で**原文と一致することを確かめてから**使う。門は「`fallback` が無い」「腕が 2 つ以上」「全ての腕の本体が同じ」「範囲に `//` が無い」。`Fix { code: "E502", line: node.span.line, col: node.span.col, canonical: flatten(&text), replacement: text }`。
 
 **次の 1 歩は計器**（E504 で確立した規律）。`identical_cond_fix` の入口と各 bail 点（fallback 有り／腕が 1 つ以下／canonical 不一致／原文不一致／branch_range が None／`//` 有り）に印字を入れ、E502 の再現に `check --fix` を直接掛ける。1 回でどの門で落ちるか分かる。**推測は重ねない。** なお `spec.md` には既に `書き換え` の語があり（69-e の要件のうち plan の `## 64.` だけが欠けている）、spec は変更していない。
+
+## E502 の計器の結果（`CondBranch` の腕に来ていない）
+
+`identical_cond_fix` の入口と各 bail 点に印字を入れ（入口は `P702 enter`）、`NodeKind::CondBranch { arms, fallback }` の腕を `PatternBranch` の直前に足して、E502 の再現へ `check --fix` を直接掛けた。
+
+```
+$ cargo run --offline -q -- check --fix target/e502/main.hd 2>&1 | grep -E "P70|E502"
+main.hd:4:3: error[E502]: identical branch results at 4:15 and 4:19
+$ sed -n '3,5p' target/e502/main.hd
+def f x =>
+  if x > 1 => 1 | 1
+def main = f 1
+```
+
+**`P702` が 1 行も出ない（入口の `P702 enter` すら出ない）。** つまり `identical_cond_fix` は呼ばれておらず、**`NodeKind::CondBranch` の腕に到達していない**。E504 のときの「所有している腕が先に当たる」とは違い、**この形の本体が `CondBranch` として来ていない**か、`CondBranch` に当たる前に別の腕が受けているかのどちらかである。
+
+**次の 1 歩**（E504 で効いた形）: (1) `walk_node` の `match &node.kind {` の直前に「訪れた位置」を印字する計器を戻す（E502 の `if` は 4:3 にあるので、`node 4:3` が出るかで walk に来ているかを判定できる）。(2) 最後の `_ => {}` の腕を印字する腕に変え、4:3 がそこへ落ちるかを見る。(3) `parser.rs` の `NodeKind` から `if` に相当する名前（`If` / `Cond` など）を grep で確かめ、候補ごとに腕を足して二分探索する。**推測は重ねない。**
