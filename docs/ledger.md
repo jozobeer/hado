@@ -3895,3 +3895,11 @@ E512 に写すとこうなる。最後の腕で、行が変数 1 つ、`fallback
 **残っている不明点は 3 つ。** (1) `PatternKind::Name` / `NodeKind::Name` から名前の文字列を取り出す口（`rewrap_if_fix` は `name == "$argument"` と比較しているので文字列として使えるが、`Display` か field かは未確認）。(2) 本体の置き換えは**トークン単位**でやる必要がある（`y` を素朴に文字列置換すると `yx` の `y` まで置き換わる）。`tokens` と `index` が渡っているので、本体の範囲のトークンを並べ直して束縛のトークンだけ差し替える。(3) 置き換えた名前が本体で影になっていないかの判定（内側の `let` が同名を束縛する場合）を構文だけで決められるか。
 
 この 3 つは `fixes.rs` の他の書き換え（名前を読むもの、トークンを並べ直すもの）を 30 行ほど読めば決まる。次に実装に入るラウンドは、そこから始める。
+
+### R68 の残る不明点の解消（工程 3 の直前）
+
+- **名前の比較。** `fixes.rs` では `NodeKind::Name(name) if name == "$argument"`（548 行）と `PatternKind::Name(bound)`（803 行）で、名前は `&str` と `==` で比較できる。**名前の文字列を取り出す口は要らない。** 束縛の綴りは、pattern の span のトークンをソースから切り出して得る。
+- **トークン単位の置き換え。** `fixes.rs` にトークンの text フィールドは無い。`Tok` は種別と span を持つだけなので、**隣り合うトークンのオフセットの間をソースから切り出す**（`TokenIndex::position(span)`（1060 行）と `lines.offset` で並べる）ことで、元の綴りのまま本文を作り直せる。長さを知る必要がない。束縛と同じ綴りのトークンだけを scrutinee の綴りに差し替えるので、`yx` の `y` を巻き込まない。
+- **影の判定。** 構文だけで決めるのは保留し、**安全側に倒す**。本体に `let` が現れる形は書き換えない（同名を束縛していなくても書き換えない。過度に保守的だが、誤った置き換えより良い）。68-d の対象外の形には影響しない。
+
+これで工程 3 に必要な材料は揃った。実装は (1) `catch_all_variable_fix` を `catch_all_fallback_fix` の隣に足す（対象は最後の腕・行が変数 1 つ・`fallback.is_none()`・`scrutinees` が `NodeKind::Name` の 1 つ）、(2) 範囲は `lines.offset(source, pattern.span)` から `branch_range(node, Tail::If, ...)?.1` まで、(3) 範囲に `//` があれば書かない、(4) 差し替えは本体のトークンを並べ直して束縛と同じ綴りだけを scrutinee の綴りにする、(5) `Fix { code: "E512", line: pattern.span.line, col: pattern.span.col, start, end, replacement, canonical: "| " + replacement }`、(6) `PatternBranch` の腕（814 行の隣）から呼ぶ。本体に `let` があるときは (1) の条件で外す。
