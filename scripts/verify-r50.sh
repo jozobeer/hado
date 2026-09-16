@@ -140,6 +140,45 @@ print('shallow: 1000 iterations on a 1 MB stack print 1000 and exit 0')
 PY
 }
 
+# --- 50-e: 枯渇でないフォールトを握り潰さない ---
+# The guard's statics are not reachable from a guest program, so compile the
+# runtime into a probe and drive it with a fault whose address is not the
+# stack floor (a raise has no address). It must stay a real signal death.
+r50_fault_not_masked() {
+    cat >"$workdir/probe.c" <<'C'
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int32_t hado_entry(void) { return 0; }
+#define main hado_runtime_main
+#include "hado_runtime.c"
+#undef main
+
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+  install_stack_guard();
+  raise(SIGSEGV);
+  return 0;
+}
+C
+    cc -I runtime -o "$workdir/probe" "$workdir/probe.c" -lgc || return 1
+    local output status
+    output=$("$workdir/probe" 2>&1) 2>/dev/null
+    status=$?
+    if [ "$status" -ne 139 ]; then
+        echo "probe exited $status, not 139"
+        return 1
+    fi
+    if [ -n "$output" ]; then
+        echo "probe wrote to stderr: $output"
+        return 1
+    fi
+    echo "not masked: a fault away from the stack floor stays a signal death"
+}
+
 # --- 50-d: 仕様と追跡表と層別と corpus lock ---
 r50_docs() {
     python3 - <<'PY'
@@ -164,6 +203,7 @@ r50_lock() {
 check '50-a a deep again loop reports a stack overflow' r50_overflow
 check '50-b a deep again loop completes with enough stack' r50_completes
 check '50-c a shallow again loop completes on a small stack' r50_shallow
+check '50-e a fault away from the stack floor is not masked' r50_fault_not_masked
 check '50-d spec, trace, tier' r50_docs
 check '50-d corpus lock' r50_lock
 
