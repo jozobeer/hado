@@ -94,7 +94,9 @@ def exists(tag):
 
 table_text = spec.split('## 56. エラーコード', 1)[1]
 table = dict(re.findall(r'^\| (E[1-7]\d\d) \|[^|]*\| (§\d+(?:\.\d+)?|付録[A-Z]) \|', table_text, flags=re.M))
-assert len(table) == 69, len(table)
+# 行数は直書きせず、拒否コーパスのディレクトリ数（表と 1 対 1）から導く
+reject_dirs = [path for path in Path('tests/reject').iterdir() if path.is_dir()]
+assert len(table) == len(reject_dirs), (len(table), len(reject_dirs))
 bad = []
 for path in sorted(Path('tests').rglob('main.hd')):
     text = path.read_text()
