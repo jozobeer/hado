@@ -916,7 +916,7 @@ expect_error_at '33-d 緩和なしは E705 で def main' "$workdir/33dneg/main.h
 accept_build_run '33-e shared で E601 が緩和され field が読める' "$workdir/33e/main.hd" "$rand_name"
 expect_error_at '33-e 緩和なしは E601 で field の .' "$workdir/33eneg/main.hd" E601 '.name'
 print_type_is '33-f (1) --print-type が String を出す' "$workdir/33a2/main.hd" 'String'
-expect_code_contains '33-f (2) E305 は cannot unify と String / Int を診断し .T を含まない' "$workdir/33f2/main.hd" E305 '.T' 'cannot unify' 'String' 'Int'
+expect_code_contains '33-f (2) E305 は期待型 String と実型 Int を診断し .T を含まない' "$workdir/33f2/main.hd" E305 '.T' 'expected String' 'found Int'
 accept_build_run '33-h 型引数付き shared で push と注釈が通る' "$workdir/33h/main.hd" '[2, 1]'
 expect_error_at '33-i (1) shared type T = T は E602' "$workdir/33i1/main.hd" E602 'implement'
 expect_error_at '33-i (2) shared の相互参照は E602' "$workdir/33i2/main.hd" E602 'implement'
@@ -940,7 +940,7 @@ print_type_is '33-f(3) shared functor の適用結果が String と印字' "$wor
 # 工程 1 の修正: ADT payload・別実装の局所型・局所 record。
 accept_build_run 'shared が ADT payload を展開し Box(String) を印字' "$workdir/33wrap/main.hd" "Box(\"$rand_box\")"
 expect_code_message 'shared 無しの ADT payload は E305 で Store.T が出る' "$workdir/33wrapneg/main.hd" E305 'Store.T'
-expect_code_contains '別実装の局所型 A.Hidden と B.Hidden は単一化できない' "$workdir/33dist/main.hd" E305 '' 'cannot unify' 'A.Hidden' 'B.Hidden'
+expect_code_contains '別実装の局所型 A.Hidden と B.Hidden は単一化できない' "$workdir/33dist/main.hd" E305 '' 'expected A.Hidden' 'found B.Hidden'
 accept_build_run '同じ実装の局所型は一致し整数を印字' "$workdir/33distpos/main.hd" "$rand_int"
 accept_build_run 'shared が局所 record を展開し field を読める' "$workdir/33lrec/main.hd" "$rand_rec"
 expect_code 'shared 無しの局所 record は E601' "$workdir/33lrecneg/main.hd" E601
