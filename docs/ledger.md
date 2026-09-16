@@ -4855,3 +4855,15 @@ raise:     check-exit=0 / run-exit=1 / stderr=[boom]
 
 ### 全走
 次のラウンドで層別と `cargo test` を 1 回回して記録する。
+
+### R76 の全走
+
+```
+TALLY: 3725/3725 passed; red: none
+gates-exit=0
+cargo-test-exit=0
+FAILED lines 0
+passed=773 failed=0
+```
+
+層別は 73 本・検査 3725 で**赤ゼロ**（`r76` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
