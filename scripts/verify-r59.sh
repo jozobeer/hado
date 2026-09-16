@@ -181,8 +181,10 @@ only = (f'type {ty} = | Mk(Int)\n'
         f'effect {effect}\n'
         f'once {op} (m: {ty}): Unit\n'
         f'handler {effect} as {handler}\n'
-        f'once {op} _ => ()\n'
-        f'def main = with {handler} -> ()\n')
+        f'once {op} _ =>\n'
+        f'  with {handler} ->\n'
+        f'  ()\n'
+        f'def main = 1\n')
 accepted(project(root, 'optype', {'main.hd': only}, 'check'))
 
 # control: 効果を外すと、その型は未使用になる
