@@ -2963,6 +2963,7 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 - **45-g（全テスト）。** `cargo test --offline --no-fail-fast` は 63 target 全て 0 failed（作業ツリーで実測）。
 - **45-h（層別）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full` は 41 本を走らせ、39 本が `^NG:` 0。`verify-r45.sh` 8/8、`verify-r34.sh` 1360/1360、`verify-r35.sh` 714/714、`verify-r36.sh` 388/388、`verify-r37.sh` 262/262、`verify-m3.sh` 12/12。赤は 2 本。`lint-docs` 6/7 は台帳の R45 節が未記入のため（この節を書いた後に単独で緑）。`verify-r42.sh` 4/5 は §56 の行数を `69` と直書きしていたためで（E125 で 70 行）、拒否コーパスのディレクトリ数から導く形に直して単独で 5/5。
 - **工程 2 の赤。** 判定器を足した直後の `bash scripts/verify-r45.sh` は PASSED 2/8 で、赤は全て `if` の後のカンマが E100 になるため。工程 3 の直後は 4/8（E125、文法生成器、45-d、lock）で `cargo test` は corpus と prelude の 2 target が多列未実装で赤、工程 4 の直後は 6/8 で同じ 2 target、工程 5 で 8/8 と 0 failed。
+- **R45 の最終全走（R46 の着手時）。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r45final` は 43 本を走らせ、`^NG:` 0、exit 0。前節で赤だった `lint-docs`（7/7）と `verify-r42.sh`（5/5）も緑で、R45 の終了時に許容される赤は無い。
 
 ### 経緯
 
@@ -2979,3 +2980,35 @@ r38-c の 6 つの逐語 regex は lint-docs 検査 7 へ移し、`verify-r38.sh
 
 - **入れ子パターンと列をまたぐ同名束縛。** `Pair(x, x)` は今も受理される（実測）。`| x, x =>` も同じ。§26 に規則が無く、R46 以降に送る。
 - **fallback を持たない腕の条件列が続く腕を飲む形。** `| Some(x) => if | x > 0 => x | None => 0` は `None` を条件として読み E305 になる。§26.1 に書いた。専用の診断は頻発してから。
+
+## R46 正準形の診断と `check --fix`（2026-09-16）
+
+### 背景と決定
+
+R45 の最終全走が緑で閉じたので、次は診断と fmt（言語意味を増やさない）に移った。Hado は冗長な書き方を拒否するため、診断が「どう書けばよいか」を言わないと日々の編集が摩擦になる。正規形印字は既にあるので、正準形を診断に載せ、局所的な書き換えを機械で当てる材料は揃っていた。全 AST の再印字 formatter を先に作るとコメントを失うので、まわりの木を変えずに書ける書き換えから始めた。手順と決定は `docs/plan.md` 42 節、仕様は §57。
+
+### 実装
+
+- `crates/hado/src/fixes.rs` を新設した。`Fix { code, line, col, start, end, replacement, canonical }` を AST から導く。`Span` は行・桁しか持たないので、ソースの行頭表と `char_indices` でバイト位置へ直す。桁は文字数である（§43）。
+- 対象は E510（式の `Nil` / `Cons`）、E516（パターンの `Nil` / `Cons`）、E517（`=> if | ...` の条件列）。E517 の site は `ast.long_condition_functions` の `def` の位置から、括弧の深さ 0 の最初の `=>` を字句で探す。E510 / E516 は `Call` / `Apply` / `Constructor` の `Cons` と `Name` の `Nil` を木の走査で探す。
+- 書き換えの範囲に `//` を含む `Fix` は出さない。重なる範囲は最も外側だけを残すので、`Cons(1, Cons(2, Nil))` は 1 つの `[1, 2]` になる。字句の長さが要る綴り（`=>`、`if`、`)`）だけを表で持つ。
+- `hado check [--print-type] [--fix] <file>` にした。`--fix` は報告されたアンカーと一致する書き換えを 1 つだけ当てて再検査する（上限 16 回）。`Project::canonical_hint` と `Project::apply_canonical_fix` が、診断の path から物理ファイルを引く。既定の `check` / `build` / `dump-mono` はソースを書き換えない。診断の末尾に `canonical form: <正準形>` を足す（E510 / E516 / E517）。
+- `source_print` の `item` と `list_pattern` を crate 内へ公開し、正準形の文字列を既存の印字から作る（E517 は `def` の印字、E510 / E516 は List の印字）。
+
+### 判定の実測
+
+- **46-a〜46-f（R46 の門番）。** `bash scripts/verify-r46.sh` は 7/7。46-a は seed 46 で 10 本の `=> if |` を書き換えて実行し、コメントの保存と 2 回目の冪等を測る。46-b は 10 本の `Cons` の連鎖、46-c は 10 本の `Cons` パターン。46-d は拒否される 3 本で `check` と `build` の前後で sha256 が変わらない。46-e は E501 で終了コード 1 とファイル不変。46-f は §57 の文言、`wants.md` の参照、full の層、corpus lock。
+- **Rust 単体テスト。** `cargo test --offline -q --test r46_fixes` は 4 passed。`fixes` の範囲と置換、コメントを含む範囲を出さないこと、日本語コメント越しのバイト位置、`fix_at` の一致を測る。
+- **工程 3 の赤。** 判定器を足した直後は `written_list_forms_become_literals` が「連鎖の各綴りに編集が出る」と誤って期待して赤（重なりの除去で 1 本に畳まれる）。期待を直して緑。
+- **R46 の全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r46` は 44 本を走らせ、`^NG:` 0、exit 0。`verify-r46.sh` は 7/7、`lint-docs` は §57 を足しても 7/7、`verify-r42.sh` は 5/5、`verify-m1-corpus.sh` は 7/7。`cargo test --offline --no-fail-fast` は 63 target 全て 0 failed、exit 0。
+
+### 迷った点
+
+- **`--fix` の適用単位。** ファイル内の全 `Fix` を一括で当てず、報告されたアンカーと一致する 1 つだけを当てる。検査器は最初の診断しか返さないので、当てた書き換えが別の診断を呼ぶことがあり、1 つずつなら原因が追いやすい。上限 16 回。
+- **`Cons` の連鎖に `//` があるとき。** 外側の `Fix` は出さないが内側は出る。今は報告されたアンカーが外側なのでファイルは変わらない。部分適用を許すかは頻発してから決める（計画 42 節の疑義）。
+- **E517 の空白。** `=>` の前と `if` の後の空白とタブも範囲に含め、`def classify score` の行末に空白が残らないようにした。改行は消さない。
+
+### 仕様への疑義
+
+- **診断の `canonical form:` は仕様の言語意味ではない。** §57 は CLI の振る舞いとして書いた。`fmt` の書き換えの単位（一括か 1 つずつか）は §57 では決めていない。
+- **`fmt` はまだ無い。** §57 の `--fix` は局所的な書き換えだけで、レイアウトや全体の正規化はしない。`wants.md` の CLI と編集ループの 11 に残した。
