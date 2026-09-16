@@ -3587,7 +3587,7 @@ E602 の 5 か所（欠けた member、定義の形、型、多相性、欠け�
 - **実装前の赤。** `PASSED: 5/10`。60-a〜60-d と 60-i が NG。計画 56 節は「実装前は 60-a〜60-e が赤いはず」と書いたが、60-e は R56 の既存の振る舞いなので初めから緑だった（予想が誤りだった。ここに記す）。
 - **R56 の門番の期待値が仕様に追い越された。** `bash scripts/verify-r56.sh` は 56-d「引数以外の食い違いは cannot unify のまま」が NG になった。R56 の時点の仕様では正しかったので、R60 の仕様に合わせて直した。条件式の腕は文面と先の腕の関連位置をそのまま照合し、リストの要素は対称な文面のままであることも残した。判定の強さは変えていない（部分一致ではなく文面全体と位置の照合）。直した後は 7/7。`cargo test --offline --no-fail-fast` は 773 passed、0 failed（変更した箇所を固定する単体テストは無かった）。
 - **文面を持つ門番の掃き出し。** `grep -ln "cannot unify" scripts/verify-*.sh` は `verify-r56.sh` と `verify-r60.sh` だけだった。`verify-m0`（7/7）`verify-m1-corpus`（7/7）`verify-r57`（8/8）`verify-r50`（6/6）`verify-r52`（7/7）`verify-r48`（8/8）`verify-r55`（7/7）は赤くならず、`verify-r58`（10/10）と `verify-r37`（262/262）も緑である。
-- **全走。** （次の工程で測る。）
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r60` は 56 本を走らせ、56 本のログがすべて `PASSED: n/n`、`^NG:` 0、exit 0。締めは集計自身が出した `TALLY: 3647/3647 passed; red: none`（R59 の 3637 に R60 の 10 件が加わった）。`verify-m0.sh` の `cargo-test` は `passed=773`、`verify-r60.sh` は 10/10、`verify-r56.sh` は 7/7 である。
 
 ### 迷った点
 
