@@ -4753,3 +4753,15 @@ def main = f 1
 
 ### 全走
 次のラウンドで層別と `cargo test` を 1 回回して記録する。
+
+### R73 の全走
+
+```
+TALLY: 3710/3710 passed; red: none
+gates-exit=0
+cargo-test-exit=0
+FAILED lines 0
+passed=773 failed=0
+```
+
+層別は 70 本・検査 3710 で**赤ゼロ**（`r73` の 5 検査が加わった回。R71 の 71-d と同型のスコープ上書きが出ていないことを `red:` 欄で確認した）。
