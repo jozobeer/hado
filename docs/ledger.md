@@ -3722,7 +3722,7 @@ R62（58 節）が落とした E520 の書き換えを入れた。R62 は「E520
 - **実装前の赤。** `PASSED: 4/6`（64-a と 64-e が NG。64-b〜64-d・64-f は緑）。
 - **門番の期待値の誤りを 1 つ直した。** `fmt` の行は入力根からの相対パスなので `fmt: main.hd (2 rewrites)` である。最初 `fmt: a (2 rewrites)` と書いていた。赤は 64-a の終了コードの判定で出ていたので、赤そのものは本物である。
 - **空のファイル。** `fmt` は終了コード 0 で何も出さない（実測）。計画の「変わらない」と一致した。
-- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r64` は 62 本を走らせ、exit 0、締めは `TALLY: 3672/3672 passed; red: none`（R63 の 3666 に R64 の 6 件）。`verify-m0.sh` の `cargo-test` は `passed=773`。レイアウトは `fmt` の一括整形にだけ入れたので、`fmt` を走らせる既存の門番（r52 / r57 / r62 / r63）も緑。走行の後に `git status --short` は空で、走行がリポジトリのソースを書き換えていない。
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r64` は 61 本を走らせ、exit 0、締めは `TALLY: 3672/3672 passed; red: none`（R63 の 3666 に R64 の 6 件）。`verify-m0.sh` の `cargo-test` は `passed=773`。レイアウトは `fmt` の一括整形にだけ入れたので、`fmt` を走らせる既存の門番（r52 / r57 / r62 / r63）も緑。走行の後に `git status --short` は空で、走行がリポジトリのソースを書き換えていない。
 
 ### 迷った点
 
