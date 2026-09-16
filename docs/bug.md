@@ -34,7 +34,7 @@ stderr_bytes=0
 
 `%` を使う次の再帰生成器は E306 になるが、戻り型を `Int List {Error}` と明記すれば build できて `5` を返す。
 
-リポジトリルートで実行する（診断の行・列は生成した空行・空白から計算した位置だけを `<anchor>` に置き換え、型変数の番号は `<type>` に揃える）。
+リポジトリルートで実行する（診断の行・列は生成した空行・空白から計算した位置だけを `<anchor>` に置き換え、§15.1 の型変数は `<type>` に揃える）。
 
 ```bash
 probe=$(mktemp -d)
@@ -55,7 +55,7 @@ status=0
 RUSTC_WRAPPER= CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo run --offline -q -- check "$probe/main.hd" >"$probe/out" 2>"$probe/err" || status=$?
 printf 'status=%s\nstdout_bytes=%s\n' "$status" "$(wc -c <"$probe/out")"
 cat "$probe/out"
-sed -E "s/^main[.]hd:$((blank+1)):$((indent+1)):/main.hd:<anchor>:/; s/ t[0-9]+ / <type> /" "$probe/err"
+sed -E "s/^main[.]hd:$((blank+1)):$((indent+1)):/main.hd:<anchor>:/; s/ \| [A-Z][0-9]*\}/ | <type>}/; s/ [A-Z][0-9]* / <type> /" "$probe/err"
 ```
 
 実測した出力（正規化後）:
@@ -63,5 +63,5 @@ sed -E "s/^main[.]hd:$((blank+1)):$((indent+1)):/main.hd:<anchor>:/; s/ t[0-9]+ 
 ```text
 status=1
 stdout_bytes=0
-main.hd:<anchor>: error[E306]: cannot unify <type> with Fn(Int => Int List {Error})
+main.hd:<anchor>: error[E306]: cannot unify <type> with Fn(Int => Int List {Error | <type>})
 ```
