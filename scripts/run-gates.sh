@@ -410,4 +410,22 @@ if { [ "$tier" = "full" ] || [ "$default_all" -eq 1 ]; } && [ -f scripts/lint-do
     fi
 fi
 
+# 走行のログの集計は Hado の道具で出す（docs/plan.md 47 節、wants.md の 53）。
+# 出力先には書かない。集計自身がそのディレクトリを読むので、自分のログを混ぜると
+# 入口の契約（全ての項目が PASSED: n/N の行を持つ）を破る。読めないログがあれば
+# 走行を赤にする。ログは走行自身の成果物である。
+hado_binary="${CARGO_TARGET_DIR:-target}/debug/hado"
+if [ -x "$hado_binary" ] && [ -f tools/gates/main.hd ]; then
+    tally_status=0
+    tally=$("$hado_binary" run tools/gates/main.hd -- "$output" 2>&1) || tally_status=$?
+    if [ "$tally_status" -eq 0 ]; then
+        printf 'TALLY: %s\n' "$tally"
+    else
+        printf 'TALLY: failed (%s): %s\n' "$tally_status" "$tally" >&2
+        status=1
+    fi
+else
+    echo "TALLY: skipped (no $hado_binary or tools/gates/main.hd)" >&2
+fi
+
 exit "$status"
