@@ -413,7 +413,9 @@ fi
 # 走行のログの集計は Hado の道具で出す（docs/plan.md 47 節、wants.md の 53）。
 # 出力先には書かない。集計自身がそのディレクトリを読むので、自分のログを混ぜると
 # 入口の契約（全ての項目が PASSED: n/N の行を持つ）を破る。読めないログがあれば
-# 走行を赤にする。ログは走行自身の成果物である。
+# 走行を赤にする。ログは走行自身の成果物である。道具かバイナリの無い走行（合成木）
+# では黙って飛ばす。成功した走行が stderr に何も書かないことは `verify-r38.sh` と
+# `verify-gate-cache.sh` が固定している契約で、TALLY の行が無いこと自体が印になる。
 hado_binary="${CARGO_TARGET_DIR:-target}/debug/hado"
 if [ -x "$hado_binary" ] && [ -f tools/gates/main.hd ]; then
     tally_status=0
@@ -424,8 +426,6 @@ if [ -x "$hado_binary" ] && [ -f tools/gates/main.hd ]; then
         printf 'TALLY: failed (%s): %s\n' "$tally_status" "$tally" >&2
         status=1
     fi
-else
-    echo "TALLY: skipped (no $hado_binary or tools/gates/main.hd)" >&2
 fi
 
 exit "$status"
