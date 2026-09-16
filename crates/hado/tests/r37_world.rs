@@ -35,7 +35,10 @@ impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.
 fn operation_result_rows_reach_the_call_without_effectful_handler_arms() {
     for (annotation, expected) in [("", "String"), (" {Error}", "String {Error}"), (" {Error, Bar}", "String {Bar, Error}")] {
         for (param, arm, call) in [("", "", "pick"), ("(n: Int)", " _", "pick 3")] {
-            Case::new(&format!("effect Bar\nonce other: Int\neffect Foo\nonce pick{param}: Int{annotation}\nhandler Foo as H\nonce pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n")).prints_type(expected);
+            // §37: an effect that nothing names is E513, so `Bar` is declared only
+            // where the annotation's row uses it.
+            let bar = if annotation.contains("Bar") { "effect Bar\nonce other: Int\n" } else { "" };
+            Case::new(&format!("{bar}effect Foo\nonce pick{param}: Int{annotation}\nhandler Foo as H\nonce pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n")).prints_type(expected);
         }
     }
 }
