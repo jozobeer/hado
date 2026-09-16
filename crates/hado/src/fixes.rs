@@ -496,6 +496,11 @@ fn repropagate_fix(
     {
         return None;
     }
+    // The rewritten definition names its argument `value`; a free `value` in
+    // the body would be captured by that name.
+    if tail != Tail::If && crate::names::references(body, "value") {
+        return None;
+    }
     // With every arm rebuilding, E507 is reported and its rewrite is shorter.
     if crate::check::rewrap_branch(node).is_some() {
         return None;

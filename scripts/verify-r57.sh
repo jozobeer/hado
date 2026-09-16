@@ -278,6 +278,12 @@ no_rewrite(root, 'fallback', 'def f (x: Int Option): Int Option Pure =>\n  if x\
 # 束縛名が 1 つも無い E508: do が正準形になる。
 no_rewrite(root, 'binderless', 'type Wrap = | Wrap\ndef f (x: Wrap Option): Int Option Pure =>\n  if x\n  | Some(Wrap) => Some(1)\n  | None => None\ndef main = f (Some(Wrap))\n', 'E508')
 
+# 本体が `value` を自由に参照する E508（第31節の形）: 引数の名前が捕捉する。
+capture = ('def merge (user: Int, rest: Int Option): Int Option Pure =>\n'
+           '  if rest\n  | Some(n) => Some(user + n)\n  | None => Some(user)\n'
+           'def main =\n  let value = Some(100) ->\n  (fn(| Some(user) => merge user value | None => None)) (Some(1))\n')
+no_rewrite(root, 'capture', capture, 'E508')
+
 # 範囲にコメントを含む E507: コメントを消さない。
 no_rewrite(root, 'comment', 'def f (x: Int Option): Int Option Pure =>\n  if x\n  // keep\n  | Some(v) => Some(v)\n  | None => None\ndef main = f (Some(1))\n', 'E507')
 print('declines: nested E508, fallback E507, binderless E508 and a comment range are left alone')
