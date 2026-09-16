@@ -3733,3 +3733,30 @@ R62（58 節）が落とした E520 の書き換えを入れた。R62 は「E520
 
 - **CRLF。** 行末の空白として `\r` を消すかどうかを決めていない。`\r` は「行末の空白（スペースとタブ）」の外なので、CRLF のファイルはそのまま通る。改行コードを正規化するかは決めていない。
 - **空行の数。** ファイルの中の連続する空行は触らない。レイアウトの正規化の一部とするかは決めていない。
+
+## R65 診断の機械可読な出力（2026-09-16）
+
+### 背景と決定
+
+`docs/wants.md` の 6（中）。優先順位 1 の「将来の LSP code action」は診断を機械可読に読む入口を要る。材料の実測で、整形は `Project::report`（`project.rs:70`）の 1 か所、正準形は `canonical_hint`（`project.rs:80`）が別に返す、CLI の印字は `main.rs` の 4 か所、`--format` は無い、`Diagnostic.code` は `Option<String>`、`Related` のラベルは `related_label` がコードから決める、と分かっていた（計画 61 節）。
+
+決定は 6 つ。1 行 1 診断の JSON。フィールドは `path` `line` `col` `code` `message` `canonical` `related` の 7 つ。`--format json` は 4 か所の印字を切り替え、既定は今の 1 行のまま。`message` に `; canonical form: ...` を混ぜず `canonical` に入れる。印字先と終了コードは変えない。`fmt` と `dump-mono` は受けない。
+
+### 実装
+
+`project.rs` に `report_json` と、`option_string` / `json_string`（`"` `\` 改行 復帰 タブ と 0x20 未満の文字を逃がす）を足した。`parser::related_label` を `pub(crate)` にした。`main.rs` は `--format json` を `check` / `build` / `run` / `test` で受け、4 か所の `eprintln!` を `print_diagnostic` に集約した。2 か所は入れ子の関数の中にあり `main` の局所変数が見えないので、切り替えは `static FORMAT_JSON: AtomicBool` に置いた（このファイルは既に `AtomicU64` を同じ流儀で使っている）。
+
+### 判定の実測
+
+- **65-a〜65-g（R65 の門番）。** `bash scripts/verify-r65.sh` は 7/7。65-a 1 行で `json.loads` が読め、path が `main.hd` で終わり、line / col が `1 25`、code が `E520`、message が `use a Boolean branch` で始まる。65-b `canonical` が `if b => 1 | 2` で message に混ざらず、`related` が `null`。65-c E205 の `related` が line 1 と `first declared`。65-d 既定の 1 行が `error[E520]` と `; canonical form: if b => 1 | 2` を含み `{` で始まらない。65-e `--format yaml` と値を付けない `--format` が終了コード 2。65-f 仕様と追跡表と層、65-g corpus lock。
+- **実装前の赤。** `PASSED: 3/7`（65-a・65-b・65-c・65-f が NG）。計画は 65-e も赤いと見ていたが、未知の引数は元から用法の誤りで終了コード 2 なので緑だった。予想が外れた 1 件として記録する。
+- **全走。** （次の工程で測る。）
+
+### 迷った点
+
+- **印字の切り替えに `AtomicBool` を使った。** 4 か所のうち 2 か所が入れ子の関数の中にあり、`main` の局所変数を渡すには関数の引数を増やす必要がある。このファイルが既に `AtomicU64` をグローバルに使っているので、同じ流儀にした。引数を増やすより差分が小さい。
+- **`fmt` と `dump-mono` は `--format` を受けない。** `fmt` の `fmt: ...` と `test` の `test: ...` は診断ではないので JSON にしない（§58.4 に書いた）。
+
+### 仕様への疑義
+
+- **`label` が引けないとき。** `related` を持つのに `related_label` が `None` を返すコードは、いまのところ無い（§56 の 3 つはすべてラベルを持つ）。仕様では `null` と書いたが、そのような診断を作らないことを門番で固定してはいない。
