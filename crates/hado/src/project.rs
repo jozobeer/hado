@@ -221,6 +221,21 @@ pub fn source_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
         .collect())
 }
 
+/// §58.2: the tests of the project: the root directory's `*_test.hd`, in the
+/// order the checker reads them. A test needs `main`, and only a root file can
+/// hold one (§50, §52), so the subdirectories contribute none.
+pub fn test_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
+    let (root, paths, _) = collect_paths(entry)?;
+    Ok(paths
+        .into_iter()
+        .filter(|path| path.parent() == Some(root.as_path()))
+        .filter(|path| {
+            path.file_name().is_some_and(|name| name.as_encoded_bytes().ends_with(b"_test.hd"))
+        })
+        .map(|path| (relative_source(&path, &root).to_string_lossy().into_owned(), path))
+        .collect())
+}
+
 /// The paths of the project in reading order, with the root and the namespace
 /// directories `read_files` needs.
 fn collect_paths(

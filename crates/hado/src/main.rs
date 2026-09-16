@@ -9,7 +9,7 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
-    if !matches!(command, "check" | "dump-mono" | "build" | "run" | "fmt") {
+    if !matches!(command, "check" | "dump-mono" | "build" | "run" | "fmt" | "test") {
         usage();
         return ExitCode::from(2);
     }
@@ -69,6 +69,9 @@ fn main() -> ExitCode {
     }
     if command == "run" {
         return run_program(input, &program_args);
+    }
+    if command == "test" {
+        return run_tests(input);
     }
     if fix && command == "build" {
         // §58.1: `build --fix` writes the canonical form before reading the
@@ -205,39 +208,87 @@ fn format_sources(input: &Path, check_only: bool) -> Result<bool, ExitCode> {
     Ok(changed)
 }
 
-/// `run` links the program into a private directory, runs it with the given
-/// arguments, and returns the program's exit code (§58). The directory is
-/// removed afterwards, so nothing is written next to the source.
-fn run_program(input: &Path, args: &[String]) -> ExitCode {
+/// The outcome of one `run`-style execution. `run` and `test` differ only in
+/// how they report it.
+enum Outcome {
+    /// The program exited with this code.
+    Exited(i32),
+    /// The program was terminated by a signal and has no exit code.
+    Signalled,
+    /// The program could not be loaded, built or started. The message is
+    /// already a report for stderr.
+    Failed(String),
+}
+
+/// Load, link into a private directory, and run the program with `args`
+/// (§58). The directory is removed before returning, so nothing is written
+/// next to the source.
+fn execute(input: &Path, args: &[String]) -> Outcome {
     let project = match Project::load(input) {
         Ok(project) => project,
+        Err(error) => return Outcome::Failed(error.to_string()),
+    };
+    let directory = match RunDirectory::create() {
+        Ok(directory) => directory,
+        Err(message) => return Outcome::Failed(format!("run: {message}")),
+    };
+    let binary = directory.path().join("program");
+    if let Err(message) = project.build(&binary) {
+        return Outcome::Failed(message);
+    }
+    match Command::new(&binary).args(args).status() {
+        Ok(status) => match status.code() {
+            Some(code) => Outcome::Exited(code),
+            None => Outcome::Signalled,
+        },
+        Err(error) => Outcome::Failed(format!("run: {error}")),
+    }
+}
+
+/// `hado test <file.hd>` runs the root's `*_test.hd` in turn (§58.2). A test
+/// passes when the program exits 0; a `raise` that reaches `main`, a stack
+/// overflow and a signal all fail. One failure does not stop the run.
+fn run_tests(input: &Path) -> ExitCode {
+    let tests = match hado::project::test_paths(input) {
+        Ok(tests) => tests,
         Err(error) => {
             eprintln!("{error}");
             return ExitCode::from(1);
         }
     };
-    let directory = match RunDirectory::create() {
-        Ok(directory) => directory,
-        Err(message) => {
-            eprintln!("run: {message}");
-            return ExitCode::from(1);
-        }
-    };
-    let binary = directory.path().join("program");
-    if let Err(message) = project.build(&binary) {
-        eprintln!("{message}");
+    if tests.is_empty() {
+        eprintln!("test: no *_test.hd in the input root");
         return ExitCode::from(1);
     }
-    match Command::new(&binary).args(args).status() {
-        Ok(status) => match status.code() {
-            Some(code) => ExitCode::from(code as u8),
-            None => {
-                eprintln!("run: the program was terminated by a signal");
-                ExitCode::from(1)
+    let mut passed = 0;
+    for (display, path) in &tests {
+        match execute(path, &[]) {
+            Outcome::Exited(0) => {
+                println!("test: {display} ok");
+                passed += 1;
             }
-        },
-        Err(error) => {
-            eprintln!("run: {error}");
+            Outcome::Exited(code) => println!("test: {display} failed (exit {code})"),
+            Outcome::Signalled => println!("test: {display} failed (signal)"),
+            Outcome::Failed(message) => {
+                eprintln!("{message}");
+                println!("test: {display} failed (build)");
+            }
+        }
+    }
+    println!("test: {passed}/{} passed", tests.len());
+    if passed == tests.len() { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+
+/// `run` reports the program's exit code as its own (§58).
+fn run_program(input: &Path, args: &[String]) -> ExitCode {
+    match execute(input, args) {
+        Outcome::Exited(code) => ExitCode::from(code as u8),
+        Outcome::Signalled => {
+            eprintln!("run: the program was terminated by a signal");
+            ExitCode::from(1)
+        }
+        Outcome::Failed(message) => {
+            eprintln!("{message}");
             ExitCode::from(1)
         }
     }
@@ -275,6 +326,6 @@ impl Drop for RunDirectory {
 
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd>"
+        "usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd>"
     );
 }
