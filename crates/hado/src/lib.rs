@@ -3,6 +3,7 @@ mod functor_instances;
 mod namespaces;
 pub mod build;
 pub mod project;
+pub mod fixes;
 pub mod emit;
 pub mod lexer;
 pub mod parser;

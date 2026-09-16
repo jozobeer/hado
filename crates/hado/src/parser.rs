@@ -2418,3 +2418,4 @@ mod tests;
 #[path = "source_print.rs"]
 mod source_print;
 pub use source_print::canonical_program;
+pub(crate) use source_print::{item_source, list_pattern as list_pattern_source};

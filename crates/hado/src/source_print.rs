@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn list_pattern(pattern: &Pattern) -> Option<String> {
+pub(crate) fn item_source(value: &Item) -> String {
+    item(value)
+}
+
+pub(crate) fn list_pattern(pattern: &Pattern) -> Option<String> {
     match &pattern.kind {
         PatternKind::Name(name) if name == "Nil" => return Some("[]".into()),
         PatternKind::Constructor(name, args) if name == "Nil" && args.is_empty() => return Some("[]".into()),

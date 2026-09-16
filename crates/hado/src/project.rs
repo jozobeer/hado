@@ -65,6 +65,56 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    /// The diagnostic as the CLI prints it: the canonical form is appended
+    /// when a local rewrite (§57) starts at the diagnostic's anchor.
+    pub fn report(&self, error: &Diagnostic) -> String {
+        match self.canonical_hint(error) {
+            Some(hint) => format!("{error}; canonical form: {hint}"),
+            None => error.to_string(),
+        }
+    }
+
+    /// The canonical form to show next to a diagnostic, when one of the local
+    /// rewrites (§57) starts exactly at the diagnostic's anchor. The file is
+    /// read only when a diagnostic is already reported.
+    pub fn canonical_hint(&self, error: &Diagnostic) -> Option<String> {
+        let code = error.code.as_deref()?;
+        if !crate::fixes::is_fixable(code) {
+            return None;
+        }
+        let source = std::fs::read_to_string(self.source_file(&error.path)?).ok()?;
+        crate::fixes::hint(&source, code, error.line, error.col)
+    }
+
+    /// Apply the canonical rewrite for one diagnostic to its file. Returns
+    /// `true` when the file changed. The rewrite is matched by code and anchor,
+    /// so a diagnostic without a local rewrite leaves the file untouched.
+    pub fn apply_canonical_fix(&self, error: &Diagnostic) -> Result<bool, String> {
+        let Some(code) = error.code.as_deref() else { return Ok(false) };
+        if !crate::fixes::is_fixable(code) {
+            return Ok(false);
+        }
+        let Some(file) = self.source_file(&error.path) else { return Ok(false) };
+        let source = std::fs::read_to_string(file).map_err(|error| error.to_string())?;
+        let Some(fix) = crate::fixes::fix_at(&source, code, error.line, error.col) else {
+            return Ok(false);
+        };
+        let mut updated = String::with_capacity(source.len() + fix.replacement.len());
+        updated.push_str(&source[..fix.start]);
+        updated.push_str(&fix.replacement);
+        updated.push_str(&source[fix.end..]);
+        std::fs::write(file, updated).map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    fn source_file(&self, path: &str) -> Option<&std::path::Path> {
+        self.files
+            .iter()
+            .find(|file| file.path == path)
+            .or_else(|| self.files.first())
+            .map(|file| file.physical.as_path())
+    }
+
     pub fn compile_to_object(&self, output: &Path) -> Result<(), String> {
         if self.is_library() {
             return Err(crate::entry_required(&self.files[0].path).to_string());

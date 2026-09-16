@@ -9,7 +9,7 @@ fn cli_usage_and_basic_types() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"usage: hado check [--print-type] <file> | dump-mono <file> | build <file.hd>\n");
+        assert_eq!(output.stderr, b"usage: hado check [--print-type] [--fix] <file> | dump-mono <file> | build <file.hd>\n");
     }
     let dir = std::env::temp_dir().join(format!("hado-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -110,7 +110,7 @@ fn reject_corpus_reports_declared_codes_through_cli() {
             .unwrap();
         let diagnostic = String::from_utf8(output.stderr).unwrap();
         let baseline = match hado::project::Project::load(&path) {
-            Ok(project) => project.check().err().expect("reject corpus passed library checker").to_string(),
+            Ok(project) => project.report(&project.check().err().expect("reject corpus passed library checker")),
             Err(error) => error.to_string(),
         };
         assert_eq!(diagnostic, format!("{baseline}\n"), "project diagnostic changed: {}", path.display());
