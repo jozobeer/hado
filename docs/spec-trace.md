@@ -76,7 +76,7 @@
 | §10 | `main` の型に `shared` で解けない抽象型を含めない | 単相化 | E705 | `tests/reject/E705/main.hd`、`verify-r33.sh` |
 | §10 | `main` に残ってよい効果は prelude の効果 | 単相化 | E706 | `tests/reject/E706/main.hd`、`verify-r37.sh` |
 | §36 | 効果を持てるのは分岐の条件以外。scrutinee・引数・被演算子・record field は許す | 型 | E308 / 受理 | `tests/reject/E308/main.hd`、`tests/accept/effect_position/` |
-| §20 | 効果行の省略は推論、`Pure` は空、書いた行はちょうどそれだけ | 型 | E305 / 受理 | `tests/accept/effect_row/`、R24 の判定器 |
+| §20 | 効果行の省略は推論、`Pure` は空、書いた行はちょうどそれだけ。省略した行は再帰定義でも推論され、暗黙の効果変数として全称量化される | 型 | E305 / 受理 | `tests/accept/effect_row/`、R24 の判定器、`verify-r61.sh`（61-a〜61-d） |
 | §53 | `again` を経由しない呼び出しだけスタックを消費しない | 実行 | 受理 | `tests/accept/again_loop/main.hd`、R26 の判定器 |
 | §37 | 操作は値の名前空間に無修飾で入り、書けるのはそのディレクトリだけ | 名前解決 | 受理 / E204 / E205 | `tests/accept/effect_forms/`、R23 の判定器 |
 | §38 | `return` の腕を書かなければ恒等。`with H -> rest` は継続の形 | 型 / 実行 | 受理 | `tests/accept/handler_forms/` `to_option/`、R26 の判定器 |
