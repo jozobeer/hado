@@ -4923,3 +4923,14 @@ run    def main = ()                     → stdout empty
 
 ### 全走
 次のコミットで層別を 1 回回して記録する。
+
+### R78 の全走
+
+```
+TALLY: 3735/3735 passed; red: none
+gates-exit=0
+cargo-test-exit=0
+passed=773 failed=0
+```
+
+層別は 75 本・検査 3735 で**赤ゼロ**（`r78` の 5 検査が加わった回）。
