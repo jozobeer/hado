@@ -160,7 +160,7 @@ print('occurs: one table per diagnostic keeps a shared variable one name')
 PY
 }
 
-# --- 56-d: 引数以外の食い違いは cannot unify のまま ---
+# --- 56-d: 引数以外の食い違い（役割が確定する箇所は期待と実、リストは対称な文面のまま） ---
 r56_other() {
     python3 - "$workdir" "$hado" <<'PY'
 import sys
@@ -169,13 +169,17 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
-from harness import ARMS, LIST, diagnostic, shape
+from harness import ARMS, LIST, anchor, diagnostic, shape
 
 entry, _ = shape(Path(sys.argv[1]) / 'd/list', LIST, 1)
 assert diagnostic(entry)[2:] == ('E305', 'cannot unify Bool with A'), diagnostic(entry)
-entry, _ = shape(Path(sys.argv[1]) / 'd/arms', ARMS, 1)
-assert diagnostic(entry)[2:] == ('E305', 'cannot unify String with Int'), diagnostic(entry)
-print('other: a mismatch outside an application keeps the symmetric wording')
+# R60: 条件式の腕は期待の側が先の腕なので、期待と実の形に変わり、先の腕の位置が関連位置になる。
+entry, text = shape(Path(sys.argv[1]) / 'd/arms', ARMS, 1)
+line, col, code, message = diagnostic(entry)
+assert (line, col, code) == (*anchor(text, '"x"'), 'E305'), (line, col, code)
+related_line, related_col = anchor(text, '1 |')
+assert message == f'expected Int, found String; expected here at main.hd:{related_line}:{related_col}', message
+print('other: a determined site names the pair, a list keeps the symmetric wording')
 PY
 }
 
@@ -229,7 +233,7 @@ r56_lock() {
 check '56-a an application mismatch names the argument and its parameter' r56_application
 check '56-b a parameter type variable is renamed' r56_variable
 check '56-c an occurs check keeps one name for a shared variable' r56_occurs
-check '56-d a mismatch outside an application keeps cannot unify' r56_other
+check '56-d a determined site names the pair, a list stays symmetric' r56_other
 check '56-e no diagnostic prints an internal variable number' r56_no_numbers
 check '56-f spec, trace, tier, wants' r56_docs
 check '56-f corpus lock' r56_lock
