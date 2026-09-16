@@ -4898,3 +4898,28 @@ cargo test: 記録時に走行中（層別は上記で確定）
 ```
 
 層別は 74 本・検査 3730 で**赤ゼロ**（`r77` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
+
+## R78 型名 Unit を Void に改名する
+
+### 決定と実装
+- 型の名前だけを `Void` にした。値の綴りは `()`、入れ子の印字は `Some(())`、最上位は無印字、機械語型は i64 の 0。
+- 旧綴りは別名にしない。`: Unit` は E204。`docs/ledger.md` の過去の語は残した。
+
+### 実測
+```
+check --print-type  of def main = ()     → Void
+check  def f (x: Void) => x              → exit 0
+check  def f (x: Unit) => x              → error[E204]
+run    def main = Some(())               → stdout Some(())
+run    def main = ()                     → stdout empty
+旧綴りへ戻した受理コーパスの写し        → check 非 0
+```
+
+### 門番
+`bash scripts/verify-r78.sh` → 5/5（型名・仕様・印字・旧綴りの排除・層/系譜/手順書/コーパスロックと台帳の旧名）。
+`bash scripts/verify-r44.sh` → 6/6。
+`bash scripts/verify-r43.sh` → 12/12。
+`cargo test --offline --no-fail-fast` → passed=773 failed=0。
+
+### 全走
+次のコミットで層別を 1 回回して記録する。
