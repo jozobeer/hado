@@ -4017,3 +4017,23 @@ parenthesized-exit=1
 - **同じ結果の判定は字面ではなく正準形で行われる。** `1` と `(1)` でも E502 が出た。書き換えの共通本体は `parser::canonical` で作ればよい。
 
 残る設計は「効果を持ち得ない条件」の構文的な判定である。名前・リテラル・それらの比較は安全側に置けるが、呼び出しを含む形は入れない。この判定を実測で詰めてから工程 3（`fixes.rs`）に入る。
+
+### R69 の対象条件の構文（`NodeKind` の形）と、掛ける節
+
+`NodeKind` の変種は 79〜125 行にあり、効果を持ち得ない条件の判定は次の形で安全側に書ける（呼び出し・フィールド・レコード・リスト・分岐・`let`・`?` はすべて含めない）。
+
+```rust
+fn is_effect_free(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_)
+        | NodeKind::Bool(_) | NodeKind::Unit | NodeKind::Name(_) => true,
+        NodeKind::Neg(inner) | NodeKind::Not(inner) => is_effect_free(inner),
+        NodeKind::Bin(_, left, right) => is_effect_free(left) && is_effect_free(right),
+        _ => false,
+    }
+}
+```
+
+書き換えはこの判定を通った条件のときだけ出す。共通の本体は `parser::canonical` で作り（`1` と `(1)` が同じ結果と見なされることを実測済み）、腕の本体と fallback のすべてが同じ正準形であることを要求する。範囲は `branch_range(node, Tail::If, …)` の 1 範囲、`Fix` の `line`/`col` は診断の位置。
+
+**掛ける節が 1 つ違う。** E502 の再現は `if x > 1 => 1 | 1` で、条件が `x > 1` の**条件分岐**（`NodeKind::CondBranch`）である。`PatternBranch` だけを見ている今の walk では掛からないので、`CondBranch` の腕の形（条件の列・腕の本体・fallback のフィールド名）を 3 行ほど読んでから `fixes.rs` に入る。`Tail::If` は末尾位置の印なので両方に使える。
