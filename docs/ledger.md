@@ -4355,3 +4355,29 @@ fn discard_let_fix(
 ```
 
 **次の 1 歩は E502 と同じ計器。** `walk_node` の入口で訪れた node の種類を 1 行印字し、`check --fix` を写しに直接掛けて、この `let` が walk に来ているか、来ているならどの門で落ちるかを見る。1 回の実行で切り分けられる。**推測は重ねない。**
+
+## R71 の計器の結果（`walk_node` が一度も呼ばれていない）
+
+`walk_node` の入口で訪れた node の位置を印字する計器（`P600 visit line:col`）を入れ、E504 の再現を写して `check --fix` を直接走らせた。
+
+```
+$ cargo run --offline -q -- check --fix target/fix-probe/main.hd 2>&1 | grep -E "P600|error"
+main.hd:4:7: error[E504]: use do to discard a success value
+```
+
+**`P600 visit` が 1 行も出ない。** E502 のときは「入れ子の node に来ていない」だったが、こちらは**そもそも `walk_node` が一度も呼ばれていない**。つまり `fixes()` → `walk_item` の入口が、この形の本体に対して `walk_node` を呼んでいない。
+
+`walk_node` の呼び出し箇所（実測）:
+
+```
+492:                    walk_node(body, source, lines, tokens, index, branches, found);
+513:                    walk_node(body, source, lines, tokens, index, branches, found);
+889:fn walk_node(
+971:        walk_node(child, source, lines, tokens, index, branches, found);
+```
+
+これが **E502（アーム形の `if`）・E504・E506（`let` の本体）が掛からない一方、E503・E507・E512（分岐そのものが本体）は掛かる**理由である。入口が「どの形の本体なら walk するか」を選んでおり、選ばれない形の中の冗長はどの書き換えでも直らない。
+
+**次はこの入口を読んで条件を確定する**（`walk_item` の本体）。そこが分かれば、E502・E504・E506・E511 と将来の書き換えが**同じ 1 箇所の修正**で届くようになる。影響範囲は R57 の門番と全走で確かめる。
+
+計器は戻した（木は綺麗）。
