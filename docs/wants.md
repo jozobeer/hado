@@ -14,7 +14,7 @@ R45 で言語意味を 1 つ足した（複数の scrutinee と腕の条件列�
 
 - **中** 参照カウント、record の field 更新
 - **低** 条件列の区間推論、JIT、引数パターンで名前付き引数を先に並べる形、`as` パターン、第31節の形（`def f | ...`）の多引数化（R45 の決定 1 で範囲外にした）
-- **中** `again` 下の末尾呼び出し喪失（約 3 万反復で SIGSEGV）。上限を仕様に書く。segmented stacks は低
+- **中** `again` 下の末尾呼び出し喪失。R50 で SIGSEGV ではなく診断（`hado: stack overflow`、終了コード 1）にした（§53.1、計画 46 節）。尽きるまでの回数は実装依存なので仕様には書かないと決めた。segmented stacks は低
 
 ## 診断と正準形
 
@@ -58,7 +58,7 @@ R45 で言語意味を 1 つ足した（複数の scrutinee と腕の条件列�
 31. **低** 多行文字列
 33. **中** 連想配列。最初は association list。キーは Fn を含まない（E703）
 34. **中** prelude の `map` / `append` を末尾再帰 + reverse にする。v0.1 は「素直な再帰」が意図なので、変えるなら仕様に書く
-35. **高** スタック溢れを SIGSEGV ではなく `{Error}` にする
+35. **高** スタック溢れを `{Error}` にする。R50 で SIGSEGV ではなく診断にはした（§53.1）。`handler` で捕まえられる `{Error}` にするのは残り
 36. **中** ビット演算と hex / binary リテラル。演算子過負荷は禁止のまま `Int.shift_left` のような module 関数
 37. **中** 加減乗の wrap。`/` が `Error` を raise するなら、加算も `{Error}` か saturating かを選び直す機会
 

@@ -33,6 +33,7 @@
 | §22 | パターンに List リテラルの糖衣は無い | 構文 | E100 | EBNF 生成器 |
 | §49 | shadowing は許す | 名前解決 | 受理 | `tests/accept/display/main.hd`（`Member(user) => user.name`） |
 | §53 | 末尾位置の呼び出しはスタックを消費しない（3 経路） | 実行 | 受理 | `tests/accept/tail_self/main.hd` `tail_mutual.hd` `tail_closure.hd` |
+| §53.1 | スタックが尽きたら `hado: stack overflow` を stderr に出して終了 1。`raise` の `Error` ではない | 実行 | — | `verify-r50.sh` |
 | §55 | prelude は全ての検査を公開面の根として受ける | 全段階 | — | `stdlib/` が全プログラムに連結されて `check_source` を通ること。`verify-r32.sh` |
 | §56 | 段階順で最初の 1 件を報告する | 全段階 | — | R9-2 の判定器（同居させた欠陥） |
 | §56 | 同一段階内はアンカー位置順 | 全段階 | — | R9-2 の判定器（位置の入れ替え） |
