@@ -80,3 +80,22 @@ fn build_executes_abstract_module_function_values() {
     assert!(output.stderr.is_empty());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn build_executes_an_effectful_function_value_from_a_definition() {
+    let dir = std::env::temp_dir().join(format!("hado-effect-closure-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("example.hd");
+    std::fs::write(
+        &source,
+        "def apply f x => f x\ndef make(s: String): Fn(String => String {Error}) Pure => fn(t => String.concat s (Int.to_string (Int.parse t)))\ndef main = apply (make \"x\") \"7\"",
+    )
+    .unwrap();
+    let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&source).output().unwrap();
+    assert!(built.status.success(), "{built:?}");
+    let output = Command::new(dir.join("example")).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"x7\n");
+    assert!(output.stderr.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
