@@ -119,21 +119,24 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
-source = 'def f x = x + 1\ndef main = f true\ndef g = let y = 5 -> y\n'
-root = project(Path(sys.argv[1]) / 'b', {'main.hd': source})
+source = 'def f x => x + 1\ndef main = f true\ndef g = let y = 5 -> y\n'
+# 2 つを別の入力根に置く。`fmt` は入力根のソース全部を見るので、同じ根に
+# 並べると片方を整形したときにもう片方も直ってしまう。
+root = Path(sys.argv[1]) / 'b'
+formatted = project(root / 'format', {'main.hd': source})
 with_check = project(root / 'check', {'main.hd': source})
 fix = run('check', '--fix', str(with_check / 'main.hd'))
 assert fix.returncode == 1, (fix.returncode, fix.stderr)
 assert (with_check / 'main.hd').read_text() == source, 'check --fix changed a masked file'
 
-format_result = run('fmt', str(root / 'main.hd'))
+format_result = run('fmt', str(formatted / 'main.hd'))
 assert format_result.returncode == 0, (format_result.returncode, format_result.stderr)
-assert (root / 'main.hd').read_text() != source, 'fmt left the masked rewrite alone'
+assert (formatted / 'main.hd').read_text() != source, 'fmt left the masked rewrite alone'
 still = run('fmt', '--check', str(with_check / 'main.hd'))
 assert still.returncode == 1, (still.returncode, still.stdout)
-done = run('fmt', '--check', str(root / 'main.hd'))
+done = run('fmt', '--check', str(formatted / 'main.hd'))
 assert done.returncode == 0, (done.returncode, done.stdout)
-checked = run('check', str(root / 'main.hd'))
+checked = run('check', str(formatted / 'main.hd'))
 assert checked.returncode == 1, checked.returncode
 assert b'E305' in checked.stderr, checked.stderr
 print('beyond diagnostics: fmt writes a rewrite that check --fix cannot reach')
@@ -192,15 +195,15 @@ harness.HADO = sys.argv[2]
 from harness import project, run
 
 root = project(Path(sys.argv[1]) / 'd', {
-    'main.hd': 'def main = 0\n',
-    'lib/util.hd': 'library\ndef helper x => let y = x -> y\n',
+    'main.hd': 'def main = lib::Util.helper 3\n',
+    'lib/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => let y = x -> y\n',
 })
 before = (root / 'lib/util.hd').read_text()
 result = run('fmt', str(root / 'main.hd'))
 assert result.returncode == 0, (result.returncode, result.stderr)
 assert result.stdout == b'fmt: lib/util.hd (1 rewrites)\n', result.stdout
 assert (root / 'lib/util.hd').read_text() != before, 'the subdirectory file was not rewritten'
-assert (root / 'main.hd').read_text() == 'def main = 0\n', 'an already canonical file changed'
+assert (root / 'main.hd').read_text() == 'def main = lib::Util.helper 3\n', 'an already canonical file changed'
 checked = run('check', str(root / 'main.hd'))
 assert checked.returncode == 0, checked.stderr
 print('project scope: the input root is formatted, relative paths are printed')
