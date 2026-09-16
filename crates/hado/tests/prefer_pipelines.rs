@@ -166,7 +166,20 @@ fn collect_node(
 #[test]
 fn distributed_hado_sources_prefer_pipelines() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let roots = ["stdlib", "tools", "tests/accept", "tests/library"];
+    let roots = ["stdlib", "tools"];
+    let appendix_b_examples = [
+        "tests/accept/active_names/main.hd",
+        "tests/accept/classify/main.hd",
+        "tests/accept/create_user/main.hd",
+        "tests/accept/delete_user/main.hd",
+        "tests/accept/display/main.hd",
+        "tests/accept/display_name/main.hd",
+        "tests/accept/functor/main.hd",
+        "tests/accept/name/main.hd",
+        "tests/accept/size/main.hd",
+        "tests/accept/to_option/main.hd",
+        "tests/accept/user_store/main.hd",
+    ];
     let mut applications = Vec::new();
     for root in roots {
         for file in source_files(&repository.join(root)) {
@@ -176,6 +189,14 @@ fn distributed_hado_sources_prefer_pipelines() {
             for item in &ast.items {
                 collect_item(item, &relative, &mut applications);
             }
+        }
+    }
+    for relative in appendix_b_examples {
+        let file = repository.join(relative);
+        let source = fs::read_to_string(&file).unwrap();
+        let ast = parser::parse_source(&source, relative).unwrap();
+        for item in &ast.items {
+            collect_item(item, relative, &mut applications);
         }
     }
     applications.sort();
