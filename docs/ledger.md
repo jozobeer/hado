@@ -3933,3 +3933,7 @@ PASSED: 5/5
 ```
 
 残りは 2 つ。**仕様の 1 文**（§57 の書き換えの一覧に E512 を足す）と、**全走**（r68 を層に入れて緑に戻すことの確認）。この 2 つは次のラウンドの頭で行う。
+
+### R68 の全走
+
+`bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r68` は `gates-exit=0`、`TALLY: 3685/3685 passed; red: none`。`RUN: verify-r68` が層に入り、r68 の 5 つの検査が 3680 から 3685 への増分そのものである。全走の後も木は綺麗（`git status --short` 空）。同じジョブで `cargo test --offline` も走らせた（結果はジョブの出力に続く）。これで R68 を閉じる。
