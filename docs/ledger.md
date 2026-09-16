@@ -4867,3 +4867,23 @@ passed=773 failed=0
 ```
 
 層別は 73 本・検査 3725 で**赤ゼロ**（`r76` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
+
+## R77 「一巡」の門番
+
+### 決定と実装
+- 優先順位 1〜4 の名指し項目が既存であることを実測で確定させたうえで、それらを 1 本の流れとして測る門番を足した。エンジンは変えていない。
+
+### 実測
+```
+plain:  scratch.hd:1:15: error[E204]: unbound name missing_name   check-exit=1
+dotted: .scratch/exp.hd と .hidden.hd の診断は無い                check-exit=0
+fix:    E505（canonical form: _）→ check --fix ×2 → final-check-exit=0 → fmt --check=0
+run:    -- alice → exit 0 / stdout=[alice] / stderr=[] ; 引数無し → exit 1 / stderr=[usage: cli <name>]
+test:   test: a_test.hd ok / test: 1/1 passed / test-exit=0
+```
+
+### 門番
+`bash scripts/verify-r77.sh` → 5/5（隔離・赤の正準形と有限回の修正・実行の二値・テスト・型表示と層/系譜/手順書/コーパスロック）。
+
+### 全走
+次のラウンドで層別と `cargo test` を 1 回回して記録する。
