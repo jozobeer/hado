@@ -4581,3 +4581,13 @@ passed=773 failed=0
 ```
 
 層別 full の検査は R70 の 3695 から 3700 へ、通過は 3691 から 3696 へ増え、増分 5 は R71 の門番。赤は Park 中の `verify-r69.sh` のみ。**緩めた門番は無い。** `cargo test` は層別の直後に始めた背景ジョブが長く出力を止めたため一度は打ち切りと判断したが、**実際には完走しており（`cargo-test-exit=0`、終了通知が遅れて届いた）**、前景で 16 スレッドで回した追試も `passed=773 failed=0 FAILED 0`。判断を誤ったことをここに記録する。
+
+## E502 の最初の実装（ビルドは通り、掛からない）
+
+`fixes.rs` に `identical_cond_fix` と `NodeKind::CondBranch { arms, fallback }` の腕（`PatternBranch` の直前）、`is_fixable` に `"E502"` を入れた。
+
+- 最初のビルドは 2 つのエラー: **`parser::canonical` は `Option<String>` ではなく `String` を返す**（`?` も `as_deref` も使えない）。直したらビルドは通った。
+- **しかし E502 の再現で `check --fix` は終了 1 のまま**（`if x > 1 => 1 | 1` は変わらず、E502 も残る）。`verify-r69.sh` は 1/5（69-d のみ緑）。
+- 実装の要点（次に戻すための記録）: 範囲は `branch_range(node, Tail::If, …)`、置換は `let text = parser::canonical(first_body);`（`String`）を `source[body_start..].starts_with(&text)` で**原文と一致することを確かめてから**使う。門は「`fallback` が無い」「腕が 2 つ以上」「全ての腕の本体が同じ」「範囲に `//` が無い」。`Fix { code: "E502", line: node.span.line, col: node.span.col, canonical: flatten(&text), replacement: text }`。
+
+**次の 1 歩は計器**（E504 で確立した規律）。`identical_cond_fix` の入口と各 bail 点（fallback 有り／腕が 1 つ以下／canonical 不一致／原文不一致／branch_range が None／`//` 有り）に印字を入れ、E502 の再現に `check --fix` を直接掛ける。1 回でどの門で落ちるか分かる。**推測は重ねない。** なお `spec.md` には既に `書き換え` の語があり（69-e の要件のうち plan の `## 64.` だけが欠けている）、spec は変更していない。
