@@ -151,7 +151,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E503" | "E504" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E502" | "E503" | "E504" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -355,6 +355,50 @@ fn discard_let_fix(
         end,
         replacement: "do ".to_string(),
         canonical: canonical.to_string(),
+    })
+}
+
+/// §42: when both results of a condition branch are the same, the condition is
+/// redundant and the branch collapses to that one result. One range.
+fn identical_bool_fix(
+    node: &Node,
+    then: &Node,
+    els: &Node,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let text = parser::canonical(then);
+    if text.is_empty() || text.contains('\n') || text != parser::canonical(els) {
+        return None;
+    }
+    let body_start = lines.offset(source, then.span);
+    if !source[body_start..].starts_with(&text) {
+        return None;
+    }
+    let (start, end) = match branch_range(node, Tail::If, source, lines, tokens, index, branches) {
+        Some(range) => range,
+        None => (
+            lines.offset(source, node.span),
+            lines.offset(source, els.span) + text.len(),
+        ),
+    };
+    if start >= end || start > body_start || end < body_start + text.len() {
+        return None;
+    }
+    if source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E502",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        canonical: flatten(&text),
+        replacement: text,
     })
 }
 
@@ -951,6 +995,14 @@ fn walk_node(
                 found.push(fix);
             }
             walk_pattern(pat, source, lines, tokens, index, found);
+        }
+        NodeKind::BoolBranch { cond, then, els } => {
+            if let Some(fix) = identical_bool_fix(node, then, els, source, lines, tokens, index, branches) {
+                found.push(fix);
+            }
+            walk_node(cond, source, lines, tokens, index, branches, found);
+            walk_node(then, source, lines, tokens, index, branches, found);
+            walk_node(els, source, lines, tokens, index, branches, found);
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
             if let Some(fix) = catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index) {
