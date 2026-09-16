@@ -151,7 +151,7 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E502" | "E503" | "E504" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E502" | "E503" | "E504" | "E506" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -399,6 +399,49 @@ fn identical_bool_fix(
         end,
         canonical: flatten(&text),
         replacement: text,
+    })
+}
+
+/// §40: a plain let binding that discards a pure value is redundant; the
+/// binding disappears and the body stays. Only a bare name or a literal is
+/// provably effect-free (E506 fires for effectful discards too, so anything
+/// else is left for the author to rewrite as a `do`).
+fn discard_plain_let_fix(
+    node: &Node,
+    pat: &Pattern,
+    value: &Node,
+    body: &Node,
+    canonical: &str,
+    source: &str,
+    lines: &LineMap,
+) -> Option<Fix> {
+    if !matches!(pat.kind, PatternKind::Underscore) {
+        return None;
+    }
+    let start = lines.offset(source, node.span);
+    let value_start = lines.offset(source, value.span);
+    let end = lines.offset(source, body.span);
+    if start >= end || value_start >= end {
+        return None;
+    }
+    let head = source[value_start..end].trim_end();
+    let text = head.strip_suffix("->").unwrap_or(head).trim();
+    let bare_name = !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let literal = text.len() >= 2 && text.starts_with('"') && text.ends_with('"');
+    if !bare_name && !literal {
+        return None;
+    }
+    if source[start..end].contains("//") {
+        return None;
+    }
+    Some(Fix {
+        code: "E506",
+        line: pat.span.line,
+        col: pat.span.col,
+        start,
+        end,
+        canonical: flatten(canonical),
+        replacement: String::new(),
     })
 }
 
@@ -980,7 +1023,10 @@ fn walk_node(
                 }
             }
         }
-        NodeKind::Let { pat, body, .. } => {
+        NodeKind::Let { pat, value, body, .. } => {
+            if let Some(fix) = discard_plain_let_fix(node, pat, value, body, "（束縛を削除）", source, lines) {
+                found.push(fix);
+            }
             walk_pattern(pat, source, lines, tokens, index, found);
             if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
                 if bound == returned {
