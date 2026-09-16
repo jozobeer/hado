@@ -4835,3 +4835,23 @@ passed=773 failed=0
 ```
 
 層別は 72 本・検査 3720 で**赤ゼロ**（`r75` の 5 検査が加わった回。E505 の書き換えが書き換え歩行器に触れたが、既存の門番の前提は壊れていないことを `red:` 欄で確認した）。
+
+## R76 終了コードの体験
+
+### 決定と実装
+- `exit` を足さない。失敗は `raise` が `main` まで届く形（§54）で表す。常用 CLI の用法失敗を `| [] => raise { message = usage }` に変えた。
+- 検体を門番が一時木に書き、1 つずつ別ディレクトリに置く。
+
+### 実測
+```
+check-exit=0
+no args:   run-exit=1  stdout=[]       stderr=[usage: cli <name>]
+with args: run-exit=0  stdout=[alice]  stderr=[]
+raise:     check-exit=0 / run-exit=1 / stderr=[boom]
+```
+
+### 門番
+`bash scripts/verify-r76.sh` → 5/5（用法失敗の stderr＋1・成功の stdout＋0・`raise` が `main` まで届く場合・二値であること・層/系譜/手順書/コーパスロック）。
+
+### 全走
+次のラウンドで層別と `cargo test` を 1 回回して記録する。
