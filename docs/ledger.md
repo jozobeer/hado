@@ -3941,3 +3941,24 @@ PASSED: 5/5
 ### R68 の `cargo test`
 
 `cargo test --offline` を**終了コードを保ったまま**回した（出力は `target/cargo-test-r68.log`）。`cargo-test-exit=0`、`test result: FAILED` の行は 0 本、全ターゲットの合計は `passed=773 failed=0`。前のラウンドで `| tail -4` に終了コードを食われて未確認だった点は、これで埋まった。R68 に未確認事項は無い。
+
+### R69 の材料（残る 4 つの書き換え候補）
+
+`docs/spec.md` のエラー表から、まだ書き換えの無い冗長は 4 つ。
+
+| コード | 名前 | 節 | 対象 | 再現（拒否コーパス） |
+|---|---|---|---|---|
+| E502 | identical-branches | §42 | `if`。第32節の形では `def` か `fn` | `tests/reject/E502/main.hd` |
+| E504 | let-question-underscore | §35 | `_` | `tests/reject/E504/main.hd` |
+| E506 | implicit-discard | §40 | `_` | `tests/reject/E506/main.hd` |
+| E511 | cond-to-literal-pattern | §26 | `if`。第32節の形では `def` か `fn` | `tests/reject/E511/main.hd` |
+
+E502 の再現は `tests/reject/E502/main.hd` の中身そのもの（`// error: E502` のヘッダを持つ）。
+
+```
+def f x =>
+  if x > 1 => 1 | 1
+def main = f 1
+```
+
+腕と fallback の本体が同じで、正準形は分岐全体をその本体にすること。**枝の全体を 1 範囲で差し替える形なので、E507 の畳み込みと同じ道具（`branch_range(node, Tail::If, ...)` と `parser::canonical`、`Fix` の `line`/`col` は診断の位置）がそのまま使える。** 4 つのうち次に着手するのは E502 が最短（E504 と E506 は `_` の位置、E511 は腕の条件列に関わるので、対象条件の実測がもう少し要る）。
