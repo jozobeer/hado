@@ -4803,3 +4803,22 @@ passed=773 failed=0
 ```
 
 層別は 71 本・検査 3715 で**赤ゼロ**（`r74` の 5 検査が加わった回。E511 の変更が他の門番の前提を上書きしていないことを `red:` 欄で確認した）。
+
+## R75 E505（未使用束縛）の書き換え
+
+### 決定と実装
+- `is_fixable` に `"E505"`、`PatternBranch` の腕で `unused_binding_fix` を呼ぶ。束縛 span を `_` に置換し、`canonical` は `_`。判定は `names::bindings` / `names::references`（検査器と同一）。
+
+### 実測
+```
+a: E515 → check --fix → final-check-exit=0 / | [name, ..._] => name
+b: E505（canonical form: _）→ final-check-exit=0 / | [name, ..._] => name
+c: name のみ _ へ、使用中の ...rest は不改名 → final-check-exit=0
+d: fmt 1 回で ..._、2 回目は無出力（冪等）
+```
+
+### 門番
+`bash scripts/verify-r75.sh` → 5/5（受理到達・正準形を持つこと・使用中束縛の不改名・fmt 共有と冪等・層/系譜/手順書/コーパスロック）。
+
+### 全走
+次のラウンドで層別と `cargo test` を 1 回回して記録する。
