@@ -110,3 +110,4 @@
 | §58 | `hado run` は一時ディレクトリで作って実行し、子プロセスの終了コードを返す。`build -o` は出力先を明示する。`build` と `run` の失敗にも `canonical form:` を付ける | CLI | — | `verify-r48.sh`、`crates/hado/tests/run_cli.rs` |
 | §58.1 | `hado fmt` は入力根のソースの局所的な書き換えを診断を待たずに一括で当て、`--check` は書かずに門番になる。`build --fix` は作る前に同じ整形をする | CLI | — | `verify-r52.sh` |
 | §58.2 | `hado test` は根の直下の `*_test.hd` を順に走らせ、終了コードで合否を決めて 1 本ごととまとめを出す。落ちても残りを走らせる | CLI | — | `verify-r54.sh` |
+| §58.3 | `--print-type=<名前>` はその定義の型を §16・§20・§41 の正準形で印字する。変数は `A` `B` … と改名し、開いた行は `| A` を足す。member は契約が宣言する型。無い名前は終了 1 | CLI | — | `scripts/verify-r55.sh` |
