@@ -6097,3 +6097,75 @@ def main = f 1` は受理される（`check` 終了 0、ラウンド 106 で実�
 ### 確認して報告
 - 隔離の有無が根の成否を分けること。
 - 赤が正準形を伴い、有限回の修正で緑になり、`fmt --check` も 0 になること。
+
+## 73. R78 Unit 型を Void 型に改名する手順書（2026-09-16）
+
+### 背景
+
+プリミティブ型の名前は `Unit` である（§5、§19）。値の綴りは `()`、印字は入れ子で `()`、最上位では無印字、機械語型は i64 の 0 である。名前だけを `Void` にする。値の綴り・印字・機械語型・検査の段階・エラーコードは動かさない。
+
+### 決定
+
+- **決定 1: 型の名前を `Void` にする。** §5 の「Void は `()`」、§19 のプリミティブ一覧、§19 の機械語型、§29 の「Void の値は名前か `_`」、§54 の印字表と最上位の例外、prelude と契約の戻り型、付録C の `void := "()"`（`bool` / `Bool` と同じ大小の対）を改名する。`()` の意味は変えない。
+- **決定 2: 旧綴りを型として残さない。** 別名は置かない。`: Unit` は E204。`type Unit = | U` は利用者の型名として受理する（第49節の型名前空間。組み込みから外れるため）。
+- **決定 3: 実装の内部識別子を揃える。** `Ty::Void` `Type::Void` `TokKind::Void` `NodeKind::Void` `Constant::Void`、印字の `"Void"`、`BUILTIN_TYPES` の `"Void"`。派生名 `eq_Void` `compare_Void` `print_Void` は Debug に従う。
+- **決定 4: コーパスのディレクトリ名を揃える。** `tests/accept/unit` → `tests/accept/void`、`tests/accept/again_non_unit_result` → `tests/accept/again_non_void_result`。`git mv` し、lock は改名後のパスで作り直す。計画 2.2 の項目名 `Unit payload` は現行版なので `Void payload` にする。
+- **決定 5: `docs/ledger.md` の過去のラウンドの記述は当時の語のまま残す。** `docs/plan.md` は現行版なので改名する。版と tag は動かさない。
+- **決定 6: `scripts/verify-r78.sh` を新設し、`scripts/lib/gate-tiers.sh` の full に `r78` を足す。**
+
+### 期待値の根拠
+
+| 形 | 期待 | 根拠 |
+|---|---|---|
+| `def main = ()` の `--print-type` | `Void` | 決定 1 |
+| `def f (x: Void) => x` | 受理 | 決定 1 |
+| `def f (x: Unit) => x` | E204 | 決定 2 |
+| 入れ子の `Some(())` | `Some(())` | §54。値の綴りは動かさない |
+| 最上位の `()` | 無印字 | §54 |
+| `type Unit = \| U` | 受理 | 決定 2 |
+
+### 成果物
+
+`docs/plan.md`（本節）、`docs/spec.md`、`docs/spec-trace.md`、`docs/spec-coverage.md`、`docs/corpus.md`、`docs/ledger.md`、`crates/hado/src/{lexer,parser,types,names,infer,mono,repr,emit,runtime_abi,file_scopes,functor_instances}.rs`、`crates/hado/tests/`、`tests/accept/`、`tests/reject/`、`stdlib/*.hd`、`scripts/verify-*.sh`（Unit を探す既存門番）、`scripts/verify-r78.sh`（新設）、`scripts/lib/gate-tiers.sh`、`tests/corpus.sha256`。
+
+### 工程
+
+- 工程 0: 計画（本節）。
+- 工程 1: 構造。決定 3 の識別子を改名する。型の綴り `"Unit"` は残す。`cargo test --offline --lib` が緑のままであることを測る。
+- 工程 2: 仕様と見える面。決定 1・2・4・5 の文書・コーパス・stdlib・診断の印字・既存門番を切り替え、lock を更新する。
+- 工程 3: 判定器。`scripts/verify-r78.sh` を新設して緑にする。層・系譜・台帳。全走。
+
+### 判定
+
+`scripts/verify-r78.sh` を新設する。**入力は生成し、期待値は判定器側で計算する。コーパスのファイル名や行を埋め込まない。**
+
+- 判定 78-a: `()` の `--print-type` が `Void`。`: Void` は受理、`: Unit` は E204。
+- 判定 78-b: 仕様に型名としての `\bUnit\b` が無く、§19 の一覧・§54 の表・付録C の `void := "()"` が `Void` / `void` である。`()` は残る。
+- 判定 78-c: 入れ子の印字は `Some(())`、最上位の `()` は無印字。
+- 判定 78-d: 受理コーパスのうち `Void` を含む各本について、その語を `Unit` に戻した写しが check を通らない（別名が残っていない）。
+- 判定 78-e: 文書（追跡表と 2.2 の項目名）・層の `r78`・corpus lock。
+
+### 許容される赤
+
+工程 1 の直後まで 78-a〜78-d は赤でよい（綴りがまだ `Unit`）。工程 2 の直後に既存門番のうち仕様の `Unit` を探すものは赤になる（意図した赤。工程 2 で追随する）。**R78 の終了時に許容される赤は無い。**
+
+### スコープ外
+
+- 値の綴り `()` の変更、パターンに `()` を足すこと
+- 印字規則と機械語型
+- エラーコードの追加・変更
+- 版と tag
+- `docs/ledger.md` の過去のラウンドの語の書き換え
+- `crates/hado/tests/unit/`（Rust の単体テスト置き場）
+
+### 確認して報告（決定から）
+
+- `: Unit` が E204 になり、別名が残っていないこと（決定 2、判定 78-d）
+- 最上位と入れ子の印字が 1 バイトも変わっていないこと（決定 1）
+- `docs/ledger.md` の過去の `Unit` が残っていること（決定 5）
+
+### 中断の条件
+
+**`()` の意味や印字が変わるなら、止めて報告せよ。**
+
+**既存のエラーコードの番号や段階が動くなら、止めて報告せよ。**
