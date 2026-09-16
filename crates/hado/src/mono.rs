@@ -853,12 +853,15 @@ impl Signature {
     ) -> Result<Self, String> {
         let mut inference = crate::types::Inference::default();
         let function = inference.instantiate(scheme);
-        let result = result.map(Ty::from).unwrap_or_else(|| inference.fresh());
-        let expected = Ty::fn_with(
-            parameters.iter().map(Ty::from).collect(),
-            result.clone(),
-            inference.fresh_row(),
-        );
+        let result = match result {
+            Some(ty) => ty_with_fresh_rows(ty, &mut inference),
+            None => inference.fresh(),
+        };
+        let expected_parameters: Vec<Ty> = parameters
+            .iter()
+            .map(|ty| ty_with_fresh_rows(ty, &mut inference))
+            .collect();
+        let expected = Ty::fn_with(expected_parameters, result.clone(), inference.fresh_row());
         inference
             .unify(&function, &expected)
             .map_err(|error| format!("{error:?}"))?;
@@ -892,6 +895,31 @@ impl From<&Type> for Ty {
                 Self::from(result.as_ref()),
             ),
         }
+    }
+}
+
+/// `Type` is the monomorphic type codegen sees. It has no effect rows, because
+/// effects are lowered away before codegen. Turning a closure back into `Ty`
+/// therefore gets a *fresh* row instead of `Row::pure()`: the definition's
+/// scheme decides the row during specialization, rather than a rowless `Type`
+/// forcing `pure` and rejecting an effectful function value (R49).
+fn ty_with_fresh_rows(ty: &Type, inference: &mut crate::types::Inference) -> Ty {
+    match ty {
+        Type::Data(name, args) => Ty::Adt(
+            name.clone(),
+            args.iter().map(|arg| ty_with_fresh_rows(arg, inference)).collect(),
+        ),
+        Type::Abstract(name, args) => Ty::Abstract(
+            name.clone(),
+            args.iter().map(|arg| ty_with_fresh_rows(arg, inference)).collect(),
+        ),
+        Type::Closure(args, result) => {
+            let args: Vec<Ty> = args.iter().map(|arg| ty_with_fresh_rows(arg, inference)).collect();
+            let result = ty_with_fresh_rows(result, inference);
+            let row = inference.fresh_row();
+            Ty::fn_with(args, result, row)
+        }
+        other => Ty::from(other),
     }
 }
 
@@ -1945,8 +1973,9 @@ impl Lowerer {
             Ty::Fn(fields, result, _) => (fields, *result),
             result => (vec![], result),
         };
+        let expected = ty_with_fresh_rows(ty, &mut inference);
         inference
-            .unify(&result, &Ty::from(ty))
+            .unify(&result, &expected)
             .map_err(|error| format!("constructor type mismatch: {error:?}"))?;
         fields
             .iter()
@@ -2003,8 +2032,9 @@ impl Lowerer {
         let Ty::Fn(fields, result, _) = inference.instantiate(scheme) else {
             return Err("invalid record schema".into());
         };
+        let expected = ty_with_fresh_rows(&ty, &mut inference);
         inference
-            .unify(&result, &Ty::from(&ty))
+            .unify(&result, &expected)
             .map_err(|error| format!("record type mismatch: {error:?}"))?;
         let result = Type::try_from(&inference.resolve(&fields[index]))
             .map_err(|_| "record field type is not concrete")?;
@@ -3581,11 +3611,12 @@ impl Lowerer {
             return Ok((*id, active.clone()));
         }
         let mut specialization = crate::types::Inference::default();
-        let concrete = Ty::fn_with(
-            types.iter().map(Ty::from).collect(),
-            Ty::from(&inferred.result),
-            specialization.fresh_row(),
-        );
+        let concrete_parameters: Vec<Ty> = types
+            .iter()
+            .map(|ty| ty_with_fresh_rows(ty, &mut specialization))
+            .collect();
+        let result = ty_with_fresh_rows(&inferred.result, &mut specialization);
+        let concrete = Ty::fn_with(concrete_parameters, result, specialization.fresh_row());
         specialization
             .unify(scheme.body(), &concrete)
             .map_err(|error| format!("specialization failed: {error:?}"))?;
