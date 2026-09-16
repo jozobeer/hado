@@ -4898,3 +4898,38 @@ cargo test: 記録時に走行中（層別は上記で確定）
 ```
 
 層別は 74 本・検査 3730 で**赤ゼロ**（`r77` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
+
+## R78 配布する Hado コードをパイプライン中心にする
+
+### 境界と実装
+- 対象は `stdlib/` 10 本、`tools/` 3 本、付録Bの典型コードと対応する受理ケース 11 本。構文を検証するコーパス全体と拒否コーパスは対象外にした。
+- 構文木から「パイプの右辺ではない直接適用」を列挙する `prefer_pipelines` を追加した。最初の実測は 245 件で赤、移行後は 0 件で緑。
+- パイプ左辺とパイプ結果が同じ span を使い、複合型の型表を上書きする欠陥が出た。`|>` 自身の span をパイプ式の識別位置にした。レコードを左辺に置く最小再現は修正前に E513、修正後に単相化まで通る。
+- corpus lock は対象 219 本の実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test mono --test prelude --test corpus --no-fail-fast
+prefer_pipelines 1/1、mono 63/63、prelude 4/4、corpus 4/4
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ bash scripts/run-gates.sh --tier quick /tmp/hado-r78-quick.BKuXOa
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+775 passed / 0 failed
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 初回の `corpus` は複合型を左辺に置くパイプで 22 件赤。span 衝突の再現テストを先に固定し、parser の識別位置を直して 4/4 に戻した。
+- lock 更新前の `verify-r70.sh` は 70-e だけ赤。lock を 219 本の現物へ更新した後は 5/5。
+- 最終 quick と全 Rust テストに赤はない。
+
+### 迷った点
+`tests/accept/` は利用例にも見えるが、直接適用・効果操作・末尾呼び出しを個別に検証する判定器でもある。付録Bの対応ケースだけを配布サンプルとして移し、残りの構文被覆は維持した。
+
+### 仕様への疑義
+なし。
