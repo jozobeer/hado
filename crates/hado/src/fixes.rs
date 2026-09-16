@@ -113,7 +113,68 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E503" | "E507" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E501" | "E503" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+}
+
+// --- E520: Bool リテラルの腕を Boolean 分岐へ ---
+
+/// §24: `if b | true => x | false => y` と `if b | true => x | y` の canonical form は
+/// `if b => x | y`。腕は真偽で選び直すので、書かれた順が逆でも値は変わらない。
+/// 式の範囲は `branch_range` に頼るので、枝の位置にある形だけを扱う。
+#[allow(clippy::too_many_arguments)]
+fn boolean_branch_fix(
+    node: &Node,
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: Option<&Node>,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let NodeKind::PatternBranch { scrutinees, .. } = &node.kind else { return None };
+    if scrutinees.len() != 1 {
+        return None;
+    }
+    let literal = |patterns: &[Pattern]| -> Option<bool> {
+        let [pattern] = patterns else { return None };
+        let PatternKind::Literal(value) = &pattern.kind else { return None };
+        let NodeKind::Bool(value) = &value.kind else { return None };
+        Some(*value)
+    };
+    // 腕 2 本は真偽で 1 対 1、腕 1 本は fallback が残り半分。Bool の分岐は 2 本なので、
+    // 腕 2 本と fallback が同居する形には正準形が無い。
+    let (then, or_else) = match (arms, fallback) {
+        ([(first, first_body), (second, second_body)], None) => match (literal(first)?, literal(second)?) {
+            (true, false) => (first_body, second_body),
+            (false, true) => (second_body, first_body),
+            _ => return None,
+        },
+        ([(only, only_body)], Some(alternative)) => match literal(only)? {
+            true => (only_body, alternative),
+            false => (alternative, only_body),
+        },
+        _ => return None,
+    };
+    let (start, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    if source[start..end].contains("//") {
+        return None;
+    }
+    let replacement = format!(
+        "if {} => {} | {}",
+        parser::canonical(&scrutinees[0]),
+        parser::canonical(then),
+        parser::canonical(or_else)
+    );
+    Some(Fix {
+        code: "E520",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
 }
 
 // --- E503: `| _ => body` を fallback `| body` へ ---
@@ -714,6 +775,9 @@ fn walk_node(
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
             if let Some(fix) = catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index) {
+                found.push(fix);
+            }
+            if let Some(fix) = boolean_branch_fix(node, arms, fallback.as_deref(), source, lines, tokens, index, branches) {
                 found.push(fix);
             }
             // §57: 腕がすべて自分の pattern を組み直す分岐は scrutinee ちょうど。
