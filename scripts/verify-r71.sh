@@ -64,7 +64,9 @@ HD
 cp "$work/d/pure.hd" "$work/d/pure.before"; cp "$work/d/named.hd" "$work/d/named.before"
 hado check --fix "$work/d/pure.hd" >/dev/null 2>&1
 hado check --fix "$work/d/named.hd" >/dev/null 2>&1
-if cmp -s "$work/d/pure.before" "$work/d/pure.hd" && cmp -s "$work/d/named.before" "$work/d/named.hd"; then
+# R72 made the pure-discard shape (E506) fixable; its behaviour is covered by
+# scripts/verify-r72.sh (72-a..72-d), so only the named shape is checked here.
+if cmp -s "$work/d/named.before" "$work/d/named.hd"; then
   ok "71-d the excluded shapes are left alone"
 else
   ng "71-d the excluded shapes are left alone" "pure/named changed"
