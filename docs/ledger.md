@@ -3660,7 +3660,7 @@ E520 の書き換えは入れられなかった。`fixes.rs` は式の範囲を 
 - **62-a〜62-f（R62 の門番）。** `bash scripts/verify-r62.sh` は 6/6。62-a 診断が `canonical form: | 0` を出し、`check --fix` と `hado fmt` が `| 0` にし、直したソースが受理され、`fmt --check` が 0、62-b `_ =>` の後ろのコメントが残ること、62-c §24 の除外（入れ子の Bool リテラルと 2 条件列）が受理され、規則そのものは E520 を出し続けること、62-d 既存の E501 と新しい E503 が一括の `fmt` で settle すること、62-e 仕様と追跡表と層、62-f corpus lock。
 - **実装前の赤。** `git stash push -- crates/hado/src/fixes.rs` で戻して測り、`PASSED: 3/6`（62-a・62-b・62-d が NG。62-c・62-e・62-f は緑）。
 - **門番が自分の材料の欠陥を捕まえた。** 最初の混合の材料は `if n | 0 => 1 | _ => n` で、E503 ではなく E402（non-Boolean literal patterns require a fallback）が先に当たっていた。コンストラクタの腕に直した。1 ファイル 1 欠陥の規約が門番の側でも効いている。
-- **全走。** （次の工程で測る。）
+- **全走。** `bash scripts/run-gates.sh --jobs 3 --tier full target/gates-full-r62` は 58 本を走らせ、すべて `PASSED: n/n`、`^NG:` 0、exit 0。締めは `TALLY: 3660/3660 passed; red: none`（R61 の 3654 に R62 の 6 件）。`verify-m0.sh` の `cargo-test` は `passed=773`。`verify-r57.sh`（8/8）と `verify-r60.sh`（10/10）と `verify-r61.sh`（7/7）は書き換えの表を共有するので個別にも緑を確認した。
 
 ### 迷った点
 
