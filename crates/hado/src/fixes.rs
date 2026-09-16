@@ -151,7 +151,41 @@ fn splice(source: &str, edits: &[Fix]) -> String {
 }
 
 pub fn is_fixable(code: &str) -> bool {
-    matches!(code, "E501" | "E502" | "E503" | "E504" | "E506" | "E511" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+    matches!(code, "E505" | "E501" | "E502" | "E503" | "E504" | "E506" | "E511" | "E512" | "E507" | "E520" | "E508" | "E510" | "E515" | "E516" | "E517")
+}
+
+// --- E505: 使われていない束縛を `_` にする ---
+
+/// The checker reports an unused arm binding (E505) with the binding's span;
+/// this renames exactly that span to `_`, which the checker exempts (check.rs).
+/// The predicate is the checker's own (`names::bindings` / `names::references`),
+/// so the rewrite cannot drift from the diagnostic.
+fn unused_binding_fix(
+    pattern: &Pattern,
+    body: &Node,
+    source: &str,
+    lines: &LineMap,
+) -> Option<Fix> {
+    for (name, span) in crate::names::bindings(pattern) {
+        if matches!(name, "_" | "$argument") || crate::names::references(body, name) {
+            continue;
+        }
+        let start = lines.offset(source, span);
+        let end = start + name.len();
+        if end > source.len() || &source[start..end] != name {
+            return None;
+        }
+        return Some(Fix {
+            code: "E505",
+            line: span.line,
+            col: span.col,
+            start,
+            end,
+            replacement: "_".into(),
+            canonical: "_".into(),
+        });
+    }
+    None
 }
 
 // --- E520: Bool リテラルの腕を Boolean 分岐へ ---
@@ -1220,8 +1254,11 @@ fn walk_node(
             if let Some(fix) = rewrap_if_fix(node, source, lines, tokens, index, branches) {
                 found.push(fix);
             }
-            for (patterns, _) in arms {
+            for (patterns, body) in arms {
                 for pattern in patterns {
+                    if let Some(fix) = unused_binding_fix(pattern, body, source, lines) {
+                        found.push(fix);
+                    }
                     walk_pattern(pattern, source, lines, tokens, index, found);
                 }
             }
