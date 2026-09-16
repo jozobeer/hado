@@ -46,7 +46,8 @@
 | record | 構築は `{ name = "a"; age = 3 }`。型は field 集合から一意に決まる nominal 型で、曖昧なら注釈を要求。パターンは `{ name }`（同名束縛）と `{ name = n }`（別名）。書かない field は無視。field 更新構文は v0.2 |
 | tuple | 持たない。`Fn<(Int, Int), Int>` の `( )` は引数列 |
 | 演算子 | 算術 `+ - * / %`、比較 `< <= > >= == !=`、論理 `&& \|\| not`。算術と順序比較 `< <= > >=` は Int / Float 両用の組み込み多相で、単相化時に確定し、未確定なら Int（`/` `%` の戻り型は 2.3）。`==` `!=` は Fn を含まない全型の構造比較で、M5 の派生パスが型ごとに合成する。Fn を含む型への `==` `!=` `compare` は単相化時に判明するので `E7xx`。`&&` `\|\|` は短絡評価で、左辺が結果を決めるとき右辺を評価しない。文字列連結演算子は置かない。優先順位は高い方から 適用、単項 `-`、`* / %`、`+ -`、比較、`&&`、`\|\|`、`\|>`。比較は非結合 |
-| リテラル | Int は 10 進。Float は小数点の両側に数字必須。Char は `'a'`。String は `"..."`、エスケープは `\n \t \\ \"`。Bool は `true` `false`。Unit は `()` |
+| リテラル | Int は 10 進。Float は小数点の両側に数字必須。Char は `'a'`。String は `"..."`、エスケープは `
+ \t \\ \"`。Bool は `true` `false`。Unit は `()` |
 | Unit payload | `Ok()` が canonical。`Ok(())` は拒否 |
 | コメント | `--` 行コメントのみ |
 | 変数パターン | 最上位の `\| x => ...` は禁止。入れ子内は許可 |
@@ -343,7 +344,8 @@ M3〜M7 の成果物を実測して見つかった未決事項を、grilling 形
 
 grilling を経ずに commander が決めた点（可逆。異議があれば戻す）:
 
-- Char のエスケープは `\n` `\t` `\\` `\'` の 4 つ（§43）。実装は Char にエスケープを持たないが、String と対称でないと改行の Char が書けない。
+- Char のエスケープは `
+` `\t` `\\` `\'` の 4 つ（§43）。実装は Char にエスケープを持たないが、String と対称でないと改行の Char が書けない。
 - パターンに List リテラルの糖衣は無い（§46）。実装どおり。
 - `()` はパターンではない（§19）。実装どおり。
 - shadowing は許す（§47）。§39 の例が依存している。
@@ -2998,7 +3000,8 @@ Rust 側: `crates/hado/tests/r36_int.rs` を新設し、`crates/hado/tests/runti
 判定 37-e: 予約名と可視性。(1) 利用者の `effect Env` の宣言が E205。(2) **prelude の操作と同名の利用者の宣言が E205**（決定 4b。外の `def args`、実装の `def args`、他の効果の操作 `once args`。**単一ファイルと複数ファイルの両方で測る**。今は複数ファイルで黙って影になる）。(3) **`handler Env as X` をサブディレクトリに置いても通る**（決定 4c。今は E204）。同じ形の `handler Error as X` も通ることを対照に置く。(4) サブディレクトリからも `args` が無修飾で見える（R34 の `prelude_operations` が `Env` にも効くことの固定）
 判定 37-f: `Io` の 4 操作。`read_file`（存在する / 空ファイル / バイナリ / 大きいファイル）、`write_file` → `read_file` の往復、`read_dir`（空 / 1 個 / 複数 / 名前が非 UTF-8 / `.` と `..` を除く / 整列）、`read_stdin`（閉じた stdin / 内容がある stdin / 2 回目）
 判定 37-g: `Io` の失敗の分類。**4 分類すべてに決定的な入力を置く。** `NotFound`（存在しないパス）、`NotADirectory`（通常ファイルを `read_dir`）、`IoFailure`（ディレクトリを `read_file`。EISDIR）、`PermissionDenied`（`chmod 000` のファイル）。**`PermissionDenied` は root では起きないので、`id -u` が 0 なら `NG: skipped-as-root` として失敗にする**（skip で緑にしない）。`write_file` の失敗（存在しないディレクトリ → `NotFound`、読み取り専用ディレクトリ → `PermissionDenied`）
-判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "\n"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**`scripts/verify-r32.sh` の 32-j(d) を決定 8b の形に直し、実物の `main.hd` が実行時に生成したディレクトリを引数に受けて動くことを測る。** **行の選び方は R38 のシェル側 oracle と同じ規則にする**（R38 で作る集計スクリプトが `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。**`scripts/run-gates.sh` はまだリポジトリに無い**（指揮者のスクラッチにある同名のものは別物）。E2 も `String.starts_with line "PASSED: "` に一致する**最後の**行を選び、名前はファイル名から作る。`tail -1` と一致させる）。**`Report.parse_line` は `<名前> PASSED: <n>/<N>` の 1 行だけを受ける**（`report.hd` の `fields` が `String.split line " PASSED: "` で 2 分割するので、名前の無い行をそのまま渡すと 1 要素になって `InvalidLine` で落ちる）。**E2 は選んだ行の `PASSED: ` の前にファイル名を付けて組み立ててから `parse_line` に渡す。**空 argv は `MissingDirectory`
+判定 37-h: E2。`tools/gates/main.hd` が argv でディレクトリを受け、`read_dir` で列挙し、`read_file` で読み、`Bytes.to_string` → `String.split "
+"` → 各行を `Report.parse_line` に通して集計し、`render` を印字する。**`scripts/verify-r32.sh` の 32-j(d) を決定 8b の形に直し、実物の `main.hd` が実行時に生成したディレクトリを引数に受けて動くことを測る。** **行の選び方は R38 のシェル側 oracle と同じ規則にする**（R38 で作る集計スクリプトが `grep -E '^PASSED:' | tail -1` で最後の 1 行を取る。**`scripts/run-gates.sh` はまだリポジトリに無い**（指揮者のスクラッチにある同名のものは別物）。E2 も `String.starts_with line "PASSED: "` に一致する**最後の**行を選び、名前はファイル名から作る。`tail -1` と一致させる）。**`Report.parse_line` は `<名前> PASSED: <n>/<N>` の 1 行だけを受ける**（`report.hd` の `fields` が `String.split line " PASSED: "` で 2 分割するので、名前の無い行をそのまま渡すと 1 要素になって `InvalidLine` で落ちる）。**E2 は選んだ行の `PASSED: ` の前にファイル名を付けて組み立ててから `parse_line` に渡す。**空 argv は `MissingDirectory`
 判定 37-i: 受理コーパス（`// item: Env と Io` 1 本以上。`// needs: prelude` 付き）、lock 更新、`verify-m1-corpus.sh` の pairs から `Env と Io` が消える。**受理コーパスは E2 とは別の小さな fixture 読みのケースにする**（E2 を受理コーパスに入れると、空 argv の既定と実行ファイルの `main` の混入を捌く必要が出る）
 判定 37-j: 決定 8。`verify-m6.sh` が cwd と stdin を固定する。**固定を外す注入で受理ケースが落ちること**を報告に書く
 判定 37-k: `cargo test --offline --no-fail-fast` が 0 failed。全門番を単独で走らせ、**すべて満点**（R37 の完了で許容される赤が無くなる見込み）。**判定 37-g の `PermissionDenied` は root では成立しないので、`verify-r37.sh` は root で失敗する。** これは環境の要件であって門番の緩めではない（実測: このマシンの `id -u` は 1000）
@@ -3538,7 +3541,8 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 | arity 2 以上の引数 pattern 分岐（`def rec f | [], _ => ...`） | **書けない。** `E100: pattern branch requires at least one arm`。`crates/hado/src/parser.rs:1770-1776` が合成名 `$argument` の arity 1 に落とす（§31 は arity 1 に限る） |
 | 腕の中の `if` | **禁止。** §30 の E101。リスト関数は腕の深さを 1 に保つ交互再帰で組む |
 | `String.get` を条件列の条件に置く | **`E308: effects are not allowed in branch conditions`。** trim を hado で書くときは純粋な `__string_get` だけを使う |
-| CR を hado のソースに書けるか | **書けない。** §5 のエスケープは `\n` `\t` `\\` `\"` の 4 つで、`\r` は E110。char のコードを取る intrinsic も無い |
+| CR を hado のソースに書けるか | **書けない。** §5 のエスケープは `
+` `\t` `\\` `\"` の 4 つで、`\r` は E110。char のコードを取る intrinsic も無い |
 | `log` `join` `trim` `abs` `min` `max` `head` `nth` `take` `drop` を識別子に使う既存の記述 | **無い**（`tests/` `stdlib/` `tools/` `crates/hado/tests/` を検索）。`log` は prelude の操作名になるので、以後の利用者の `log` は E205 になる |
 
 ### 決定
@@ -3546,7 +3550,8 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 - **決定 1: `log` は `effect Io` の `once` とし、String と改行 1 つを stdout へ書く。**
   - 宣言は `once log(contents: String): Unit {Error}`。既定実装は `IoDefault` の `def` に置く（R37 決定 1 の経路。0 引数の操作は `definition_reference`、1 引数以上は `specialize_function` + `call_direct`）。
   - 本体は `let status = __io_log contents -> if status == 0 => () | raise { message = io_failure_message status }`。status は 0 成功 / 4 失敗で、4 は `io_failure_message` の既定腕により `"IoFailure"` になる。**`io_status_from_errno` は使わない**（EPIPE・ENOSPC が `PermissionDenied` などに化ける）。
-  - C は `int64_t hado_io_log(const HadoString *contents)`。`fwrite` で contents、`fputc('\n')`、`fflush(stdout)` の 3 つを 1 つの status に畳む。**`print_failed` は触らない。** log の失敗は言語の `Error` で、利用者の `handler Error` が捕まえられる。終了コードは、捕捉されなければ `main` の raise 経路（stderr と 1）が、捕捉されても `main` 末尾の `check_stdout`（R29）が決める。
+  - C は `int64_t hado_io_log(const HadoString *contents)`。`fwrite` で contents、`fputc('
+')`、`fflush(stdout)` の 3 つを 1 つの status に畳む。**`print_failed` は触らない。** log の失敗は言語の `Error` で、利用者の `handler Error` が捕まえられる。終了コードは、捕捉されなければ `main` の raise 経路（stderr と 1）が、捕捉されても `main` 末尾の `check_stdout`（R29）が決める。
   - **R29 の再考:** SIGPIPE の無視と EPIPE の扱いは変えない。log の EPIPE は status 4 → `Error` になる。§54 の終了コードの二値も変えない。
 - **決定 2: `String.trim` は ASCII の空白 6 種（SPACE 0x20、TAB 0x09、LF 0x0A、VT 0x0B、FF 0x0C、CR 0x0D）を両端から除く。** C の `__string_trim` で実装する。
   - **理由:** CR は §5 のエスケープに無く hado のソースに書けず、char のコードを取る intrinsic も無い。hado 側だけでは CRLF の CR を除けず、利用者に回避手段も無い。1 つの C 関数でこの穴を塞ぐ。
@@ -3577,13 +3582,16 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 | 形 | 期待 | 根拠 |
 |---|---|---|
-| `log <生成した String>` | stdout が `<String>\n` と `main` の値、終了 0 | 決定 1、§54 |
-| 空文字列の `log ""` | stdout が `\n` | 決定 1 |
+| `log <生成した String>` | stdout が `<String>
+` と `main` の値、終了 0 | 決定 1、§54 |
+| 空文字列の `log ""` | stdout が `
+` | 決定 1 |
 | stdout を閉じた実行 | 終了 1、stderr が `IoFailure` | 決定 1、§54 |
 | `/dev/full` への実行 | 終了 1、stderr が `IoFailure`（ENOSPC） | 決定 1 |
 | 読み側を閉じたパイプへの実行 | 終了 1（141 でない） | 決定 1、R29 |
 | `handler Error` で log の失敗を捕まえる | 腕が `message` `"IoFailure"` を受け取る | §37、§38 |
-| `String.trim s` | python3 の `s.strip(" \t\n\v\f\r")` | 決定 2 |
+| `String.trim s` | python3 の `s.strip(" \t
+\v\f\r")` | 決定 2 |
 | `String.join values separator` | python3 の `separator.join(values)` | 決定 3 |
 | `Int.abs n` | python3 の 64 bit wrap の `-n` | 決定 4 |
 | `Int.min` / `Int.max` | python3 の `min` / `max` | 決定 4 |
@@ -3611,7 +3619,9 @@ stdlib も CLI を 1 本書くのに要る基本関数を欠く。`String` に `
 
 判定 43-a: 仕様と stdlib の一致。§55 の関数集合と member の型が、`stdlib/io.hd` `stdlib/string.hd` `stdlib/int.hd` `stdlib/list.hd` の module の宣言と一致し、`effect Io` に `once log` がある。`verify-m7.sh` と `verify-r34.sh` と `verify-r36.sh` の判定を入れ子で呼ばず、そちらは別の門番として走らせる。
 
-判定 43-b: `log` の正常系。python3 が生成した String（空・ASCII・`\n` `\t` `"` `\` を含む・マルチバイト UTF-8・長い）を `log` して `main` が値を返す形を build して実行し、stdout が `文字列 + "\n"` と `main` の値の連結に一致し、終了 0、stderr が空であることを測る。
+判定 43-b: `log` の正常系。python3 が生成した String（空・ASCII・`
+` `\t` `"` `\` を含む・マルチバイト UTF-8・長い）を `log` して `main` が値を返す形を build して実行し、stdout が `文字列 + "
+"` と `main` の値の連結に一致し、終了 0、stderr が空であることを測る。
 
 判定 43-c: `log` の失敗。上の 4 分類（stdout 閉じ・`/dev/full`・読み側を閉じたパイプ・`handler Error` での捕捉）を決定的に作る。**捕捉の証拠は `Io.write_file` で書いたファイルの中身を判定器が読んで取る**（stdout は壊れているので観測に使えない）。**パイプは 141 でなく 1、シグナル死でないことを測る。**
 
@@ -5492,7 +5502,8 @@ R62 の実測（58 節の表）から、`if b | true => 1 | false => 2` は `1:2
 
 ### 実測した材料
 
-`def main =\n\t1   `（タブの字下げ、行末の空白 3 つ、末尾の改行なし）を書いて測った。
+`def main =
+\t1   `（タブの字下げ、行末の空白 3 つ、末尾の改行なし）を書いて測った。
 
 ```
 $ hado fmt --check main.hd   → check=0
@@ -5514,8 +5525,13 @@ $ hado check main.hd         → check=0
 
 | 入力 | `fmt` の後 | 数 |
 |---|---|---|
-| `def main =\n\t1   ` | `def main =\n\t1\n` | 2（行末の空白 1、末尾の改行 1） |
-| `def main =\n  1\n` | 変わらない | 0 |
+| `def main =
+\t1   ` | `def main =
+\t1
+` | 2（行末の空白 1、末尾の改行 1） |
+| `def main =
+  1
+` | 変わらない | 0 |
 | 空のファイル | 変わらない | 0 |
 
 ### 成果物
