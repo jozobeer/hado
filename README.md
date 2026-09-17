@@ -29,7 +29,7 @@ $ target/debug/hado run <file.hd>                # 一時ディレクトリで�
 
 ```
 $ target/debug/hado check tests/reject/E508/main.hd
-main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let p? = or do
+main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let p? = or do; canonical form: let user? = find_user id -> Some(user + 1)
 ```
 
 ## 検証

@@ -6,17 +6,15 @@
 $ cargo build --offline
 ```
 
-以後は同じ根から、書いたファイルのパスを付けて呼ぶ。以下では `hello.hd` と書く。
+以後は同じ根から、空ディレクトリに書いたファイルのパスを付ける。以下では `path/to/hello.hd` と書く。
 
 ```
-$ target/debug/hado run hello.hd
-$ target/debug/hado check [--print-type] hello.hd
-$ target/debug/hado build hello.hd
+$ target/debug/hado run path/to/hello.hd
+$ target/debug/hado check [--print-type] path/to/hello.hd
+$ target/debug/hado build path/to/hello.hd
 ```
 
-`run` は一時ディレクトリで実行し、隣に何も残さない。`build` は入力の隣に実行ファイルを置く。
-
-ファイルはどこに置いてもよい。渡したファイルのディレクトリがプログラムの根で、その下の `.hd` は全部検査される（[仕様 §50](spec.md#50-複数ファイル)）。このリポジトリの根や `tests/` `stdlib/` `tools/` に置くと、隣のプログラムと一つの検査になる。
+`run` は一時ディレクトリで実行し、隣に何も残さない。`build` は入力の隣に実行ファイルを置く。渡したファイルのディレクトリがプログラムの根で、その下の `.hd` は全部検査される（[仕様 §50](spec.md#50-複数ファイル)）。このリポジトリの根や `tests/` `stdlib/` `tools/` に置くと、隣のプログラムと一つの検査になる。
 
 ## hello
 
@@ -25,16 +23,16 @@ def main = "hello"
 ```
 
 ```
-$ target/debug/hado run hello.hd
+$ target/debug/hado run path/to/hello.hd
+hello
+$ target/debug/hado check --print-type path/to/hello.hd
+String
+$ target/debug/hado build path/to/hello.hd
+$ path/to/hello
 hello
 ```
 
 `main` の値が stdout に出る。String の最上位は引用符を付けない（[仕様 §54](spec.md#54-印字)）。
-
-```
-$ target/debug/hado check --print-type hello.hd
-String
-```
 
 ## 関数
 
@@ -61,9 +59,9 @@ def main = create_user []
 ```
 
 ```
-$ target/debug/hado run hello.hd
+$ target/debug/hado run path/to/hello.hd
 ok
-$ target/debug/hado check --print-type hello.hd
+$ target/debug/hado check --print-type path/to/hello.hd
 String {Error}
 ```
 
@@ -74,7 +72,7 @@ String {Error}
 `def main = create_user [1]` に変える。
 
 ```
-$ target/debug/hado run hello.hd
+$ target/debug/hado run path/to/hello.hd
 invalid
 ```
 
@@ -89,7 +87,7 @@ def main =
 ```
 
 ```
-$ target/debug/hado check hello.hd
+$ target/debug/hado check path/to/hello.hd
 hello.hd:2:3: error[E501]: binding x is returned unchanged at 3:3; canonical form: "hello"
 ```
 
