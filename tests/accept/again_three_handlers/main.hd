@@ -3,7 +3,7 @@
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler A as Outer

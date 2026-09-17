@@ -102,7 +102,7 @@ fn generated_chains_execute_success_and_each_failure_path() {
             let source = format!(
                 "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
                  def first (flag: Int): Entry {{Error}} => if flag == 1 => raise {{ message = \"f{n}\" }} | {{ field = Box({n}) }}\n\
-                 def step (flag: Int, stage: Int): Unit {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
+                 def step (flag: Int, stage: Int): Void {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
                  def run flag => let {{ field = Box(x) }} = first flag -> do step flag 2 -> do step flag 3 -> x + 5\n\
                  def main = run {fail}"
             );

@@ -1,7 +1,7 @@
 // spec: §53
 // expect: 10000000
 effect Tick
-once tick: Unit
+once tick: Void
 handler Tick as Nop
 once tick => ()
 def rec loop (n: Int, acc: Int): Int {Tick} =>

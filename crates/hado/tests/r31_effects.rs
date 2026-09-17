@@ -8,7 +8,7 @@ fn run_main(body: &str, expected: &[i64]) {
     ));
     std::fs::create_dir(&dir).unwrap();
     let source = format!(
-        "effect Y\nagain y(value: Int): Unit\nhandler Y as Keep\nagain y value => let rest = resume () -> [value, ...rest]\nreturn x => x\n{body}\n"
+        "effect Y\nagain y(value: Int): Void\nhandler Y as Keep\nagain y value => let rest = resume () -> [value, ...rest]\nreturn x => x\n{body}\n"
     );
     std::fs::write(dir.join("main.hd"), &source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado"))
@@ -54,7 +54,7 @@ fn short_circuit_takes_the_right_branch_only_when_needed() {
 fn compound_do_keeps_the_following_computation() {
     let (a, b) = payloads();
     run_main(&format!(
-        "def g (u: Unit) => u\ndef main = with Keep -> do g (y {a}) -> [{b}]"
+        "def g (u: Void) => u\ndef main = with Keep -> do g (y {a}) -> [{b}]"
     ), &[a, b]);
 }
 
@@ -62,7 +62,7 @@ fn compound_do_keeps_the_following_computation() {
 fn pattern_scrutinee_is_evaluated_before_its_arm() {
     let (a, b) = payloads();
     run_main(&format!(
-        "type Box = | Empty | Full(Unit)\ndef main = with Keep -> if Full(y {a}) | Full(_) => [{b}] | Empty => []"
+        "type Box = | Empty | Full(Void)\ndef main = with Keep -> if Full(y {a}) | Full(_) => [{b}] | Empty => []"
     ), &[a, b]);
 }
 
@@ -122,7 +122,7 @@ fn non_unit_again_result_is_bound() {
 
 fn mixed_source(body: &str, prefix: &str) -> String {
     format!(
-        "effect S\nagain s(value: String): Unit\neffect Y\nagain y(value: Int): Unit\nhandler S as Names\nagain s value => let rest = resume () -> [value, ...rest]\nreturn x => x\nhandler Y as Collect\nagain y value => let rest = resume () -> [String.concat \"{prefix}\" (Int.to_string value), ...rest]\nreturn _ => []\ndef main = with Names -> with Collect -> {body}\n"
+        "effect S\nagain s(value: String): Void\neffect Y\nagain y(value: Int): Void\nhandler S as Names\nagain s value => let rest = resume () -> [value, ...rest]\nreturn x => x\nhandler Y as Collect\nagain y value => let rest = resume () -> [String.concat \"{prefix}\" (Int.to_string value), ...rest]\nreturn _ => []\ndef main = with Names -> with Collect -> {body}\n"
     )
 }
 

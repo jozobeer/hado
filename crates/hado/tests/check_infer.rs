@@ -37,7 +37,7 @@ impl Generator {
             Ty::Bool => (value % 2 == 0).to_string(),
             Ty::Char => format!("'{}'", (b'a' + (value % 26) as u8) as char),
             Ty::String => format!("\"value{value}\""),
-            Ty::Unit => "()".into(),
+            Ty::Void => "()".into(),
             _ => unreachable!(),
         }
     }
@@ -70,7 +70,7 @@ impl Generator {
 }
 
 fn scalar_types() -> [Ty; 6] {
-    [Ty::Int, Ty::Float, Ty::Bool, Ty::Char, Ty::String, Ty::Unit]
+    [Ty::Int, Ty::Float, Ty::Bool, Ty::Char, Ty::String, Ty::Void]
 }
 
 #[test]

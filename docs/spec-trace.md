@@ -40,7 +40,7 @@
 | §56 | アンカーは表の列どおり | 全段階 | — | 位置の摂動プローブ（`-- error:` 行の直後に空行）を全コードに広げる |
 | §54 | `raise` は `message` を stderr に出して終了コード 1。Option は剥がさない | 実行 | 受理 | `tests/accept/create_user/main.hd` `division_error.hd` |
 | §54 | List は `[1, 2]`、入れ子の String は literal 形 | 実行 | 受理 | R9-5 の印字プローブ |
-| §54 | 最上位の String は生、Unit は無印字 | 実行 | 受理 | `tests/accept/display/main.hd` `unit.hd` |
+| §54 | 最上位の String は生、Void は無印字 | 実行 | 受理 | `tests/accept/display/main.hd` `void.hd` |
 | §54 | Float は指数なしの最短往復 | 実行 | 受理 | R9-5 の印字プローブ（`3.0` `0.1` `-0.0` と極端な値） |
 | §31 | E515 の 4 条件 | 冗長 | E515 | `tests/reject/E515/main.hd`、R9-4 の判定器（条件を 1 つずつ外す 4 プローブ） |
 | §32 | 引数を持たない `def main \| true => 1 \| 0` は第31節の pattern 腕として読まれる | 構文 | 受理 → E206 | R13 の判定器 |
@@ -134,3 +134,4 @@
 | §40 | 腕の未使用束縛は `_` に改名され、参照される束縛は残る | 冗長 | 受理 | verify-r75.sh（75-a〜75-e） |
 | §54 | 失敗は raise が main まで届くことで表し、stderr と終了コード 1 を返す | 実行 | 失敗 | verify-r76.sh（76-a〜76-e） |
 | §50, §54 | 試し書きはドット始まりで隔離でき、赤は正準形つきで直り、実行・テスト・型表示まで 1 本で回る | 体験 | 成功 | verify-r77.sh（77-a〜77-e） |
+| §5, §19, §54 | 型名は Void。値は `()`。入れ子は `()`、最上位は無印字 | 型 / 実行 | 受理 | verify-r81.sh（81-a〜81-e） |

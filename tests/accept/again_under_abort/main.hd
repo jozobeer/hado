@@ -1,7 +1,7 @@
 // spec: §38
 // expect: [7]
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect E
 abort e(reason: Int)
 handler Y as Collect

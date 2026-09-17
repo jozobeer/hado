@@ -79,7 +79,7 @@ fn print_type_orders_effect_rows_and_writes_them_back() {
         let case = Case::new();
         let mut source = String::new();
         for name in &names {
-            source.push_str(&format!("effect {name}\nonce {}op: Unit\n", name.to_lowercase()));
+            source.push_str(&format!("effect {name}\nonce {}op: Void\n", name.to_lowercase()));
         }
         source.push_str(&format!("def f (x: Int): Int {{{}}} => x\ndef main = f 1\n", written.join(", ")));
         case.write("main.hd", &source);
@@ -88,7 +88,7 @@ fn print_type_orders_effect_rows_and_writes_them_back() {
         assert_eq!(printed, expected, "{source}");
         let mut restored = String::new();
         for name in &names {
-            restored.push_str(&format!("effect {name}\nonce {}op: Unit\n", name.to_lowercase()));
+            restored.push_str(&format!("effect {name}\nonce {}op: Void\n", name.to_lowercase()));
         }
         restored.push_str(&format!("def g (x: Int): {} => x\ndef main = g 1\n", printed.trim()));
         case.write("main.hd", &restored);
@@ -161,18 +161,18 @@ fn instantiated_condition_effects_are_e308() {
 #[test]
 fn higher_order_union_keeps_argument_row_open() {
     let case = Case::new();
-    case.write("main.hd", "effect Ask\nonce ask: Bool\neffect Log\nonce tick: Unit\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
+    case.write("main.hd", "effect Ask\nonce ask: Bool\neffect Log\nonce tick: Void\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Ask, Log}\n");
 }
 
 #[test]
 fn operation_labels_use_unified_arguments() {
     let case = Case::new();
-    case.write("main.hd", "effect A Yield\nagain yield(value: A): Unit\ndef emit x => yield x\ndef main = emit 1\n");
+    case.write("main.hd", "effect A Yield\nagain yield(value: A): Void\ndef emit x => yield x\ndef main = emit 1\n");
     let printed = case.print_type("main.hd");
-    assert_eq!(printed, "Unit {Int Yield}\n");
-    case.write("main.hd", "effect A Yield\nagain yield(value: A): Unit\ndef emit (x: Int): Unit {Int Yield} => yield x\ndef main = emit 1\n");
-    assert_eq!(case.print_type("main.hd"), "Unit {Int Yield}\n");
+    assert_eq!(printed, "Void {Int Yield}\n");
+    case.write("main.hd", "effect A Yield\nagain yield(value: A): Void\ndef emit (x: Int): Void {Int Yield} => yield x\ndef main = emit 1\n");
+    assert_eq!(case.print_type("main.hd"), "Void {Int Yield}\n");
 }
 
 #[test]
@@ -186,21 +186,21 @@ fn handler_for_a_root_effect_in_another_directory_is_e204() {
 #[test]
 fn unannotated_union_keeps_argument_and_body_rows() {
     let case = Case::new();
-    case.write("main.hd", "effect Ask\nonce ask: Bool\neffect Log\nonce tick: Unit\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
+    case.write("main.hd", "effect Ask\nonce ask: Bool\neffect Log\nonce tick: Void\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Ask, Log}\n");
 }
 
 #[test]
 fn annotated_row_is_an_upper_bound_for_argument_rows() {
     let case = Case::new();
-    case.write("main.hd", "effect Log\nonce tick: Unit\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x: Int {Log} => tickit (f x)\ndef main = apply2 tickit 1\n");
+    case.write("main.hd", "effect Log\nonce tick: Void\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x: Int {Log} => tickit (f x)\ndef main = apply2 tickit 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Log}\n");
 }
 
 #[test]
 fn annotated_row_rejects_argument_effects_outside_the_bound() {
     let case = Case::new();
-    case.write("main.hd", "effect Log\nonce tick: Unit\neffect Ask\nonce ask: Bool\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x: Int {Log} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = apply2 peek 1\n");
+    case.write("main.hd", "effect Log\nonce tick: Void\neffect Ask\nonce ask: Bool\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x: Int {Log} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = apply2 peek 1\n");
     let output = case.command("check", "main.hd");
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
     let diagnostic = String::from_utf8_lossy(&output.stderr);
@@ -210,7 +210,7 @@ fn annotated_row_rejects_argument_effects_outside_the_bound() {
 #[test]
 fn argument_rows_are_generalized_per_call() {
     let case = Case::new();
-    case.write("main.hd", "effect Log\nonce tick: Unit\neffect Ask\nonce ask: Bool\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Ask, Log} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = g peek 1 + g tickit 1\n");
+    case.write("main.hd", "effect Log\nonce tick: Void\neffect Ask\nonce ask: Bool\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Ask, Log} => tickit (f x)\ndef peek (n: Int): Int {Ask} => n\ndef main = g peek 1 + g tickit 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Ask, Log}\n");
 }
 
@@ -238,14 +238,14 @@ fn matching_value_member_rows_are_kept() {
 #[test]
 fn unannotated_argument_accepts_matching_effect_arguments() {
     let case = Case::new();
-    case.write("main.hd", "effect Log\nonce tick: Unit\neffect A Yield\nagain yield(value: A): Unit\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Log, Int Yield} => tickit (f x)\ndef emit (n: Int): Int {Int Yield} => n\ndef main = g emit 1\n");
+    case.write("main.hd", "effect Log\nonce tick: Void\neffect A Yield\nagain yield(value: A): Void\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Log, Int Yield} => tickit (f x)\ndef emit (n: Int): Int {Int Yield} => n\ndef main = g emit 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Int Yield, Log}\n");
 }
 
 #[test]
 fn unannotated_argument_rejects_mismatched_effect_arguments() {
     let case = Case::new();
-    case.write("main.hd", "effect Log\nonce tick: Unit\neffect A Yield\nagain yield(value: A): Unit\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Log, Int Yield} => tickit (f x)\ndef semit (n: Int): Int {String Yield} => n\ndef main = g semit 1\n");
+    case.write("main.hd", "effect Log\nonce tick: Void\neffect A Yield\nagain yield(value: A): Void\ndef tickit (x: Int): Int {Log} => x\ndef g f x: Int {Log, Int Yield} => tickit (f x)\ndef semit (n: Int): Int {String Yield} => n\ndef main = g semit 1\n");
     let output = case.command("check", "main.hd");
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
     let diagnostic = String::from_utf8_lossy(&output.stderr);
@@ -255,14 +255,14 @@ fn unannotated_argument_rejects_mismatched_effect_arguments() {
 #[test]
 fn annotated_argument_accepts_matching_effect_arguments() {
     let case = Case::new();
-    case.write("main.hd", "effect A Yield\nagain yield(value: A): Unit\ndef emit (n: Int): Int {Int Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g emit 1\n");
+    case.write("main.hd", "effect A Yield\nagain yield(value: A): Void\ndef emit (n: Int): Int {Int Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g emit 1\n");
     assert_eq!(case.print_type("main.hd"), "Int {Int Yield}\n");
 }
 
 #[test]
 fn annotated_argument_rejects_mismatched_effect_arguments() {
     let case = Case::new();
-    case.write("main.hd", "effect A Yield\nagain yield(value: A): Unit\ndef semit (n: Int): Int {String Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g semit 1\n");
+    case.write("main.hd", "effect A Yield\nagain yield(value: A): Void\ndef semit (n: Int): Int {String Yield} => n\ndef g (f: Fn(Int => Int {Int Yield}), x: Int): Int {Int Yield} => f x\ndef main = g semit 1\n");
     let output = case.command("check", "main.hd");
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
     let diagnostic = String::from_utf8_lossy(&output.stderr);

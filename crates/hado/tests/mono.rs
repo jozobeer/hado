@@ -34,7 +34,7 @@ fn literal_lowering_preserves_values_and_types() {
         ("true", Type::Bool),
         ("'x'", Type::Char),
         ("\"hello\"", Type::String),
-        ("()", Type::Unit),
+        ("()", Type::Void),
     ] {
         let ast = hado::parser::parse_source(&format!("def main = {source}"), "t").unwrap();
         let expression = hado::mono::lower_literal(ast.main().unwrap()).unwrap();
@@ -855,7 +855,7 @@ fn scalar_compare_derivations_have_distinct_signatures() {
     for (source, name, ty) in [
         ("def main = compare false true", "compare_Bool", Type::Bool),
         ("def main = compare 'a' 'b'", "compare_Char", Type::Char),
-        ("def main = compare () ()", "compare_Unit", Type::Unit),
+        ("def main = compare () ()", "compare_Void", Type::Void),
     ] {
         let checked = hado::check_source(source, "t").unwrap();
         let ast = hado::parser::parse_source(source, "t").unwrap();
@@ -863,7 +863,7 @@ fn scalar_compare_derivations_have_distinct_signatures() {
         let function = program.functions.iter().find(|f| f.name == name).unwrap();
         assert_eq!(function.signature.parameters, vec![ty.clone(), ty.clone()]);
         assert_eq!(function.signature.result, Type::Int);
-        if ty == Type::Unit {
+        if ty == Type::Void {
             assert_eq!(
                 function.body,
                 hado::mono::Expression::Constant(hado::mono::Constant::Int(0))
@@ -901,7 +901,7 @@ fn integer_printer_is_an_ordinary_function_with_external_body() {
     let function = hado::mono::derive_int_printer(hado::mono::FunctionId(12)).unwrap();
     assert_eq!(function.name, "print_Int");
     assert_eq!(function.signature.parameters, vec![Type::Int]);
-    assert_eq!(function.signature.result, Type::Unit);
+    assert_eq!(function.signature.result, Type::Void);
     assert!(matches!(function.body, hado::mono::Expression::CallRuntime { function: hado::runtime_abi::RuntimeFunction::PrintInt, .. }));
 }
 
@@ -914,7 +914,7 @@ fn dump_mono_includes_the_generated_main_printer() {
 
 #[test]
 fn scalar_equality_has_one_derived_function_per_type() {
-    for (expression, name) in [("1 == 1 && 2 != 3", "Int"), ("true == false", "Bool"), ("1.0 == 1.0", "Float"), ("'a' == 'b'", "Char"), ("\"a\" == \"b\"", "String"), ("() == ()", "Unit")] {
+    for (expression, name) in [("1 == 1 && 2 != 3", "Int"), ("true == false", "Bool"), ("1.0 == 1.0", "Float"), ("'a' == 'b'", "Char"), ("\"a\" == \"b\"", "String"), ("() == ()", "Void")] {
         let source = format!("def main = {expression}");
         let output = hado::dump_mono(&source, "t").unwrap();
         assert_eq!(output.matches(&format!("name: \"eq_{name}\"")).count(), 1, "{output}");

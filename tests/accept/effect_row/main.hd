@@ -4,7 +4,7 @@
 effect Ask
 once ask: String
 effect Log
-once tick: Unit
+once tick: Void
 handler Ask as HAsk
 once ask => ""
 handler Log as HLog

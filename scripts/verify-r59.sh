@@ -179,7 +179,7 @@ build_run(root, 'reached', {'main.hd': reached}, str(n))
 # (2) 効果の操作の型にだけ現れる型は使われる（bug.md の 2 つ目の穴）
 only = (f'type {ty} = | Mk(Int)\n'
         f'effect {effect}\n'
-        f'once {op} (m: {ty}): Unit\n'
+        f'once {op} (m: {ty}): Void\n'
         f'handler {effect} as {handler}\n'
         f'once {op} _ =>\n'
         f'  with {handler} ->\n'

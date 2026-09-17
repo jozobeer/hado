@@ -148,7 +148,7 @@ fn once_tail_recursion_completes_ten_million_iterations() {
         let n = random(&mut state, 40) + 10;
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Tick\nonce tick: Unit\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+            "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
         ));
         let dump = case.command("dump-mono", "main.hd");
         assert_eq!(dump.status.code(), Some(0), "{}", String::from_utf8_lossy(&dump.stderr));
@@ -180,7 +180,7 @@ struct Built {
 fn build_once_loop(n: u64) -> Built {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "effect Tick\nonce tick: Unit\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
     ));
     let built = case.build("main.hd");
     assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
@@ -200,7 +200,7 @@ fn max_rss_kb(bin: &std::path::Path) -> u64 {
 }
 
 fn collect_handler() -> &'static str {
-    "effect A Yield\nagain yield(value: A): Unit\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
+    "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
 }
 
 fn list_literal(values: &[i64]) -> String {
@@ -217,7 +217,7 @@ fn generator_collects_yielded_values() {
         let values: Vec<i64> = (0..len).map(|_| random(&mut state, 50) as i64).collect();
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\ndef rec each (values: Int List): Unit {{Int Yield}} =>\n  if values | [] => () | [head, ...tail] =>\n    do yield head ->\n    each tail\ndef main = with Collect -> each {}\n",
+            "{}\ndef rec each (values: Int List): Void {{Int Yield}} =>\n  if values | [] => () | [head, ...tail] =>\n    do yield head ->\n    each tail\ndef main = with Collect -> each {}\n",
             collect_handler(),
             list_literal(&values),
         ));
@@ -237,7 +237,7 @@ fn again_loop_counts_each_yield() {
         let n = random(&mut state, 30) + 5;
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop {n})\n",
+            "{}\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop {n})\n",
             collect_handler(),
         ));
         let dump = case.command("dump-mono", "main.hd");
@@ -253,7 +253,7 @@ fn again_loop_counts_each_yield() {
     }
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}\ndef rec loop (n: Int): Unit {{Int Yield}} =>\n  if n <= 0 => ()\n  | do yield n -> loop (n - 1)\ndef main = List.length (with Collect -> loop 10000)\n",
+        "{}\ndef rec loop (n: Int): Void {{Int Yield}} =>\n  if n <= 0 => ()\n  | do yield n -> loop (n - 1)\ndef main = List.length (with Collect -> loop 10000)\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -347,7 +347,7 @@ fn again_arm_keeps_pure_helpers_at_their_result_type() {
         let doubled: Vec<i64> = (1..=n as i64).rev().map(|k| k * 2).collect();
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect A Yield\nagain yield(value: A): Unit\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Unit {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
+            "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));

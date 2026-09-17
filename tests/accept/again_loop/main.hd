@@ -3,13 +3,13 @@
 // needs: prelude
 // expect: 10000
 effect A Yield
-again yield(value: A): Unit
+again yield(value: A): Void
 handler A Yield as Collect
 again yield value =>
   let rest = resume () ->
   [value, ...rest]
 return _ => []
-def rec loop (n: Int): Unit {Int Yield} =>
+def rec loop (n: Int): Void {Int Yield} =>
   if n <= 0 => ()
   | do yield n -> loop (n - 1)
 def main = List.length (with Collect -> loop 10000)

@@ -6,7 +6,7 @@ once ask: String
 effect Stop
 abort stop
 effect A Yield
-again yield(value: A): Unit
+again yield(value: A): Void
 handler Ask as HAsk
 once ask => ""
 handler Stop as HStop

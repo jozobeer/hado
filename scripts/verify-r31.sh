@@ -26,7 +26,7 @@ write_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Y as $handler
 again y value => let rest = resume () -> [value, ...rest]
 $(if [ "$handler" = Keep ]; then echo "return x => x"; else echo "return _ => []"; fi)
@@ -53,7 +53,7 @@ write_source let "def f u => if u == () => [7] | []
 def main = with Keep -> let u = y $payload_a -> f u" Keep
 write_source argument "def f u => if u == () => [9] | []
 def main = with Keep -> f (y $payload_a)" Keep
-write_source record "type P = { a: Unit; b: Int }
+write_source record "type P = { a: Void; b: Int }
 def main = with Keep -> let p = { a = y $payload_a; b = 4 } -> [p.b]" Keep
 write_source pipe "def f u => if u == () => [8] | []
 def main = with Keep -> y $payload_a |> f" Keep
@@ -84,9 +84,9 @@ write_outer_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return $returns
@@ -102,9 +102,9 @@ write_spread_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect W
-again w(value: Int): Unit
+again w(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return x => x
@@ -127,9 +127,9 @@ write_spread_source generated_f "$payload_a" "$payload_b"
 mkdir -p "$workdir/e" "$workdir/ok_outer" "$workdir/ok_once"
 cat >"$workdir/e/main.hd" <<'EOF'
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer
@@ -144,9 +144,9 @@ def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
 EOF
 cat >"$workdir/ok_outer/main.hd" <<'EOF'
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler Z as Outer
 again z value => let rest = resume () -> [value, ...rest]
 return _ => []
@@ -159,7 +159,7 @@ cat >"$workdir/ok_once/main.hd" <<'EOF'
 effect A
 once a: Int
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
@@ -197,9 +197,9 @@ write_mixed_source() {
     mkdir -p "$workdir/$kind"
     cat >"$workdir/$kind/main.hd" <<EOF
 effect S
-again s(value: String): Unit
+again s(value: String): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 handler S as Names
 again s value => let rest = resume () -> [value, ...rest]
 return x => x
@@ -214,7 +214,7 @@ write_ask_source h 21
 write_ask_source generated_h "$payload_a"
 write_mixed_source i 'do s "a" -> do y 1 -> ()' n
 write_mixed_source j 'do y 1 -> do s "b" -> ()' ''
-check '31-h non-Unit again result' check_prints h '[42]'
+check '31-h non-Void again result' check_prints h '[42]'
 check '31-i mixed payloads' check_prints i '["a", "n1"]'
 check '31-j mixed payloads through resume' check_prints j '["b", "1"]'
 check '31-k generated 31-h' check_prints generated_h "[$((payload_a * 2))]"

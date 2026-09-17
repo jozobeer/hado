@@ -1,9 +1,9 @@
 // spec: §38
 // expect: [5]
 effect Z
-again z(value: Int): Unit
+again z(value: Int): Void
 effect Y
-again y(value: Int): Unit
+again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer

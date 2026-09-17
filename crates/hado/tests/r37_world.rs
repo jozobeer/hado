@@ -71,7 +71,7 @@ fn user_operation_parameters_shadow_operations() {
 
 #[test]
 fn shadowed_again_is_a_local_let_value() {
-    Case::new("effect Foo\nagain tick(value: Int): Unit\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
+    Case::new("effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
 }
 
 #[test]

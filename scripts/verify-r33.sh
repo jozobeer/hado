@@ -814,7 +814,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 解いていなければ（効果行を落としていれば）field の型が合わず E301 / E305 になる。
 {
     printf 'def main = with Catch -> go (read ({ value = go; tag = "%s" }))\ndef read box => box.tag\ntype Box = { value: Store.T; tag: String }\ndef go (suffix: String): String {Error} => parse suffix\ndef parse (input: String): String {Error} => raise { message = String.concat input "%s" }\n\n' "$rand_fe_suffix" "$rand_fe_message"
-    printf 'module Store\ntype T\ndef touch(name: String): Unit Pure\n\n'
+    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n\n'
     printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n\n'
     printf 'handler Error as Catch\nabort raise e => e.message\n'
 } >"$workdir/33fneff/main.hd"
@@ -822,7 +822,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 負 2: shared を外すと効果行付きの field は不透明のまま型検査が落ちる。
 {
     printf 'def main = read ({ value = go })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\n\n' "$rand_fe_suffix" "$rand_fe_prefix"
-    printf 'module Store\ntype T\ndef touch(name: String): Unit Pure\n\n'
+    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n\n'
     printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef touch _ => ()\n'
 } >"$workdir/33fneffneg/main.hd"
 
@@ -856,14 +856,14 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # panic（終了 101）する形。`shared` を外した対照と同じ診断で終了 1（101 でない）を測る。
 
 # 負 1 (rhs-arity): 契約 Stack.T の arity は 1。右辺を型引数 0 で参照する。
-printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()\n' >"$workdir/33rhs1/main.hd"
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()\n' >"$workdir/33rhs1/main.hd"
 
 # 負 2 (rhs-too-many): 右辺を型引数 2 で参照する。
-printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()\n' >"$workdir/33rhs2/main.hd"
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()\n' >"$workdir/33rhs2/main.hd"
 
 # 負 3 (functor-rhs-arity): functor 本文の `shared type T = M.T`。仮引数の契約 Stack の
 # T は arity 1 だが、M.T を型引数 0 で参照する。
-printf 'type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)\n' >"$workdir/33frhs/main.hd"
+printf 'type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)\n' >"$workdir/33frhs/main.hd"
 
 # 負 4 (wrong-result-contract): functor Make の結果契約は Source、適用の見出しは Target。
 printf 'type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Source as Base\nshared type T = String\ndef make x => x\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Target as Out = Make(Base)\n' >"$workdir/33wres/main.hd"

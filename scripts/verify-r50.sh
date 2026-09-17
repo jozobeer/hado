@@ -32,13 +32,13 @@ OVERFLOW = b'hado: stack overflow\n'
 def again_source(n):
     return (
         'effect A Yield\n'
-        'again yield(value: A): Unit\n'
+        'again yield(value: A): Void\n'
         'handler A Yield as Collect\n'
         'again yield value =>\n'
         '  let rest = resume () ->\n'
         '  [value, ...rest]\n'
         'return _ => []\n'
-        'def rec loop (n: Int): Unit {Int Yield} =>\n'
+        'def rec loop (n: Int): Void {Int Yield} =>\n'
         '  if n <= 0 => ()\n'
         '  | do yield n -> loop (n - 1)\n'
         f'def main = List.length (with Collect -> loop {n})\n')

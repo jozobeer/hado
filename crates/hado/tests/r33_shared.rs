@@ -122,9 +122,9 @@ fn shared_def_is_a_syntax_error() {
 
 #[test]
 fn shared_with_a_constructor_body_is_a_syntax_error() {
-    let adt = format!("{MONOID}\n\nimplement Monoid as Monad\ntype T = Unit\ndef combine left _ => left\ndef of value => value\nshared type T = | A | B");
+    let adt = format!("{MONOID}\n\nimplement Monoid as Monad\ntype T = Void\ndef combine left _ => left\ndef of value => value\nshared type T = | A | B");
     reject(&adt, "E100", "| A");
-    let record = format!("{MONOID}\n\nimplement Monoid as Monad\ntype T = Unit\ndef combine left _ => left\ndef of value => value\nshared type T = {{ x: Int }}");
+    let record = format!("{MONOID}\n\nimplement Monoid as Monad\ntype T = Void\ndef combine left _ => left\ndef of value => value\nshared type T = {{ x: Int }}");
     reject(&record, "E100", "{ x");
 }
 
@@ -456,7 +456,7 @@ fn a_shared_realization_whose_rhs_under_applies_an_abstract_type_is_rejected() {
     // 契約 Stack の T は型引数 1。右辺 Stack.T を型引数 0 で書いた等式を前処理が
     // 登録すると、`Ty::reveal` から `TypeRealization::apply` の個数 assert で panic する。
     // 登録せず、既存の経路（annotation_inner の arity 照合）が E204 で拒否すること。
-    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()";
+    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()";
     let error = check_source(source, "t").err().expect("an under-applied rhs must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
 }
@@ -465,7 +465,7 @@ fn a_shared_realization_whose_rhs_under_applies_an_abstract_type_is_rejected() {
 fn a_shared_realization_whose_rhs_over_applies_an_abstract_type_is_rejected() {
     // 右辺 (Int, String) Stack.T は型引数 2。Stack.T の arity 1 と食い違う。同じく
     // 登録せず、annotation_inner が型注釈として拒否すること（コード無しの型注釈エラー）。
-    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()";
+    let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()";
     let error = check_source(source, "t").err().expect("an over-applied rhs must be rejected, not crash");
     assert!(error.code.is_none(), "{error}");
 }
@@ -475,7 +475,7 @@ fn a_functor_shared_realization_whose_rhs_under_applies_a_parameter_is_rejected(
     // functor 本文の `shared type T = M.T`。契約 Stack の T は型引数 1 だが M.T を
     // 型引数 0 で参照している。仮引数の契約の署名から arity を取り、食い違う等式を
     // 登録しないこと（登録すると apply の assert で panic する）。
-    let source = "type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Unit Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)";
+    let source = "type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)";
     let error = check_source(source, "t").err().expect("a parameter-dropping rhs must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
 }

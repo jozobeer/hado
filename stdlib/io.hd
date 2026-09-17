@@ -1,13 +1,13 @@
 effect Io
 once read_file(path: String): Bytes {Error}
-once write_file(path: String, contents: Bytes): Unit {Error}
-once log(contents: String): Unit {Error}
+once write_file(path: String, contents: Bytes): Void {Error}
+once log(contents: String): Void {Error}
 once read_dir(path: String): String List {Error}
 once read_stdin: Bytes {Error}
 module IoDefault
 def read_file(path: String): Bytes {Error}
-def write_file(path: String, contents: Bytes): Unit {Error}
-def log(contents: String): Unit {Error}
+def write_file(path: String, contents: Bytes): Void {Error}
+def log(contents: String): Void {Error}
 def read_dir(path: String): String List {Error}
 def read_stdin: Bytes {Error}
 implement IoDefault as IoDefault

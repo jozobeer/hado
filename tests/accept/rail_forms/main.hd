@@ -4,7 +4,7 @@
 // needs: prelude
 type Box = | Box(Int)
 type Entry = { value: Box }
-def pass (n: Int): Unit {Error} => if n > 0 => () | raise { message = "negative" }
+def pass (n: Int): Void {Error} => if n > 0 => () | raise { message = "negative" }
 def read (entry: Entry Option): Int {Error} =>
   Option.ok_or (
     let { value = Box(n) }? = entry ->

@@ -178,7 +178,7 @@ impl FileScope {
                 }
                 self.optional(fallback, bound);
             }
-            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Unit | NodeKind::Resume => {}
+            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Void | NodeKind::Resume => {}
             NodeKind::With { args, body, .. } => {
                 for arg in args { self.expression(arg, bound); }
                 self.expression(body, bound);

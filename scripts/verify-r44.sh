@@ -48,9 +48,9 @@ def check(name, source, expected_code):
 check('once-declaration',
       'effect Ask\nonce ask: String\nhandler Ask as H\nonce ask => "x"\ndef main = with H -> ask\n', None)
 check('again-declaration',
-      'effect A Y\nagain y(value: Int): Unit\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> do y 1 -> 0\n', None)
+      'effect A Y\nagain y(value: Int): Void\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> do y 1 -> 0\n', None)
 check('again-function-body',
-      'effect A Y\nagain y(value: Int): Unit\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n', None)
+      'effect A Y\nagain y(value: Int): Void\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n', None)
 # 旧綴りは op_kind の位置で名前として読まれ、文法に合わない。
 check('old-reply-is-a-name', 'effect E reply x: Int\ndef main = 0\n', 'E100')
 check('old-capture-is-a-name', 'effect E capture x: Int\ndef main = 0\n', 'E100')
@@ -73,7 +73,7 @@ spec = Path('docs/spec.md').read_text()
 assert not re.search(r'\breply\b', spec), 'reply remains in docs/spec.md'
 assert not re.search(r'\bcapture\b', spec), 'capture remains in docs/spec.md'
 needles = ['| `once` |', '| `again` |', 'once ask: String', 'again yield value =>',
-           'once log(contents: String): Unit {Error}', '`once` `abort` `again`',
+           'once log(contents: String): Void {Error}', '`once` `abort` `again`',
            'op_kind         := "once" | "abort" | "again"']
 missing = [needle for needle in needles if needle not in spec]
 assert not missing, missing

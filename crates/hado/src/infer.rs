@@ -223,7 +223,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         }
         // A library has no entry: skip the `main` type rules (E206 stays in
         // `entry_form`, and E701/E702/E705/E706 need a `main` to apply).
-        if inspection == crate::Inspection::Library { return Ok(Ty::Unit); }
+        if inspection == crate::Inspection::Library { return Ok(Ty::Void); }
         let scheme = checker
             .values
             .get("main")
@@ -232,7 +232,7 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         let main = checker.inference.instantiate(&scheme);
         if let Ty::Var(_) = checker.inference.resolve(&main) {
             // raise's result is polymorphic; leaving it open makes main E701.
-            let _ = checker.inference.unify(&main, &Ty::Unit);
+            let _ = checker.inference.unify(&main, &Ty::Void);
         }
         checker.inference.close_rows(&main);
         checker.main_effects = checker.inference.close_row(&checker.main_effects);
@@ -974,7 +974,7 @@ impl Checker<'_> {
             NodeKind::Bool(_) => Ok(Ty::Bool),
             NodeKind::Char(_) => Ok(Ty::Char),
             NodeKind::Str(_) => Ok(Ty::String),
-            NodeKind::Unit => Ok(Ty::Unit),
+            NodeKind::Void => Ok(Ty::Void),
             NodeKind::Bin(op, a, b) => self.binary(*op, a, b),
             NodeKind::Not(value) => {
                 let ty = self.expression(value)?;
@@ -1957,7 +1957,7 @@ impl Checker<'_> {
                 let result = match &op.ret {
                     Some(ty) => self.payload_type(ty, &parameters, op.span)?,
                     None if op.kind == OpKind::Abort => self.inference.fresh(),
-                    None => Ty::Unit,
+                    None => Ty::Void,
                 };
                 let result_row = match &op.ret {
                     Some(ty) if ty.effects.is_some() => self.row_annotation(&ty.effects)?,
@@ -2109,13 +2109,13 @@ impl Checker<'_> {
                     self.unify(&ty?, answer, *arm_span)?;
                 }
                 HandlerArm::Operation { kind: OpKind::Abort, name, params, body: ret, span: arm_span, .. } => {
-                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Unit));
+                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Void));
                     for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
                     let ty = self.expression(ret)?;
                     self.unify(&ty, answer, *arm_span)?;
                 }
                 HandlerArm::Operation { name, params, body: ret, .. } => {
-                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Unit));
+                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Void));
                     for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
                     let _ = self.expression(ret)?;
                 }

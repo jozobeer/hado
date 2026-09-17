@@ -1,0 +1,5 @@
+// spec: §33
+// expect:
+// item: Void payload
+def done (x: Int): Void {Error} => if x == 1 => () | raise { message = "unexpected" }
+def main = done 1

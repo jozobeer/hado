@@ -43,7 +43,7 @@ pub enum TokKind {
     Float(f64),
     Char(char),
     Str(String),
-    Unit,
+    Void,
     LParen,
     RParen,
     LBrace,
@@ -111,7 +111,7 @@ impl std::fmt::Display for TokKind {
             TokKind::Float(x) => write!(f, "{x}"),
             TokKind::Char(c) => write!(f, "'{c}'"),
             TokKind::Str(s) => write!(f, "\"{s}\""),
-            TokKind::Unit => write!(f, "()"),
+            TokKind::Void => write!(f, "()"),
             TokKind::LParen => write!(f, "("),
             TokKind::RParen => write!(f, ")"),
             TokKind::LBrace => write!(f, "{{"),
@@ -272,7 +272,7 @@ impl Lexer<'_> {
                 self.bump();
                 if self.peek() == Some(')') {
                     self.bump();
-                    Ok(TokKind::Unit)
+                    Ok(TokKind::Void)
                 } else {
                     Ok(TokKind::LParen)
                 }

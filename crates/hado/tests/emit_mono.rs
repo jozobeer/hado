@@ -541,8 +541,8 @@ fn polymorphic_global_function_values_specialize_the_thunk_result() {
 #[test]
 fn unit_output_prints_option_payloads_without_a_status_channel() {
     for (index, (expression, ty, stdout)) in [
-        ("Some(())", "Unit Option", "Some(())\n"),
-        ("None", "Unit Option", "None\n"),
+        ("Some(())", "Void Option", "Some(())\n"),
+        ("None", "Void Option", "None\n"),
     ].into_iter().enumerate() {
         let path = std::env::temp_dir().join(format!("hado-unit-option-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.hd", &path).unwrap();
