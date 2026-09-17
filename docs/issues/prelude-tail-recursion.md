@@ -32,8 +32,8 @@
 
 ## 完了条件
 
-- 100 万要素で `List.map` `filter` `append` `sort` `length` `take`、`String.split` `join`、`Array.set` `to_list`、`Bytes.to_list` が通る。`Env.args` と `Io.read_dir` は変更前に stack overflow する件数の実入力に加え、門番用 runtime stub が 100 万件を返す public path で運転する。門番は終了コード 0 と結果を判定する。
-- 25 本の棚卸しで非末尾とした全関数が、上の公開経路のいずれかから運転される。公開経路を持たない helper は、その helper を所有する member の門番で到達を確認する。
+- 100 万要素で `List.map` `filter` `append` `sort` `length`、`List.take`（100 万件取る）、`String.split`（100 万部分に割る）`join`、`Array.set`（末尾の index）`to_list`、`Bytes.to_list` が通る。`Env.args` と `Io.read_dir` は変更前に stack overflow する件数の実入力に加え、門番用 runtime stub が 100 万件を返す public path で運転する。門番は終了コード 0 と結果を判定する。
+- 25 本の棚卸しで非末尾とした全関数が、上の公開経路のいずれかから、変更前に stack overflow する深さで運転される。公開経路を持たない helper は、その helper を所有する member の門番で同じ深さまで到達させる。
 - `filter` の述語が先頭から呼ばれる受理ケースを 1 本足す。
 
 ## 由来
