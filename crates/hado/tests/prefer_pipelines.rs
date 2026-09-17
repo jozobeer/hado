@@ -159,7 +159,7 @@ fn collect_node(
         | NodeKind::Char(_)
         | NodeKind::Str(_)
         | NodeKind::Bool(_)
-        | NodeKind::Unit
+        | NodeKind::Void
         | NodeKind::Name(_)
         | NodeKind::Resume => {}
     }
