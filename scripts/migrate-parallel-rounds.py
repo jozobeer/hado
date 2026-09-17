@@ -322,6 +322,9 @@ def ref_targets():
     return paths
 
 
+HONSHO_SECTION = re.compile(r'本文書(?:の)? (\d+)(?:〜(\d+))? 節')
+
+
 def leftover_ref_hits(mapping):
     hits = []
     for path in ref_targets():
@@ -332,6 +335,17 @@ def leftover_ref_hits(mapping):
                 continue
             for number in mapping:
                 if re.search(rf'(計画|plan\.md)[^\n]{{0,12}}\b{number} 節', line):
+                    hits.append(f'{rel}:{i}:{line}')
+                    break
+    for path in [PLAN, *sorted(ROUNDS.glob('*.md'))]:
+        rel = path.relative_to(ROOT)
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if line.startswith('旧 '):
+                continue
+            for match in HONSHO_SECTION.finditer(line):
+                start = int(match.group(1))
+                end = int(match.group(2) or match.group(1))
+                if any(n in mapping for n in range(start, end + 1)):
                     hits.append(f'{rel}:{i}:{line}')
                     break
     return hits
