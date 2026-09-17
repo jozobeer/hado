@@ -28,9 +28,10 @@ E100 は parser の期待トークンをそのまま出す。E101 は禁止だ�
 ## 完了条件
 
 - 上の 2 つの入力で、既定の診断に正準の綴りが含まれる。`hado check --format json` も `code` を E100 / E101 とする JSON を 1 行出し、`suggestion` が正準の綴りを含み（`null` でない）、`canonical` は `null` になる。解析段階の診断が既定の 1 行のままにならないよう、`main.rs` の読み込み失敗の経路も `--format json` に従わせる。拒否コーパスの E100 / E101 のケースは 1 ファイル 1 欠陥のまま。
-- `hado fmt` と `--fix` は `suggestion` を適用せず、`canonical` の書き換えだけを適用する（形の提示と書き換えを機械可読に区別する）。
+- 上の 2 つの入力に `hado fmt` と `hado check --fix` をかけても本文は変わらない（`suggestion` は適用しない）。
+- 書き換え側の対照として、既存の局所書き換え（`tests/reject/E520/main.hd`）では `--format json` の `canonical` が §24 の Boolean branch の正準形を含み（`null` でない）、`suggestion` は `null` になり、`hado fmt` と `--fix` がその書き換えを適用する。`suggestion` だけを見て適用する実装や、両方を空にして適用を止めた実装では通らない。
 - E101 の他の部分形（`tests/reject/E101/main.hd` の `fn(| ... )`、腕の中の pattern branch、条件列の腕の中の分岐）では `suggestion` を `null` のままにし、当たらない書き換えを出さない。
-- §58.4 のフィールド表に `suggestion` を足し、`canonical`（書き換え）と `suggestion`（形の提示）の 2 つの表現を `--format json` で測る。
+- §58.4 の 1 行のフィールドを 8 つにし、`suggestion` を足す（無ければ `null`）。`canonical` は局所的な書き換え、`suggestion` は形の提示。同じ診断で両方を非 null にしない。`--format json` でこの 2 つの表現を測る。
 
 ## 由来
 
