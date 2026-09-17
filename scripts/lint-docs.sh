@@ -332,6 +332,24 @@ for path in sorted(Path('docs/issues').glob('*.md')):
 PY
 }
 
+# --- 検査 9: issue の現象が実測をコードフェンスか表で持つ（docs/issues.md のファイルの形） ---
+doc_issue_evidence() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+missing = []
+for path in sorted(Path('docs/issues').glob('*.md')):
+    text = path.read_text()
+    match = re.search(r'^## 現象$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    assert match, f'{path.name}: no 現象 section'
+    body = match.group(1)
+    if not (re.search(r'^```', body, re.M) or re.search(r'^\|', body, re.M)):
+        missing.append(path.name)
+assert not missing, '現象 has no code fence or table: ' + ', '.join(missing)
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -340,6 +358,7 @@ check 'spec and spec-coverage name the same version' doc_version
 check 'each gate with a round header has a round file with recorded results' doc_round_files
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 check 'each issue cause cites a file:line anchor' doc_issue_causes
+check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
