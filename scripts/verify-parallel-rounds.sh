@@ -120,10 +120,40 @@ lock_tool_case() {
     bash "$copy/scripts/corpus-lock.sh" --check || return 1
 }
 
+lint_docs_fence_case() {
+    local tree
+    tree="$workdir/lint-e"
+    rm -rf -- "$tree"
+    mkdir -p "$tree"
+    cp -a docs scripts "$tree/"
+    bash "$tree/scripts/lint-docs.sh" >"$workdir/lint-e-ok.out" 2>&1 || true
+    grep -q '^OK: each gate with a round header has a round file with recorded results$' \
+        "$workdir/lint-e-ok.out" || return 1
+    python3 - "$tree/docs/rounds/parallel-rounds.md" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text().splitlines()
+try:
+    idx = next(i for i, line in enumerate(lines) if line == '## 実測')
+except StopIteration:
+    raise SystemExit('missing 実測')
+stripped = [line for line in lines[idx + 1 :] if not line.startswith('```')]
+path.write_text(
+    '\n'.join(lines[: idx + 1] + stripped + ['', '## 付記', '', '```', 'fence', '```', ''])
+)
+PY
+    bash "$tree/scripts/lint-docs.sh" >"$workdir/lint-e-ng.out" 2>&1 || true
+    grep -q '^NG: each gate with a round header has a round file with recorded results$' \
+        "$workdir/lint-e-ng.out"
+}
+
 check 'a probe with # tier: full appears; a missing header aborts run-gates with no logs' tier_scan_case
 check 'b plan headings have no R numbers; every round file has # title and ## 手順書' plan_split_case
 check 'c each # round: slug is unique, well-formed, and has docs/rounds/<slug>.md' round_header_case
 check 'd corpus-lock --check matches; a generated accept case adds one lock line' lock_tool_case
+check 'e a fence after the next ## heading does not satisfy 実測' lint_docs_fence_case
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

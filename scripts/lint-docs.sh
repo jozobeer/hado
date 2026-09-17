@@ -266,10 +266,18 @@ for path in sorted(Path('scripts').glob('verify-*.sh')):
     assert round_path.is_file(), path.name
     text = round_path.read_text().splitlines()
     try:
-        idx = next(i for i, line in enumerate(text) if line.startswith('## 実測'))
+        idx = next(i for i, line in enumerate(text) if line == '## 実測')
     except StopIteration:
         raise AssertionError(path.name)
-    assert any(fence.match(line) for line in text[idx + 1:]), path.name
+    end = next(
+        (
+            i
+            for i, line in enumerate(text[idx + 1 :], idx + 1)
+            if line.startswith('## ') and not line.startswith('###')
+        ),
+        len(text),
+    )
+    assert any(fence.match(line) for line in text[idx + 1 : end]), path.name
 PY
 }
 
