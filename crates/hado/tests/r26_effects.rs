@@ -239,6 +239,102 @@ fn abort_handler_skips_do_continuation_on_division_by_zero() {
 }
 
 #[test]
+fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
+    let mut state = 0x26_35;
+    for _ in 0..8 {
+        let caught = format!("c{}", random(&mut state, 1000));
+        let continued = format!("d{}", random(&mut state, 1000));
+        let x = random(&mut state, 2);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => \"{caught}\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {x} ->\n  \"{continued}\"\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if x == 0 { &caught } else { &continued };
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_catches_division_outside_an_unrelated_once_handler() {
+    let mut state = 0x26_36;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let left = random(&mut state, 50) + 1;
+        let op = if random(&mut state, 2) == 0 { "/" } else { "%" };
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + ({left} {op} 0)\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_catches_division_in_a_callee_outside_an_unrelated_once_handler() {
+    let mut state = 0x26_37;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let left = random(&mut state, 50) + 1;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef f x => x / 0\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (f {left})\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_catches_raise_outside_an_unrelated_once_handler() {
+    let mut state = 0x26_38;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (raise {{ message = \"x\" }})\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_outside_once_still_runs_the_once_body() {
+    let mut state = 0x26_39;
+    for _ in 0..8 {
+        let n = random(&mut state, 20) + 1;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Catch ->\n  with Nop ->\n  loop {n} 0\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
