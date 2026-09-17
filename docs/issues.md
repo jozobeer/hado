@@ -4,7 +4,7 @@
 
 ## 識別子
 
-slug の字種は `docs/rounds.md` と同じ `[a-z0-9][a-z0-9-]*` で、`r<数字>` の形は使わない。着手したら同じ slug で `docs/rounds/<slug>.md` とブランチと worktree を切る。issue とラウンドの対応はファイル名だけで付く。
+slug の字種は `docs/rounds.md` と同じ `[a-z0-9][a-z0-9-]*` で、`r<数字>` の形は使わない。着手したら同じ slug で `docs/rounds/<slug>.md` とブランチと worktree を切る。issue とラウンドの対応はファイル名だけで付く。`docs/plan.md` の版ごとの決定は一時的な issue のパスではなく slug を識別子にする。着手後の手順と実測は同じ slug のラウンドファイルが持つ。
 
 ## ファイルの形
 

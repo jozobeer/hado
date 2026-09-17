@@ -18,12 +18,13 @@ $ hado run main.hd   # module Ord / def A less(a: A, b: A): Bool / implement: co
 
 ## 案
 
-- prelude に `(K, V) Map` を閉じた ADT（平衡木）として置き、`empty` `insert` `find` `remove` `fold` `to_list` の内部で `compare` を呼ぶ。比較関数は渡さない。Fn を含むキーは E704 で単相化時に弾かれ、wants 33 の「キーは Fn を含まない」と一致する。Float キーの NaN の順は §21 が既に決めている。
+- prelude の契約 `Map` に抽象型 `(K, V) T` と `empty` `insert` `find` `remove` `fold` `to_list` を置く。`implement Map as Map` の中だけに平衡木の ADT を実体化し、constructor を外へ出さない。公開 member の型は `(K, V) Map.T` を使い、内部で `compare` を呼ぶ。比較関数は渡さない。Fn を含むキーは E704 で単相化時に弾かれ、wants 33 の「キーは Fn を含まない」と一致する。Float キーの NaN の順は §21 が既に決めている。
 - 独自の順序が要る日は functor（§48）で `MakeMap(Key: Ord)`。いまは作らない。
 
 ## 完了条件
 
 - `Map` の member の型を §55 に書く。`fold` と `to_list` はキーの昇順。
+- 外から内部 constructor を構築・pattern 分解すると E204 になる。`empty` から公開 member だけで作った値について、挿入・削除後も順序と平衡条件を満たすことを門番で判定する。
 - 単語頻度の CLI を `Map` で書き直し、20 万語で `bump` 版より速いことを門番で測る。
 
 ## 由来

@@ -1278,7 +1278,7 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 
 ## 35. v0.5 の範囲と決定（2026-09-17）
 
-`docs/issues/` の prelude-tail-recursion、highlight-treesitter、lsp-minimal を次の版にする。根拠は各 issue の現象欄の実測。順は prelude → highlight → lsp で、lsp の門番が highlight のファイルタイプ判定に乗る。判断基準は 7 節と同じ（迷ったら拒否、新機能は最小形）。
+slug `prelude-tail-recursion`、`highlight-treesitter`、`lsp-minimal` を次の版にする。着手前の根拠は各 `docs/issues/<slug>.md` の現象欄、着手後の手順と実測は `docs/rounds/<slug>.md` が持つ。順は prelude → highlight → lsp で、lsp の門番が highlight のファイルタイプ判定に乗る。判断基準は 7 節と同じ（迷ったら拒否、新機能は最小形）。
 
 | ID | 論点 | 決定 | 仕様の節 |
 |---|---|---|---|

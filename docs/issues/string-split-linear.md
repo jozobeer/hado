@@ -21,7 +21,7 @@
 
 ## 案
 
-- A（推奨、仕様不変）: `split` と `join` を C の単一走査の組み込みにし、extern 表（`crates/hado/src/runtime_abi.rs`）に足す。C からは `String Array` を返し、prelude が `Array.to_list` で List にする。あわせて `HadoString` にスカラ数を持たせ、`length` を O(1) にする。
+- A（推奨、仕様不変）: `split` と `join` を C の単一走査の組み込みにし、extern 表（`crates/hado/src/runtime_abi.rs`）に足す。C からは `String Array` を返し、prelude が `Array.to_list` で List にする。`HadoString` にスカラ数を足して `length` を O(1) にする。String と Bytes は同じ配置を使うため、Bytes の確保時はスカラ数を未知値にし、全ての String 生成経路と UTF-8 検査済みの `Bytes.to_string` が正しい値を入れる。`Bytes.of_string` は同じポインタと既存の値を保つ。
 - B（仕様不変、退ける）: ASCII だけ索引を O(1) にする高速経路。日本語で二乗に戻る。
 - C（§19/§55 を変える）: 索引をバイト単位にし、境界外を `Error` にする。利用者のコードに索引ループが現れてから検討する。
 
@@ -29,8 +29,9 @@ A は `Array.to_list` が非末尾再帰（`stdlib/array.hd`）なので、prelu
 
 ## 完了条件
 
-- 上の表の入力で、`split` と `join` の時間が行数に比例する（2 倍で 2 倍以内）。門番は入力を生成し、比を判定する。
+- `split` と `join` の時間が行数に比例する。小さい側の中央値が 200 ms 以上になる入力と、その 2 倍の入力を生成する。各入力を 1 回 warm-up してから 5 回測り、中央値の比が 2.5 以下であることを判定する。大きい側には比とは別に 10 秒の timeout を置く。
 - `String.length` の計算量を §55 に書く。
+- `Bytes.of_list [227, 129, 130] |> Bytes.to_string |> String.length` が 1 になる。String・Bytes の全確保経路がスカラ数を初期化し、未知値を String の `length` が読まないことを runtime の単体テストで判定する。
 - 受理コーパスの String 系ケースが変わらず通る。
 
 ## 由来

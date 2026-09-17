@@ -26,12 +26,14 @@
 ## 案
 
 - 推奨: 累積 + `reverse` に書き直す（`reverse` は `fold` 経由で既に末尾）。添字が取れる列（Array・Bytes・argv・read_dir）は末尾から先頭へ累積して `reverse` を省く。言語意味は足さない。
+- `stdlib/` の 25 本の `def rec` を末尾・非末尾に分類し、非末尾の helper へ到達する公開 member と効果操作を対応付ける。この表をラウンドの手順書に置き、対応の無い非末尾再帰を残さない。
 - §55 に「`map` と `filter` は先頭から順に適用する」を 1 文足す。`filter` の順序が変わるので、ラウンドで仕様変更として記録する。
 - 退ける: スタック上限の引き上げ（上限を動かすだけ）。TRMC（§53 の保証範囲を広げる規範変更で、コンパイラ側が大きい）。
 
 ## 完了条件
 
-- 100 万要素で `map` `filter` `append` `sort` `length` `String.join` `Array.to_list` が通る。門番は要素数を生成し、終了コード 0 と結果を判定する。
+- 100 万要素で `List.map` `filter` `append` `sort` `length` `take`、`String.split` `join`、`Array.set` `to_list`、`Bytes.to_list` が通る。`Env.args` と `Io.read_dir` は変更前に stack overflow する件数の実入力に加え、門番用 runtime stub が 100 万件を返す public path で運転する。門番は終了コード 0 と結果を判定する。
+- 25 本の棚卸しで非末尾とした全関数が、上の公開経路のいずれかから運転される。公開経路を持たない helper は、その helper を所有する member の門番で到達を確認する。
 - `filter` の述語が先頭から呼ばれる受理ケースを 1 本足す。
 
 ## 由来
