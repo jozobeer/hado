@@ -17,11 +17,11 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 
 対象エディタは Neovim（0.12.5、`vim.lsp.config` / `vim.lsp.enable`）。offline の cargo cache に `lsp-server` `lsp-types` `tower-lsp` は無く、`serde_json` はある。
 
-## 決めること
+## 決定（`docs/plan.md` 35 節 L1〜L4）
 
-1. `--show-all` を opt-in で足すか。意味は「同じ段階の全件をアンカー順」。E1xx と E3xx の致命は 1 件のまま（構文の回復と型エラー後の型は信用できない）。既定は変えず、拒否コーパスの判定も変わらない。§56 に 1 文足す。推奨: 足す。
-2. 診断で止まっていても型を返すか。ライブラリの入口を「診断の列と `Option<Checked>`」を返す形にする。E1xx・E2xx・E3xx の致命で止まったときは型が無い。CLI の `--print-type` も同じ意味にするなら §58.3 に書く。推奨: 返す。
-3. サーバの形。`hado lsp` サブコマンドで JSON-RPC を `serde_json` で書く（バイナリ 1 つ、エディタ非依存）か、Neovim の Lua だけで `vim.diagnostic.set` と `:HadoFix` を組む（100 行、Neovim 限定、後で捨てる）か。推奨: `hado lsp`。
+- `--show-all` を opt-in で足す。同じ段階の全件をアンカー順。E1xx と E3xx の致命は 1 件のまま。既定は変えない。
+- 診断で止まっていても型を返す。ライブラリの入口を「診断の列と `Option<Checked>`」を返す形にする。E1xx・E2xx・E3xx の致命で止まったときは型が無い。
+- `hado lsp` サブコマンドで JSON-RPC を `serde_json` で書く。
 
 ## 案
 
@@ -32,7 +32,6 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 
 ## 完了条件
 
-- 決めること 1〜3 が `docs/plan.md` の版の決定に書かれている。
 - `nvim --headless` で `.hd` を開き、診断・hover・code action の結果を取り出す門番（`verify-skill` のハーネス）が緑。
 - E505 で止まったファイルで hover が型を返す。
 
