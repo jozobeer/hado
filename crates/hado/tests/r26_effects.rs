@@ -142,6 +142,103 @@ fn abort_handler_turns_raise_into_a_value() {
 }
 
 #[test]
+fn abort_handler_skips_do_continuation_when_the_rhs_raises() {
+    let mut state = 0x26_30;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let continued = caught + 1 + random(&mut state, 1000);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 0 ->\n  {continued}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
+    let mut state = 0x26_31;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let continued = caught + 1 + random(&mut state, 1000);
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 1 ->\n  {continued}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{continued}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_catches_integer_division_by_zero() {
+    let mut state = 0x26_32;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let left = random(&mut state, 50) + 1;
+        let op = if random(&mut state, 2) == 0 { "/" } else { "%" };
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  {left} {op} 0\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_catches_division_inside_arithmetic_and_calls() {
+    let mut state = 0x26_33;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let left = random(&mut state, 50) + 1;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => x / 0\ndef main =\n  with Catch ->\n  1 + (f {left})\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn abort_handler_skips_do_continuation_on_division_by_zero() {
+    let mut state = 0x26_34;
+    for _ in 0..8 {
+        let caught = random(&mut state, 1000);
+        let continued = caught + 1 + random(&mut state, 1000);
+        let left = random(&mut state, 50) + 1;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  do ({left} / 0) ->\n  {continued}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
