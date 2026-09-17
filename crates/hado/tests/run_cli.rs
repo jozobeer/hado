@@ -99,3 +99,48 @@ fn build_reports_the_canonical_form() {
     assert!(stderr.contains("canonical form: 1"), "{stderr}");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn run_discovers_namespaces_beside_embedded_compiler_sources() {
+    let dir = scratch("embedded-compiler");
+    std::fs::create_dir_all(dir.join("crates/hado/src")).unwrap();
+    std::fs::write(dir.join("crates/hado/src/project.rs"), []).unwrap();
+    std::fs::create_dir_all(dir.join("store")).unwrap();
+    std::fs::write(
+        dir.join("store/all.hd"),
+        "module S\ndef run(x: Int): Int\nimplement S as M\ndef run x => x + 3\n",
+    )
+    .unwrap();
+    let source = write(&dir, "def main = store::M.run 7\n");
+    let dotted = dir.join("./main.hd");
+    for path in [&source, &dotted] {
+        let output = hado().arg("run").arg(path).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{path:?} {output:?}");
+        assert_eq!(output.stdout, b"10\n", "{path:?}");
+        assert!(output.stderr.is_empty(), "{path:?} {:?}", output.stderr);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn run_skips_dunder_directories_that_are_not_namespaces() {
+    let dir = scratch("dunder");
+    std::fs::create_dir_all(dir.join("scripts/__pycache__")).unwrap();
+    std::fs::write(dir.join("scripts/__pycache__/x"), []).unwrap();
+    let source = write(&dir, "def main = \"hello\"\n");
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"hello\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn run_reads_dunder_named_source_files() {
+    let dir = scratch("dunder-file");
+    std::fs::write(dir.join("__types.hd"), "type User = { name: String }\n").unwrap();
+    let source = write(&dir, "def name (user: User): String => user.name\ndef main = name { name = \"hello\" }\n");
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"hello\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}

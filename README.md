@@ -16,30 +16,20 @@ ML 系の型システムと ADT を核に、より小さく、より平坦に、
 
 ## 使い方
 
-`cargo build --offline` で `target/debug/hado` ができる（`CARGO_TARGET_DIR` を設定していればその下）。
+`cargo build --offline` でコンパイラを作る。最初のプログラムは [docs/getting-started.md](docs/getting-started.md)。`cargo run` 経由で呼び、バイナリの出力先に依存しない。
 
 ```
-hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
-hado dump-mono <file>               # 単相化後のプログラムを印字
-hado build <file.hd>              # 入力の隣に実行ファイルを置く
+$ cargo run --offline -q -- check [--print-type] <file> # 検査。--print-type で main の型を印字
+$ cargo run --offline -q -- dump-mono <file>            # 単相化後のプログラムを印字
+$ cargo run --offline -q -- build <file.hd>              # 入力の隣に実行ファイルを置く
+$ cargo run --offline -q -- run <file.hd>                # 実行ファイルを一時ディレクトリに作り、隣に何も残さない
 ```
-
-`tests/accept/create_user/main.hd` を別のディレクトリの `hello.hd` へコピーして試す（コーパスの隣に実行ファイルを作らないため）。
-
-```
-$ hado check --print-type hello.hd
-String {Error}
-$ hado build hello.hd && ./hello
-ok
-```
-
-`main` の値が stdout に出て終了コード 0。`raise` が `main` まで届いたら stderr に `message` が出て終了コード 1。
 
 拒否の例:
 
 ```
-$ hado check tests/reject/E508/main.hd
-main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let p? = or do
+$ cargo run --offline -q -- check tests/reject/E508/main.hd
+main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let p? = or do; canonical form: let user? = find_user id -> Some(user + 1)
 ```
 
 ## 検証
@@ -90,6 +80,7 @@ AGENTS.md         エージェント向けの規則
 
 `docs/` の文書は常に現行版。過去の版は git tag（`v0.1` など）で読む。
 
+- `docs/getting-started.md` — 最初のプログラム
 - `docs/spec.md` — 言語仕様。§56 にエラーコード表と検査の段階順
 - `docs/plan.md` — 開発計画。決定記録、ラウンドの手順書、判断の解説
 - `docs/corpus.md` — コーパスの規約と門番の設計

@@ -209,12 +209,19 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
         let path = entry.path();
         // §50: `.` で始まる名前は読まない。名前空間の字句（§51）になり得ない
         // ので、拒否するのではなく黙って外す。git の倉庫の根でも検査でき、
-        // 試し書きの隔離先になる。
-        if entry.file_name().as_encoded_bytes().starts_with(b".") {
+        // 試し書きの隔離先になる。`__` 始まりのディレクトリも字句になり得ない
+        // ので同じ（`__pycache__`）。ファイル名は自由（§50）なので、
+        // `__` 始まりのファイルは読む。
+        let name_bytes = entry.file_name();
+        let name_bytes = name_bytes.as_encoded_bytes();
+        if name_bytes.starts_with(b".") {
             continue;
         }
         let kind = entry.file_type().map_err(|error| io_error(&path, error))?;
         if kind.is_dir() {
+            if name_bytes.starts_with(b"__") {
+                continue;
+            }
             let name = entry.file_name();
             if !name.to_str().is_some_and(valid_directory_name) {
                 return Err(LoadError::Input(format!("invalid namespace directory: {}", relative_source(&path, root).display())));
