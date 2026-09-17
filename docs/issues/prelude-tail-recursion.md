@@ -35,7 +35,7 @@
 - 100 万要素で `List.map` `filter` `append` `sort` `length`、`List.take`（100 万件取る）、`Array.set`（末尾の index）`to_list`、`Bytes.to_list` が通る。`Env.args` と `Io.read_dir` は変更前に stack overflow する件数の実入力に加え、門番用 runtime stub が 100 万件を返す public path で運転する。門番は終了コード 0 と結果を判定する。
 - `String.split`（100 万部分）と `String.join`（100 万要素）は、`__string_length` `__string_find` `__string_slice` `__string_concat` を定数時間にする門番用 runtime stub で、再帰の深さだけを運転する。いまの runtime は `string_byte_offset` で毎回先頭から走査し、`join` の右結合 `concat` はコピー量が総長の二乗になるので、stub 無しの 100 万部分は実時間で数時間かかる。実時間の線形性は string-split-linear の門番が持つ。
 - 25 本の棚卸しで非末尾とした全関数が、上の公開経路のいずれかから、変更前に stack overflow する深さで運転される。公開経路を持たない helper は、その helper を所有する member の門番で同じ深さまで到達させる。
-- `filter` の述語が先頭から呼ばれる受理ケースを 1 本足す。
+- `map` の関数と `filter` の述語が先頭から呼ばれる受理ケースをそれぞれ 1 本足す。末尾から呼んで結果を reverse する実装では通らない。
 - `sort` の比較子が呼ばれる順を、変更前の実装が同じ入力で出す引数列としてラウンドファイルに記録し、書き直した実装が同じ列を出すことを門番にする。入力は 5 要素以上で `odds` と `evens` の両方に要素が残り、`merge` が左右どちらを選ぶ比較を両方含む順列（例 `[3, 1, 4, 1, 5]`）に固定し、空列や 1 要素では測らない。`sort` の比較子は `Pure` でない（`stdlib/list.hd:9`）ので、列を保存しない書き直しをするなら比較子を `Pure` に限る仕様変更を別に決めてからにする。
 
 ## 由来
