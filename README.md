@@ -63,6 +63,12 @@ gate-cache）は前段で 1 本ずつ完走させてから残りをファンア�
 外でもよい。`HADO_GATE_TIMES` と `HADO_GATE_RUNS` も `target/` の中かツリーの外に
 置く。中断すると親は子孫ごとワーカーを止めてから走行スコープを消す。
 
+CI は GitHub Actions が回す（`.github/workflows/ci.yml`、`docs/rounds/ci.md`）。PR は core 層と
+`scripts/lint-docs.sh`、main への push は full 層。層の選択は `scripts/ci-run.sh` が持ち、
+`scripts/verify-ci.sh`（quick）が固定する。手動実行（workflow_dispatch）では層を選べる
+（既定 full）。依存は `cargo fetch --locked` で取得し、以後は `--offline` で回す。private
+リポジトリなので branch protection は使えず、CI は必須チェックにはできない。
+
 ## 構成
 
 ```
