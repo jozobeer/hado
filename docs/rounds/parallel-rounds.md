@@ -59,7 +59,7 @@ R78 の番号を 2 本の枝が同時に取り、着地時に `verify-r78.sh →
 
 `scripts/verify-parallel-rounds.sh` を新設する。入力は生成し、期待値は判定器側で計算する。
 
-- 判定 a: 一時木に `# tier: full` の `verify-probe.sh` を置くと `run-gates.sh --print-tier full` に `probe` が現れ、`# tier:` を欠く門番を置くと `verify-gate-cache.sh` の層照合が赤になる。
+- 判定 a: 一時木に `# tier: full` の `verify-probe.sh` を置くと `hado_tier_minimal_gates full` の出力に `probe` が現れ、`# tier:` を欠く門番を置くと `hado_tier_all_gates` が非 0 を返す。
 - 判定 b: `docs/plan.md` に題に R 番号を含む `## N.` の見出しが無く、`docs/rounds/*.md` の全件が `# ` の題と `## 手順書` を持つ。
 - 判定 c: `# round:` を持つ各門番の slug が決定 1 の字種に合い、`docs/rounds/<slug>.md` が実在する。
 - 判定 d: `scripts/corpus-lock.sh` を一時木で走らせた出力が `tests/corpus.sha256` と一致し、一時ケースを足すと行数が 1 増える。
