@@ -80,6 +80,11 @@ NVIM v0.12.5
 # カスタム filetype "hado" に lua parser を割り当て、-u NONE（nvim-treesitter 無し）で開く
 # filetype=hado / parser=true / active_before_start=false / active_after_start=true
 
+# query は runtimepath の queries/<言語>/<名前>.scm として解決される
+RT=$(nvim --headless -u NONE -i NONE -c 'lua io.write(vim.env.VIMRUNTIME)' -c 'qa!' 2>/dev/null)
+grep -n "queries/%s/%s.scm" "$RT/lua/vim/treesitter/query.lua"
+159:  local query_path = string.format('queries/%s/%s.scm', lang, query_name)
+
 cargo run --offline -q -- check --format json tests/reject/E101/main.hd
 main.hd:6:40: error[E101]: branches cannot be nested inside another branch
 cargo run --offline -q -- check --format json tests/reject/E505/main.hd

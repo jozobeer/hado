@@ -17,7 +17,8 @@
 ## 完了条件
 
 - `tools/` に 100 行以上のテキスト処理のプログラムがあり、`scripts/run-gates.sh` の中で走る。
-- split・trim・Char・Map と正準形診断をこのツールの実行経路で使う。
+- split・trim・Char・Map をこのツールの実行経路で使う。
+- 正準形の診断はツールの実行経路では出せない（E100/E101 はコンパイルを止め、ツールに別入力を `hado` へ渡す操作は無い）。`canonical-in-syntax-errors` の入力は、そのラウンドの門番が `hado check --format json` に通して測る。
 - 足りなかった API と診断が issue になっている。
 
 ## 由来

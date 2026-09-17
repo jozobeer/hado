@@ -13,13 +13,15 @@
 
 - `main` の型が `Int` のときだけ、0 以上 255 以下の値を終了コードにする。それ以外の型は今までどおり印字して 0。`Int` の印字は失われるので、印字したい Int は `Int.to_string` で String にする。
 - `Int` が範囲外なら `hado: exit code out of range` を stderr に書いて 1 で終わる。i64 から ABI の i32 へ縮める前に判定し、負数や 256 を OS 任せに正規化しない。
-- stderr は `Io` に `log_error(contents: String): Void {Error}` を足す。`log` と同じ規則で改行を 1 つ書く。
+- stderr は `Io` に `log_error(contents: String): Void {Error}` を足す。`log` と同じ規則で改行を 1 つ書き、失敗は `log` と同じく `message` を `"IoFailure"` とする `Error` にする。
 - 退ける: `exit` 操作。`abort` 種別の効果として書けるが、`main` の値で表せるものを操作にしない。
 
 ## 完了条件
 
 - `def main = 0`、`1`、`3`、`255` がその終了コードで終わり、何も印字しない。`def main = raise ...` は 1 のまま。
 - `def main = -1`、`256`、`9223372036854775807`、`(-9223372036854775807 - 1)` が範囲外の診断を stderr に書いて 1 で終わる。i64 の最小値はリテラルに書けない（E112）ので引き算で作る。生成した実行ファイルと `hado run` の両方で判定する。
+- `log_error "x"` を呼ぶ `def main` を build と `hado run` で走らせ、stdout は空、stderr は `x` と改行 1 つだけになる。`log` は stdout、`log_error` は stderr に書く対照を同じ門番に置く。
+- stderr の読み手が先に終わって書き込みが失敗する状態で `log_error` を呼ぶと、`handler` が `message` を `"IoFailure"` とする `Error` を捕まえる。捕まえなければ 1 で終わる。§55 の失敗の表に `log_error` の行を足す。
 - §54 の表と「二値を保つ」の文を改める。
 
 ## 由来
