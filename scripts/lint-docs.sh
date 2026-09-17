@@ -317,6 +317,21 @@ print('coverage: ' + ' '.join(f'§{section}={sum(1 for s, _ in rules.values() if
 PY
 }
 
+# --- 検査 8: issue の原因が file:line を指す（docs/issues.md のファイルの形） ---
+doc_issue_causes() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+anchor = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+:[0-9]+')
+for path in sorted(Path('docs/issues').glob('*.md')):
+    text = path.read_text()
+    match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    assert match, f'{path.name}: no 原因 section'
+    assert anchor.search(match.group(1)), f'{path.name}: 原因 has no file:line anchor'
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -324,6 +339,7 @@ check 'condition column prose does not require a newline' doc_condition_column
 check 'spec and spec-coverage name the same version' doc_version
 check 'each gate with a round header has a round file with recorded results' doc_round_files
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
+check 'each issue cause cites a file:line anchor' doc_issue_causes
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

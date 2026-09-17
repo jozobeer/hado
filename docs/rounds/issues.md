@@ -56,6 +56,7 @@
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
 | （文書運用） | issue 候補は slug で識別し、着手後は同じ slug のラウンドが手順と実測を持つ | 文書 | 成功 | `lint-docs.sh` |
+| （文書運用） | issue の原因は `file:line` を指す | 文書 | 成功 | `lint-docs.sh` 検査 8 |
 
 ## 実測
 
@@ -89,4 +90,26 @@ cargo run --offline -q -- check --format json tests/reject/E101/main.hd
 main.hd:6:40: error[E101]: branches cannot be nested inside another branch
 cargo run --offline -q -- check --format json tests/reject/E505/main.hd
 {"path": "main.hd", "line": 4, "col": 7, "code": "E505", "message": "binding unused is unused", "canonical": null, "related": null}
+```
+
+### 追加レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -2
+OK: each issue cause cites a file:line anchor
+PASSED: 8/8
+
+# 検査 8 が空でないこと。原因に file:line の無い一時 issue を docs/issues/ に置くと赤になる
+NG: each issue cause cites a file:line anchor
+PASSED: 7/8
+
+# def の形（付録C の parameters）。1 つの括弧と引数だけの注釈は正当で、括弧の連続だけ E100
+cargo run --offline -q -- check target/pr5/t1/main.hd   # def f x : Int => x
+exit=0
+cargo run --offline -q -- check target/pr5/t2/main.hd   # def f (a: Int): Int => a
+exit=0
+cargo run --offline -q -- check target/pr5/t3/main.hd   # def f (a: Int) (b: Int): Int => a
+main.hd:1:16: error[E100]: expected =>, found (
 ```
