@@ -323,12 +323,19 @@ doc_issue_causes() {
 import re
 from pathlib import Path
 
-anchor = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+:[0-9]+')
+anchor = re.compile(r'([A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)')
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     assert match, f'{path.name}: no 原因 section'
-    assert anchor.search(match.group(1)), f'{path.name}: 原因 has no file:line anchor'
+    found = anchor.findall(match.group(1))
+    assert found, f'{path.name}: 原因 has no file:line anchor'
+    for target, line in found:
+        fp = Path(target)
+        assert fp.is_file(), f'{path.name}: 原因 anchor file does not exist: {target}:{line}'
+        count = len(fp.read_text().splitlines())
+        assert 1 <= int(line) <= count, \
+            f'{path.name}: 原因 anchor line is out of range: {target}:{line} (file has {count} lines)'
 PY
 }
 
