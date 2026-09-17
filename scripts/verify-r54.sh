@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R54 `hado test`（docs/plan.md 50 節）。
+# tier: full
+# R54 `hado test`（`docs/rounds/r54.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -201,9 +202,9 @@ assert 'hado test <file.hd>' in tail, '§58 does not list test'
 section = spec.split('## 58.2. ', 1)[1].split('\n## ', 1)[0]
 for word in ('*_test.hd', 'failed (build)', 'passed'):
     assert word in section, f'§58.2 does not define {word}'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r54' in full.split(), 'r54 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r54' in full, 'r54 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert '§58.2' in trace, 'spec-trace has no §58.2 row'
 wants = Path('docs/wants.md').read_text()

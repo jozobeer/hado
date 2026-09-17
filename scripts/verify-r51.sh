@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R51 実用 CLI を門番の走行に組み込む（docs/plan.md 47 節）。
+# tier: full
+# R51 実用 CLI を門番の走行に組み込む（`docs/rounds/r51.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -192,9 +193,9 @@ r51_docs() {
     python3 - <<'PY'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r51' in full.split(), 'r51 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r51' in full, 'r51 is not in the full tier'
 run_gates = Path('scripts/run-gates.sh').read_text()
 assert 'run tools/gates/main.hd --' in run_gates, 'run-gates does not call the tally'
 wants = Path('docs/wants.md').read_text()

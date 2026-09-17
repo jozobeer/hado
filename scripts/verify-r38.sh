@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: core
 set -uo pipefail
 cd "$(dirname "$0")/.."
 passed=0

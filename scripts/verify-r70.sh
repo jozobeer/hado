@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R70: 診断を JSON で読む小さな道具（tools/diagnostics/main.hd）の門番。
 # 期待値は判定器が JSON から独立に数えて導く。ファイル名も件数も暗記しない。
 set -uo pipefail
@@ -57,9 +58,9 @@ fi
 
 # 70-e: 層・系譜・手順書・コーパスのロック。
 missing=""
-grep -q "r70" scripts/lib/gate-tiers.sh || missing="$missing tier"
+bash scripts/run-gates.sh --print-tier full | grep -qx r70 || missing="$missing tier"
 grep -q "verify-r70" docs/spec-trace.md || missing="$missing trace"
-grep -q "^## 65\. " docs/plan.md || missing="$missing plan"
+[ -f docs/rounds/r70.md ] || missing="$missing plan"
 if [ -n "$(git status --porcelain tests/accept tests/reject stdlib tests/corpus.sha256)" ]; then
   missing="$missing corpus"
 fi

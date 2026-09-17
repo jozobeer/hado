@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R71: let _? = の破棄を do に書き換える（E504）。期待値は判定器側で導く。
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -74,9 +75,9 @@ fi
 
 # 71-e: 層・系譜・手順書・コーパスのロック。
 missing=""
-grep -q "r71" scripts/lib/gate-tiers.sh || missing="$missing tier"
+bash scripts/run-gates.sh --print-tier full | grep -qx r71 || missing="$missing tier"
 grep -q "verify-r71" docs/spec-trace.md || missing="$missing trace"
-grep -q "^## 66\. " docs/plan.md || missing="$missing plan"
+[ -f docs/rounds/r71.md ] || missing="$missing plan"
 if [ -n "$(git status --porcelain tests/accept tests/reject stdlib tests/corpus.sha256)" ]; then
   missing="$missing corpus"
 fi

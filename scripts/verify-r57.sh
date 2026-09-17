@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R57 E507 / E508 の書き換え（docs/plan.md 53 節）。
+# tier: full
+# R57 E507 / E508 の書き換え（`docs/rounds/r57.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -331,9 +332,9 @@ section = spec.split('## 57. ', 1)[1].split('\n## ', 1)[0]
 for word in ('E507', 'E508', 'def f value => value', 'let', '本体ちょうど', 'fallback'):
     assert word in section, f'§57 does not mention {word}'
 assert '局所的な書き換えを持たない正準形違反（E507 / E508）' not in spec, '§58.1 still calls E507 / E508 unfixable'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r57' in full.split(), 'r57 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r57' in full, 'r57 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r57' in trace, 'spec-trace does not name verify-r57'
 wants = Path('docs/wants.md').read_text()

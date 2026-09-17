@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R75: E505（未使用束縛）の書き換え —— 検査器が印字する正準形が受理されること。
 # 検体は 1 つずつ別ディレクトリに置く（check は入力ルート配下の全 .hd を見るため）。
 set -eu
@@ -101,11 +102,10 @@ def r75_fmt_shares_the_rewrite_and_is_idempotent():
 
 
 def r75_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r75' in full.split(), 'r75 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r75' in full, 'r75 is not in the full tier'
     assert 'verify-r75' in Path('docs/spec-trace.md').read_text(), 'the trace has no r75 row'
-    assert '## 70. ' in Path('docs/plan.md').read_text(), 'the plan has no section 70'
+    assert Path('docs/rounds/r75.md').is_file(), 'docs/rounds/r75.md is missing'
     assert 'E505' in Path('docs/spec.md').read_text(), 'the spec does not mention E505'
     assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
 

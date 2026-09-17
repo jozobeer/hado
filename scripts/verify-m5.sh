@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: core
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build --offline --bin hado

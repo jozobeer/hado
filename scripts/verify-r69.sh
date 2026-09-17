@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R69: E502 の書き換え（docs/plan.md 64 節）。
+# tier: full
+# R69: E502 の書き換え（`docs/rounds/r69.md`）。
 # 判定は「E502 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu
 cd "$(dirname "$0")/.."
@@ -99,11 +100,10 @@ def r69_leaves_alone():
 
 
 def r69_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r69' in full.split(), 'r69 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r69' in full, 'r69 is not in the full tier'
     assert 'verify-r69' in Path('docs/spec-trace.md').read_text(), 'the trace has no r69 row'
-    assert '## 64. ' in Path('docs/plan.md').read_text(), 'the plan has no section 64'
+    assert Path('docs/rounds/r69.md').is_file(), 'docs/rounds/r69.md is missing'
     spec = Path('docs/spec.md').read_text()
     assert 'E502' in spec and '書き換え' in spec, 'the spec does not record the E502 rewrite'
     assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0

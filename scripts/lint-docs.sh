@@ -242,15 +242,43 @@ doc_version() {
     [ -n "$sv" ] && [ "$sv" = "$cv" ]
 }
 
-# --- 検査 6: 最新ラウンドの台帳の節がある ---
-doc_ledger_round() {
-    local max
-    max=$(for f in scripts/verify-r[0-9]*.sh; do
-        f=${f##*/}
-        f=${f%.sh}
-        printf '%s\n' "${f#verify-r}"
-    done | LC_ALL=C sort -n | tail -n 1)
-    [ -n "$max" ] && grep -qE "^## R${max} " docs/ledger.md
+# --- 検査 6: # round: を持つ門番にラウンドファイルと実測がある ---
+doc_round_files() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+slug_ok = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+reserved = re.compile(r'^r[0-9]+(-r[0-9]+)?$')
+header = re.compile(r'^# round: (.*)$', re.M)
+fence = re.compile(r'^```')
+found = 0
+for path in sorted(Path('scripts').glob('verify-*.sh')):
+    slugs = header.findall(path.read_text())
+    if not slugs:
+        continue
+    found += 1
+    assert len(slugs) == 1, path.name
+    slug = slugs[0]
+    assert slug_ok.fullmatch(slug), path.name
+    assert not reserved.fullmatch(slug), path.name
+    round_path = Path('docs/rounds') / f'{slug}.md'
+    assert round_path.is_file(), path.name
+    text = round_path.read_text().splitlines()
+    try:
+        idx = next(i for i, line in enumerate(text) if line == '## 実測')
+    except StopIteration:
+        raise AssertionError(path.name)
+    end = next(
+        (
+            i
+            for i, line in enumerate(text[idx + 1 :], idx + 1)
+            if line.startswith('## ') and not line.startswith('###')
+        ),
+        len(text),
+    )
+    assert any(fence.match(line) for line in text[idx + 1 : end]), path.name
+PY
 }
 
 # --- 検査 7: R38 が足した規則の文が spec に逐語で 1 回ずつある ---
@@ -294,7 +322,7 @@ check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
 check 'condition column prose does not require a newline' doc_condition_column
 check 'spec and spec-coverage name the same version' doc_version
-check 'the latest round has a ledger section' doc_ledger_round
+check 'each gate with a round header has a round file with recorded results' doc_round_files
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 
 echo "PASSED: $passed/$total"

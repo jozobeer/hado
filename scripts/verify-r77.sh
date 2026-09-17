@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R77: 「一巡」——隔離した試し書きから、赤・修正・整形・実行・テスト・型表示までを 1 本で測る。
 # 検体は 1 つずつ別ディレクトリに置く（check は入力根配下の全 .hd を読むため。§50）。
 set -eu
@@ -107,11 +108,10 @@ def r77_print_type_and_docs():
     r = run(['check', '--print-type=message', path])
     assert r.returncode == 0, (r.returncode, r.stderr[:160])
     assert r.stdout.strip(), 'no type was printed'
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r77' in full.split(), 'r77 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r77' in full, 'r77 is not in the full tier'
     assert 'verify-r77' in Path('docs/spec-trace.md').read_text(), 'the trace has no r77 row'
-    assert '## 72. ' in Path('docs/plan.md').read_text(), 'the plan has no section 72'
+    assert Path('docs/rounds/r77.md').is_file(), 'docs/rounds/r77.md is missing'
     assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
 
 

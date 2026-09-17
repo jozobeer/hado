@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R67: 受理コーパスを実際に動かす（docs/plan.md 62 節）。
+# tier: full
+# R67: 受理コーパスを実際に動かす（`docs/rounds/r67.md`）。
 # 検査だけでは「check は通るが実行できない」を見つけられない。受理ファイルの
 # ヘッダが宣言する `// expect:`（stdout）と `// expect-error:`（終了とエラー名）を、
 # 実際に build して走らせて比べる。件数も名前も判定器には書かない。

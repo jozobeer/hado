@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: core
 set -eu
 cd "$(dirname "$0")/.."
 

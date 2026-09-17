@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,7 +21,7 @@ trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
 
 # 生成する探針の共通の道具。build と実行と比較を 1 箇所に閉じ、
-# 比較が差を検出できることを control で先に確かめる（docs/plan.md 39 節）。
+# 比較が差を検出できることを control で先に確かめる（`docs/rounds/r43.md`）。
 cat >"$workdir/harness.py" <<'PY'
 import subprocess
 from pathlib import Path

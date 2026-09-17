@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: quick
 # 門番キャッシュ（scripts/lib/gate-cache.sh）の判定器。
 # 目的は 6 つ。内容が同じなら実走は 1 回。内容が変われば実走する。失敗は保存しない。
 # 引数が違えば別の結果になる。走行スコープが入れ子の run-gates に漏れない。
@@ -142,10 +143,22 @@ prune_case() {
     return "$ok"
 }
 
-# 層の一覧（scripts/lib/gate-tiers.sh）が実在の門番と一致し、3 層が
-# 重複なく全門番を覆う（docs/plan.md 33-f）。
+# 各門番が有効な `# tier:` 行をちょうど 1 つ持ち、走査結果が実在の門番と
+# 一致して 3 層が重複なく覆い、直列の一覧が実在の門番の部分集合である。
+# `# tier:` を欠く門番を写した scripts/ に置くと走査は非 0 になり、付けると
+# その層に現れる（docs/plan.md 33-f / 決定 5）。
 tier_list_case() {
-    local actual listed dup serial
+    local actual listed dup serial f count value
+    local probe_root probe_scripts probe_full
+    for f in scripts/verify-*.sh; do
+        count=$(grep -c '^# tier: ' "$f" || true)
+        [ "$count" = 1 ] || return 1
+        value=$(grep '^# tier: ' "$f")
+        case "$value" in
+            '# tier: quick' | '# tier: core' | '# tier: full') ;;
+            *) return 1 ;;
+        esac
+    done
     actual=$(for f in scripts/verify-*.sh; do
         f=${f##*/}
         f=${f%.sh}
@@ -155,12 +168,12 @@ tier_list_case() {
         # shellcheck source=scripts/lib/gate-tiers.sh
         . scripts/lib/gate-tiers.sh
         hado_tier_all_gates | LC_ALL=C sort
-    )
+    ) || return 1
     [ "$actual" = "$listed" ] || return 1
     dup=$(
         . scripts/lib/gate-tiers.sh
         for t in quick core full; do hado_tier_minimal_gates "$t"; done | LC_ALL=C sort | uniq -d
-    )
+    ) || return 1
     [ -z "$dup" ] || return 1
     # 直列の一覧（--jobs の前段）は空でなく、実在の門番の部分集合である。
     serial=$(
@@ -168,7 +181,28 @@ tier_list_case() {
         hado_tier_serial_gates | LC_ALL=C sort
     )
     [ -n "$serial" ] || return 1
-    [ -z "$(comm -23 <(printf '%s\n' "$serial") <(printf '%s\n' "$listed"))" ]
+    [ -z "$(comm -23 <(printf '%s\n' "$serial") <(printf '%s\n' "$listed"))" ] || return 1
+
+    probe_root="$workdir/tier-probe"
+    probe_scripts="$probe_root/scripts"
+    rm -rf -- "$probe_root"
+    mkdir -p "$probe_root"
+    cp -a scripts "$probe_scripts"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_scripts/verify-probe.sh"
+    if (
+        # shellcheck source=scripts/lib/gate-tiers.sh
+        . "$probe_scripts/lib/gate-tiers.sh"
+        hado_tier_all_gates
+    ) >/dev/null 2>"$workdir/tier-probe.err"; then
+        return 1
+    fi
+    grep -q 'invalid tier header: verify-probe.sh' "$workdir/tier-probe.err" || return 1
+    printf '%s\n' '#!/usr/bin/env bash' '# tier: full' 'exit 0' >"$probe_scripts/verify-probe.sh"
+    probe_full=$(
+        . "$probe_scripts/lib/gate-tiers.sh"
+        hado_tier_minimal_gates full
+    ) || return 1
+    printf '%s\n' $probe_full | grep -qx probe
 }
 
 # run-gates が層の一覧から同じ門番を解決し、quick ⊆ core ⊆ full、

@@ -2,17 +2,18 @@
 
 ## 読む順
 
-1. `docs/plan.md` — 開発計画、決定記録、現在のラウンドの手順書。触ってよい場所と判定条件はここが決める
-2. `docs/corpus.md` — コーパスと門番の規約
-3. `docs/spec.md` — 言語仕様。全ての判断の根拠
-4. `docs/ledger.md` — ラウンドごとの実行記録
+1. `docs/plan.md` — 開発計画と版ごとの決定記録。ラウンドの手順書は `docs/rounds/`
+2. `docs/rounds.md` — ラウンドの識別子・ファイルの形・門番の宣言行
+3. `docs/corpus.md` — コーパスと門番の規約
+4. `docs/spec.md` — 言語仕様。全ての判断の根拠
+5. `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）。以後の実測は各 `docs/rounds/<slug>.md`
 
 `docs/` の文書は常に現行版で、過去の版は git tag（`v0.1` など）が持つ。文書が食い違ったら仕様本文を正とし、食い違いを報告に書く。計画の中での優先順位は `docs/plan.md` が示す。
 
 ## 環境
 
 - Rust、`cc`、`libgc-dev`。Cranelift の版は `Cargo.lock` に固定
-- `CARGO_TARGET_DIR` が `~/.cargo/target` に向いている。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
+- `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
 
 ## コマンド
@@ -20,6 +21,7 @@
 ```
 cargo test --offline                 # 単体テストとコーパス判定
 bash scripts/verify-*.sh             # リポジトリルートから。最後に PASSED: n/N
+bash scripts/corpus-lock.sh [--check]   # corpus lock を作り直す / 照合する
 cargo run --offline -q -- check [--print-type] <file>
 cargo run --offline -q -- dump-mono <file>
 cargo run --offline -q -- build <file>        # 入力の隣に実行ファイルを置く
@@ -27,7 +29,7 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 
 ## 守ること
 
-- **コーパスは既定でロック。** `tests/accept` `tests/reject` `stdlib/` は、そのラウンドの成果物に含まれるときだけ変える。`tests/corpus.sha256` を実装の工程で更新しない
+- **コーパスは既定でロック。** `tests/accept` `tests/reject` `stdlib/` は、そのラウンドの成果物に含まれるときだけ変える。`tests/corpus.sha256` を実装の工程で更新しない。main を取り込んだ後の作り直し（`scripts/corpus-lock.sh`）だけが例外
 - **仕様の節番号は増やしても動かさない。** 本文の節は `## N.`（`N` は整数）。新しい節は直前に置きたい節の直後に小数で入れ（例 `§N.M`）、整数は本文の末尾にだけ足す。付録は `## 付録A` から順に足し、本文の番号を使わない。corpus の `// spec:`・エラー表の節欄・門番はこの表記（`§N`・`付録A`）をそのまま使う
 - **拒否コーパスは 1 ファイル 1 欠陥。** ヘッダの `error:` タグのコードが、仕様の検査段階順で最初に当たる唯一の欠陥でなければならない
 - **件数を直書きしない。** 受理・拒否の本数は仕様のエラーコード表の行数とディスクの実数から導く
@@ -37,6 +39,9 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 - **木が変わらないなら門番を回さない。** コミットメッセージの言い直しや履歴の整理のように、追跡ファイルの中身が変わらない変更では `cargo test` も層別も回さない。
 - **門番の走行中は木を触らない。** `verify-m1-corpus.sh` の検査 7 は `docs` `runtime` `scripts` を開始時に固定する。全走と文書の編集は直列にする（走行中の編集は `protected-files-changed-during-verification` の偽の赤になる）
 - **仕様に疑義が出たら仕様を変えない。** 解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める
+- **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）。`docs/plan.md` に残る版ごとの決定（`v0.x の範囲と決定`）と門番基盤の節は、並走させず 1 本のラウンドが順に書く。2 本が同じ版の表を触るなら、先に着地する側を決めてから始める。
+- **門番は自分の層とラウンドを宣言する。** 新しい `scripts/verify-*.sh` は冒頭に `# tier: quick|core|full` と `# round: <slug>` を置く。`scripts/lib/gate-tiers.sh` に一覧は無い
+- **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから `bash scripts/corpus-lock.sh` で作り直す。説明できない行があれば作り直さずに止めて報告する。そのラウンドの門番と quick 層を回してから PR にする。着地後の全走は main を checkout した側が回し、結果は同じ `docs/rounds/<slug>.md` の `## 実測` に追記する `docs:` コミット 1 本を PR で足す（main に直接は書かない）
 
 ## コミットと報告
 

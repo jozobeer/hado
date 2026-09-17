@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R55 `--print-type` を任意の `def` に広げる（docs/plan.md 51 節）。
+# tier: full
+# R55 `--print-type` を任意の `def` に広げる（`docs/rounds/r55.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -191,9 +192,9 @@ section = spec.split('## 58.3. ', 1)[1].split('\n## ', 1)[0]
 # member は契約の型であること。
 for word in ('`A` `B`', '| A', 'Pure', 'E100', '契約'):
     assert word in section, f'§58.3 does not define {word}'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r55' in full.split(), 'r55 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r55' in full, 'r55 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert '§58.3' in trace, 'spec-trace has no §58.3 row'
 wants = Path('docs/wants.md').read_text()

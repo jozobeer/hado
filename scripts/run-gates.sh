@@ -198,7 +198,15 @@ if [ -z "$tier" ] && [ "${#selectors[@]}" -eq 0 ]; then
 fi
 all=()
 if [ -n "$tier" ]; then
-    mapfile -t all < <(hado_tier_gates "$tier")
+    tier_list=$(hado_tier_gates "$tier") || {
+        echo "tier scan failed: $tier" >&2
+        exit 1
+    }
+    if [ -z "$tier_list" ]; then
+        all=()
+    else
+        mapfile -t all <<<"$tier_list"
+    fi
 fi
 all+=("${selectors[@]}")
 if [ "${#all[@]}" -eq 0 ]; then
@@ -410,7 +418,7 @@ if { [ "$tier" = "full" ] || [ "$default_all" -eq 1 ]; } && [ -f scripts/lint-do
     fi
 fi
 
-# 走行のログの集計は Hado の道具で出す（docs/plan.md 47 節、wants.md の 53）。
+# 走行のログの集計は Hado の道具で出す（`docs/rounds/r51.md`、wants.md の 53）。
 # 出力先には書かない。集計自身がそのディレクトリを読むので、自分のログを混ぜると
 # 入口の契約（全ての項目が PASSED: n/N の行を持つ）を破る。読めないログがあれば
 # 走行を赤にする。ログは走行自身の成果物である。道具かバイナリの無い走行（合成木）

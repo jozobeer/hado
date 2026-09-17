@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R62 `_` の catch-all を fallback の正準形にする（docs/plan.md 58 節）。
+# tier: full
+# R62 `_` の catch-all を fallback の正準形にする（`docs/rounds/r62.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -181,13 +182,12 @@ r62_docs() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r62' in full.split(), 'r62 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r62' in full, 'r62 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r62' in trace, 'spec-trace does not name verify-r62'
-plan = Path('docs/plan.md').read_text()
-assert '## 58. ' in plan, 'plan has no section 58'
+assert Path('docs/rounds/r62.md').is_file(), 'docs/rounds/r62.md is missing'
 spec = Path('docs/spec.md').read_text()
 section = spec.split('## 29. ', 1)[1].split('\n## ', 1)[0]
 assert 'canonical form' in section, '§29 does not name the canonical form of the rewrite'

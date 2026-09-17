@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R58 E205 / E602 の関連位置（docs/plan.md 54 節）。
+# tier: full
+# R58 E205 / E602 の関連位置（`docs/rounds/r58.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -325,9 +326,9 @@ assert 'declared in the contract' in spec, '§56 does not write the E602 label'
 rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
 assert 'first declared' in rows['E205'], rows['E205']
 assert 'declared in the contract' in rows['E602'], rows['E602']
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r58' in full.split(), 'r58 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r58' in full, 'r58 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r58' in trace, 'spec-trace does not name verify-r58'
 wants = Path('docs/wants.md').read_text()

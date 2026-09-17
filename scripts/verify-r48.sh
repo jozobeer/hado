@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R48 `hado run` と安全な出力先（docs/plan.md 44 節）。
+# tier: full
+# R48 `hado run` と安全な出力先（`docs/rounds/r48.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -246,9 +247,9 @@ for fragment in ['hado run', '-o <path>', '一時ディレクトリ', '終了コ
     assert fragment in body, fragment
 wants = Path('docs/wants.md').read_text()
 assert 'R48' in wants, 'wants does not mention R48'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r48' in full.split(), 'r48 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r48' in full, 'r48 is not in the full tier'
 print('docs: §58, wants points at R48, r48 in the full tier')
 PY
 }

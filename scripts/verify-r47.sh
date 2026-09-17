@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R47 正準形の修正を E515 と E501 へ広げる（docs/plan.md 43 節）。
+# tier: full
+# R47 正準形の修正を E515 と E501 へ広げる（`docs/rounds/r47.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -257,9 +258,9 @@ for fragment in ['E515', 'E501']:
     assert fragment in body, fragment
 wants = Path('docs/wants.md').read_text()
 assert 'R47' in wants, 'wants does not mention R47'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r47' in full.split(), 'r47 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r47' in full, 'r47 is not in the full tier'
 print('docs: §57 has E515 and E501, wants points at R47, r47 in the full tier')
 PY
 }

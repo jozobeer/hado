@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R76: 終了コードの体験 —— 失敗は raise が main まで届くことで表し、stderr と 1 を返す（§54）。
 # 終了コードは 0 と 1 の二値である（spec.md:1846）。検体は 1 つずつ別ディレクトリに置く。
 set -eu
@@ -79,11 +80,10 @@ def r76_exit_codes_are_the_binary_pair():
 
 
 def r76_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r76' in full.split(), 'r76 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r76' in full, 'r76 is not in the full tier'
     assert 'verify-r76' in Path('docs/spec-trace.md').read_text(), 'the trace has no r76 row'
-    assert '## 71. ' in Path('docs/plan.md').read_text(), 'the plan has no section 71'
+    assert Path('docs/rounds/r76.md').is_file(), 'docs/rounds/r76.md is missing'
     spec = Path('docs/spec.md').read_text()
     assert '終了コードは 0 と 1 の二値' in spec, 'the spec no longer fixes the exit codes'
     assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0

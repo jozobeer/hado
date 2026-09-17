@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# R64 fmt のレイアウトの正規化（docs/plan.md 60 節）。
+# tier: full
+# R64 fmt のレイアウトの正規化（`docs/rounds/r64.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -175,13 +176,12 @@ r64_docs() {
     python3 - <<'PYEOF3'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r64' in full.split(), 'r64 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r64' in full, 'r64 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r64' in trace, 'spec-trace does not name verify-r64'
-plan = Path('docs/plan.md').read_text()
-assert '## 60. ' in plan, 'plan has no section 60'
+assert Path('docs/rounds/r64.md').is_file(), 'docs/rounds/r64.md is missing'
 spec = Path('docs/spec.md').read_text()
 section = spec.split('## 58.1. ', 1)[1].split('\n## ', 1)[0]
 assert '行末' in section, '§58.1 does not record the layout normalization'
