@@ -6,12 +6,12 @@
 $ cargo build --offline
 ```
 
-同じ根に `hello.hd` を書く。以後のコマンドも根から叩く。
+同じ根に `hello.hd` を書く。以後のコマンドも根から `cargo run` 経由で叩き、バイナリの出力先に依存しない。
 
 ```
-$ target/debug/hado run hello.hd
-$ target/debug/hado check [--print-type] hello.hd
-$ target/debug/hado build hello.hd
+$ cargo run --offline -q -- run hello.hd
+$ cargo run --offline -q -- check [--print-type] hello.hd
+$ cargo run --offline -q -- build hello.hd
 ```
 
 `run` は実行ファイルを一時ディレクトリに作り、隣に何も残さない。作業ディレクトリは変えない（[仕様 §58](spec.md#58-実行と出力先)）。`build` は `hello` を隣に置く。`./hello.hd` でも同じである。
@@ -23,11 +23,11 @@ def main = "hello"
 ```
 
 ```
-$ target/debug/hado run hello.hd
+$ cargo run --offline -q -- run hello.hd
 hello
-$ target/debug/hado check --print-type hello.hd
+$ cargo run --offline -q -- check --print-type hello.hd
 String
-$ target/debug/hado build hello.hd
+$ cargo run --offline -q -- build hello.hd
 $ ./hello
 hello
 ```
@@ -59,9 +59,9 @@ def main = create_user []
 ```
 
 ```
-$ target/debug/hado run hello.hd
+$ cargo run --offline -q -- run hello.hd
 ok
-$ target/debug/hado check --print-type hello.hd
+$ cargo run --offline -q -- check --print-type hello.hd
 String {Error}
 ```
 
@@ -72,7 +72,7 @@ String {Error}
 `def main = create_user [1]` に変える。
 
 ```
-$ target/debug/hado run hello.hd
+$ cargo run --offline -q -- run hello.hd
 invalid
 ```
 
@@ -87,7 +87,7 @@ def main =
 ```
 
 ```
-$ target/debug/hado check hello.hd
+$ cargo run --offline -q -- check hello.hd
 hello.hd:2:3: error[E501]: binding x is returned unchanged at 3:3; canonical form: "hello"
 ```
 

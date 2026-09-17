@@ -5047,7 +5047,7 @@ passed=773 failed=0
 
 契約の関数 member を `def add(x: Int, y: Int): Int` から `def add: Fn(Int, Int => Int)` に統一する案を検討し、退けた。契約の `def` 形と `Fn` 形は役割が分かれている。`def` 形は名前を持つ定義の宣言で、`Fn` は名前を持たない値の型として引数と戻りの中にだけ現れる。
 
-**退けた理由。** 検査器は値 member と関数 member を実装の形で区別する（`infer.rs` の E602 `signature member requires the declared definition form`、§20 の「単相の `Fn` ごとに `tail` 規約の signature が一つに定まる」）。`Fn` 形に寄せると、実装を `def add = fn(x, y => ...)` に強いるか、この区別を検査器から外すかになる。引数名が契約から消え、`.hdi` を公開 API の正本として文書化する案（wants 56）と相性が悪い。契約の member・効果の操作・handler の引数は同じ `contract_param` を使うので（§37「契約の member と同じ形で書く」）、契約だけを変えると 3 つが割れる。
+**退けた理由。** 検査器は値 member と関数 member を実装の形で区別する（`infer.rs` の E602 `signature member requires the declared definition form`、§20 の「単相の `Fn` ごとに `tail` 規約の signature が一つに定まる」）。`Fn` 形に寄せると、実装を `def add = fn(x, y => ...)` に強いるか、この区別を検査器から外すかになる。引数名が契約から消え、`.hdi` を公開 API の正本として文書化する案（wants 56）と相性が悪い。契約の member と効果の操作は同じ `contract_param` を使うので（§37「契約の member と同じ形で書く」）、契約だけを変えると 2 つの宣言形が割れる。
 
 **得られたはずの利点。** member の形が `def 名前: 型` の 1 つになること、`--print-type` の出力と契約の見た目が一致すること。見た目の差が問題になるなら、文法ではなく印字側を寄せる。
 

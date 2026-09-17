@@ -16,19 +16,19 @@ ML 系の型システムと ADT を核に、より小さく、より平坦に、
 
 ## 使い方
 
-`cargo build --offline` で `target/debug/hado` ができる（`CARGO_TARGET_DIR` を設定していればその下）。最初のプログラムは [docs/getting-started.md](docs/getting-started.md)。
+`cargo build --offline` でコンパイラを作る。最初のプログラムは [docs/getting-started.md](docs/getting-started.md)。`cargo run` 経由で呼び、バイナリの出力先に依存しない。
 
 ```
-$ target/debug/hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
-$ target/debug/hado dump-mono <file>               # 単相化後のプログラムを印字
-$ target/debug/hado build <file.hd>              # 入力の隣に実行ファイルを置く
-$ target/debug/hado run <file.hd>                # 実行ファイルを一時ディレクトリに作り、隣に何も残さない
+$ cargo run --offline -q -- check [--print-type] <file> # 検査。--print-type で main の型を印字
+$ cargo run --offline -q -- dump-mono <file>            # 単相化後のプログラムを印字
+$ cargo run --offline -q -- build <file.hd>              # 入力の隣に実行ファイルを置く
+$ cargo run --offline -q -- run <file.hd>                # 実行ファイルを一時ディレクトリに作り、隣に何も残さない
 ```
 
 拒否の例:
 
 ```
-$ target/debug/hado check tests/reject/E508/main.hd
+$ cargo run --offline -q -- check tests/reject/E508/main.hd
 main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let p? = or do; canonical form: let user? = find_user id -> Some(user + 1)
 ```
 
