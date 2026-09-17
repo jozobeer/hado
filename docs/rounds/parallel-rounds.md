@@ -121,3 +121,12 @@ lock=0
 # 赤と対応
 lint-docs 検査 6（## 実測 にコードフェンスが無かった）。本節で閉じる。閉じたあと赤なし。
 ```
+
+### 文言を整えた後の全走
+
+`826de74`（spec-trace の参照、決定 6 の位置指定、rounds.md の削り、33 節の層一覧の正）の後に層別を 1 回回した。
+
+```
+bash scripts/run-gates.sh --jobs 4 --tier full /tmp/hado-parallel-rounds-final.ZqgxUJ
+TALLY: 3739/3739 passed; red: none
+```
