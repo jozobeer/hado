@@ -11,7 +11,7 @@ ROUNDS = ROOT / 'docs' / 'rounds'
 HEADING_RE = re.compile(r'^## (\d+)\. (.*)$', re.M)
 MOVED_TITLE_RE = re.compile(r'R[0-9]')
 
-# 現行 scripts/lib/gate-tiers.sh の hado_tier_minimal_gates の一覧。
+# 移行前（bfa9e4c より前）の scripts/lib/gate-tiers.sh が持っていた層の一覧。
 QUICK = frozenset({'gate-cache', 'm1-spec'})
 CORE = frozenset({
     'm0', 'm1-corpus', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'r38',
