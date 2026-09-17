@@ -205,16 +205,25 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
     let mut entries = std::fs::read_dir(directory).map_err(|error| io_error(directory, error))?
         .collect::<Result<Vec<_>, _>>().map_err(|error| io_error(directory, error))?;
     entries.sort_by_key(|entry| entry.file_name());
+    // 処理系のソース木（根の下に crates/hado がある）では、サブディレクトリを
+    // 走査しない。根に置いた試し書きが tests/ や target/ と一つのプログラムに
+    // なるのを避ける（§50）。
+    let skip_subdirs = directory == root && root.join("crates").join("hado").is_dir();
     for entry in entries {
         let path = entry.path();
         // §50: `.` で始まる名前は読まない。名前空間の字句（§51）になり得ない
         // ので、拒否するのではなく黙って外す。git の倉庫の根でも検査でき、
-        // 試し書きの隔離先になる。
-        if entry.file_name().as_encoded_bytes().starts_with(b".") {
+        // 試し書きの隔離先になる。`__` 始まりも字句になり得ないので同じ。
+        let name_bytes = entry.file_name();
+        let name_bytes = name_bytes.as_encoded_bytes();
+        if name_bytes.starts_with(b".") || name_bytes.starts_with(b"__") {
             continue;
         }
         let kind = entry.file_type().map_err(|error| io_error(&path, error))?;
         if kind.is_dir() {
+            if skip_subdirs {
+                continue;
+            }
             let name = entry.file_name();
             if !name.to_str().is_some_and(valid_directory_name) {
                 return Err(LoadError::Input(format!("invalid namespace directory: {}", relative_source(&path, root).display())));

@@ -99,3 +99,34 @@ fn build_reports_the_canonical_form() {
     assert!(stderr.contains("canonical form: 1"), "{stderr}");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn run_at_a_compiler_checkout_root_reads_only_the_entry_tree() {
+    let dir = scratch("checkout");
+    std::fs::create_dir_all(dir.join("crates/hado")).unwrap();
+    std::fs::create_dir_all(dir.join("scripts/__pycache__")).unwrap();
+    std::fs::write(dir.join("scripts/__pycache__/x"), []).unwrap();
+    std::fs::create_dir_all(dir.join("tests/other")).unwrap();
+    std::fs::write(dir.join("tests/other/main.hd"), "def main = \"other\"\n").unwrap();
+    let source = write(&dir, "def main = \"hello\"\n");
+    let dotted = dir.join("./main.hd");
+    for path in [&source, &dotted] {
+        let output = hado().arg("run").arg(path).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{path:?} {output:?}");
+        assert_eq!(output.stdout, b"hello\n", "{path:?}");
+        assert!(output.stderr.is_empty(), "{path:?} {:?}", output.stderr);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn run_skips_dunder_directories_that_are_not_namespaces() {
+    let dir = scratch("dunder");
+    std::fs::create_dir_all(dir.join("scripts/__pycache__")).unwrap();
+    std::fs::write(dir.join("scripts/__pycache__/x"), []).unwrap();
+    let source = write(&dir, "def main = \"hello\"\n");
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"hello\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
