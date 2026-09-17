@@ -145,3 +145,14 @@ fn run_skips_dunder_directories_that_are_not_namespaces() {
     assert_eq!(output.stdout, b"hello\n");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn run_reads_dunder_named_source_files() {
+    let dir = scratch("dunder-file");
+    std::fs::write(dir.join("__types.hd"), "type User = { name: String }\n").unwrap();
+    let source = write(&dir, "def name (user: User): String => user.name\ndef main = name { name = \"hello\" }\n");
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"hello\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
