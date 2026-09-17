@@ -25,17 +25,19 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 
 ## 案
 
-- token と構文要素に UTF-8 byte offset の開始・終端を持たせる。`--format json` はそこから 1-based の開始・終端行列を出し（§58.4）、LSP は初期化時に交渉した UTF-8・UTF-16・UTF-32 の position encoding に変換して 0-based range を返す。未交渉なら LSP の既定どおり UTF-16 とする。現在の `lexer::Span` は開始の行列しか持たないので、そのまま終端には使わない。
+- token と構文要素の span は `SourceId` と、その source 内の UTF-8 byte offset の開始・終端を持つ。project loader は source ごとの URI と本文を source map に保持し、複数ファイルの AST を結合した後も span から元の source を一意に引けるようにする。`--format json` はそこから 1-based の開始・終端行列を出し（§58.4）、LSP は初期化時に交渉した UTF-8・UTF-16・UTF-32 の position encoding に変換して 0-based range を返す。未交渉なら LSP の既定どおり UTF-16 とする。現在の `lexer::Span` は開始の行列しか持たないので、そのまま終端には使わない。
 - 機能は診断・hover・「正準形へ置換」の code action の 3 つ。code action は `check --fix` と同じ関数を呼ぶ。補完は入れない。
+- サーバは URI ごとに version と本文を保持する。`didOpen` の全文で開き、`didChange` は `TextDocumentSyncKind::FULL` の全文変更を version の昇順で反映する。開いている文書はディスクを読み直さず、古い version の変更と解析結果を公開しない。
 - hover の第一段はカーソル下の最上位 `def` の型に限る。局所束縛と式の型は、infer が span から型への対応を保持しているか未確認なので、調べてから決める。
 - Neovim 側は `vim.lsp.config("hado", { cmd = { "hado", "lsp" }, filetypes = { "hado" } })` と `vim.lsp.enable("hado")` の数行。
 
 ## 完了条件
 
-- `nvim --headless` で `.hd` を開き、診断・hover・code action の結果を取り出す門番（`verify-skill` のハーネス）が緑。
+- `nvim --headless` で `.hd` を開き、保存せずに本文を変更してから、診断・hover・code action の 3 つが新しい version の本文を参照することを判定する。ディスク上の本文は変更前のままとし、ディスクの再読込だけでは通らない門番にする。
 - 同じ非致命段階の診断を 2 件以上持つ 1 ファイルで、`check --show-all --format json` と LSP の diagnostics が同じ全件をアンカー順に返す。E1xx と E3xx の複数欠陥を置いた対照は 1 件だけを返し、`--show-all` の無い CLI も 1 件のまま。
 - ASCII、BMP の多バイト文字、BMP 外の文字を診断の前に置き、UTF-8・UTF-16・UTF-32 それぞれで開始と終端が対象構文を指す。
-- E505 で止まったファイルで hover が型を返す。
+- 入口ファイルと別の source の同じ byte offset に診断・hover・code action の対象を置き、各結果が正しい URI と source 内 range を返す。
+- 型付け後に止まる E4xx・E5xx・E6xx の代表として E402・E505・E602 を用意する。それぞれで `check --print-type=<名前>` と hover が同じ診断コードと同じ推論型を返す。E1xx・E2xx・E3xx では型を返さない対照も置く。
 
 ## 由来
 

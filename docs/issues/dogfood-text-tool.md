@@ -12,11 +12,12 @@
 ## 案
 
 - 候補: エラーコード表（§56）と `tests/reject/` のディレクトリの差分を出すツール。仕様の markdown を読むので split・trim・Char・Map を使う。門番 `verify-*.sh` の一部を置き換えられる。
-- 上の 4 つの issue の完了条件に、このツールが通ることを含める。
+- `string-split-linear`、`prelude-tail-recursion`、`char-and-float-conversions`、`map-by-builtin-compare`、`canonical-in-syntax-errors` の着地後に始める。前提の issue は各 API と診断の門番だけで閉じ、この統合ツールを完了条件に含めない。
 
 ## 完了条件
 
 - `tools/` に 100 行以上のテキスト処理のプログラムがあり、`scripts/run-gates.sh` の中で走る。
+- split・trim・Char・Map と正準形診断をこのツールの実行経路で使う。
 - 足りなかった API と診断が issue になっている。
 
 ## 由来

@@ -22,13 +22,14 @@ Char のリテラル比較（`c == 'a'`）と `Float.to_string`、`Int.parse` �
 
 ## 案
 
-- `Char`: `to_int`、`of_int`（範囲外は `{Error}`）、`to_string`。
+- `Char`: `to_int`、`of_int`、`to_string`。`of_int` は Unicode scalar value の `0x0000..=0xD7FF` と `0xE000..=0x10FFFF` だけを受理し、それ以外は `{Error}` にする。
 - `Float`: `parse`（受理文法は `Int.parse` と同じく仕様で決める）、`of_int`。`Int.to_float` か `Float.of_int` かは prelude の命名（`Bytes.of_string` `Array.of_list`）に合わせて `of_int`。
 - 入れない: 大文字化などの Unicode の性質。必要になってから。
 
 ## 完了条件
 
 - 各 member の型を §55 に書き、受理と拒否のケースを足す。
+- `Char.of_int` は `0`、`0xD7FF`、`0xE000`、`0x10FFFF` を受理し、`-1`、`0xD800`、`0xDFFF`、`0x110000` を `{Error}` にする。受理した値の `Char.to_string` が abort しないことも測る。
 - `Float.parse` の受理文法と往復（`to_string` → `parse`）を仕様に書き、門番で測る。
 
 ## 由来
