@@ -67,7 +67,8 @@ impl BinOp {
 }
 
 /// Expression tree node. `span` is the start (1-based line/col) of the
-/// node's leftmost token.
+/// node's leftmost token, except that a pipeline uses its own `|>` token so
+/// nested left operands and pipeline results have distinct type-table keys.
 #[derive(Debug, Clone)]
 pub struct Node {
     pub kind: NodeKind,
@@ -1414,15 +1415,15 @@ impl Parser<'_> {
     fn parse_pipe(&mut self) -> Result<Node, Diagnostic> {
         let mut left = self.parse_or()?;
         while self.kind() == &TokKind::PipeArrow {
+            let pipe_span = self.span();
             self.bump();
             let right = self.parse_or()?;
             if constructor_head(&right) {
                 return Err(self.error_at(right.span, Some("E106"), "constructor cannot be a pipe target"));
             }
-            let lspan = left.span;
             left = Node {
                 kind: NodeKind::Pipe(Box::new(left), Box::new(right)),
-                span: lspan,
+                span: pipe_span,
             };
         }
         Ok(left)

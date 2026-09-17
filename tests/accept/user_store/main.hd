@@ -7,7 +7,7 @@ def saved
 | Some(user) => do UserStore.save user -> true
 | false
 def main =
-  let ok = saved (UserStore.find 1) ->
+  let ok = UserStore.find 1 |> saved ->
   if ok => 1 | 0
 module UserStore
 type T

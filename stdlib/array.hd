@@ -12,9 +12,9 @@ def get xs index =>
     | raise { message = "IndexOutOfRange" }
 def set xs index value =>
   if index >= 0 && index < length xs
-    => of_list (replace (to_list xs) index value)
+    => to_list xs |> replace index value |> of_list
     | raise { message = "IndexOutOfRange" }
-def of_list xs => build xs 0 (__array_alloc (List.length xs))
+def of_list xs => build xs 0 (List.length xs |> __array_alloc)
 def to_list xs => elements xs 0 (length xs)
 // target は構築中だけに閉じ込め、全 slot を埋めた後で公開する。
 def rec build xs index target =>

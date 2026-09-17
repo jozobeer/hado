@@ -4899,7 +4899,111 @@ cargo test: 記録時に走行中（層別は上記で確定）
 
 層別は 74 本・検査 3730 で**赤ゼロ**（`r77` の 5 検査が加わった回。追跡変更は門番・層・系譜・文書のみでエンジンには触れていない）。
 
-## R78 型名 Unit を Void に改名する
+## R78 配布する Hado コードをパイプライン中心にする
+
+### 境界と実装
+- 対象は `stdlib/` 10 本、`tools/` 3 本、付録Bの典型コードと対応する受理ケース 11 本。構文を検証するコーパス全体と拒否コーパスは対象外にした。
+- 構文木から「パイプの右辺ではない直接適用」を列挙する `prefer_pipelines` を追加した。最初の実測は 245 件で赤、移行後は 0 件で緑。
+- パイプ左辺とパイプ結果が同じ span を使い、複合型の型表を上書きする欠陥が出た。`|>` 自身の span をパイプ式の識別位置にした。レコードを左辺に置く最小再現は修正前に E513、修正後に単相化まで通る。
+- corpus lock は対象 219 本の実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test mono --test prelude --test corpus --no-fail-fast
+prefer_pipelines 1/1、mono 63/63、prelude 4/4、corpus 4/4
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ bash scripts/run-gates.sh --tier quick /tmp/hado-r78-quick.BKuXOa
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+775 passed / 0 failed
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 初回の `corpus` は複合型を左辺に置くパイプで 22 件赤。span 衝突の再現テストを先に固定し、parser の識別位置を直して 4/4 に戻した。
+- lock 更新前の `verify-r70.sh` は 70-e だけ赤。lock を 219 本の現物へ更新した後は 5/5。
+- 最終 quick と全 Rust テストに赤はない。
+
+### 迷った点
+`tests/accept/` は利用例にも見えるが、直接適用・効果操作・末尾呼び出しを個別に検証する判定器でもある。付録Bの対応ケースだけを配布サンプルとして移し、残りの構文被覆は維持した。
+
+### 仕様への疑義
+なし。
+
+## R79 パイプラインを連続適用に限定する
+
+### 境界と実装
+- 対象は R78 と同じ `stdlib/`、`tools/`、付録Bと対応する受理ケースにした。
+- `prefer_pipelines` を「直接適用を列挙する検査」から「最大のパイプ式が一段だけの箇所を列挙する検査」へ変更した。二段以上の左結合パイプの内側は単段と数えない。
+- 検査を先に赤にし、列挙された `value |> f args` を `f value args` へ戻した。23 ファイルで 152 行を置換し、検査は緑になった。
+- `value |> f |> g` のような連続適用は維持した。配列・Bytes の確保、List の sort、Env・Io の変換、二つの配布 CLI、付録Bのデータ変換が該当する。
+- corpus lock は収録パスの実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test prelude --no-fail-fast
+prefer_pipelines 1/1、prelude 4/4
+$ cargo test --offline --test corpus --test check_modules --no-fail-fast
+corpus 4/4、check_modules 14/14
+$ bash scripts/run-gates.sh --jobs 1 --tier quick /tmp/hado-r79-quick
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+exit 0
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 新しい `prefer_pipelines` は移行前の単段パイプを列挙して赤になった。直接適用へ戻した後は 1/1。
+- 最終 quick、全 Rust テスト、配布 CLI の門番に赤はない。
+
+### 仕様への疑義
+なし。
+
+## R80 パイプラインを関数適用結果から始める
+
+### 境界と実装
+- `prefer_pipelines` は最大のパイプ式を左へ辿り、左端が並置の関数適用であることを検査する。
+- `value |> f |> g` を `f value |> g` へ変え、二つ目以降の適用はパイプラインのまま残した。対象は `stdlib/`、`tools/`、付録Bと対応する受理ケースで、12 ファイルを変更した。
+- §14 は `x |> f` と `f x` の同値規則を維持し、連続変換の推奨例を `f x |> g` へ変更した。
+- corpus lock は収録パスの実数から作り直した。
+
+### 判定の実測
+```
+$ cargo test --offline --test prefer_pipelines --test prelude --test corpus --test check_modules --no-fail-fast
+prefer_pipelines 1/1、prelude 4/4、corpus 4/4、check_modules 14/14
+$ bash scripts/run-gates.sh --jobs 1 --tier quick /tmp/hado-r80-quick
+TALLY: 28/28 passed; red: none
+$ cargo test --offline --no-fail-fast
+775 passed / 0 failed
+$ bash scripts/verify-r51.sh
+PASSED: 5/5
+$ bash scripts/verify-r70.sh
+PASSED: 5/5
+$ bash scripts/lint-docs.sh
+PASSED: 7/7
+$ sha256sum --strict --status -c tests/corpus.sha256
+exit 0
+```
+
+### 赤と対応
+- 新しい `prefer_pipelines` は値から始まる最大パイプ式を 27 箇所列挙して赤になった。先頭の適用だけを並置へ変えた後は 1/1。
+- 最終 quick、全 Rust テスト、配布 CLI の門番、文書検査に赤はない。
+
+### 仕様への疑義
+なし。
+
+## R81 型名 Unit を Void に改名する
+
+main が R78 をパイプラインに使ったため、本ラウンドは R81 とする。
 
 ### 決定と実装
 - 型の名前だけを `Void` にした。値の綴りは `()`、入れ子の印字は `Some(())`、最上位は無印字、機械語型は i64 の 0。
@@ -4916,7 +5020,7 @@ run    def main = ()                     → stdout empty
 ```
 
 ### 門番
-`bash scripts/verify-r78.sh` → 5/5（型名・仕様・印字・旧綴りの排除・層/系譜/手順書/コーパスロックと台帳の旧名）。
+`bash scripts/verify-r81.sh` → 5/5（型名・仕様・印字・旧綴りの排除・層/系譜/手順書/コーパスロックと台帳の旧名）。
 `bash scripts/verify-r44.sh` → 6/6。
 `bash scripts/verify-r43.sh` → 12/12。
 `cargo test --offline --no-fail-fast` → passed=773 failed=0。
@@ -4924,7 +5028,7 @@ run    def main = ()                     → stdout empty
 ### 全走
 次のコミットで層別を 1 回回して記録する。
 
-### R78 の全走
+### R81 の全走
 
 ```
 TALLY: 3735/3735 passed; red: none
@@ -4933,4 +5037,4 @@ cargo-test-exit=0
 passed=773 failed=0
 ```
 
-層別は 75 本・検査 3735 で**赤ゼロ**（`r78` の 5 検査が加わった回）。
+層別は 75 本・検査 3735 で**赤ゼロ**（`r81` の 5 検査が加わった回）。

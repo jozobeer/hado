@@ -29,7 +29,7 @@ def read_dir path =>
   let status = __io_read_dir path ->
   if status == 0 => directory_elements 0 (__io_dir_count 0) | raise { message = io_failure_message status }
 def rec directory_elements (index: Int, count: Int): String List {Error} =>
-  if index >= count => [] | [Bytes.to_string (__io_dir_get index), ...directory_elements (index + 1) count]
+  if index >= count => [] | [__io_dir_get index |> Bytes.to_string, ...directory_elements (index + 1) count]
 def read_stdin =
   let status = __io_read_stdin 0 ->
   if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }

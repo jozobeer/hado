@@ -525,6 +525,14 @@ fn records_keep_field_names_and_nominal_type() {
 }
 
 #[test]
+fn pipeline_keeps_the_left_composite_type_separate_from_its_result() {
+    let source = "type Box = { value: Int }\ndef unbox box => box.value\ndef main = { value = 42 } |> unbox";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert!(output.contains("Record { fields: [(\"value\", Constant(Int(42)))], result: Data(\"Box\", []) }"));
+    assert!(output.contains("result: Int"));
+}
+
+#[test]
 fn record_projections_preserve_each_intermediate_type() {
     let source = "type Inner = { x: Int }\ntype Outer = { inner: Inner }\ndef main = let obj = { inner = { x = 3 } } -> obj.inner.x";
     let output = hado::dump_mono(source, "t").unwrap();

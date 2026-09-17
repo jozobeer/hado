@@ -28,7 +28,7 @@ def rec merge left right comparator =>
   | [a, ...rest_a], [b, ...rest_b] => if
     | comparator a b <= 0 => [a, ...merge rest_a right comparator]
     | [b, ...merge left rest_b comparator]
-def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => merge (sort (odds values) comparator) (sort (evens values) comparator) comparator
+def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => odds values |> sort comparator |> merge (evens values |> sort comparator) comparator
 def head
 | [] => None
 | [value, ..._] => Some(value)
