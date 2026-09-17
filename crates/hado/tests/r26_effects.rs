@@ -335,6 +335,47 @@ fn abort_handler_outside_once_still_runs_the_once_body() {
 }
 
 #[test]
+fn again_handler_outside_abort_handler_collects_callee_yields() {
+    let mut state = 0x26_3a;
+    for _ in 0..8 {
+        let yielded = random(&mut state, 50) as i64;
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef f (x: Int): Int {{Int Yield}} =>\n  do yield x -> x\ndef main =\n  with Collect ->\n  with Catch ->\n  f {yielded}\n",
+            collect_handler(),
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("[{}]\n", yielded).as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn again_handler_outside_abort_handler_forwards_callee_raise() {
+    let mut state = 0x26_3b;
+    for _ in 0..8 {
+        let fails = random(&mut state, 2) == 0;
+        let yielded = random(&mut state, 50) + 1;
+        let value = if fails { 0 } else { yielded };
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef f (x: Int): Int {{Int Yield, Error}} =>\n  if x == 0 => raise {{ message = \"x\" }}\n  | do yield x -> x\ndef main =\n  with Collect ->\n  with Catch ->\n  f {value}\n",
+            collect_handler(),
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected = if fails { "[]".to_string() } else { format!("[{yielded}]") };
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
