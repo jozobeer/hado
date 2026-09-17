@@ -199,3 +199,27 @@ parser=true
 active_before_start=false
 active_after_start=true
 ```
+
+### 八次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 検査 8 を実ファイルと行数で照合するようにし、負の探針で赤を確認する
+$ sed -n '23p' docs/issues/zz-probe.md     # 原因が missing.rs:999
+AssertionError: zz-probe.md: 原因 anchor file does not exist: missing.rs:999
+NG: each issue cause cites a file:line anchor
+$ sed -n '23p' docs/issues/zz-probe.md     # 原因が crates/hado/src/emit.rs:99999
+AssertionError: zz-probe.md: 原因 anchor line is out of range: crates/hado/src/emit.rs:99999 (file has 773 lines)
+
+# Int は 10 進のみ（Char.of_int の境界は 10 進で書く）
+sed -n '214p' docs/spec.md
+Int は 10 進のみとする。i64 の範囲を超えるリテラルは E112 とする。
+
+# log_error を足すと既存の網羅 handler Io は腕が 1 つ足りなくなる（verify-r37 の 5 腕）
+sed -n '205p' scripts/verify-r37.sh
+io_arms = ['once read_file _ => Bytes.of_string "virtual"', 'once write_file _ _ => ()', 'once log _ => ()', 'once read_dir _ => ["virtual"]', 'once read_stdin => Bytes.of_string "virtual"']
+```
