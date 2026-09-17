@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R76: 終了コードの体験 —— 失敗は raise が main まで届くことで表し、stderr と 1 を返す（§54）。
 # 終了コードは 0 と 1 の二値である（spec.md:1846）。検体は 1 つずつ別ディレクトリに置く。
 set -eu

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R71: let _? = の破棄を do に書き換える（E504）。期待値は判定器側で導く。
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)

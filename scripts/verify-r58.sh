@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R58 E205 / E602 の関連位置（docs/plan.md 54 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

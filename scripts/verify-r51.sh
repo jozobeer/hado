@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R51 実用 CLI を門番の走行に組み込む（docs/plan.md 47 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

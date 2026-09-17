@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # M1 spec acceptance check 3 (see docs/plan.md, M1 and 33 節). Run from the repository root.
 #
 # 検査 1（見出し）・2（新設節）・4（対応表）・5（条件列の逐語）は文書管理であって

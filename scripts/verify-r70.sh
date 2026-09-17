@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R70: 診断を JSON で読む小さな道具（tools/diagnostics/main.hd）の門番。
 # 期待値は判定器が JSON から独立に数えて導く。ファイル名も件数も暗記しない。
 set -uo pipefail

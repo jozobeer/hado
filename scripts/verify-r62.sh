@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R62 `_` の catch-all を fallback の正準形にする（docs/plan.md 58 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

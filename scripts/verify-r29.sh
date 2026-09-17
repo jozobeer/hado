@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R61 再帰定義の省略した効果行（docs/plan.md 57 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

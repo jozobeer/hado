@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R53 入力根の走査から `.` 始まりを外す（docs/plan.md 49 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R46 正準形の診断と check --fix（docs/plan.md 42 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R54 `hado test`（docs/plan.md 50 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

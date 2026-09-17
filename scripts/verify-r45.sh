@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R45 複数の scrutinee とパターンの腕の条件列（docs/plan.md 41 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

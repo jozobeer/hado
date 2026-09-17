@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R81: 型名 Unit を Void に改名する。値の綴り `()` と印字は動かさない。
 set -eu
 cd "$(dirname "$0")/.."

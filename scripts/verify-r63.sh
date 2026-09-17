@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R63 Boolean の pattern 分岐を Boolean 分岐の正準形にする（docs/plan.md 59 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

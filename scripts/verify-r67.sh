@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R67: 受理コーパスを実際に動かす（docs/plan.md 62 節）。
 # 検査だけでは「check は通るが実行できない」を見つけられない。受理ファイルの
 # ヘッダが宣言する `// expect:`（stdout）と `// expect-error:`（終了とエラー名）を、

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: core
 # M2 acceptance checks 1..8 (see docs/plan.md, M2). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

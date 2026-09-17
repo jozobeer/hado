@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R72: E506 の書き換え（docs/plan.md 67 節）。
 # 判定は「E506 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu

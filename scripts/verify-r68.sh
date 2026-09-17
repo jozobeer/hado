@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R68: E512 の書き換え（docs/plan.md 63 節）。
 # 判定は「E512 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu

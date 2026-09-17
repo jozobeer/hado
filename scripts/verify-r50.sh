@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R50 スタックの枯渇を診断にする（docs/plan.md 46 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

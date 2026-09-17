@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R57 E507 / E508 の書き換え（docs/plan.md 53 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

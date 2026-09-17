@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R74: E511 の書き換え（docs/plan.md 69 節）。
 # 判定は「E511 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu

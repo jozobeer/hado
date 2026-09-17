@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R55 `--print-type` を任意の `def` に広げる（docs/plan.md 51 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

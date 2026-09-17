@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R65 診断の機械可読な出力（docs/plan.md 61 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

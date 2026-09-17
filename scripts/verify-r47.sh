@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R47 正準形の修正を E515 と E501 へ広げる（docs/plan.md 43 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."

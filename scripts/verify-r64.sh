@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# tier: full
 # R64 fmt のレイアウトの正規化（docs/plan.md 60 節）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
