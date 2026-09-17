@@ -39,9 +39,9 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 - **木が変わらないなら門番を回さない。** コミットメッセージの言い直しや履歴の整理のように、追跡ファイルの中身が変わらない変更では `cargo test` も層別も回さない。
 - **門番の走行中は木を触らない。** `verify-m1-corpus.sh` の検査 7 は `docs` `runtime` `scripts` を開始時に固定する。全走と文書の編集は直列にする（走行中の編集は `protected-files-changed-during-verification` の偽の赤になる）
 - **仕様に疑義が出たら仕様を変えない。** 解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める
-- **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）
+- **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）。`docs/plan.md` に残る版ごとの決定（`v0.x の範囲と決定`）と門番基盤の節は、並走させず 1 本のラウンドが順に書く。2 本が同じ版の表を触るなら、先に着地する側を決めてから始める。
 - **門番は自分の層とラウンドを宣言する。** 新しい `scripts/verify-*.sh` は冒頭に `# tier: quick|core|full` と `# round: <slug>` を置く。`scripts/lib/gate-tiers.sh` に一覧は無い
-- **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、`bash scripts/corpus-lock.sh` で `tests/corpus.sha256` を作り直し、`bash scripts/corpus-lock.sh --check` とそのラウンドの門番と quick 層を回してから PR にする。着地後の全走は着地した側が回し、`## 実測` に書く
+- **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから `bash scripts/corpus-lock.sh` で作り直す。説明できない行があれば作り直さずに止めて報告する。そのラウンドの門番と quick 層を回してから PR にする。着地後の全走は main を checkout した側が回し、結果は同じ `docs/rounds/<slug>.md` の `## 実測` に追記する `docs:` コミット 1 本を PR で足す（main に直接は書かない）
 
 ## コミットと報告
 
