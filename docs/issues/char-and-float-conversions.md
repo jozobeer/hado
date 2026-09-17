@@ -23,13 +23,16 @@ Char のリテラル比較（`c == 'a'`）と `Float.to_string`、`Int.parse` �
 ## 案
 
 - `Char`: `to_int`、`of_int`、`to_string`。`of_int` は Unicode scalar value の `0x0000..=0xD7FF` と `0xE000..=0x10FFFF` だけを受理し、それ以外は `message` を `"InvalidScalar"` とする `{Error}` にする。
-- `Float`: `parse`（受理文法は `Int.parse` と同じく仕様で決め、不正入力は `message` を `"InvalidFloat"` とする `{Error}`）、`of_int`。`Int.to_float` か `Float.of_int` かは prelude の命名（`Bytes.of_string` `Array.of_list`）に合わせて `of_int`。
+- `Float`: `parse`（受理文法は `Int.parse` と同じく仕様で決め、不正入力は `message` を `"InvalidFloat"` とする `{Error}`）、`of_int`。`Int.to_float` か `Float.of_int` かは prelude の命名（`Bytes.of_string` `Array.of_list`）に合わせて `of_int`。`of_int` は i64 を IEEE 754 の round-to-nearest, ties-to-even で f64 にする。
+- `Float.to_string` はいま §54 の正準形（往復可能な最短の 10 進桁、指数を使わない位取り、小数点の両側に最低 1 桁）を満たしていない。`runtime/hado_runtime.c:514` の `%.17g` は `0.0` を `0`、10 の 300 乗を `1e+300` と出し、`main` の印字も `runtime/hado_runtime.c:462` で同じ `%.17g` を使う。`parse` の往復の期待に使う前に §54 へ直す。
 - 入れない: 大文字化などの Unicode の性質。必要になってから。
 
 ## 完了条件
 
 - 各 member の型と、`Char.of_int`・`Float.parse` の失敗の `message` を §55 の失敗の表に書き、受理ケースと、実行時の `{Error}` を `// expect-error:` で測る受理ケース（`docs/corpus.md`）を足す。両方の失敗は実行時の `{Error}` で §56 に静的コードが無いので、拒否コーパス（`// error:`）には置かない。
 - `Char.of_int` は `0`、`0xD7FF`、`0xE000`、`0x10FFFF` を受理し、`-1`、`0xD800`、`0xDFFF`、`0x110000` は `message` が `"InvalidScalar"` の `{Error}` になる。受理した値の `Char.to_string` が abort しないことも測る。
+- `Float.to_string` が §54 の正準形になり、`0.0` は `0.0`、`-0.0` は `-0.0`、`0.1` は `0.1`、10 の 300 乗は `1` の後に `0` が 300 個と `.0` になり、どの出力にも `e` も `E` も含まれない。往復の期待はこの形から測る。
+- `Float.of_int` は `9007199254740992`（2^53）、`9007199254740993`（2^53+1）、`-9007199254740993`、`9223372036854775807`、`-9223372036854775808` で IEEE 754 の round-to-nearest, ties-to-even に一致する。期待値は判定器側で独立に計算する。
 - `Float.parse` の受理文法と往復（`to_string` → `parse`）を仕様に書き、門番で測る。文法の外の入力（空文字列、`"1."`、`"."`、`"1e3"`、`" 1"`、`"0x1"`）は `message` が `"InvalidFloat"` の `{Error}` になり、有限値の往復は `parse (to_string x) == x` になる。`-0.0` は IEEE の `==` では `+0.0` と区別できないので、`Float.to_string (Float.parse "-0.0") == "-0.0"` で測る（§54）。
 
 ## 由来

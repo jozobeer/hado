@@ -20,12 +20,14 @@ $ hado run main.hd   # module Ord / def A less(a: A, b: A): Bool / implement: co
 
 - prelude の契約 `Map` に抽象型 `(K, V) T` と `empty` `insert` `find` `remove` `fold` `to_list` を置く。`implement Map as Map` の中だけに平衡木の ADT を実体化し、constructor を外へ出さない。公開 member の型は `(K, V) Map.T` を使い、内部で `compare` を呼ぶ。比較関数は渡さない。Fn を含むキーは E704 で単相化時に弾かれ、wants 33 の「キーは Fn を含まない」と一致する。Float キーの NaN の順は §21 が既に決めている。
 - 独自の順序が要る日は functor（§48）で `MakeMap(Key: Ord)`。いまは作らない。
+- `compare` が `0` を返す等価な鍵は 1 つに畳む。`insert` は既存の値だけを置き換えて先に入っている鍵を保ち、`find` は等価な鍵を返し、`remove` は等価な鍵を 1 つ消す。Float の `-0.0` と `+0.0`、NaN 同士は §21 により同順位なので同じ鍵に畳まれる。
 
 ## 完了条件
 
 - `Map` の member の型を §55 に書く。`fold` と `to_list` はキーの昇順。
 - 外から内部 constructor を構築・pattern 分解すると E204 になる。`empty` から公開 member だけで作った値について、挿入・削除後も順序と平衡条件を満たすことを門番で判定する。公開 member の結果だけでは木の形が見えないので、`implement Map as Map` の中に門番専用の内部 member（高さなど）を置くか、`compare` の呼び出し回数を数える計測用の runtime stub を用意し、昇順・降順・ランダムな挿入と削除で高さと比較回数が要素数 `n` に対する `O(log n)` の上限（判定器側で独立に計算した値）に収まることを照合する。
 - 単語頻度の CLI を `Map` で書き直し、20 万語で `bump` 版より速いことを門番で測る。
+- 重複する鍵、`-0.0` の後に `+0.0`、NaN 同士を `insert` し、`find` `remove` `to_list` `fold` が上の規則どおりになる。`to_list` に出る鍵は最初に挿入したものである。
 
 ## 由来
 

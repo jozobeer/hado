@@ -23,6 +23,7 @@
 - `log_error "x"` を呼ぶ `def main` を build と `hado run` で走らせ、stdout は空、stderr は `x` と改行 1 つだけになる。`log` は stdout、`log_error` は stderr に書く対照を同じ門番に置く。
 - stderr の読み手が先に終わって書き込みが失敗する状態で `log_error` を呼ぶと、`handler` が `message` を `"IoFailure"` とする `Error` を捕まえる。捕まえなければ 1 で終わる。§55 の失敗の表に `log_error` の行を足す。
 - `tests/accept/` の入口 `main` が `Int` を返し `// expect:` が数値のケース（`tests/accept/once_loop/main.hd:2` の `10000000` など）を棚卸しする。印字の期待を保つため `Int.to_string` で包むなどして移行し、移行の前後で `scripts/verify-m1-corpus.sh` の項目被覆が変わらないことを確かめる。`tests/corpus.sha256` はこのラウンドの成果物として作り直す。
+- 実行する `main` が `Int` を印字に使う非コーパスの門番とテストも同じ棚卸しに含める（`crates/hado/tests/walk.rs:15`、`scripts/verify-r29.sh:108`、`scripts/verify-r43.sh:245` など）。`Int.to_string` で包むなどして移行し、`cargo test` と各 `verify-*.sh` が移行の前後で同じ被覆を測ることを確かめる。
 - §54 の表と「二値を保つ」の文を改める。
 
 ## 由来

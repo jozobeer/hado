@@ -113,3 +113,27 @@ exit=0
 cargo run --offline -q -- check target/pr5/t3/main.hd   # def f (a: Int) (b: Int): Int => a
 main.hd:1:16: error[E100]: expected =>, found (
 ```
+
+### 四次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 8/8
+
+grep -n '%.17g' runtime/hado_runtime.c
+462:  check_stdout(printf("%.17g\n", value) >= 0);
+514:  int length = snprintf(buffer, sizeof(buffer), "%.17g", value);
+
+sed -n '9p;31p' stdlib/list.hd
+def A sort(values: A List, comparator: Fn(A, A => Int)): A List
+def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => odds values |> sort comparator |> merge (evens values |> sort comparator) comparator
+
+grep -n 'def main = 1 + 2' crates/hado/tests/walk.rs
+15:        ("def main = 1 + 2", "3"),
+grep -n 'def main = \$int_value' scripts/verify-r29.sh
+108:if ! build_kind int "def main = $int_value" \
+grep -n 'def main = Int.abs' scripts/verify-r43.sh
+245:    source = f'def main = Int.abs {expression(value)}\n'
+```
