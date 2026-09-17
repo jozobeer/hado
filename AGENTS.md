@@ -6,7 +6,7 @@
 2. `docs/rounds.md` — ラウンドの識別子・ファイルの形・門番の宣言行
 3. `docs/corpus.md` — コーパスと門番の規約
 4. `docs/spec.md` — 言語仕様。全ての判断の根拠
-5. `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）。以後の実測は各 `docs/rounds/<slug>.md`
+5. `docs/ledger.md` — R81 までのラウンドの実行記録と、ラウンド外の設計メモ。実行記録は凍結し、以後の実測は各 `docs/rounds/<slug>.md`
 
 `docs/` の文書は常に現行版で、過去の版は git tag（`v0.1` など）が持つ。文書が食い違ったら仕様本文を正とし、食い違いを報告に書く。計画の中での優先順位は `docs/plan.md` が示す。
 
