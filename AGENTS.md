@@ -4,9 +4,10 @@
 
 1. `docs/plan.md` — 開発計画と版ごとの決定記録。ラウンドの手順書は `docs/rounds/`
 2. `docs/rounds.md` — ラウンドの識別子・ファイルの形・門番の宣言行
-3. `docs/corpus.md` — コーパスと門番の規約
-4. `docs/spec.md` — 言語仕様。全ての判断の根拠
-5. `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）。以後の実測は各 `docs/rounds/<slug>.md`
+3. `docs/issues.md` — 次にやる候補の置き方。候補は `docs/issues/<slug>.md`、着手でラウンドの slug になる
+4. `docs/corpus.md` — コーパスと門番の規約
+5. `docs/spec.md` — 言語仕様。全ての判断の根拠
+6. `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）。以後の実測は各 `docs/rounds/<slug>.md`
 
 `docs/` の文書は常に現行版で、過去の版は git tag（`v0.1` など）が持つ。文書が食い違ったら仕様本文を正とし、食い違いを報告に書く。計画の中での優先順位は `docs/plan.md` が示す。
 

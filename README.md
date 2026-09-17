@@ -96,4 +96,5 @@ AGENTS.md         エージェント向けの規則
 - `docs/ledger.md` — ラウンドごとの実行記録
 - `docs/spec-trace.md` `docs/spec-coverage.md` — 仕様の規範文と計画の項目の対応表
 - `docs/bug.md` — 修正していない不具合
+- `docs/issues.md` `docs/issues/` — 次にやる候補。1 件 1 ファイル。`docs/wants.md` は根拠が揃う前のメモ
 - `docs/cranelift-<版>.md` — Cranelift の API の実際の形
