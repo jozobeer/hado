@@ -137,3 +137,15 @@ grep -n 'def main = \$int_value' scripts/verify-r29.sh
 grep -n 'def main = Int.abs' scripts/verify-r43.sh
 245:    source = f'def main = Int.abs {expression(value)}\n'
 ```
+
+### 五次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 8/8
+
+grep -n 'fn execute' crates/hado/src/main.rs
+266:fn execute(input: &Path, args: &[String]) -> Outcome {
+```
