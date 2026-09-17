@@ -335,6 +335,7 @@ struct Lowerer {
     handler_stack: Vec<crate::parser::HandlerDecl>,
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
+    context_answer: Option<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
     fail_ids: std::collections::HashMap<String, u32>,
@@ -2991,7 +2992,11 @@ impl Lowerer {
         effect: &str,
         success: Type,
     ) -> Result<Expression, String> {
-        let answer = self.again_answers.last().cloned().ok_or("abort without handler answer")?;
+        let answer = self
+            .context_answer
+            .clone()
+            .or_else(|| self.again_answers.last().cloned())
+            .ok_or("abort without handler answer")?;
         let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Void));
         let constructor = self.fail_constructor(effect);
         self.operation_types.insert(constructor.clone(), Signature {
@@ -3270,15 +3275,17 @@ impl Lowerer {
         }
     }
 
-    fn specialization_needs_outcome(&self, scheme: &crate::types::Scheme) -> bool {
-        self.handler_stack.iter().any(|handler| {
-            Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect)
-        })
+    fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
+        for handler in &self.handler_stack {
+            if Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect) {
+                return self.answer_for_handler(handler).map(Some);
+            }
+        }
+        Ok(None)
     }
 
-    fn outcome_of(&self, success: &Type, _body: &crate::parser::Node) -> Result<Type, String> {
-        let answer = self.again_answers.last().cloned().ok_or("handler answer missing")?;
-        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer, Type::Void]))
+    fn outcome_of(&self, success: &Type, answer: &Type) -> Result<Type, String> {
+        Ok(Type::Data(OUTCOME.into(), vec![success.clone(), answer.clone(), Type::Void]))
     }
 
     fn node_type(&self, node: &crate::parser::Node) -> Option<Type> {
@@ -3717,12 +3724,13 @@ impl Lowerer {
         if params.len() != types.len() {
             return Err("function arity mismatch".into());
         }
-        let outcome = self.specialization_needs_outcome(&scheme);
+        let outcome_answer = self.specialization_answer(&scheme)?;
+        let outcome = outcome_answer.is_some();
         let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| !outcome))?;
-        let signature = if outcome {
+        let signature = if let Some(answer) = &outcome_answer {
             Signature {
                 parameters: inferred.parameters.clone(),
-                result: self.outcome_of(&inferred.result, &body)?,
+                result: self.outcome_of(&inferred.result, answer)?,
             }
         } else {
             inferred.clone()
@@ -3762,7 +3770,9 @@ impl Lowerer {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         self.active.push((key.clone(), id, signature.clone()));
+        let saved_answer = std::mem::replace(&mut self.context_answer, outcome_answer.clone());
         let lowered = self.expression(&body);
+        self.context_answer = saved_answer;
         self.active.pop();
         self.specialization = saved_specialization;
         self.scope = saved;
