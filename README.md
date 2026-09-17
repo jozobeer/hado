@@ -19,16 +19,16 @@ ML 系の型システムと ADT を核に、より小さく、より平坦に、
 `cargo build --offline` で `target/debug/hado` ができる（`CARGO_TARGET_DIR` を設定していればその下）。最初のプログラムは [docs/getting-started.md](docs/getting-started.md)。
 
 ```
-hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
-hado dump-mono <file>               # 単相化後のプログラムを印字
-hado build <file.hd>              # 入力の隣に実行ファイルを置く
-hado run <file.hd>                # 一時ディレクトリで実行し、隣に何も残さない
+$ target/debug/hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
+$ target/debug/hado dump-mono <file>               # 単相化後のプログラムを印字
+$ target/debug/hado build <file.hd>              # 入力の隣に実行ファイルを置く
+$ target/debug/hado run <file.hd>                # 一時ディレクトリで実行し、隣に何も残さない
 ```
 
 拒否の例:
 
 ```
-$ hado check tests/reject/E508/main.hd
+$ target/debug/hado check tests/reject/E508/main.hd
 main.hd:7:3: error[E508]: failure bound at 7:5 is propagated unchanged; use let p? = or do
 ```
 

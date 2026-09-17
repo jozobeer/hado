@@ -1,6 +1,20 @@
 # 書き始める
 
-必要なものとバイナリの作り方は [README.md](../README.md)。リポジトリの根から `target/debug/hado` を呼ぶ。引数は書いたファイルのパスで、以下では `hello.hd` と書く。
+必要なものは [README.md](../README.md)。リポジトリの根でコンパイラを作る。
+
+```
+$ cargo build --offline
+```
+
+以後は同じ根から、書いたファイルのパスを付けて呼ぶ。以下では `hello.hd` と書く。
+
+```
+$ target/debug/hado run hello.hd
+$ target/debug/hado check [--print-type] hello.hd
+$ target/debug/hado build hello.hd
+```
+
+`run` は一時ディレクトリで実行し、隣に何も残さない。`build` は入力の隣に実行ファイルを置く。
 
 ファイルはどこに置いてもよい。渡したファイルのディレクトリがプログラムの根で、その下の `.hd` は全部検査される（[仕様 §50](spec.md#50-複数ファイル)）。このリポジトリの根や `tests/` `stdlib/` `tools/` に置くと、隣のプログラムと一つの検査になる。
 
