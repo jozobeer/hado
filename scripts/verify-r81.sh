@@ -112,7 +112,7 @@ def r81_docs_lock():
     full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
     assert 'r81' in full, 'r81 is not in the full tier'
     assert 'verify-r81' in Path('docs/spec-trace.md').read_text(), 'the trace has no r81 row'
-    assert '## 76. ' in Path('docs/plan.md').read_text(), 'the plan has no section 76'
+    assert Path('docs/rounds/r81.md').is_file(), 'docs/rounds/r81.md is missing'
     coverage = Path('docs/spec-coverage.md').read_text()
     assert '| 2.2 | Void payload |' in coverage, 'coverage still uses the old item name'
     assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0

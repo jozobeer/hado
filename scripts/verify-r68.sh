@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R68: E512 の書き換え（docs/plan.md 63 節）。
+# R68: E512 の書き換え（`docs/rounds/r68.md`）。
 # 判定は「E512 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu
 cd "$(dirname "$0")/.."
@@ -100,7 +100,7 @@ def r68_docs():
     full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
     assert 'r68' in full, 'r68 is not in the full tier'
     assert 'verify-r68' in Path('docs/spec-trace.md').read_text(), 'the trace has no r68 row'
-    assert '## 63. ' in Path('docs/plan.md').read_text(), 'the plan has no section 63'
+    assert Path('docs/rounds/r68.md').is_file(), 'docs/rounds/r68.md is missing'
     spec = Path('docs/spec.md').read_text()
     assert 'E512' in spec and '書き換え' in spec, 'the spec does not record the E512 rewrite'
     assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0

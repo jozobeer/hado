@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R45 複数の scrutinee とパターンの腕の条件列（docs/plan.md 41 節）。
+# R45 複数の scrutinee とパターンの腕の条件列（`docs/rounds/r45.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,7 +22,7 @@ trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
 
 # 生成する探針の共通の道具。check / build と比較を 1 箇所に閉じ、
-# 比較が差を検出できることを control で先に確かめる（docs/plan.md 39 節）。
+# 比較が差を検出できることを control で先に確かめる（`docs/rounds/r43.md`）。
 cat >"$workdir/harness.py" <<'PY'
 import re
 import subprocess

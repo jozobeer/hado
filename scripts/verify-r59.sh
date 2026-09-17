@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R59 未使用の効果と handler の E513（docs/plan.md 55 節）。
+# R59 未使用の効果と handler の E513（`docs/rounds/r59.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R73: E501 の書き換え（docs/plan.md 68 節）。
+# R73: E501 の書き換え（`docs/rounds/r73.md`）。
 # 判定は「E501 が消えた」ではなく「直したファイルが check を通る」まで見る。
 set -eu
 cd "$(dirname "$0")/.."
@@ -100,7 +100,7 @@ def r73_docs():
     full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
     assert 'r73' in full, 'r73 is not in the full tier'
     assert 'verify-r73' in Path('docs/spec-trace.md').read_text(), 'the trace has no r73 row'
-    assert '## 68. ' in Path('docs/plan.md').read_text(), 'the plan has no section 68'
+    assert Path('docs/rounds/r73.md').is_file(), 'docs/rounds/r73.md is missing'
     assert 'E501' in Path('docs/spec.md').read_text(), 'the spec does not mention E501'
     assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
 

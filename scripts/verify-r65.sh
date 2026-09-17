@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R65 診断の機械可読な出力（docs/plan.md 61 節）。
+# R65 診断の機械可読な出力（`docs/rounds/r65.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -205,8 +205,7 @@ full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], 
 assert 'r65' in full, 'r65 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r65' in trace, 'spec-trace does not name verify-r65'
-plan = Path('docs/plan.md').read_text()
-assert '## 61. ' in plan, 'plan has no section 61'
+assert Path('docs/rounds/r65.md').is_file(), 'docs/rounds/r65.md is missing'
 spec = Path('docs/spec.md').read_text()
 section = spec.split('## 58.4. ', 1)[1].split('\n## ', 1)[0]
 assert 'json' in section, '§58.4 does not record the JSON format'

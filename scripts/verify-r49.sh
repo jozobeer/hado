@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R49 効果行付き関数値の build 失敗を直す（docs/plan.md 45 節）。
+# R49 効果行付き関数値の build 失敗を直す（`docs/rounds/r49.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R56 E305 に期待型と実型を載せる（docs/plan.md 52 節）。
+# R56 E305 に期待型と実型を載せる（`docs/rounds/r56.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

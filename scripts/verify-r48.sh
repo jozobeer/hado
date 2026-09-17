@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R48 `hado run` と安全な出力先（docs/plan.md 44 節）。
+# R48 `hado run` と安全な出力先（`docs/rounds/r48.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

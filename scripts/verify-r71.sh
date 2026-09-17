@@ -77,7 +77,7 @@ fi
 missing=""
 bash scripts/run-gates.sh --print-tier full | grep -qx r71 || missing="$missing tier"
 grep -q "verify-r71" docs/spec-trace.md || missing="$missing trace"
-grep -q "^## 66\. " docs/plan.md || missing="$missing plan"
+[ -f docs/rounds/r71.md ] || missing="$missing plan"
 if [ -n "$(git status --porcelain tests/accept tests/reject stdlib tests/corpus.sha256)" ]; then
   missing="$missing corpus"
 fi

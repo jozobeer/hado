@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R61 再帰定義の省略した効果行（docs/plan.md 57 節）。
+# R61 再帰定義の省略した効果行（`docs/rounds/r61.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -222,8 +222,7 @@ full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], 
 assert 'r61' in full, 'r61 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r61' in trace, 'spec-trace does not name verify-r61'
-plan = Path('docs/plan.md').read_text()
-assert '## 57. ' in plan, 'plan has no section 57'
+assert Path('docs/rounds/r61.md').is_file(), 'docs/rounds/r61.md is missing'
 print('docs: the tier, the trace row and the plan section')
 PY
 }

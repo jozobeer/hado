@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R42 節番号を増やしても動かない形にする（docs/plan.md 38 節）。本文は整数と
+# R42 節番号を増やしても動かない形にする（`docs/rounds/r42.md`）。本文は整数と
 # 小数、付録は文字で引き、参照が実在を指すことを測る。リポジトリルートから実行する。
 set -uo pipefail
 cd "$(dirname "$0")/.."

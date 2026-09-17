@@ -105,7 +105,7 @@ def r75_docs():
     full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
     assert 'r75' in full, 'r75 is not in the full tier'
     assert 'verify-r75' in Path('docs/spec-trace.md').read_text(), 'the trace has no r75 row'
-    assert '## 70. ' in Path('docs/plan.md').read_text(), 'the plan has no section 70'
+    assert Path('docs/rounds/r75.md').is_file(), 'docs/rounds/r75.md is missing'
     assert 'E505' in Path('docs/spec.md').read_text(), 'the spec does not mention E505'
     assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
 

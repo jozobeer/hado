@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R63 Boolean の pattern 分岐を Boolean 分岐の正準形にする（docs/plan.md 59 節）。
+# R63 Boolean の pattern 分岐を Boolean 分岐の正準形にする（`docs/rounds/r63.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -183,8 +183,7 @@ full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], 
 assert 'r63' in full, 'r63 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r63' in trace, 'spec-trace does not name verify-r63'
-plan = Path('docs/plan.md').read_text()
-assert '## 59. ' in plan, 'plan has no section 59'
+assert Path('docs/rounds/r63.md').is_file(), 'docs/rounds/r63.md is missing'
 spec = Path('docs/spec.md').read_text()
 section = spec.split('## 24. ', 1)[1].split('\n## ', 1)[0]
 assert '書き換え' in section, '§24 does not record the rewrite'

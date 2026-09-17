@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R52 `hado fmt` と `build --fix`（docs/plan.md 48 節）。
+# R52 `hado fmt` と `build --fix`（`docs/rounds/r52.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

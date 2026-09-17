@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R60 E305 の役割と関連位置（docs/plan.md 56 節）。
+# R60 E305 の役割と関連位置（`docs/rounds/r60.md`）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

@@ -111,7 +111,7 @@ def r77_print_type_and_docs():
     full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
     assert 'r77' in full, 'r77 is not in the full tier'
     assert 'verify-r77' in Path('docs/spec-trace.md').read_text(), 'the trace has no r77 row'
-    assert '## 72. ' in Path('docs/plan.md').read_text(), 'the plan has no section 72'
+    assert Path('docs/rounds/r77.md').is_file(), 'docs/rounds/r77.md is missing'
     assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
 
 
