@@ -178,6 +178,18 @@ PASSED: 7/7
 ```
 
 準備の段（checkout・apt・cache・`cargo fetch --locked`）は 20:10:07Z -> 20:10:27Z の 20 秒。
-runner は 2 vCPU（`nproc` = 2）で、20 分のうち m0 が 14 分 31 秒（73%）を占める。2000 分/月の
-無料枠では PR の core が約 100 回である。`target/` のキャッシュと `m0` の短縮は実測を見て
-別ラウンドで判断する。
+runner は 2 vCPU（`nproc` = 2）で、この走行の 20 分のうち m0 が 14 分 31 秒（73%）を占める。
+2000 分/月の無料枠では PR の core が約 100 回である。
+
+```
+# 2 本目（本ファイルの追記の push で走った走行。head 8dd6970）
+$ gh run view 35271325121 --json conclusion,createdAt,updatedAt
+{"conclusion":"success","createdAt":"2026-09-17T20:31:34Z","updatedAt":"2026-09-17T20:43:52Z"}
+ci-run: event=pull_request ref=refs/pull/6/merge tier=core jobs=2 out=target/ci-gates
+TALLY: 569/569 passed; red: none
+PASSED: 7/7
+（job 全体 12 分 18 秒。同じ判定で、所要は runner 次第で 12〜20 分に散る）
+```
+
+`target/` のキャッシュと `m0` の短縮、`--jobs` の値の見直しは、この実測を見て別ラウンドで
+判断する。
