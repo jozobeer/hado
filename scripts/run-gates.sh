@@ -198,7 +198,15 @@ if [ -z "$tier" ] && [ "${#selectors[@]}" -eq 0 ]; then
 fi
 all=()
 if [ -n "$tier" ]; then
-    mapfile -t all < <(hado_tier_gates "$tier")
+    tier_list=$(hado_tier_gates "$tier") || {
+        echo "tier scan failed: $tier" >&2
+        exit 1
+    }
+    if [ -z "$tier_list" ]; then
+        all=()
+    else
+        mapfile -t all <<<"$tier_list"
+    fi
 fi
 all+=("${selectors[@]}")
 if [ "${#all[@]}" -eq 0 ]; then

@@ -26,10 +26,12 @@ cleanup() {
 trap cleanup EXIT
 
 tier_scan_case() {
-    local copy probe_full
-    copy="$workdir/scripts-a"
-    rm -rf -- "$copy"
-    cp -a scripts "$copy"
+    local tree copy probe_full out status
+    tree="$workdir/tree-a"
+    rm -rf -- "$tree"
+    mkdir -p "$tree"
+    cp -a scripts "$tree/scripts"
+    copy="$tree/scripts"
     printf '%s\n' '#!/usr/bin/env bash' '# tier: full' 'exit 0' >"$copy/verify-probe.sh"
     probe_full=$(
         # shellcheck source=scripts/lib/gate-tiers.sh
@@ -45,6 +47,13 @@ tier_scan_case() {
     ) >/dev/null 2>&1; then
         return 1
     fi
+    out="$workdir/out-a"
+    rm -rf -- "$out"
+    mkdir -p "$out"
+    status=0
+    bash "$copy/run-gates.sh" --tier full "$out" >/dev/null 2>&1 || status=$?
+    [ "$status" -ne 0 ] || return 1
+    [ -z "$(find "$out" -name 'verify-*.log' -print)" ]
 }
 
 plan_split_case() {
@@ -111,7 +120,7 @@ lock_tool_case() {
     bash "$copy/scripts/corpus-lock.sh" --check || return 1
 }
 
-check 'a probe with # tier: full appears; a missing header makes hado_tier_all_gates fail' tier_scan_case
+check 'a probe with # tier: full appears; a missing header aborts run-gates with no logs' tier_scan_case
 check 'b plan headings have no R numbers; every round file has # title and ## 手順書' plan_split_case
 check 'c each # round: slug is unique, well-formed, and has docs/rounds/<slug>.md' round_header_case
 check 'd corpus-lock --check matches; a generated accept case adds one lock line' lock_tool_case
