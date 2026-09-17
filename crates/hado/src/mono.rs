@@ -359,14 +359,15 @@ impl Lowerer {
     }
 
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
-        if !self.handler_needs_outcome() { return false; }
         if matches!(&node.kind, crate::parser::NodeKind::Bin(crate::parser::BinOp::Div | crate::parser::BinOp::Mod, _, _))
             && self.handler_for("raise").is_some()
         {
             return true;
         }
+        if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
+            return true;
+        }
         if let crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) = &node.kind {
-            if self.is_abort_node(node) && self.handler_for_node(node).is_some() { return true; }
             let name = match &callee.kind {
                 crate::parser::NodeKind::Name(name) if !self.scope.contains_key(name) => Some(name.clone()),
                 crate::parser::NodeKind::Field(module, member) => match &module.kind {
@@ -375,7 +376,7 @@ impl Lowerer {
                 },
                 _ => None,
             };
-            if name.is_some_and(|name| {
+            if self.stack_needs_outcome() && name.is_some_and(|name| {
                 self.schemes.get(&self.resolve_definition(&name)).is_some_and(Self::scheme_carries_effects)
             }) { return true; }
         }
@@ -3184,47 +3185,94 @@ impl Lowerer {
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
         let ty = value.ty();
-        let success = match &ty {
-            Type::Data(name, args) if name == OUTCOME => args.first().cloned().ok_or("outcome missing success type")?,
-            _ => return Err("propagate requires an outcome".into()),
-        };
+        let (success, answer, payload) = outcome_parts(&ty)?;
         let id = self.next;
         self.next += 1;
         let variable = Expression::Variable { id, ty: ty.clone() };
-        let payload = Expression::Project {
+        let projected = Expression::Project {
             value: Box::new(variable.clone()),
             constructor: DONE.into(),
             index: 0,
             result: success,
         };
-        let mut rest = self.bound_body(pat, payload, body)?;
+        let mut rest = self.bound_body(pat, projected, body)?;
+        let outgoing = if is_outcome(&rest.ty()) {
+            let (_, rest_answer, rest_payload) = outcome_parts(&rest.ty())?;
+            if rest_answer != answer || rest_payload != payload {
+                return Err("continuation result type mismatch".into());
+            }
+            rest.ty()
+        } else {
+            Type::Data(OUTCOME.into(), vec![rest.ty(), answer, payload])
+        };
         if !is_outcome(&rest.ty()) {
-            rest = self.done(rest, &ty)?;
+            rest = self.done(rest, &outgoing)?;
         }
-        let result = rest.ty();
+        let mut arms = vec![(DONE.into(), rest)];
+        let fallback = if outgoing == ty {
+            Some(Box::new(Expression::Variable { id, ty }))
+        } else {
+            arms.extend(self.fail_forward_arms(&variable, &outgoing)?);
+            Some(Box::new(Expression::Unreachable { result: outgoing.clone() }))
+        };
         Ok(Expression::Let {
             id,
             value: Box::new(value),
             body: Box::new(Expression::Switch {
                 value: Box::new(variable),
-                arms: vec![(DONE.into(), rest)],
-                fallback: Some(Box::new(Expression::Variable { id, ty })),
-                result,
+                arms,
+                fallback,
+                result: outgoing,
             }),
         })
     }
 
-    fn handler_needs_outcome(&self) -> bool {
-        self.handler_stack.last().is_some_and(|handler| {
-            handler.arms.iter().any(|arm| {
-                matches!(
-                    arm,
-                    crate::parser::HandlerArm::Operation {
-                        kind: crate::parser::OpKind::Abort | crate::parser::OpKind::Again,
-                        ..
-                    }
-                )
-            })
+    fn fail_forward_arms(&mut self, value: &Expression, outgoing: &Type) -> Result<Vec<(String, Expression)>, String> {
+        let mut arms = Vec::new();
+        for effect in self.fail_ids.keys().cloned().collect::<Vec<_>>() {
+            let constructor = self.fail_constructor(&effect);
+            if !self.operation_types.contains_key(&constructor) {
+                continue;
+            }
+            arms.push((
+                constructor.clone(),
+                Expression::Construct {
+                    fields: vec![project(value, &constructor, 0, self.outcome_payload(&constructor)?)],
+                    constructor,
+                    result: outgoing.clone(),
+                },
+            ));
+        }
+        Ok(arms)
+    }
+
+    fn handler_has_propagation_ops(handler: &crate::parser::HandlerDecl) -> bool {
+        handler.arms.iter().any(|arm| {
+            matches!(
+                arm,
+                crate::parser::HandlerArm::Operation {
+                    kind: crate::parser::OpKind::Abort | crate::parser::OpKind::Again,
+                    ..
+                }
+            )
+        })
+    }
+
+    fn stack_needs_outcome(&self) -> bool {
+        self.handler_stack.iter().any(Self::handler_has_propagation_ops)
+    }
+
+    fn scheme_carries_effect(scheme: &crate::types::Scheme, effect: &str) -> bool {
+        let mut inference = crate::types::Inference::default();
+        match inference.instantiate(scheme) {
+            crate::types::Ty::Fn(_, _, row) => row.without_effect(effect) != *row,
+            _ => false,
+        }
+    }
+
+    fn specialization_needs_outcome(&self, scheme: &crate::types::Scheme) -> bool {
+        self.handler_stack.iter().any(|handler| {
+            Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect)
         })
     }
 
@@ -3669,7 +3717,7 @@ impl Lowerer {
         if params.len() != types.len() {
             return Err("function arity mismatch".into());
         }
-        let outcome = self.handler_needs_outcome() && Self::scheme_carries_effects(&scheme);
+        let outcome = self.specialization_needs_outcome(&scheme);
         let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| !outcome))?;
         let signature = if outcome {
             Signature {
