@@ -89,4 +89,35 @@ R78 の番号を 2 本の枝が同時に取り、着地時に `verify-r78.sh →
 
 ## 実測
 
-（工程 4 の後に書く）
+```
+# 稽古（判定 e）
+git merge --no-edit rehearsal-a; echo merge-a=$?
+merge-a=0
+git merge --no-edit rehearsal-b; echo merge-b=$?
+merge-b=0
+git status --short | head
+(empty)
+bash scripts/run-gates.sh --print-tier full | grep -c rehearsal
+2
+bash scripts/lint-docs.sh 2>&1 | tail -2
+PASSED: 6/7
+bash scripts/verify-parallel-rounds.sh 2>&1 | tail -2
+PASSED: 4/4
+
+# 対照（main からの旧方式）
+git merge --no-edit old-b; echo merge-b=$?
+merge-b=1
+git diff --name-only --diff-filter=U
+docs/plan.md
+scripts/lib/gate-tiers.sh
+
+# 全走
+TALLY: 3738/3739 passed; red: lint-docs.log
+gates-exit=1
+cargo test --offline --no-fail-fast → passed=775 failed=0
+bash scripts/corpus-lock.sh --check; echo lock=$?
+lock=0
+
+# 赤と対応
+lint-docs 検査 6（## 実測 にコードフェンスが無かった）。本節で閉じる。閉じたあと赤なし。
+```
