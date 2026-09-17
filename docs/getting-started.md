@@ -14,7 +14,7 @@ $ cargo run --offline -q -- check [--print-type] hello/hello.hd
 $ cargo run --offline -q -- build hello/hello.hd
 ```
 
-`run` は実行ファイルを一時ディレクトリに作り、隣に何も残さない。作業ディレクトリは変えない（[仕様 §58](spec.md#58-実行と出力先)）。`build` は `hello/hello` を入力の隣に置く。`hello/./hello.hd` でも同じである。
+`run` は実行ファイルを一時ディレクトリに作り、隣に何も残さない。作業ディレクトリは変えない（[仕様 §58](spec.md#58-実行と出力先)）。`build` は `hello/hello` を入力の隣に置く。
 
 ## hello
 
