@@ -16,9 +16,9 @@
 
 ## 完了条件
 
-- 計測の表がラウンドファイルにある。同じ 2 つのループと string-split-linear の入力で `"speed"` と `"none"` を比べ、比と中央値を書く。
-- 差が 2 倍未満なら `crates/hado/src/emit.rs:23` は `"none"` のままとし、`build` と `hado run` の既定を変えない。
-- 差が 2 倍以上なら `build` と `hado run` の既定を `"speed"` にし、生成した実行ファイルと `hado run` の両方で計測して表と同じ比を再現する。`check` は emit を通らないので、`check` の診断と `--print-type` が変わらないことを対照に置く。
+- 計測の表がラウンドファイルにある。同じ 2 つのループと string-split-linear の入力それぞれで `"none"` と `"speed"` を warm-up 後 5 回測り、各入力の比（`"none"` の中央値 ÷ `"speed"` の中央値）を出す。3 つの比の中央値を判定値とする。
+- 判定値が 2 倍未満なら `crates/hado/src/emit.rs:23` は `"none"` のままとし、`build` と `hado run` の既定を変えない。
+- 判定値が 2 倍以上なら `build` と `hado run` の既定を `"speed"` にし、生成した実行ファイルと `hado run` の両方で計測して同じ判定値を再現する。`check` は emit を通らないので、`check` の診断と `--print-type` が変わらないことを対照に置く。
 
 ## 由来
 

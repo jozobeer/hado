@@ -9,7 +9,7 @@
 
 `docs/wants.md` 33 は association list を想定している。typeclass も演算子過負荷も無い（§4）ので、比較を誰が持つかが決まっていなかった。
 
-組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs` の `derive_comparison`）、契約経由の多相関数から型変数の上で呼べることを実測した（2026-09-17）。
+組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs:3294` の `derive_comparison`）、契約経由の多相関数から型変数の上で呼べることを実測した（2026-09-17）。
 
 ```
 $ hado run main.hd   # module Ord / def A less(a: A, b: A): Bool / implement: compare a b < 0
@@ -24,7 +24,7 @@ $ hado run main.hd   # module Ord / def A less(a: A, b: A): Bool / implement: co
 ## 完了条件
 
 - `Map` の member の型を §55 に書く。`fold` と `to_list` はキーの昇順。
-- 外から内部 constructor を構築・pattern 分解すると E204 になる。`empty` から公開 member だけで作った値について、挿入・削除後も順序と平衡条件を満たすことを門番で判定する。
+- 外から内部 constructor を構築・pattern 分解すると E204 になる。`empty` から公開 member だけで作った値について、挿入・削除後も順序と平衡条件を満たすことを門番で判定する。公開 member の結果だけでは木の形が見えないので、`implement Map as Map` の中に門番専用の内部 member（高さなど）を置くか、`compare` の呼び出し回数を数える計測用の runtime stub を用意し、昇順・降順・ランダムな挿入と削除で高さと比較回数が要素数 `n` に対する `O(log n)` の上限（判定器側で独立に計算した値）に収まることを照合する。
 - 単語頻度の CLI を `Map` で書き直し、20 万語で `bump` 版より速いことを門番で測る。
 
 ## 由来

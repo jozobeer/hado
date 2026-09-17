@@ -7,7 +7,7 @@
 
 ## 原因
 
-§54 の決定。`Failure is an effect` が OS の境界で 0/1 に潰れる。
+§54 の決定。`docs/spec.md:1845` が終了コードを 0 と 1 の二値に保つと定め、`runtime/hado_runtime.c:539` の `hado_abort_error` が `exit(1)` で `Failure is an effect` を OS の境界で 0/1 に潰す。
 
 ## 案
 
@@ -22,6 +22,7 @@
 - `def main = -1`、`256`、`9223372036854775807`、`(-9223372036854775807 - 1)` が範囲外の診断を stderr に書いて 1 で終わる。i64 の最小値はリテラルに書けない（E112）ので引き算で作る。生成した実行ファイルと `hado run` の両方で判定する。
 - `log_error "x"` を呼ぶ `def main` を build と `hado run` で走らせ、stdout は空、stderr は `x` と改行 1 つだけになる。`log` は stdout、`log_error` は stderr に書く対照を同じ門番に置く。
 - stderr の読み手が先に終わって書き込みが失敗する状態で `log_error` を呼ぶと、`handler` が `message` を `"IoFailure"` とする `Error` を捕まえる。捕まえなければ 1 で終わる。§55 の失敗の表に `log_error` の行を足す。
+- `tests/accept/` の入口 `main` が `Int` を返し `// expect:` が数値のケース（`tests/accept/once_loop/main.hd:2` の `10000000` など）を棚卸しする。印字の期待を保つため `Int.to_string` で包むなどして移行し、移行の前後で `scripts/verify-m1-corpus.sh` の項目被覆が変わらないことを確かめる。`tests/corpus.sha256` はこのラウンドの成果物として作り直す。
 - §54 の表と「二値を保つ」の文を改める。
 
 ## 由来

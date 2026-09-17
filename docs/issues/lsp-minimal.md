@@ -29,16 +29,17 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 - 機能は診断・hover・「正準形へ置換」の code action の 3 つ。code action は `check --fix` と同じ関数を呼ぶ。補完は入れない。
 - サーバは URI ごとに version と本文を保持する。`didOpen` の全文で開き、`didChange` は `TextDocumentSyncKind::FULL` の全文変更を version の昇順で反映する。開いている文書はディスクを読み直さず、古い version の変更と解析結果を公開しない。
 - hover の第一段はカーソル下の最上位 `def` の型に限る。局所束縛と式の型は、infer が span から型への対応を保持しているか未確認なので、調べてから決める。
-- Neovim 側は `vim.lsp.config("hado", { cmd = { "hado", "lsp" }, filetypes = { "hado" } })` と `vim.lsp.enable("hado")` の数行。
+- Neovim 側は `vim.lsp.config("hado", { cmd = { "<checkout>/scripts/hado-lsp.sh" }, filetypes = { "hado" } })` と `vim.lsp.enable("hado")` の数行。`scripts/hado-lsp.sh` は自分の位置からリポジトリ根を求め、`cargo run --offline -q -- lsp` を実行する。`AGENTS.md` の環境に `hado` のインストールは無いので、PATH 上の `hado` は使わない。
 
 ## 完了条件
 
 - `nvim --headless` で `.hd` を開き、保存せずに本文を変更してから、診断・hover・code action の 3 つが新しい version の本文を参照することを判定する。ディスク上の本文は変更前のままとし、ディスクの再読込だけでは通らない門番にする。
+- 門番は `README` の設定の `cmd` を checkout の絶対パスに置き換えて `nvim --headless` を走らせる。`target` の実行ファイルを `PATH` に足さず、`hado` という名前の実行ファイルにも依存しない。
 - 同じ非致命段階の診断を 2 件以上持つ 1 ファイルで、`check --show-all --format json` と LSP の diagnostics が同じ全件をアンカー順に返す。E1xx と E3xx の複数欠陥を置いた対照は 1 件だけを返し、`--show-all` の無い CLI も 1 件のまま。
 - 入口ファイルと下位 source 2 つに同じ非致命段階の診断を、行番号が逆になるように置く。`check --show-all --format json` と LSP の diagnostics が §50 のソース順（入口ファイルが先、残りは根からの相対パスのバイト順、同じファイル内は行・列）で並ぶ。source 内の offset だけで並べる実装では通らない。
 - ASCII、BMP の多バイト文字、BMP 外の文字を診断の前に置き、UTF-8・UTF-16・UTF-32 それぞれで開始と終端が対象構文を指す。
 - 入口ファイルと別の source の同じ byte offset に診断・hover・code action の対象を置き、各結果が正しい URI と source 内 range を返す。2 つの source を `didOpen` したまま片方に未保存の変更を入れ、その変更が他方を入口にした診断・hover・code action に現れる（問い合わせた URI 以外をディスクから読み直す実装では通らない）。
-- 型付け後に止まる E4xx・E5xx・E6xx の代表として E402・E505・E602 を用意する。それぞれで `check --print-type=<名前>` と hover が同じ診断コードと同じ推論型を返す。E1xx・E2xx・E3xx では型を返さない対照も置く。
+- 型付け後に止まる E4xx・E5xx・E6xx の代表として E402・E505・E602 を用意する。E602 は早期に `Err` を返す経路（`crates/hado/src/infer.rs:613` の missing signature member で、`tests/reject/E602` の入力）を使い、`crates/hado/src/infer.rs:1849` の遅延される経路だけで通さない。それぞれで `check --print-type=<名前>` と hover が同じ診断コードと同じ推論型を返す。E1xx・E2xx・E3xx では型を返さない対照も置く。
 
 ## 由来
 

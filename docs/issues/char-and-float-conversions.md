@@ -18,7 +18,7 @@ Char のリテラル比較（`c == 'a'`）と `Float.to_string`、`Int.parse` �
 
 ## 原因
 
-§55 の関数集合に `Char` module が無く、`Float` は `to_string` だけである。`stdlib/float.hd` は 4 行。
+§55 の関数集合に `Char` module が無く、`Float` は `to_string` だけである。`docs/spec.md:1904` の効果を持たない member の一覧に `Char` は無く、`stdlib/float.hd:2-4` も `to_string` だけである。
 
 ## 案
 
@@ -28,9 +28,9 @@ Char のリテラル比較（`c == 'a'`）と `Float.to_string`、`Int.parse` �
 
 ## 完了条件
 
-- 各 member の型と、`Char.of_int`・`Float.parse` の失敗の `message` を §55 の失敗の表に書き、受理と拒否のケースを足す。
+- 各 member の型と、`Char.of_int`・`Float.parse` の失敗の `message` を §55 の失敗の表に書き、受理ケースと、実行時の `{Error}` を `// expect-error:` で測る受理ケース（`docs/corpus.md`）を足す。両方の失敗は実行時の `{Error}` で §56 に静的コードが無いので、拒否コーパス（`// error:`）には置かない。
 - `Char.of_int` は `0`、`0xD7FF`、`0xE000`、`0x10FFFF` を受理し、`-1`、`0xD800`、`0xDFFF`、`0x110000` は `message` が `"InvalidScalar"` の `{Error}` になる。受理した値の `Char.to_string` が abort しないことも測る。
-- `Float.parse` の受理文法と往復（`to_string` → `parse`）を仕様に書き、門番で測る。文法の外の入力（空文字列、`"1."`、`"."`、`"1e3"`、`" 1"`、`"0x1"`）は `message` が `"InvalidFloat"` の `{Error}` になり、有限値の往復は `parse (to_string x) == x` になる。
+- `Float.parse` の受理文法と往復（`to_string` → `parse`）を仕様に書き、門番で測る。文法の外の入力（空文字列、`"1."`、`"."`、`"1e3"`、`" 1"`、`"0x1"`）は `message` が `"InvalidFloat"` の `{Error}` になり、有限値の往復は `parse (to_string x) == x` になる。`-0.0` は IEEE の `==` では `+0.0` と区別できないので、`Float.to_string (Float.parse "-0.0") == "-0.0"` で測る（§54）。
 
 ## 由来
 
