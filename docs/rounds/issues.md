@@ -66,3 +66,22 @@ bash scripts/lint-docs.sh 2>&1 | tail -2
 OK: R38 spec sentences are pinned verbatim once each
 PASSED: 7/7
 ```
+
+### レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 7/7
+
+nvim --version | head -1
+NVIM v0.12.5
+# カスタム filetype "hado" に lua parser を割り当て、-u NONE（nvim-treesitter 無し）で開く
+# filetype=hado / parser=true / active_before_start=false / active_after_start=true
+
+cargo run --offline -q -- check --format json tests/reject/E101/main.hd
+main.hd:6:40: error[E101]: branches cannot be nested inside another branch
+cargo run --offline -q -- check --format json tests/reject/E505/main.hd
+{"path": "main.hd", "line": 4, "col": 7, "code": "E505", "message": "binding unused is unused", "canonical": null, "related": null}
+```

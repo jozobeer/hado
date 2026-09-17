@@ -5,6 +5,10 @@
 
 `crates/hado/src/emit.rs:23` で `opt_level` は `"none"` である。文字列比較 1000 万回が 0.08 s、末尾再帰 1000 万回が 0.14 s なので、いまの遅さの主因ではない（2026-09-17）。`"speed"` にしたときの差は未計測。
 
+## 原因
+
+`crates/hado/src/emit.rs:23` が Cranelift の `opt_level` を `"none"` に固定している。`"speed"` との差を測った記録が無く、既定を選ぶ根拠が無いまま残っている。
+
 ## 案
 
 - 同じ 2 つのループと string-split-linear の入力で `"speed"` と比べ、差が 2 倍未満なら閉じる。
