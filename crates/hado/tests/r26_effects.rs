@@ -376,6 +376,51 @@ fn again_handler_outside_abort_handler_forwards_callee_raise() {
 }
 
 #[test]
+fn transitive_callee_reuses_the_enclosing_answer_for_abort() {
+    let case = Case::new();
+    case.write("main.hd", "effect A\nabort a\neffect B\nabort b\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B as InnerB\nabort b => 0\nreturn value => value\ndef g (x: Int): Int {B} =>\n  if x == 0 => b | x\ndef f (x: Int): Int {A, B} =>\n  if x == 0 => a | g x\ndef main =\n  with OuterA ->\n  with InnerB ->\n  f 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"outer-abort\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn transitive_callee_reuses_the_enclosing_answer_for_again() {
+    for (value, expected) in [(0, "outer-abort"), (3, "outer-return")] {
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "effect A\nabort a\neffect B YieldB\nagain yieldB(value: Int): Void\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B YieldB as CollectB\nagain yieldB value =>\n  let rest = resume () ->\n  rest\nreturn _ => 0\ndef g (x: Int): Int {{Int YieldB}} =>\n  do yieldB x -> x\ndef f (x: Int): Int {{A, Int YieldB}} =>\n  if x == 0 => a | g x\ndef main =\n  with OuterA ->\n  with CollectB ->\n  f {value}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn nested_again_handlers_with_different_answers_align() {
+    for (value, expected) in [(0, "[0]"), (3, "[]")] {
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\neffect B YieldB\nagain yieldB(value: B): Void\nhandler B YieldB as CollectB\nagain yieldB value =>\n  let rest = resume () ->\n  rest\nreturn _ => 0\ndef f (x: Int): Int {{Int Yield, Int YieldB}} =>\n  if x == 0 => do yield x -> x\n  | do yieldB x -> x\ndef main =\n  with Collect ->\n  with CollectB ->\n  f {value}\n",
+            collect_handler(),
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
