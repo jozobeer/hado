@@ -360,6 +360,11 @@ impl Lowerer {
 
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
         if !self.handler_needs_outcome() { return false; }
+        if matches!(&node.kind, crate::parser::NodeKind::Bin(crate::parser::BinOp::Div | crate::parser::BinOp::Mod, _, _))
+            && self.handler_for("raise").is_some()
+        {
+            return true;
+        }
         if let crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) = &node.kind {
             if self.is_abort_node(node) && self.handler_for_node(node).is_some() { return true; }
             let name = match &callee.kind {
@@ -549,6 +554,13 @@ impl Lowerer {
             if matches!(&source.ty(), Type::Data(name, args) if name == "Option" && args.len() == 1) {
                 return self.option_propagation(None, source, body);
             }
+            if is_outcome(&source.ty()) {
+                let pat = crate::parser::Pattern {
+                    kind: crate::parser::PatternKind::Underscore,
+                    span: value.span,
+                };
+                return self.propagate_outcome(&pat, source, body);
+            }
             let id = self.next;
             self.next += 1;
             return Ok(Expression::Let {
@@ -675,10 +687,49 @@ impl Lowerer {
             let equality = self.structural_equality(left, right)?;
             return Ok(if op == BinOp::Ne { Expression::Unary { op: UnaryOp::Not, value: Box::new(equality) } } else { equality });
         }
+        if matches!(op, BinOp::Div | BinOp::Mod) && left.ty() == Type::Int {
+            return self.integer_division(op, left, right);
+        }
         Ok(Expression::Binary {
             op,
             left: Box::new(left),
             right: Box::new(right),
+        })
+    }
+
+    fn integer_division(
+        &mut self,
+        op: crate::parser::BinOp,
+        left: Expression,
+        right: Expression,
+    ) -> Result<Expression, String> {
+        let left_id = self.next;
+        self.next += 1;
+        let right_id = self.next;
+        self.next += 1;
+        let left_var = Expression::Variable { id: left_id, ty: Type::Int };
+        let right_var = Expression::Variable { id: right_id, ty: Type::Int };
+        let is_zero = Expression::Binary {
+            op: crate::parser::BinOp::Eq,
+            left: Box::new(right_var.clone()),
+            right: Box::new(Expression::Constant(Constant::Int(0))),
+        };
+        let raised = self.raise_message("DivisionByZero", Type::Int)?;
+        let divided = Expression::Binary {
+            op,
+            left: Box::new(left_var),
+            right: Box::new(right_var),
+        };
+        let (then, otherwise) = self.align_outcomes(raised, divided)?;
+        let body = branch(is_zero, then, otherwise)?;
+        Ok(Expression::Let {
+            id: left_id,
+            value: Box::new(left),
+            body: Box::new(Expression::Let {
+                id: right_id,
+                value: Box::new(right),
+                body: Box::new(body),
+            }),
         })
     }
 }
@@ -2126,15 +2177,6 @@ impl Lowerer {
         node: &crate::parser::Node,
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
-        let message = match arguments.len() {
-            1 => Expression::RecordGet {
-                record: Box::new(arguments.into_iter().next().unwrap()),
-                field: "message".into(),
-                result: Type::String,
-            },
-            0 => Expression::Constant(Constant::String(String::new())),
-            _ => return Err("abort operation has too many arguments".into()),
-        };
         let ty = self
             .composite_types
             .get(&(node.span.line, node.span.col))
@@ -2144,6 +2186,23 @@ impl Lowerer {
             Ok(ty) => ty,
             Err(UnresolvedType::Variable(_)) => Type::Void,
             Err(_) => return Err("abort result type is not concrete".into()),
+        };
+        self.abort_raise_with(arguments, result)
+    }
+
+    fn abort_raise_with(
+        &mut self,
+        arguments: Vec<Expression>,
+        result: Type,
+    ) -> Result<Expression, String> {
+        let message = match arguments.len() {
+            1 => Expression::RecordGet {
+                record: Box::new(arguments.into_iter().next().unwrap()),
+                field: "message".into(),
+                result: Type::String,
+            },
+            0 => Expression::Constant(Constant::String(String::new())),
+            _ => return Err("abort operation has too many arguments".into()),
         };
         let call = Expression::call_runtime(
             crate::runtime_abi::RuntimeFunction::AbortError,
@@ -2156,6 +2215,20 @@ impl Lowerer {
             value: Box::new(call),
             body: Box::new(Expression::Unreachable { result }),
         })
+    }
+
+    fn raise_message(&mut self, message: &str, success: Type) -> Result<Expression, String> {
+        let exception = Expression::Record {
+            fields: vec![(
+                "message".into(),
+                Expression::Constant(Constant::String(message.into())),
+            )],
+            result: Type::Data("Exception".into(), vec![]),
+        };
+        match self.handler_for("raise").map(|handler| handler.effect.clone()) {
+            Some(effect) => self.abort_outcome_with(vec![exception], &effect, success),
+            None => self.abort_raise_with(vec![exception], success),
+        }
     }
 
     fn operation(
@@ -2908,6 +2981,15 @@ impl Lowerer {
         effect: &str,
     ) -> Result<Expression, String> {
         let success = self.node_type(node).unwrap_or(Type::Void);
+        self.abort_outcome_with(arguments, effect, success)
+    }
+
+    fn abort_outcome_with(
+        &mut self,
+        arguments: Vec<Expression>,
+        effect: &str,
+        success: Type,
+    ) -> Result<Expression, String> {
         let answer = self.again_answers.last().cloned().ok_or("abort without handler answer")?;
         let payload_value = arguments.into_iter().next().unwrap_or(Expression::Constant(Constant::Void));
         let constructor = self.fail_constructor(effect);
