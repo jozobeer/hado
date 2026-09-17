@@ -61,8 +61,9 @@
 - ci-b. quick 層が緑（`bash scripts/run-gates.sh --jobs 8 --tier quick target/ci-quick`）。
 - ci-c. `bash scripts/lint-docs.sh` が `PASSED: 7/7`。
 - ci-d. `bash scripts/corpus-lock.sh --check` が差分なし。
-- ci-e. PR の CI が success で終わり、ログの `ci-run: ... tier=core` と `PASSED: n/N` が
-  ローカルの core の結果と一致する。main への着地後に full 層が success で終わることも見る。
+- ci-e. PR の CI が success で終わり、ログに `ci-run: event=pull_request ... tier=core`、
+  `TALLY: n/n passed; red: none`、文書層の `PASSED: 7/7` が出る。main への着地後に full 層が
+  success で終わることも見る。
 - ci-f. 否定的対照（PR を quick に弱める、文書層を落とす、ワークフローが層を名指しする、
   取得を入口の後ろへ動かす、第三者の action を使う、main も打ち切る）で門番が赤になる。
 
@@ -152,3 +153,31 @@ TALLY: 36/36 passed; red: none
 real	0m37.533s
 （build 1/1、verify-gate-cache 26/26、verify-ci 8/8、verify-m1-spec 1/1）
 ```
+
+```
+# GitHub Actions の実走（PR #6、run 35269175147、pull_request）
+$ gh run view 35269175147 --json status,conclusion,createdAt,updatedAt,event
+{"conclusion":"success","createdAt":"2026-09-17T20:10:07Z","event":"pull_request","status":"completed","updatedAt":"2026-09-17T20:30:00Z"}
+（job 全体 19 分 53 秒。gates の段は 20:10:10Z -> 20:29:59Z）
+
+$ gh run view 35269175147 --log | grep -E 'ci-run:|TALLY:|RUN: |PASSED:|nproc|rustc 1'
+nproc
+rustc 1.98.1 (48a229cea 2026-09-01)
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+ci-run: event=pull_request ref=refs/pull/6/merge tier=core jobs=2 out=target/ci-gates
+RUN: verify-gate-cache -> target/ci-gates/verify-gate-cache.log        20:10:28
+RUN: verify-m0 -> target/ci-gates/verify-m0.log                        20:10:39 -> 20:25:10
+RUN: verify-m1-corpus -> target/ci-gates/verify-m1-corpus.log          20:26:35
+RUN: verify-m2 -> target/ci-gates/verify-m2.log                        20:27:42
+RUN: verify-m3 -> target/ci-gates/verify-m3.log                        20:28:00
+RUN: verify-ci / verify-m1-spec / verify-m4 / verify-m5 / verify-m6 / verify-m7 / verify-r38
+    （後段。--jobs 2、20:28:00 -> 20:29:42）
+TALLY: 569/569 passed; red: none
+PASSED: 7/7
+（文書層。core 層では run-gates が回さないので ci-run.sh の 1 回だけ）
+```
+
+準備の段（checkout・apt・cache・`cargo fetch --locked`）は 20:10:07Z -> 20:10:27Z の 20 秒。
+runner は 2 vCPU（`nproc` = 2）で、20 分のうち m0 が 14 分 31 秒（73%）を占める。2000 分/月の
+無料枠では PR の core が約 100 回である。`target/` のキャッシュと `m0` の短縮は実測を見て
+別ラウンドで判断する。
