@@ -130,3 +130,9 @@ lint-docs 検査 6（## 実測 にコードフェンスが無かった）。本�
 bash scripts/run-gates.sh --jobs 4 --tier full /tmp/hado-parallel-rounds-final.ZqgxUJ
 TALLY: 3739/3739 passed; red: none
 ```
+
+### codex レビュー後の全走
+
+```
+TALLY: 3740/3740 passed; red: none
+```
