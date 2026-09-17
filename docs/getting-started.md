@@ -14,7 +14,7 @@ $ target/debug/hado check [--print-type] hello.hd
 $ target/debug/hado build hello.hd
 ```
 
-`run` は一時ディレクトリで実行し、隣に何も残さない。`build` は `hello` を隣に置く。`./hello.hd` でも同じである。
+`run` は実行ファイルを一時ディレクトリに作り、隣に何も残さない。作業ディレクトリは変えない（[仕様 §58](spec.md#58-実行と出力先)）。`build` は `hello` を隣に置く。`./hello.hd` でも同じである。
 
 ## hello
 

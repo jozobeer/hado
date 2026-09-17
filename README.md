@@ -22,7 +22,7 @@ ML 系の型システムと ADT を核に、より小さく、より平坦に、
 $ target/debug/hado check [--print-type] <file>    # 検査。--print-type で main の型を印字
 $ target/debug/hado dump-mono <file>               # 単相化後のプログラムを印字
 $ target/debug/hado build <file.hd>              # 入力の隣に実行ファイルを置く
-$ target/debug/hado run <file.hd>                # 一時ディレクトリで実行し、隣に何も残さない
+$ target/debug/hado run <file.hd>                # 実行ファイルを一時ディレクトリに作り、隣に何も残さない
 ```
 
 拒否の例:
