@@ -37,6 +37,7 @@ x
 - stderr の読み手が先に終わって書き込みが失敗する状態で `log_error` を呼ぶと、`handler` が `message` を `"IoFailure"` とする `Error` を捕まえる。捕まえなければ 1 で終わる。§55 の失敗の表に `log_error` の行を足す。
 - `tests/accept/` の入口 `main` が `Int` を返し `// expect:` が数値のケース（`tests/accept/once_loop/main.hd:2` の `10000000` など）を棚卸しする。印字の期待を保つため `Int.to_string` で包むなどして移行し、移行の前後で `scripts/verify-m1-corpus.sh` の項目被覆が変わらないことを確かめる。`tests/corpus.sha256` はこのラウンドの成果物として作り直す。
 - 実行する `main` が `Int` を印字に使う非コーパスの門番とテストも同じ棚卸しに含める（`crates/hado/tests/walk.rs:15`、`scripts/verify-r29.sh:108`、`scripts/verify-r43.sh:245` など）。`Int.to_string` で包むなどして移行し、`cargo test` と各 `verify-*.sh` が移行の前後で同じ被覆を測ることを確かめる。
+- `scripts/verify-r54.sh:58` の `a_test.hd`・`b_test.hd`・`c_test.hd`（`def main = 11`・`22`・`33`）は、§54 の変更後はゲストの終了コード 11・22・33 になるので、そのままでは `hado test` が失敗する。3 本とも `Int.to_string` に包んで緑にするのではなく、非零の `Int` を返す `*_test.hd` を 1 本置き、`hado test` がその終了コードを報告し、後続のテストを続け、集約の終了コード 1 を返すことを直接測る。
 - `Io` に `log_error` を足すと既存の網羅的な `handler Io` は腕が 1 つ足りなくなり E605 になる。`scripts/verify-r37.sh:205` の `io_arms`（5 操作）と `scripts/verify-r43.sh:380` の固定 5 腕を `log_error` 込みに移行し、腕を欠かすと E605 になる検査（`scripts/verify-r37.sh:211`）と網羅の被覆を弱めずに保つ。腕を減らして緑にしない。
 - §54 の表と「二値を保つ」の文を改める。
 

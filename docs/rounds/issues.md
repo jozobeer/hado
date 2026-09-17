@@ -223,3 +223,32 @@ Int は 10 進のみとする。i64 の範囲を超えるリテラルは E112 �
 sed -n '205p' scripts/verify-r37.sh
 io_arms = ['once read_file _ => Bytes.of_string "virtual"', 'once write_file _ _ => ()', 'once log _ => ()', 'once read_dir _ => ["virtual"]', 'once read_stdin => Bytes.of_string "virtual"']
 ```
+
+### 九次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# --format json は check だけでなく build / run / test も受ける（§58.4）
+sed -n '58p' crates/hado/src/main.rs
+            "--format" if matches!(command, "check" | "build" | "run" | "test") => {
+
+# 既存の col は Unicode スカラ値の数（byte 数ではない）
+sed -n '242,244p' crates/hado/src/lexer.rs
+        } else {
+            self.col += 1;
+        }
+
+# verify-r54 は main = 11 / 22 / 33 を成功するテストとして扱っている
+sed -n '60,61p' scripts/verify-r54.sh
+    'b_test.hd': 'def main = 22\n',
+    'a_test.hd': 'def main = 11\n',
+
+# Map の find は既存の List.head / nth と同じ V Option を返せる
+sed -n '1p;10p' stdlib/option.hd stdlib/list.hd
+type T Option = | None | Some(T)
+def A head(values: A List): A Option Pure
+```
