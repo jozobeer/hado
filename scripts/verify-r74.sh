@@ -110,9 +110,8 @@ def r74_leaves_no_fallback_alone():
 
 
 def r74_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r74' in full.split(), 'r74 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r74' in full, 'r74 is not in the full tier'
     assert 'verify-r74' in Path('docs/spec-trace.md').read_text(), 'the trace has no r74 row'
     assert '## 69. ' in Path('docs/plan.md').read_text(), 'the plan has no section 69'
     assert 'E511' in Path('docs/spec.md').read_text(), 'the spec does not mention E511'

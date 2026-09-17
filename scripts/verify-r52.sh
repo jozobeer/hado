@@ -253,9 +253,9 @@ assert 'hado fmt [--check] <file.hd>' in tail, '§58 does not list fmt'
 assert 'hado build [-o <path>] [--fix] <file.hd>' in tail, '§58 does not list build --fix'
 section = spec.split('## 58.1. ', 1)[1].split('\n## ', 1)[0]
 assert 'hado fmt' in section and '--check' in section, '§58.1 does not define fmt'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r52' in full.split(), 'r52 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r52' in full, 'r52 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert '§58.1' in trace, 'spec-trace has no §58.1 row'
 wants = Path('docs/wants.md').read_text()

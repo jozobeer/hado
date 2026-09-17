@@ -80,9 +80,8 @@ def r76_exit_codes_are_the_binary_pair():
 
 
 def r76_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r76' in full.split(), 'r76 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r76' in full, 'r76 is not in the full tier'
     assert 'verify-r76' in Path('docs/spec-trace.md').read_text(), 'the trace has no r76 row'
     assert '## 71. ' in Path('docs/plan.md').read_text(), 'the plan has no section 71'
     spec = Path('docs/spec.md').read_text()

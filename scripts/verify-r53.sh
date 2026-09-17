@@ -204,9 +204,9 @@ assert '`.` で始まる' in namespace, '§51 does not mention dot directories'
 trace = Path('docs/spec-trace.md').read_text()
 row = [line for line in trace.splitlines() if line.startswith('| §50 ') and '`.hd`' in line]
 assert row and '`.`' in row[0], 'the §50 trace row does not record the exclusion'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r53' in full.split(), 'r53 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r53' in full, 'r53 is not in the full tier'
 wants = Path('docs/wants.md').read_text()
 assert 'R53' in wants, 'wants.md does not record R53'
 print('docs: §50 and §51 sentences, the trace row, the tier and wants')

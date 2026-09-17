@@ -216,9 +216,9 @@ assert '## 15.1. ' in spec, 'no §15.1'
 section = spec.split('## 15.1. ', 1)[1].split('\n## ', 1)[0]
 for word in ('expected', 'found', 'cannot unify', '`A` `B`', '内部の番号'):
     assert word in section, f'§15.1 does not define {word}'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r56' in full.split(), 'r56 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r56' in full, 'r56 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert '§15.1' in trace, 'spec-trace has no §15.1 row'
 wants = Path('docs/wants.md').read_text()

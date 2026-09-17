@@ -97,9 +97,8 @@ def r68_leaves_alone():
 
 
 def r68_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r68' in full.split(), 'r68 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r68' in full, 'r68 is not in the full tier'
     assert 'verify-r68' in Path('docs/spec-trace.md').read_text(), 'the trace has no r68 row'
     assert '## 63. ' in Path('docs/plan.md').read_text(), 'the plan has no section 63'
     spec = Path('docs/spec.md').read_text()

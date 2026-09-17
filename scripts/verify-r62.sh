@@ -182,9 +182,9 @@ r62_docs() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r62' in full.split(), 'r62 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r62' in full, 'r62 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r62' in trace, 'spec-trace does not name verify-r62'
 plan = Path('docs/plan.md').read_text()

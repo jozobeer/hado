@@ -342,9 +342,9 @@ spec = Path('docs/spec.md').read_text()
 assert '操作を参照するか' in spec, '§37 does not say what using an effect means'
 rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
 assert 'handler' in rows['E513'], rows['E513']
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r59' in full.split(), 'r59 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r59' in full, 'r59 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r59' in trace, 'spec-trace does not name verify-r59'
 bug = Path('docs/bug.md').read_text()

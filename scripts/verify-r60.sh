@@ -317,9 +317,9 @@ assert '期待の側が式である' in spec or 'expected here' in spec, '§56 d
 assert '宣言された戻り型' in spec, '§15.1 does not list the sites'
 rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
 assert '型が食い違った式の先頭' in rows['E305'], rows['E305']
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r60' in full.split(), 'r60 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r60' in full, 'r60 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r60' in trace, 'spec-trace does not name verify-r60'
 print('docs: §15.1, §56, the error table, the trace rows and the tier')

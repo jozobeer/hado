@@ -176,9 +176,9 @@ r64_docs() {
     python3 - <<'PYEOF3'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r64' in full.split(), 'r64 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r64' in full, 'r64 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r64' in trace, 'spec-trace does not name verify-r64'
 plan = Path('docs/plan.md').read_text()

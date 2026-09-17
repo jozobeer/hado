@@ -316,9 +316,9 @@ for fragment in ['--fix', 'E510', 'E516', 'E517', 'コメント']:
     assert fragment in body, fragment
 wants = Path('docs/wants.md').read_text()
 assert '第57節' in wants or '§57' in wants, 'wants does not point at §57'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r46' in full.split(), 'r46 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r46' in full, 'r46 is not in the full tier'
 print('docs: §57, wants pointer, r46 in full tier')
 PY
 }

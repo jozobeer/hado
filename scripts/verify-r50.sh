@@ -190,9 +190,9 @@ assert '## 53.1. スタックの枯渇' in spec, 'spec has no §53.1'
 assert 'hado: stack overflow' in spec, 'spec does not name the message'
 trace = Path('docs/spec-trace.md').read_text()
 assert '| §53.1 |' in trace, 'spec-trace has no §53.1 row'
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r50' in full.split(), 'r50 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r50' in full, 'r50 is not in the full tier'
 print('docs: §53.1, the trace row, and r50 in the full tier')
 PY
 }

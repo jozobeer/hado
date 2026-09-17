@@ -178,9 +178,9 @@ r63_docs() {
     python3 - <<'PYEOF3'
 from pathlib import Path
 
-tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-assert 'r63' in full.split(), 'r63 is not in the full tier'
+import subprocess
+full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+assert 'r63' in full, 'r63 is not in the full tier'
 trace = Path('docs/spec-trace.md').read_text()
 assert 'verify-r63' in trace, 'spec-trace does not name verify-r63'
 plan = Path('docs/plan.md').read_text()

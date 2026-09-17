@@ -98,9 +98,8 @@ def r72_leaves_effectful_alone():
 
 
 def r72_docs():
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r72' in full.split(), 'r72 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r72' in full, 'r72 is not in the full tier'
     assert 'verify-r72' in Path('docs/spec-trace.md').read_text(), 'the trace has no r72 row'
     assert '## 67. ' in Path('docs/plan.md').read_text(), 'the plan has no section 67'
     assert 'E506' in Path('docs/spec.md').read_text(), 'the spec does not mention E506'

@@ -108,9 +108,8 @@ def r77_print_type_and_docs():
     r = run(['check', '--print-type=message', path])
     assert r.returncode == 0, (r.returncode, r.stderr[:160])
     assert r.stdout.strip(), 'no type was printed'
-    tiers = Path('scripts/lib/gate-tiers.sh').read_text()
-    full = tiers.split('full)', 1)[1].split(';;', 1)[0]
-    assert 'r77' in full.split(), 'r77 is not in the full tier'
+    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
+    assert 'r77' in full, 'r77 is not in the full tier'
     assert 'verify-r77' in Path('docs/spec-trace.md').read_text(), 'the trace has no r77 row'
     assert '## 72. ' in Path('docs/plan.md').read_text(), 'the plan has no section 72'
     assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
