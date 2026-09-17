@@ -205,10 +205,12 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
     let mut entries = std::fs::read_dir(directory).map_err(|error| io_error(directory, error))?
         .collect::<Result<Vec<_>, _>>().map_err(|error| io_error(directory, error))?;
     entries.sort_by_key(|entry| entry.file_name());
-    // 処理系のソース木（根の下に crates/hado がある）では、サブディレクトリを
-    // 走査しない。根に置いた試し書きが tests/ や target/ と一つのプログラムに
-    // なるのを避ける（§50）。
-    let skip_subdirs = directory == root && root.join("crates").join("hado").is_dir();
+    // 処理系のソース木（根に crates/hado/src/project.rs がある）では、
+    // サブディレクトリを走査しない。根に置いた試し書きが tests/ や target/
+    // と一つのプログラムになるのを避ける（§50）。名前空間 crates/hado だけの
+    // プロジェクトは、このファイルが無いので走査する。
+    let skip_subdirs = directory == root
+        && root.join("crates").join("hado").join("src").join("project.rs").is_file();
     for entry in entries {
         let path = entry.path();
         // §50: `.` で始まる名前は読まない。名前空間の字句（§51）になり得ない

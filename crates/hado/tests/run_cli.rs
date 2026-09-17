@@ -103,7 +103,8 @@ fn build_reports_the_canonical_form() {
 #[test]
 fn run_at_a_compiler_checkout_root_reads_only_the_entry_tree() {
     let dir = scratch("checkout");
-    std::fs::create_dir_all(dir.join("crates/hado")).unwrap();
+    std::fs::create_dir_all(dir.join("crates/hado/src")).unwrap();
+    std::fs::write(dir.join("crates/hado/src/project.rs"), []).unwrap();
     std::fs::create_dir_all(dir.join("scripts/__pycache__")).unwrap();
     std::fs::write(dir.join("scripts/__pycache__/x"), []).unwrap();
     std::fs::create_dir_all(dir.join("tests/other")).unwrap();
@@ -116,6 +117,20 @@ fn run_at_a_compiler_checkout_root_reads_only_the_entry_tree() {
         assert_eq!(output.stdout, b"hello\n", "{path:?}");
         assert!(output.stderr.is_empty(), "{path:?} {:?}", output.stderr);
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn run_does_not_treat_a_crates_hado_namespace_as_a_compiler_checkout() {
+    let dir = scratch("namespace");
+    std::fs::create_dir_all(dir.join("crates/hado")).unwrap();
+    std::fs::create_dir_all(dir.join("tests/other")).unwrap();
+    std::fs::write(dir.join("tests/other/main.hd"), "def main = \"other\"\n").unwrap();
+    let source = write(&dir, "def main = \"hello\"\n");
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error[E100]"), "{stderr}");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
