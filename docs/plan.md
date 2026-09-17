@@ -1153,8 +1153,8 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 
 ### 実装（2026-09-15）
 
-- 一覧の唯一の正は `scripts/lib/gate-tiers.sh`。`hado_tier_minimal_gates <層>` が各門番を
-  最小の層に 1 回ずつ割り当て、`hado_tier_gates <層>` が累積（quick / quick+core / 全 38 本）を
+- 所属の唯一の正は各門番の `# tier:` 行（`docs/rounds.md`）。`scripts/lib/gate-tiers.sh` の
+  `hado_tier_minimal_gates <層>` がそれを走査して各門番を最小の層に 1 回ずつ割り当て、`hado_tier_gates <層>` が累積（quick / quick+core / 全 38 本）を
   返す。上の表で m1-spec が quick と core の両方にあるのは、この累積の意味である。**層は分割、
   実行は累積**なので、3 層は全 38 本を重複なく覆う（33-f）。表の m1-spec を最小層の quick に
   置いたので、core は quick を含む。
