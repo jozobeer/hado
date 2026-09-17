@@ -247,8 +247,9 @@ sed -n '60,61p' scripts/verify-r54.sh
     'b_test.hd': 'def main = 22\n',
     'a_test.hd': 'def main = 11\n',
 
-# Map の find は既存の List.head / nth と同じ V Option を返せる
-sed -n '1p;10p' stdlib/option.hd stdlib/list.hd
+# Map の find は既存の List.head と同じ V Option を返せる
+sed -n '1p' stdlib/option.hd
 type T Option = | None | Some(T)
+sed -n '10p' stdlib/list.hd
 def A head(values: A List): A Option Pure
 ```
