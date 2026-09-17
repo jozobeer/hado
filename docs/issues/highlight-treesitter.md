@@ -5,6 +5,31 @@
 
 `.hd` を開いても色が付かない。対象エディタは Neovim（0.12.5、nvim-treesitter、`vim.treesitter.language.add` で動的に足す設定）。tree-sitter CLI と node は入っている（2026-09-17）。
 
+```
+$ nvim --version | head -1
+NVIM v0.12.5
+$ cat > hl.lua <<'LUA'
+vim.cmd("filetype on")
+vim.filetype.add({ extension = { hd = "hado", hdi = "hado" } })
+vim.treesitter.language.register("lua", "hado")
+vim.cmd("edit main.hd")
+local buf = vim.api.nvim_get_current_buf()
+print("filetype=" .. vim.bo.filetype)
+print("parser=" .. tostring(pcall(vim.treesitter.get_parser, 0)))
+print("active_before_start=" .. tostring(vim.treesitter.highlighter.active[buf] ~= nil))
+vim.treesitter.start()
+print("active_after_start=" .. tostring(vim.treesitter.highlighter.active[buf] ~= nil))
+vim.cmd("qa!")
+LUA
+$ nvim --headless -u NONE -i NONE -l hl.lua
+filetype=hado
+parser=true
+active_before_start=false
+active_after_start=true
+```
+
+filetype と parser は取れるが、`FileType` で `vim.treesitter.start()` を呼ぶまで highlighter は動かない。`queries/hado/highlights.scm` も無いので capture も付かない。
+
 ## 原因
 
 文法は `docs/spec.md:2325` の付録C に散文で置かれ、機械可読ではない。`docs/wants.md` 51 は付録C からの生成を想定するが、生成の前に付録C を文法ファイルにする工程が要る。

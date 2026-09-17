@@ -5,6 +5,16 @@
 
 受理コーパスの最大は 24 行、`tools/gates/main.hd` は 23 行である。20 行の CLI（stdin の単語頻度）を 1 本書いただけで、string-split-linear、prelude-tail-recursion、char-and-float-conversions、canonical-in-syntax-errors が出た。どれも `docs/wants.md` の一覧には無かったか、優先度が低かった。
 
+```
+$ wc -l tools/gates/main.hd tools/diagnostics/main.hd
+  23 tools/gates/main.hd
+  30 tools/diagnostics/main.hd
+  53 total
+$ find tests/accept -name main.hd -exec wc -l {} + | sort -rn | grep -v total | head -2
+   24 tests/accept/shared_functor/main.hd
+   21 tests/accept/user_store/main.hd
+```
+
 ## 原因
 
 `docs/wants.md` 53 は「自分用のプログラムを常に 1 本」と言うが、いまある `tools/gates/main.hd:1` と `tools/diagnostics/main.hd:1` は入力が自前の構造化された出力で、任意のテキストを読まない。

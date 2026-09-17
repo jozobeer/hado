@@ -3,7 +3,17 @@
 
 ## 現象
 
-`crates/hado/src/emit.rs:23` で `opt_level` は `"none"` である。文字列比較 1000 万回が 0.08 s、末尾再帰 1000 万回が 0.14 s なので、いまの遅さの主因ではない（2026-09-17）。`"speed"` にしたときの差は未計測。
+`crates/hado/src/emit.rs:23` で `opt_level` は `"none"` である。いまの遅さの主因ではない（2026-09-17）。`"speed"` にしたときの差は未計測。
+
+```
+$ grep -n 'opt_level' crates/hado/src/emit.rs
+23:        .set("opt_level", "none")
+```
+
+| ループ | 反復 | 時間 |
+| --- | --- | --- |
+| 文字列比較 | 1000 万 | 0.08 s |
+| 末尾再帰 | 1000 万 | 0.14 s |
 
 ## 原因
 

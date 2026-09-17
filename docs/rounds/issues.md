@@ -162,3 +162,40 @@ PASSED: 8/8
 sed -n '6p' tests/reject/E101/main.hd
 def f (x: Choice) => if x | A => apply fn(| A => 1 | B => 2) A | B => 0
 ```
+
+### 七次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9        # 検査 9 を足した: issue の現象がコードフェンスか表を持つ
+
+# 受理コーパス最大行と自作ツールの行数（docs/issues/dogfood-text-tool.md の現象）
+wc -l tools/gates/main.hd tools/diagnostics/main.hd
+  23 tools/gates/main.hd
+  30 tools/diagnostics/main.hd
+find tests/accept -name main.hd -exec wc -l {} + | sort -rn | grep -v total | head -1
+   24 tests/accept/shared_functor/main.hd
+
+# i64 の最小値はリテラルに書けず E112、構成すれば通る（char-and-float-conversions の Float.of_int）
+$ cargo run --offline -q -- check main.hd   # def main = -9223372036854775808
+main.hd:1:13: error[E112]: integer out of range: 9223372036854775808
+$ cargo run --offline -q -- run main.hd     # def main = (-9223372036854775807 - 1)
+-9223372036854775808
+
+# 連想リストの線形探索: 語彙 V を 2 倍にすると時間も約 2 倍（50 万回、毎回最後の鍵まで走査）
+/usr/bin/time -f '%e s' cargo run --offline -q -- run map/main.hd      # 語彙 250
+0.96 s
+/usr/bin/time -f '%e s' cargo run --offline -q -- run map2x/main.hd    # 語彙 500
+1.77 s
+grep -rn 'implement Map' stdlib/ | wc -l
+0
+
+# Neovim は filetype=hado / parser=true だが、start() まで highlighter は動かない
+nvim --headless -u NONE -i NONE -l hl.lua
+filetype=hado
+parser=true
+active_before_start=false
+active_after_start=true
+```
