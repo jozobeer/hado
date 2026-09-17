@@ -2555,7 +2555,10 @@ impl Lowerer {
         rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
     ) -> Result<Expression, String> {
         let handler = self.handler_for(name).cloned().ok_or("unhandled again")?;
-        let answer = self.answer_for_handler(&handler)?;
+        let answer = match &self.context_answer {
+            Some(answer) => answer.clone(),
+            None => self.answer_for_handler(&handler)?,
+        };
         let constructor = self.yield_constructor(&handler.effect);
         let input = self.again_result_type(node)?;
         let signature = Signature {
@@ -3278,6 +3281,9 @@ impl Lowerer {
     fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
         for handler in &self.handler_stack {
             if Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect) {
+                if let Some(answer) = &self.context_answer {
+                    return Ok(Some(answer.clone()));
+                }
                 return self.answer_for_handler(handler).map(Some);
             }
         }
