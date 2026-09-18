@@ -966,5 +966,7 @@ grep -n '添字が取れる列' docs/plan.md
 
 # 最終の木での全走
 cargo test --offline -> cargo-test14-exit=0（0 failed）
-bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
+# 前回の full は 3742/3742。lint-docs の検査が 9 から 10 に増えた分だけ総数が +1 する
+# （full の集計は lint-docs の検査も 1 本ずつ数える。他の 75 本のゲートは不変）
 ```
