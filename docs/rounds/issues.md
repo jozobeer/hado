@@ -305,3 +305,29 @@ sed -n '3411,3413p' crates/hado/src/mono.rs
         let signature = Signature {
             parameters: vec![ty.clone(), ty.clone()],
 ```
+
+### 十二次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 検査 9 の負の探針: 空セルの見出し、列数の不一致、here-doc だけのフェンス、コメントだけの出力の 4 種が赤
+AssertionError: 現象 has no closed nonempty fence or complete table: zz-probe.md
+NG: each issue 現象 carries measured evidence in a fence or table
+
+# 文字列リテラルは runtime の確保ではなく直列化される（スカラ数を足すと位置が動く）
+sed -n '219,220p;237,238p' crates/hado/src/repr.rs
+pub fn string_literal_data(value: &str, pointer_bytes: u32, order: ByteOrder) -> Result<Vec<u8>, String> {
+    let mut bytes = match pointer_bytes {
+    bytes.extend_from_slice(value.as_bytes());
+    Ok(bytes)
+sed -n '559p' crates/hado/src/emit.rs
+            let bytes = crate::repr::string_literal_data(value, module.target_config().pointer_type().bytes(), order)?;
+sed -n '146,148p' crates/hado/tests/repr.rs
+    use hado::repr::{string_literal_data, ByteOrder};
+    for (width, order, prefix) in [
+        (4, ByteOrder::Little, vec![5, 0, 0, 0]),
+```
