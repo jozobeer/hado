@@ -465,6 +465,23 @@ fn error_handler_arm_raise_reaches_the_outer_handler() {
 }
 
 #[test]
+fn direct_abort_and_yield_agree_on_the_innermost_answer() {
+    for (condition, expected) in [("true", "[1]"), ("false", "[]")] {
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Collect ->\n  with Catch ->\n  if {condition} =>\n    do yield 1 -> 1\n  | raise {{ message = \"b\" }}\n",
+            collect_handler(),
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{condition}\n{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{condition}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{condition}");
+        assert!(output.stderr.is_empty(), "{condition}");
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
