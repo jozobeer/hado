@@ -659,3 +659,30 @@ a / b / c  -> `/` の下に `/`
 a && b && c  -> `&&` の下に `&&`
 a || b || c  -> `||` の下に `||`
 ```
+
+### 二十六次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は `<<` と `<<-` で終端の空白の扱いを分ける
+
+# 検査 9 の自己検査: `<<EOF` のフェンスで空白付きの終端行を出力に数えない
+AssertionError: an indented line is body text for << and must not end the heredoc
+# `<<-EOF` のフェンスは先頭タブの終端行で閉じるので緑
+
+# 最終の木での全走
+cargo test --offline > target/pr5/gates/cargo-test3.log 2>&1; echo cargo-test3-exit=$?
+cargo-test3-exit=0
+grep -c FAILED target/pr5/gates/cargo-test3.log
+0
+bash scripts/run-gates.sh --tier full --jobs 4 target/pr5/gates/full3
+TALLY: 3742/3742 passed; red: none
+
+# sort の分割は偶数・奇数位置（stdlib/list.hd:22-23）で、:31 の順に整列する
+sed -n '22,23p;31p' stdlib/list.hd
+def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail] => [head, ...odds tail]
+def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
+def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => odds values |> sort comparator |> merge (evens values |> sort comparator) comparator
+```
