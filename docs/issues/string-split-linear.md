@@ -3,15 +3,31 @@
 
 ## 現象
 
-行数を 2 倍にすると時間が 4 倍になる（2026-09-17、`target/debug/hado`、1 行 1 語の入力）。
+行数を 2 倍にすると時間が約 4 倍になる（2026-09-17、`cargo run --offline -q -- run <file>`、warm-up 後 5 回の中央値。起動と `run` のビルドを含む。入力は 1 行 1 語で、末尾に改行を置かない）。
+
+```
+$ cat split.hd
+def main =
+  let bytes = IoDefault.read_stdin ->
+  let values = Bytes.to_string bytes |> String.split "\n" ->
+  values |> List.length |> Int.to_string |> IoDefault.log
+$ cat join.hd
+def rec build n acc => if n == 0 => acc | build (n - 1) [Int.to_string n, ...acc]
+def main =
+  let values = build 20000 [] ->
+  String.join values "," |> String.length |> Int.to_string |> IoDefault.log
+$ python3 -c 'import sys; sys.stdout.write("\n".join("word%d" % i for i in range(20000)))' > in20000.txt
+$ cargo run --offline -q -- run split.hd < in20000.txt
+20000
+```
 
 | 対象 | 入力 | 時間 |
 |---|---|---|
-| `read_stdin \|> Bytes.to_string \|> String.split "\n"` | 5,000 行 | 0.31 s |
-| 同 | 10,000 行 | 1.25 s |
-| 同 | 20,000 行 | 4.99 s |
-| `String.join values ","` | 20,000 要素 | 0.33 s |
-| 同 | 40,000 要素 | 1.23 s |
+| `split.hd` | 5,000 行 | 0.84 s |
+| 同 | 10,000 行 | 2.96 s |
+| 同 | 20,000 行 | 11.8 s |
+| `join.hd`（`build 20000`。`String.split` を通さず `Int.to_string` の fold でリストを作り、`join` だけを測る） | 20,000 要素 | 1.09 s |
+| 同（`build 40000`） | 40,000 要素 | 4.10 s |
 
 対照: 文字列比較 `==` 1000 万回は 0.08 s、末尾再帰 1000 万回は 0.14 s。遅いのは prelude の String 関数である。
 
@@ -34,6 +50,7 @@ A は `Array.to_list` が非末尾再帰（`stdlib/array.hd`）なので、prelu
 - `Bytes.of_list [227, 129, 130] |> Bytes.to_string |> String.length` が 1 になる。String・Bytes の全確保経路がスカラ数を初期化し、未知値を String の `length` が読まないことを runtime の単体テストで判定する。
 - `HadoString` にスカラ数を足すと `bytes[]` の位置が動くので、`{ size_t length; unsigned char bytes[N]; }` を組んで `HadoString *` に cast する既存の runtime 門番を、次の箇所の全部で移行する。`crates/hado/tests/runtime_string.rs:14`（埋め込み NUL と `あ` / `😀` の concat）、`crates/hado/tests/r34_bytes.rs:217`（生成する `Utf8Probe`）、`crates/hado/tests/r34_bytes.rs:262`（`あ` / ASCII / 継続バイトを残した途中切れ）、`crates/hado/tests/r34_bytes.rs:349`（`c_string_value`。NUL・`あ`・`😀` の slice/find）、`crates/hado/tests/r36_int.rs:47`（長さの外の尾 `"42"`）、`crates/hado/tests/r36_int.rs:50`（埋め込み NUL の `Int.parse`）、`crates/hado/tests/r37_world.rs:131`（環境名 `R37_KEYX` の長さ区切り）、`crates/hado/tests/r37_world.rs:185`（I/O の path `entriesXX` / `fileXX` の長さ区切り）。同じ関数内の `{ size_t length; }` 空値も同じ配置にする。`hado_alloc(sizeof(HadoString) + n)` で組む箇所（`crates/hado/tests/r36_int.rs:16`）は配置に従うので対象外。コンパイル済みの文字列リテラルも runtime の確保ではないので、`crates/hado/src/repr.rs:219-238` の `string_literal_data`（長さヘッダの直後に payload）と、それを埋め込む `crates/hado/src/emit.rs:559` を同じ配置に移行する。`crates/hado/tests/repr.rs:146-158` のレイアウト検査は、長さヘッダとスカラ数ヘッダの両方のあとに payload が続くことと、バイト長とスカラ数が異なる入力（いまの `"a\0あ"` は 5 バイト・3 スカラ）を残して更新する。移行後の判定は、ソース上のリテラルに対する `String.length "a"`、`String.length "あ"`、`String.length "😀"` がそれぞれ 1 であること（`"a"` はバイト長もスカラ数も 1 なので、スカラ数ヘッダを長さの前に足した旧直列化でも 1 のまま通る。`"あ"` は 3 バイト・1 スカラ、`😀` は 4 バイト・1 スカラで、旧配置は payload の先頭語をスカラ数として読む）。`== 1` を置かない、ASCII だけを測る、レイアウト検査を長さヘッダと payload だけの旧配置のまま残す実装では通らない。共有の initializer を用意するか各所を同じ配置に直す。移行後も同じ門番が、埋め込み NUL、`Utf8Probe` の受理と拒否、途中切れ継続バイト、長さの外の尾、環境名の長さ 7 と 8、I/O の path の長さ 7 と 4 を測る。3 箇所だけ直す、`Utf8Probe` や `c_string_value` を古い配置のまま残す、リテラルの直列化を古い配置のまま残す、埋め込み NUL・途中切れ・長さの外の尾を落とす実装では通らない。古い配置のまま読むと payload を新しいフィールドとして読み、`bytes` の範囲外に触れる。
 - 受理コーパスの String 系ケースが変わらず通る。
+- 組み込みへ移す前後で `split` と `join` の結果の意味を変えない。いまの prelude（`stdlib/string.hd:22`、`stdlib/string.hd:26`）と同じ結果になることを直接測る（2026-09-17 に実測した値）。`String.split "aaaaa" "aa"` は重ならず `["", "", "a"]` になる（一致した区切りの幅だけ進む）。`String.split "" ","` は `[""]`、`String.split "a,b," ","` は `["a", "b", ""]`、`String.split "a" ","` は `["a"]`。`String.join [] ","` は `""`、`String.join ["a"] ","` は `"a"`（§55）。区切りが空の `String.split "abc" ""` は §55 のとおり `message` が `"EmptySeparator"` の `{Error}` になる（stderr が `EmptySeparator`、終了コード 1）。いまの受理コーパスの `split` は区切りが 1 文字、`join` は 2 要素だけなので、重なる区切り・空の本文・末尾の区切り・空と 1 要素の `join` を直接測らない実装では通らない。
 
 ## 由来
 

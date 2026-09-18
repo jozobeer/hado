@@ -397,3 +397,35 @@ sed -n '232p;344p' crates/hado/src/project.rs
 ```
 
 レビューの `first:100` は 103 スレッドで頭打ちになるので、以後は `pageInfo` で全件を辿って未解決を数える。
+
+### 十七次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 の表は、全てのセルが placeholder でないことを要求する
+
+# 現象の計測を cargo run 経由で取り直した（起動と run のビルドを含む 5 回の中央値）
+target/pr5/bench/time.sh の出力
+split 5000: median 0.844 s (min 0.840 max 0.849)
+split 10000: median 2.963 s (min 2.921 max 2.989)
+split 20000: median 11.796 s (min 11.694 max 11.914)
+join 20000: median 1.092 s (min 1.047 max 1.157)
+join 40000: median 4.103 s (min 3.936 max 4.226)
+
+# split / join の意味を実測（重なる区切り、空の本文、末尾の区切り、空と 1 要素の join）
+$ cargo run --offline -q -- run edge.hd
+||a
+
+a|b|
+
+a
+$ cargo run --offline -q -- run empty.hd; echo exit=$?
+exit=1
+# stderr: EmptySeparator
+
+# §47 は 1 つの契約に複数の実装を許す
+sed -n '1684p' docs/spec.md
+同じ契約を複数の実装が満たせる。
+```
