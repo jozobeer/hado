@@ -2573,9 +2573,14 @@ impl Lowerer {
         rest: Option<(&crate::parser::Node, Option<&crate::parser::Pattern>)>,
     ) -> Result<Expression, String> {
         let handler = self.handler_for(name).cloned().ok_or("unhandled again")?;
+        // 直接式では enclosing の outcome が無いので、その場で最も内側の
+        // answer を使う。腕と yield が同じ answer を運び、分岐で揃う。
         let answer = match &self.context_answer {
             Some(answer) => answer.clone(),
-            None => self.answer_for_handler(&handler)?,
+            None => match self.again_answers.last() {
+                Some(answer) => answer.clone(),
+                None => self.answer_for_handler(&handler)?,
+            },
         };
         let constructor = self.yield_constructor(&handler.effect);
         let input = self.again_result_type(node)?;
