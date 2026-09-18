@@ -523,3 +523,41 @@ backend
 memory_store.hd
 store.hdi
 ```
+
+### 二十一次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は if/for/while/until/case と { } の継続を数える
+
+# 検査 9 の自己検査: 複合コマンドの PS2 行だけのフェンスが赤（実行時に確認）
+$ if true; then / > echo x / > fi だけのフェンス
+AssertionError: if/then/fi compound and PS2 lines must not count as output
+$ for i in a; do / > echo $i / > done だけのフェンス
+AssertionError: for/do/done compound and PS2 lines must not count as output
+
+# quote_text は \n \t \ と有効な引用符に \ を 1 つ足す（スカラ数はこの 4 形で +1 される）
+sed -n '6,11p;13,26p' crates/hado/runtime_print.c
+static unsigned char escape(unsigned char byte, unsigned char quote) {
+  if (byte == '\n') return 'n';
+  if (byte == '\t') return 't';
+  if (byte == '\\' || byte == quote) return byte;
+  return 0;
+}
+static HadoString *quote_text(const HadoString *value, unsigned char quote) {
+  if (value->length > (SIZE_MAX - sizeof(HadoString) - 2) / 2) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + 2 * value->length + 2);
+  if (result == NULL) abort();
+  size_t length = 0;
+  result->bytes[length++] = quote;
+  for (size_t i = 0; i < value->length; ++i) {
+    unsigned char escaped = escape(value->bytes[i], quote);
+    if (escaped) result->bytes[length++] = '\\';
+    result->bytes[length++] = escaped ? escaped : value->bytes[i];
+  }
+  result->bytes[length++] = quote;
+  result->length = length;
+  return result;
+```
