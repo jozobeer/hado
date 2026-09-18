@@ -482,6 +482,27 @@ fn direct_abort_and_yield_agree_on_the_innermost_answer() {
 }
 
 #[test]
+fn callee_case_from_a_handler_arm_escapes_that_handler() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as H\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {Error} => x / 0\ndef main =\n  with H ->\n  1 / 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
+    assert_eq!(output.stderr, b"DivisionByZero\n");
+
+    let case = Case::new();
+    case.write("main.hd", "handler Error as G\nabort raise _ => 42\nreturn value => value\nhandler Error as H\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {Error} => x / 0\ndef main =\n  with G ->\n  with H ->\n  1 / 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
