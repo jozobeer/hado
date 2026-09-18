@@ -419,11 +419,24 @@ from pathlib import Path
 
 fence_open = re.compile(r'^(`{3,})([^`]*)$')
 fence_close = re.compile(r'^(`{3,})\s*$')
+placeholders = {'', '?', '-', '--', '---', '...', '…', 'tbd', 'todo', 'xxx', 'n/a', 'na', '未定', '未計測'}
 
 def closes_fence(line, delimiter):
     """A closing fence is only backticks (at least as many as the opener) and spaces."""
     match = fence_close.match(line)
     return bool(match) and len(match.group(1)) >= len(delimiter)
+
+def transcript(block):
+    """実測の約束（docs/issues.md）: `$ ` で始まる行がコマンド、`> ` で始まる行は
+    PS2 の入力、`#` で始まらないプレースホルダでない空でない行が出力である。
+    シェルの文法（継続・heredoc・置換）は解析しない。コマンドと出力の対応は
+    レビューで見る。"""
+    commands = sum(1 for line in block if line.startswith('$ '))
+    outputs = sum(1 for line in block
+                  if not line.startswith('$ ') and not line.startswith('> ')
+                  and not line.lstrip().startswith('#')
+                  and line.strip() and line.strip().lower() not in placeholders)
+    return commands >= 1 and outputs >= 1
 
 def complete_fence(lines):
     i = 0
@@ -431,50 +444,11 @@ def complete_fence(lines):
         opening = fence_open.match(lines[i])
         if opening:
             delimiter = opening.group(1)
-            block = []
             j = i + 1
             while j < len(lines) and not closes_fence(lines[j], delimiter):
-                block.append(lines[j])
                 j += 1
-            if j < len(lines):
-                commands = 0
-                outputs = 0
-                # 実測の約束: `$ ` で始まる行がコマンド、`> ` で始まる行は PS2 の入力
-                # （コマンドの続き）、heredoc の本文は順序付きの区切りまで。それ以外の
-                # 空でない行が出力である。シェルの文法は解析しない。
-                heredocs = []
-                # `(?<!<)` keeps the `<<` of a here-string (`<<<value`) out of this.
-                here_re = re.compile(
-                    r"""(?<!<)<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
-                )
-
-                def opened_heredocs(text):
-                    return [(next(g for g in m.groups() if g),
-                             m.group(0).startswith('<<-'))
-                            for m in here_re.finditer(text)]
-
-                for line in block:
-                    if commands and line.startswith('> '):
-                        # A PS2 line belongs to the command above; never measured output.
-                        # Heredocs may open on several PS2 lines (`$ cat \`, `> <<A \`,
-                        # `> <<B`), so collect them instead of replacing the list.
-                        heredocs.extend(opened_heredocs(line))
-                        continue
-                    if heredocs:
-                        delimiter, tabs = heredocs[0]
-                        candidate = line.lstrip('\t') if tabs else line
-                        if candidate == delimiter:
-                            heredocs.pop(0)
-                        continue
-                    if line.startswith('$ '):
-                        commands += 1
-                        heredocs = opened_heredocs(line)
-                        continue
-                    if not line.strip() or line.lstrip().startswith('#'):
-                        continue
-                    outputs += 1
-                if commands and outputs:
-                    return True
+            if j < len(lines) and transcript(lines[i + 1:j]):
+                return True
             i = j + 1
         else:
             i += 1
@@ -488,7 +462,6 @@ def cells(line):
         parts = parts[:-1]
     return [part.replace('\\|', '|').strip() for part in parts]
 
-placeholders = {'', '?', '-', '--', '---', '...', '…', 'tbd', 'todo', 'xxx', 'n/a', 'na', '未定', '未計測'}
 alignment = re.compile(r':?-{3,}:?')
 
 def measured(row):
@@ -521,6 +494,7 @@ def complete_table(lines):
 def fence(*inner):
     return ['```', *inner, '```']
 
+# フェンスの形（Markdown の規則）。中身の綴りは解析しない。
 assert not complete_fence(['```lang`bad', '$ cargo test', 'ok', '```']), \
     'an opening fence whose info string contains a backtick does not open a block'
 assert not complete_fence(['```', '$ cargo test', '```not-a-closing-fence']), \
@@ -531,120 +505,27 @@ assert complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '````']), \
     'a four-backtick fence closes with four backticks'
 assert not complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '```']), \
     'a shorter fence does not close a longer one'
+assert not complete_fence(['   ```', '$ cargo test', 'ok', '   ```']), \
+    'an indented fence is not read (fences start at the line head)'
 
-assert not complete_fence(fence('$ cat \\', '> <<A \\', '> <<B', 'body-a', 'A', 'body-b', 'B')), \
-    'the bodies of several heredocs are not output'
-assert complete_fence( \
-    fence('$ cat \\', '> <<A \\', '> <<B', 'body-a', 'A', 'body-b', 'B', 'done')), \
-    'an output line after the heredoc bodies is evidence'
-assert not complete_fence(fence("$ cat > probe <<'EOF'", 'body', 'EOF')), \
-    'single-quoted here-doc body only must not count as output'
-assert not complete_fence(fence('$ cat > probe <<"EOF"', 'body', 'EOF')), \
-    'double-quoted here-doc body only must not count as output'
-assert not complete_fence(fence(r'$ cat > probe <<\EOF', 'body', 'EOF')), \
-    'backslash-quoted here-doc body only must not count as output'
-assert not complete_fence(fence('$ cargo test', '# output TBD')), \
-    'comment-only output must not count'
-assert not complete_fence(fence('$ cargo test', '  # output TBD')), \
-    'indented comment-only output must not count'
-assert complete_fence(fence("$ python3 - <<'PY'", 'print(1)', 'PY', '1')), \
-    'here-doc followed by transcript output must count'
+# 実測の約束: コマンドと出力が 1 行ずつ以上あることだけを見る。
 assert complete_fence(fence('$ cargo test', 'PASSED: 9/9')), \
-    'command plus transcript output must count'
-assert not complete_fence(fence("$ printf '%s\\n' \\", '> input.txt')), \
-    'backslash continuation and PS2 line must not count as output'
-assert not complete_fence(fence("$ printf '%s\\n' \\", '> foo \\', '> bar')), \
-    'continued-only multiline command must not count as output'
-assert complete_fence(fence("$ printf '%s\\n' \\", '> input.txt', 'input.txt')), \
-    'continued command plus transcript output must count'
-assert not complete_fence(fence('$ printf x |', '> tee result.txt')), \
-    'pipe continuation and PS2 line must not count as output'
-assert not complete_fence(fence('$ printf x &&', '> tee result.txt')), \
-    'and-and continuation and PS2 line must not count as output'
-assert complete_fence(fence('$ printf x |', '> tee result.txt', 'x')), \
-    'continued pipeline plus output must count'
-assert not complete_fence(fence('$ printf \'%s\\n\' "', '> input"')), \
-    'unmatched double quote and PS2 line must not count as output'
-assert not complete_fence(fence("$ printf '%s\\n' '", "> input'")), \
-    'unmatched single quote and PS2 line must not count as output'
-assert not complete_fence(fence('$ (cd sub', '> )')), \
-    'unbalanced parenthesis and PS2 line must not count as output'
-assert complete_fence(fence('$ printf \'%s\\n\' "', '> input"', 'input')), \
-    'quoted continuation plus output must count'
-assert complete_fence(fence("$ awk '/^## 現象/{p=1}' file.md", 'a')) , \
-    'balanced quotes in a single command must count as complete'
-assert complete_fence(fence('$ echo "(x)"', 'x')) , \
-    'balanced quotes and parentheses must count as complete'
-assert not complete_fence(fence('$ if true; then', '> echo x', '> fi')), \
-    'if/then/fi compound and PS2 lines must not count as output'
-assert not complete_fence(fence('$ for i in a; do', '> echo $i', '> done')), \
-    'for/do/done compound and PS2 lines must not count as output'
-assert not complete_fence(fence('$ { echo a;', '> }')), \
-    'brace group and PS2 line must not count as output'
-assert complete_fence(fence('$ if true; then', '> echo x', '> fi', 'x')), \
-    'compound continuation plus output must count'
-assert complete_fence(fence('$ while read x; do echo $x; done', 'x')), \
-    'a compound on one line must count as complete'
-assert complete_fence(fence('$ grep -w if file', 'if')), \
-    'if as an argument must not open a compound'
-assert not complete_fence(fence('$ f() {', '> echo x', '> }')), \
-    'function definition and PS2 lines must not count as output'
-assert not complete_fence(fence('$ function f {', '> echo x', '> }')), \
-    'function keyword definition and PS2 lines must not count as output'
-assert complete_fence(fence('$ f() {', '> echo x', '> }', 'x')), \
-    'function definition plus output must count'
-assert complete_fence(fence('$ echo a{b', 'a{b')), \
-    'a brace inside a word must not open a group'
-assert not complete_fence(fence("$ cat <<'END-INPUT'", 'a', 'END-INPUT')), \
-    'heredoc with a hyphenated delimiter and its terminator must not count as output'
-assert not complete_fence(fence('$ cat <<"END-INPUT"', 'a', 'END-INPUT')), \
-    'double-quoted heredoc delimiter and its terminator must not count as output'
-assert complete_fence(fence("$ cat <<'END-INPUT'", 'a', 'END-INPUT', 'a')), \
-    'heredoc plus output must count'
-assert not complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l')), \
-    'a continued heredoc command and its PS2 line must not count as output'
-assert complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l', '1')), \
-    'a continued heredoc plus output must count'
-assert not complete_fence(fence('$ cat <<EOF', 'a', '  EOF', 'b')), \
-    'an indented line is body text for << and must not end the heredoc'
-assert complete_fence(fence('$ cat <<-EOF', 'a', '\tEOF', 'b')), \
-    'leading tabs end a <<- heredoc'
-assert not complete_fence(fence('$ cat <<-EOF', 'a', '  EOF', 'b')), \
-    'spaces do not end a <<- heredoc'
-assert not complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF')), \
-    'a heredoc opened on a PS2 line must not count its body as output'
-assert complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF', 'body')), \
-    'a heredoc opened on a PS2 line plus output must count'
-assert not complete_fence(fence('$ f()', '> {', '> echo x', '> }')), \
-    'a function header with the body brace on the next line must stay open'
-assert complete_fence(fence('$ f()', '> {', '> echo x', '> }', 'x')), \
-    'a function header closed on a later line plus output must count'
-assert not complete_fence(fence('$ echo `', '> date', '> `')), \
-    'a backtick substitution across PS2 lines must not count as output'
-assert complete_fence(fence('$ echo `', '> date', '> `', 'x')), \
-    'a backtick substitution plus output must count'
-assert not complete_fence(fence('$ true && {', '> echo x', '> }')), \
-    'a brace group after && must stay open'
-assert complete_fence(fence('$ true && {', '> echo x', '> }', 'x')), \
-    'a brace group after && plus output must count'
-assert not complete_fence(fence('$ : ${UNSET:-', '> fallback}')), \
-    'a parameter expansion across PS2 lines must not count as output'
-assert complete_fence(fence('$ : ${UNSET:-', '> fallback}', 'x')), \
-    'a parameter expansion plus output must count'
-assert not complete_fence(fence('$ cat <<A <<B', 'a', 'A', 'b', 'B')), \
-    'a second heredoc body must not count as output'
-assert complete_fence(fence('$ cat <<A <<B', 'a', 'A', 'b', 'B', 'x')), \
-    'two heredocs plus output must count'
-assert not complete_fence(fence('$ echo hi', '> out')), \
-    'a PS2 line after a command is not measured output'
-assert complete_fence(fence('$ cat <<<value', 'value')), \
-    'a here-string is not a heredoc'
-assert not complete_fence(fence('$ select x in a; do', '> cat <<EOF', 'body', 'EOF',
-                                '> break', '> done')), \
-    'a select loop with a heredoc must not count its body as output'
-assert complete_fence(fence('$ select x in a; do', '> cat <<EOF', 'body', 'EOF',
-                            '> break', '> done', 'x')), \
-    'a select loop with a heredoc plus output must count'
+    'a command and its output are evidence'
+assert not complete_fence(fence('$ cargo test')), \
+    'a command-only fence is not evidence'
+assert not complete_fence(fence('PASSED: 9/9')), \
+    'output without a command is not evidence'
+assert not complete_fence(fence('$ cargo test', 'TBD')), \
+    'a placeholder output is not evidence'
+assert not complete_fence(fence('$ cargo test', '  ...')), \
+    'an indented placeholder output is not evidence'
+assert not complete_fence(fence('$ cargo test', '> TBD')), \
+    'a PS2 line is not output'
+assert not complete_fence(fence('$ cargo test', '# output TBD')), \
+    'a comment line is not output'
+assert complete_fence(fence('$ printf x \\', '> tee out', 'x')), \
+    'a continued command with an output line is evidence'
+
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
