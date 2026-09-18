@@ -3158,7 +3158,8 @@ impl Lowerer {
         Expression::call_direct(id, &signature, vec![value, continuation])
     }
 
-    // 宣言では型引数を具体化できないため、先に単相化した value の登録済み操作だけを扱う。
+    // Yield は continuation を張り替える必要があるので登録済みの操作だけを扱う。
+    // Fail は成功型だけが変わるので、未登録の tag も含めて outcome をそのまま載せる。
     fn again_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
         let parameters = vec![self.next, self.next + 1];
         self.next += 2;
@@ -3180,17 +3181,10 @@ impl Lowerer {
                 result: signature.result.clone(),
             }));
         }
-        for effect in self.fail_ids.keys().cloned().collect::<Vec<_>>() {
-            let constructor = self.fail_constructor(&effect);
-            if !self.operation_types.contains_key(&constructor) {
-                continue;
-            }
-            arms.push((constructor.clone(), Expression::Construct {
-                fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?)],
-                constructor,
-                result: signature.result.clone(),
-            }));
-        }
+        let fail_fallback = Expression::Variable {
+            id: parameters[0],
+            ty: signature.result.clone(),
+        };
         self.functions.push(Function {
             id,
             name: format!("bind_{}", id.0),
@@ -3198,7 +3192,10 @@ impl Lowerer {
             parameters,
             captures: Vec::new(),
             body: Expression::Switch {
-                value: Box::new(value), arms, fallback: None, result: signature.result.clone(),
+                value: Box::new(value),
+                arms,
+                fallback: Some(Box::new(fail_fallback)),
+                result: signature.result.clone(),
             }.in_tail_position(),
         });
         Ok(())
@@ -3257,42 +3254,19 @@ impl Lowerer {
         if !is_outcome(&rest.ty()) {
             rest = self.done(rest, &outgoing)?;
         }
-        let mut arms = vec![(DONE.into(), rest)];
-        let fallback = if outgoing == ty {
-            Some(Box::new(Expression::Variable { id, ty }))
-        } else {
-            arms.extend(self.fail_forward_arms(&variable, &outgoing)?);
-            Some(Box::new(Expression::Unreachable { result: outgoing.clone() }))
-        };
+        let arms = vec![(DONE.into(), rest)];
+        // Fail は成功型だけが変わる。登録済み tag に限ると、相互再帰の相手が
+        // まだ raise していない時点の switch が Unreachable のまま残る。
         Ok(Expression::Let {
             id,
             value: Box::new(value),
             body: Box::new(Expression::Switch {
                 value: Box::new(variable),
                 arms,
-                fallback,
+                fallback: Some(Box::new(Expression::Variable { id, ty: outgoing.clone() })),
                 result: outgoing,
             }),
         })
-    }
-
-    fn fail_forward_arms(&mut self, value: &Expression, outgoing: &Type) -> Result<Vec<(String, Expression)>, String> {
-        let mut arms = Vec::new();
-        for effect in self.fail_ids.keys().cloned().collect::<Vec<_>>() {
-            let constructor = self.fail_constructor(&effect);
-            if !self.operation_types.contains_key(&constructor) {
-                continue;
-            }
-            arms.push((
-                constructor.clone(),
-                Expression::Construct {
-                    fields: vec![project(value, &constructor, 0, self.outcome_payload(&constructor)?)],
-                    constructor,
-                    result: outgoing.clone(),
-                },
-            ));
-        }
-        Ok(arms)
     }
 
     fn handler_has_propagation_ops(handler: &crate::parser::HandlerDecl) -> bool {
