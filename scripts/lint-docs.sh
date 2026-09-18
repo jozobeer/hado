@@ -409,13 +409,23 @@ doc_issue_evidence() {
 import re
 from pathlib import Path
 
+fence_open = re.compile(r'^(`{3,})')
+fence_close = re.compile(r'^(`{3,})\s*$')
+
+def closes_fence(line, delimiter):
+    """A closing fence is only backticks (at least as many as the opener) and spaces."""
+    match = fence_close.match(line)
+    return bool(match) and len(match.group(1)) >= len(delimiter)
+
 def complete_fence(lines):
     i = 0
     while i < len(lines):
-        if lines[i].startswith('```'):
+        opening = fence_open.match(lines[i])
+        if opening:
+            delimiter = opening.group(1)
             block = []
             j = i + 1
-            while j < len(lines) and not lines[j].startswith('```'):
+            while j < len(lines) and not closes_fence(lines[j], delimiter):
                 block.append(lines[j])
                 j += 1
             if j < len(lines):
@@ -501,6 +511,15 @@ def complete_table(lines):
 
 def fence(*inner):
     return ['```', *inner, '```']
+
+assert not complete_fence(['```', '$ cargo test', '```not-a-closing-fence']), \
+    'a fence line with trailing text does not close the block'
+assert complete_fence(['```', '$ cargo test', 'PASSED: 9/9', '```   ']), \
+    'a closing fence with trailing spaces closes the block'
+assert complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '````']), \
+    'a four-backtick fence closes with four backticks'
+assert not complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '```']), \
+    'a shorter fence does not close a longer one'
 
 assert not complete_fence(fence("$ cat > probe <<'EOF'", 'body', 'EOF')), \
     'single-quoted here-doc body only must not count as output'
