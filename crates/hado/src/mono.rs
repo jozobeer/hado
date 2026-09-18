@@ -362,11 +362,31 @@ impl Lowerer {
             || crate::check::children(node).iter().any(|child| self.contains_again(child))
     }
 
+    // handler の無い `once` 操作は既定実装を呼ぶので、既定実装が効果を運ぶなら
+    // その呼び出しも outcome を返す（prelude の `cwd` などが `Error` を運ぶ）。
+    fn default_operation_carries_effects(&self, name: &str) -> bool {
+        let Some(definition) = self.default_operations.get(name) else {
+            return false;
+        };
+        self.schemes
+            .get(&self.resolve_definition(definition))
+            .is_some_and(Self::scheme_carries_effects)
+    }
+
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
         if matches!(&node.kind, crate::parser::NodeKind::Bin(crate::parser::BinOp::Div | crate::parser::BinOp::Mod, _, _))
             && self.handler_for("raise").is_some()
         {
             return true;
+        }
+        if let crate::parser::NodeKind::Name(name) = &node.kind {
+            if !self.scope.contains_key(name)
+                && self.handler_for(name).is_none()
+                && self.stack_needs_outcome()
+                && self.default_operation_carries_effects(name)
+            {
+                return true;
+            }
         }
         if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
             return true;
@@ -382,7 +402,16 @@ impl Lowerer {
             };
             if self.stack_needs_outcome() && name.is_some_and(|name| {
                 self.schemes.get(&self.resolve_definition(&name)).is_some_and(Self::scheme_carries_effects)
+                    || self.default_operation_carries_effects(&name)
             }) { return true; }
+            // 局所の閉包でも、結果が outcome なら呼び出し側で継続に載せる。
+            if self.stack_needs_outcome() {
+                if let crate::parser::NodeKind::Name(name) = &callee.kind {
+                    if self.scope.get(name).is_some_and(|(_, ty)| matches!(ty, Type::Closure(_, result) if is_outcome(result))) {
+                        return true;
+                    }
+                }
+            }
         }
         crate::check::children(node).iter().any(|child| self.contains_handled_call(child))
     }
