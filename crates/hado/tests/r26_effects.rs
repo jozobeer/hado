@@ -421,6 +421,50 @@ fn nested_again_handlers_with_different_answers_align() {
 }
 
 #[test]
+fn division_inside_lambda_under_handler_reaches_the_abort_arm() {
+    for (body, expected) in [
+        ("fn(x => 8 / x) 4", 2),
+        ("fn(x => 8 / x) 0", 99),
+        ("let f = fn(x => 8 / x) -> f 0", 99),
+    ] {
+        let case = Case::new();
+        case.write("main.hd", &format!(
+            "handler Error as Catch\nabort raise _ => 99\nreturn value => value\ndef main =\n  with Catch ->\n  {body}\n"
+        ));
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{body}\n{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{body}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{body}");
+        assert!(output.stderr.is_empty(), "{body}");
+    }
+}
+
+#[test]
+fn error_handler_arm_does_not_catch_its_own_raise() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as H\nabort raise _ => 1 / 0\nreturn value => value\ndef main =\n  with H ->\n  1 / 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
+    assert_eq!(output.stderr, b"DivisionByZero\n");
+}
+
+#[test]
+fn error_handler_arm_raise_reaches_the_outer_handler() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Outer\nabort raise _ => 42\nreturn value => value\nhandler Error as Inner\nabort raise _ => 1 / 0\nreturn value => value\ndef main =\n  with Outer ->\n  with Inner ->\n  1 / 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
