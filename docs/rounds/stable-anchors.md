@@ -76,3 +76,21 @@ mentions('fn make_isa() -> Isa {', 'make_is') -> False
 pairs('`crates/hado/src/lib.rs` の `check_ast`、`crates/hado/src/check.rs` の `check_ast`') ->
   [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/check.rs', 'check_ast')]
 ```
+
+```
+# 二次レビュー（Codex）の指摘 1 件（`§55x`・`付録Cfoo`・`E100foo` が実在の参照として通る）
+# 直す前: 誤った参照だけを書いた原因が通る
+$ sed -n '/^## 原因/,/^## /p' docs/issues/zz-probe.md
+## 原因
+§55x。
+bash scripts/lint-docs.sh -> PASSED: 10/10
+# 直した後: 同じ探針が赤になる
+AssertionError: zz-probe.md: 原因 points at nothing（`パス` の `識別子`、§N、Exxx のどれかを書く）
+NG: each issue cause points at a path and an identifier
+PASSED: 9/10
+$ rm docs/issues/zz-probe.md
+bash scripts/lint-docs.sh -> PASSED: 10/10
+# 単体の探針（doc_issue_causes の python ブロックを exec して呼ぶ）
+section.findall('§55x と 付録Cfoo と §55.1') -> ['§55.1']
+error_code.findall('E100foo と E602') -> ['E602']
+```
