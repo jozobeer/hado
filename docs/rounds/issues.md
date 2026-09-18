@@ -346,3 +346,22 @@ AssertionError: 現象 has no closed nonempty fence or complete table: zz-probe.
 # 検査 8 の負の探針: リポジトリの外へ出る anchor が赤
 AssertionError: zz-probe.md: 原因 anchor escapes the repository: crates/../../AGENTS.md:1
 ```
+
+### 十四次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# コメントは // だけ（-- と # は E104、ブロックコメントは無い）
+sed -n '226p' docs/spec.md
+コメントは `//` による行コメントのみとする。`--`（v0.1 の記法）と `#` を含む他の記法によるコメントは E104 とする。
+
+# --show-all は plan 35 の L1 に移り、wants の 7 は消えた
+grep -n 'show-all' docs/plan.md | cut -c1-60
+1286:| L1 | 診断の件数 | `--show-all` を opt-in で足す。同じ段階の全件を
+grep -c '^7\.' docs/wants.md
+0
+```
