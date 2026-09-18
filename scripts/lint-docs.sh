@@ -424,8 +424,9 @@ def complete_fence(lines):
                 heredocs = []
                 resume = None
                 shell = None
+                # `(?<!<)` keeps the `<<` of a here-string (`<<<value`) out of this.
                 here_re = re.compile(
-                    r"""<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
+                    r"""(?<!<)<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
                 )
                 cont_re = re.compile(r'(\||&&|\\)\s*$')
 
@@ -433,10 +434,11 @@ def complete_fence(lines):
                     """State of one command, so PS2 input lines are never counted as measured output."""
 
                     OPEN = {'if': 'fi', 'for': 'done', 'while': 'done', 'until': 'done',
-                            'case': 'esac', '{': '}'}
+                            'select': 'done', 'case': 'esac', '{': '}'}
                     CLOSE = {'fi', 'done', 'esac', '}'}
                     COMMAND_AFTER = {';', '|', '&', '(', '{', '!',
-                                     'if', 'then', 'else', 'elif', 'do', 'for', 'while', 'until', 'case'}
+                                     'if', 'then', 'else', 'elif', 'do', 'for', 'while', 'until',
+                                     'case', 'select'}
                     BREAK = set(';{}|&()')
 
                     def __init__(self):
@@ -724,6 +726,14 @@ assert complete_fence(fence('$ cat <<A <<B', 'a', 'A', 'b', 'B', 'x')), \
     'two heredocs plus output must count'
 assert not complete_fence(fence('$ echo hi', '> out')), \
     'a PS2 line after a command is not measured output'
+assert complete_fence(fence('$ cat <<<value', 'value')), \
+    'a here-string is not a heredoc'
+assert not complete_fence(fence('$ select x in a; do', '> cat <<EOF', 'body', 'EOF',
+                                '> break', '> done')), \
+    'a select loop with a heredoc must not count its body as output'
+assert complete_fence(fence('$ select x in a; do', '> cat <<EOF', 'body', 'EOF',
+                            '> break', '> done', 'x')), \
+    'a select loop with a heredoc plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
