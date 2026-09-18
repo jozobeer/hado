@@ -6,11 +6,21 @@
 20 行の CLI を書く途中で、2 つの診断が「どう書けばよいか」を示さず、綴りを仕様で探した（2026-09-17）。
 
 ```
-$ hado check main.hd    # def rec bump (entries: Entry List) (word: String): Entry List =>
-main.hd:3:36: error[E100]: expected =>, found (
-$ hado check main.hd    # 腕の中に if c => a | b
-main.hd:6:24: error[E101]: branches cannot be nested inside another branch
+$ cat main.hd    # 引数を括弧ごとに分けた形（正しい綴りは def f(a: T, b: U): R =>、§8）
+def rec bump (entries: Entry List) (word: String): Entry List =>
+  entries
+$ cargo run --offline -q -- check main.hd
+main.hd:1:36: error[E100]: expected =>, found (
+$ cat main.hd    # 腕の中に if c => a | b（正しい綴りは腕の条件列 | p => if | c => a | b、§26.1）
+def label n =>
+  if n
+    | 0 => "zero"
+    | _ => if n > 0 => "positive" | "negative"
+$ cargo run --offline -q -- check main.hd
+main.hd:4:12: error[E101]: branches cannot be nested inside another branch
 ```
+
+元は 20 行の CLI を書く途中で当たった 2 件で、上の 2 入力は同じ 2 診断への最小化である（2026-09-18 に `cargo run --offline -q -- check` で取り直した）。
 
 正しい綴りはそれぞれ `def f(a: T, b: U): R =>`（§8）と、腕の条件列 `=> if | c => a | b`（§26.1）である。
 

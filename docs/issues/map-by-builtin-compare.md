@@ -21,11 +21,17 @@ $ grep -rn 'implement Map' stdlib/ | wc -l
 
 `docs/wants.md` 33 は association list を想定している。typeclass も演算子過負荷も無い（§4）ので、比較を誰が持つかが決まっていなかった。
 
-組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs:3294` の `derive_comparison`）、契約経由の多相関数から型変数の上で呼べることを実測した（2026-09-17）。
+組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs:3294` の `derive_comparison`）、モジュールの型変数の上で呼べることを実測した（2026-09-18）。
 
 ```
-$ hado run main.hd   # module Ord / def A less(a: A, b: A): Bool / implement: compare a b < 0
-[true, false, true]  # Ord.less 1 2, Ord.less "b" "a", Ord.less [1] [1, 2]
+$ cat main.hd
+def main = [Ord.less 1 2, Ord.less "b" "a", Ord.less [1] [1, 2]]
+module Ord
+def A less(a: A, b: A): Bool
+implement Ord as Ord
+def less a b => compare a b < 0
+$ cargo run --offline -q -- run main.hd
+[true, false, true]
 ```
 
 ## 案

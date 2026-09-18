@@ -487,3 +487,39 @@ grep -n '^HadoString \*hado_' runtime/hado_runtime.c | wc -l
 grep -c 'HadoString' crates/hado/runtime_print.c
 8    # quote_text と hado_canonical_float を含む
 ```
+
+### 二十次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# E100 と E101 の最小再現を cargo run 経由で取り直した
+$ cargo run --offline -q -- check main.hd    # def rec bump (entries: Entry List) (word: String): Entry List =>
+main.hd:1:36: error[E100]: expected =>, found (
+$ cargo run --offline -q -- check main.hd    # 腕の中の if c => a | b
+main.hd:4:12: error[E101]: branches cannot be nested inside another branch
+
+# Char / Float.parse / Int.to_float は §55 に member が無い（同じ invocation で取り直した）
+main.hd:1:12: error[E204]: unbound name Char
+main.hd:1:18: error[E204]: module member is not exported
+main.hd:1:16: error[E204]: module member is not exported
+
+# compare はモジュールの型変数の上で派生され、3 つの型で呼べる
+$ cargo run --offline -q -- run main.hd
+[true, false, true]
+
+# 入れ子の契約（tests/accept/namespaces/store/store.hdi は main.hd の project に属する）
+ls tests/accept/namespaces/ tests/accept/namespaces/store/
+tests/accept/namespaces/:
+id
+main.hd
+store
+
+tests/accept/namespaces/store/:
+backend
+memory_store.hd
+store.hdi
+```

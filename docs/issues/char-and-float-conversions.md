@@ -6,11 +6,11 @@
 `String.get` で Char は取れるが、Char から先へ進む member が無い（2026-09-17）。
 
 ```
-$ hado check main.hd    # def main = Char.to_int 'a'
+$ cargo run --offline -q -- check main.hd    # def main = Char.to_int 'a'
 main.hd:1:12: error[E204]: unbound name Char
-$ hado check main.hd    # def main = Float.parse "1.5"
+$ cargo run --offline -q -- check main.hd    # def main = Float.parse "1.5"
 main.hd:1:18: error[E204]: module member is not exported
-$ hado check main.hd    # def main = Int.to_float 3
+$ cargo run --offline -q -- check main.hd    # def main = Int.to_float 3
 main.hd:1:16: error[E204]: module member is not exported
 ```
 
