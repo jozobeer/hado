@@ -991,3 +991,28 @@ python3 -c "print(len(str(5**1075)))"
 cargo test --offline -> cargo-test15-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
 ```
+
+### 四十次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# 検査 9: フェンスの中の表は実測にしない（一時 issue で確認してから消す）
+printf '# 題（temp-probe）\n優先度: 高。\n## 現象\n\n```\n| expected |\n| --- |\n| 1 |\n```\n...' > docs/issues/temp-probe.md
+bash scripts/lint-docs.sh 2>&1 | grep -E 'AssertionError|NG: each issue 現象'
+AssertionError: 現象 has no closed nonempty fence or complete table: temp-probe.md
+NG: each issue 現象 carries measured evidence in a fence or table
+
+# 検査 10: 文書の形（優先度の行・節の並び）
+assert issue_problem('good-slug', full) is None
+assert '優先度' in issue_problem('good-slug', full.replace('優先度: 高。', '優先度: 最高。'))
+assert '## 案' in issue_problem('good-slug', full.replace('## 案\n', ''))
+# docs/issues/ の全件が正規ファイルで `.md`（入れ子と `.md` 以外を拒否）
+
+# 最終の木での全走
+cargo test --offline -> cargo-test16-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
+```
