@@ -590,7 +590,13 @@ impl Lowerer {
                     .value_types
                     .get(&(node.span.line, node.span.col))
                     .ok_or("missing constructor type")?;
-                return self.construct(name, vec![], ty);
+                // 効果多相の callee の中では、この位置の型が `$Outcome` に
+                // なっている。構築するのは成功型なので、そこでほどく。
+                let ty = match Type::try_from(&self.specialization.resolve(ty)) {
+                    Ok(concrete) if is_outcome(&concrete) => Ty::from(&outcome_parts(&concrete)?.0),
+                    _ => ty.clone(),
+                };
+                return self.construct(name, vec![], &ty);
             }
             if !self.scope.contains_key(name) {
                 return self.definition_reference(name, node.span);
@@ -1154,7 +1160,15 @@ impl Lowerer {
             None => self.expression(body)?,
         };
         let result = then.ty();
-        let otherwise = self.construct("None", vec![], &Ty::from(&result))?;
+        // 効果多相の callee の中では腕の型が `$Outcome` になりうる。`None` は
+        // 成功型の値なので、構築してから done で包む。
+        let otherwise = if is_outcome(&result) {
+            let success = outcome_parts(&result)?.0;
+            let none = self.construct("None", vec![], &Ty::from(&success))?;
+            self.done(none, &result)?
+        } else {
+            self.construct("None", vec![], &Ty::from(&result))?
+        };
         let switch = Expression::Switch {
             value: Box::new(variable),
             arms: vec![("Some".into(), then), ("None".into(), otherwise)],
