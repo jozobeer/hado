@@ -1046,3 +1046,39 @@ fn return_arm_does_not_rewrite_a_pure_helper() {
         assert_eq!(output.stdout, expected.as_bytes());
     }
 }
+
+#[test]
+fn an_effectful_closure_nested_in_a_monomorphic_adt_field_arg_keeps_its_outcome() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}) Option)\ndef main =\n  with Catch ->\n  let Box(g) = Box(Some(fn(x => 8 / x))) ->\n  if g | Some(f) => f 0 | None => -1\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn a_lambda_may_return_an_adt_holding_an_effectful_lambda() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => Some(fn(y => x / y))) ->\n  let holder = make 8 ->\n  if holder | Some(f) => f 0 | None => -1\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn an_operation_in_a_nested_handler_arm_does_not_reach_the_entered_handler() {
+    let case = Case::new();
+    case.write("main.hd", "effect A\nonce askA: Int\neffect B\nonce askB: Int\nhandler A as HA\nonce askA => with HB -> askB\nreturn value => value\nhandler B as HB\nonce askB => askA\nreturn value => value\nhandler A as HA2\nonce askA => 7\nreturn value => 0\ndef main =\n  with HA2 ->\n  with HA ->\n  askA\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
