@@ -1039,3 +1039,34 @@ assert not complete_fence(['```lang`bad', '$ cargo test', 'ok', '```'])
 cargo test --offline -> cargo-test17-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
 ```
+
+### 四十二次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# PS2 行に並ぶ複数の heredoc（本文は出力に数えない）
+assert not complete_fence(fence('$ cat \', '> <<A \', '> <<B', 'body-a', 'A', 'body-b', 'B'))
+assert complete_fence(fence('$ cat \', '> <<A \', '> <<B', 'body-a', 'A', 'body-b', 'B', 'done'))
+
+# 段階順: E6xx は型の段階（3 番目）
+sed -n '243,250p' crates/hado/src/lib.rs
+pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize) {
+    let stage = match error.code.as_deref().and_then(|code| code.as_bytes().get(1)) {
+        Some(b'1') => 1,
+        Some(b'2') => 2,
+        Some(b'3' | b'6') => 3,
+
+# 最終の木での全走
+cargo test --offline -> cargo-test18-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
+```
+
+### 打ち切り（2026-09-18）
+
+PR #5 のレビュー往復は四十二次まで来た。三十五〜四十二次の指摘はすべて `scripts/lint-docs.sh` の検査 8〜10 の綴りの近似に対するもので、形は無限に作れる（シェルの継続・heredoc の本文・Markdown のフェンスと表の綴り）。実ファイルは `PASSED: 10/10` を保っており、issue の本文と実測に対する指摘は三十四次で尽きている。
+
+そこで PR #5 はここで打ち切り、残る綴りの綴り分けを `docs/issues/lint-docs-hardening.md` に切り出す。既知の形（PS2 行に並ぶ複数の heredoc、情報文字列のバッククォート、`<<-`、here-string、閉じないフェンス、診断の位置）はこの PR の探針で固定済みで、残り（字下げしたフェンス、引用の中の表、URI と en ダッシュのアンカー、`\` による継続の判定）は切り出し先で扱う。
