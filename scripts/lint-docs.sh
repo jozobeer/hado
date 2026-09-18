@@ -421,123 +421,14 @@ def complete_fence(lines):
             if j < len(lines):
                 commands = 0
                 outputs = 0
+                # 実測の約束: `$ ` で始まる行がコマンド、`> ` で始まる行は PS2 の入力
+                # （コマンドの続き）、heredoc の本文は順序付きの区切りまで。それ以外の
+                # 空でない行が出力である。シェルの文法は解析しない。
                 heredocs = []
-                resume = None
-                shell = None
                 # `(?<!<)` keeps the `<<` of a here-string (`<<<value`) out of this.
                 here_re = re.compile(
                     r"""(?<!<)<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
                 )
-                cont_re = re.compile(r'(\||&&|\\)\s*$')
-
-                class Shell:
-                    """State of one command, so PS2 input lines are never counted as measured output."""
-
-                    OPEN = {'if': 'fi', 'for': 'done', 'while': 'done', 'until': 'done',
-                            'select': 'done', 'case': 'esac', '{': '}'}
-                    CLOSE = {'fi', 'done', 'esac', '}'}
-                    COMMAND_AFTER = {';', '|', '&', '(', '{', '!',
-                                     'if', 'then', 'else', 'elif', 'do', 'for', 'while', 'until',
-                                     'case', 'select'}
-                    BREAK = set(';{}|&()')
-
-                    def __init__(self):
-                        self.single = False
-                        self.double = False
-                        self.backtick = False
-                        self.depth = 0
-                        self.expect = []
-                        self.tail = False
-                        self.header = False
-
-                    def feed(self, text):
-                        if text.startswith('$ ') or text.startswith('> '):
-                            text = text[2:]
-                        words = []
-                        word = []
-
-                        def flush():
-                            if word:
-                                words.append(''.join(word))
-                                word.clear()
-
-                        self.tail = False
-                        i = 0
-                        while i < len(text):
-                            char = text[i]
-                            if self.backtick:
-                                if char == '`':
-                                    self.backtick = False
-                                elif char == '\\':
-                                    i += 1
-                            elif self.single:
-                                if char == "'":
-                                    self.single = False
-                                else:
-                                    word.append(char)
-                            elif self.double:
-                                if char == '\\':
-                                    i += 1
-                                    if i < len(text):
-                                        word.append(text[i])
-                                elif char == '"':
-                                    self.double = False
-                                elif char == '`':
-                                    self.backtick = True
-                                else:
-                                    word.append(char)
-                            elif char == '\\':
-                                if i + 1 >= len(text):
-                                    self.tail = True
-                                else:
-                                    i += 1
-                                    word.append(text[i])
-                            elif char == "'":
-                                self.single = True
-                            elif char == '"':
-                                self.double = True
-                            elif char == '`':
-                                self.backtick = True
-                            elif char in self.BREAK:
-                                flush()
-                                words.append(char)
-                                if char == '(':
-                                    self.depth += 1
-                                elif char == ')':
-                                    self.depth = max(0, self.depth - 1)
-                            elif char.isspace():
-                                flush()
-                            else:
-                                word.append(char)
-                            i += 1
-                        flush()
-                        position = True
-                        previous = None
-                        for token in words:
-                            if token == '{':
-                                # `f() {`, `function f {`, `a && {` and `${name:-` open a group.
-                                if self.header:
-                                    self.header = False
-                                    self.expect.append('}')
-                                elif (previous == ')' or previous is None or previous == '$'
-                                        or words[0] == 'function'
-                                        or previous in self.COMMAND_AFTER):
-                                    self.expect.append('}')
-                            elif position and token in self.OPEN:
-                                self.expect.append(self.OPEN[token])
-                            elif token in self.CLOSE and self.expect and self.expect[-1] == token:
-                                self.expect.pop()
-                            position = token in self.COMMAND_AFTER
-                            previous = token
-                        if (len(words) >= 3 and words[-2] == '(' and words[-1] == ')'
-                                and words[0] not in self.COMMAND_AFTER):
-                            # `f()` alone: the body brace arrives on the next PS2 line.
-                            self.header = True
-                        trailing = bool(cont_re.search(text.rstrip()))
-                        if words and words[-1] in ('|', '&', '('):
-                            trailing = True
-                        return (self.single or self.double or self.backtick or self.depth > 0
-                                or self.tail or self.header or bool(self.expect) or trailing)
 
                 def opened_heredocs(text):
                     return [(next(g for g in m.groups() if g),
@@ -550,33 +441,15 @@ def complete_fence(lines):
                         candidate = line.lstrip('\t') if tabs else line
                         if candidate == delimiter:
                             heredocs.pop(0)
-                            if not heredocs:
-                                shell = resume
-                                resume = None
-                        continue
-                    if shell is not None:
-                        continuing = shell.feed(line)
-                        found_heres = opened_heredocs(line)
-                        if found_heres:
-                            heredocs = found_heres
-                            resume = shell if continuing else None
-                            shell = None
-                        elif not continuing:
-                            shell = None
                         continue
                     if line.startswith('$ '):
                         commands += 1
-                        opened = Shell()
-                        continuing = opened.feed(line)
-                        found_heres = opened_heredocs(line)
-                        if found_heres:
-                            heredocs = found_heres
-                            resume = opened if continuing else None
-                        elif continuing:
-                            shell = opened
+                        heredocs = opened_heredocs(line)
                         continue
                     if commands and line.startswith('> '):
                         # A PS2 line belongs to the command above; never measured output.
+                        # A heredoc may also open here (`$ cat \` then `> <<EOF`).
+                        heredocs = opened_heredocs(line)
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
