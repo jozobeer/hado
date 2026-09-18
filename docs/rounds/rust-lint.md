@@ -102,3 +102,66 @@ error: mistyped literal suffix
 184 |     let mut state = 0x26_32;
     |                     ^^^^^^^ help: did you mean to write: `0x0026_i32`
 ```
+
+```
+# Diagnostic の大きさ（実物の rlib を probe で測る）
+$ rlib=$(ls -t target/debug/deps/libhado-*.rlib | head -1)
+$ rustc --edition 2021 --extern hado="$rlib" -L target/debug/deps probe.rs -o probe && ./probe
+main（53f61ce）の target:  Diagnostic = 128
+rust-lint の target（related を箱化）: Diagnostic = 96
+```
+
+```
+# 直した後
+$ cargo fmt --all --check
+（差分なし、exit 0）
+$ cargo clippy --offline --all-targets -- -D warnings
+（exit 0、警告 0）
+$ bash scripts/verify-rustfmt.sh
+OK: cargo fmt --all --check reports no diff
+PASSED: 1/1
+$ bash scripts/verify-clippy.sh
+OK: cargo clippy --offline --all-targets -- -D warnings is clean
+PASSED: 1/1
+```
+
+```
+# 層（worktree のルートから）
+$ time bash scripts/run-gates.sh --jobs 4 --tier quick target/rust-lint-quick
+RUN: build
+RUN: verify-gate-cache
+RUN: verify-ci
+RUN: verify-m1-spec
+RUN: verify-rustfmt
+TALLY: 37/37 passed; red: none
+real	0m14.813s
+
+$ time bash scripts/run-gates.sh --jobs 8 --tier core target/rust-lint-core
+（verify-rustfmt 1/1、verify-clippy 1/1、m0 以下すべて）
+TALLY: 571/571 passed; red: none
+real	9m5.556s
+
+$ bash scripts/lint-docs.sh
+OK: spec sections §1..§56 and 付録A.. exist once in reading order
+...
+OK: each issue document has the required name, priority and sections
+PASSED: 10/10
+$ bash scripts/corpus-lock.sh --check
+（差分なし、exit 0）
+```
+
+```
+# 否定的対照（worktree を 1 箇所だけ壊して測り、git checkout -- で戻す）
+=== 整形を崩す（project.rs の `let root = ...` のインデントを 4 → 6）===
+NG: cargo fmt --all --check reports no diff
+PASSED: 0/1        exit=1
+=== lint を戻す（emit.rs の `bcx.func` に `&mut` を戻す）===
+error: this expression creates a reference which is immediately dereferenced by the compiler
+NG: cargo clippy --offline --all-targets -- -D warnings is clean
+PASSED: 0/1        exit=1
+```
+
+整形（1 コミット）・lint の修正（1 コミット）・門番（1 コミット）は別々にした。整形は
+差分 86 ファイル（挿入 14259・削除 3713）で振る舞いを変えない。lint の修正後の
+`cargo test`（core 層の m0）は 571/571 で、直す前と同じ緑である。
+
