@@ -612,20 +612,33 @@ impl Lowerer {
                 .ok_or("missing list type")?
                 .clone();
             // 要素が効果を持つ関数なら、mono の要素型は結果が outcome の閉包。
-            let element = match &ty {
+            let declared = match &ty {
                 Ty::Adt(_, arguments) if arguments.len() == 1 => self.outcome_closure_of(&arguments[0]),
                 _ => None,
             };
             let resolved = Type::try_from(&self.specialization.resolve(&ty))
                 .map_err(|_| "list type is not concrete")?;
-            let list_ty = match (&element, &resolved) {
-                (Some(element), Type::Data(name, _)) => Type::Data(name.clone(), vec![element.clone()]),
-                _ => resolved,
-            };
             let values = items
                 .iter()
                 .map(|item| self.expression(item))
                 .collect::<Result<Vec<_>, _>>()?;
+            // 宣言側が効果行を落としている（効果多相の callee を通った）場合は、
+            // lower した値の型から要素型を決める。
+            let derived = match &resolved {
+                Type::Data(_, arguments) if arguments.len() == 1 => arguments.first().and_then(|declared| {
+                    values
+                        .first()
+                        .map(Expression::ty)
+                        .filter(|first| values.iter().all(|value| &value.ty() == first))
+                        .filter(|first| logical_argument(first) == *declared)
+                }),
+                _ => None,
+            };
+            let list_ty = match (&declared, derived, &resolved) {
+                (Some(element), _, Type::Data(name, _)) => Type::Data(name.clone(), vec![element.clone()]),
+                (None, Some(element), Type::Data(name, _)) => Type::Data(name.clone(), vec![element]),
+                _ => resolved,
+            };
             let mut list = match tail {
                 Some(tail) => self.expression(tail)?,
                 None => Expression::Construct {
@@ -2207,10 +2220,17 @@ impl Lowerer {
     }
 
     fn constructor_fields(&self, name: &str, ty: &Type) -> Result<Vec<Type>, String> {
-        self.constructor_declared_fields(name, ty)
+        self.constructor_field_types(name, ty, true)
     }
 
     fn constructor_declared_fields(&self, name: &str, ty: &Type) -> Result<Vec<Type>, String> {
+        self.constructor_field_types(name, ty, false)
+    }
+
+    // 効果を持つ関数を field に取る constructor は、mono では結果が outcome の
+    // 閉包を field に持つ。宣言側の行き先に型引数が無い（単相の ADT）場合でも
+    // 射影が実際の型を見るように、Ty のうちに効果行を見る。
+    fn constructor_field_types(&self, name: &str, ty: &Type, adjust: bool) -> Result<Vec<Type>, String> {
         let scheme = self.constructors.get(name).ok_or("unknown constructor")?;
         let mut inference = crate::types::Inference::default();
         let instantiated = inference.instantiate(scheme);
@@ -2225,7 +2245,13 @@ impl Lowerer {
         fields
             .iter()
             .map(|field| {
-                Type::try_from(&inference.resolve(field))
+                let field = inference.resolve(field);
+                if adjust {
+                    if let Some(closure) = self.outcome_closure_of(&field) {
+                        return Ok(closure);
+                    }
+                }
+                Type::try_from(&field)
                     .map_err(|_| "constructor field type is not concrete".into())
             })
             .collect()
