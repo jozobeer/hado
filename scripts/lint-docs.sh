@@ -409,6 +409,7 @@ def complete_fence(lines):
                 commands = 0
                 outputs = 0
                 heredoc = None
+                resume = None
                 shell = None
                 here_re = re.compile(
                     r"""<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
@@ -507,6 +508,8 @@ def complete_fence(lines):
                     if heredoc is not None:
                         if line.strip() == heredoc:
                             heredoc = None
+                            shell = resume
+                            resume = None
                         continue
                     if shell is not None:
                         if not shell.feed(line):
@@ -514,13 +517,14 @@ def complete_fence(lines):
                         continue
                     if line.startswith('$ '):
                         commands += 1
+                        opened = Shell()
+                        continuing = opened.feed(line)
                         here = here_re.search(line)
                         if here:
                             heredoc = next(g for g in here.groups() if g)
-                        else:
-                            shell = Shell()
-                            if not shell.feed(line):
-                                shell = None
+                            resume = opened if continuing else None
+                        elif continuing:
+                            shell = opened
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
@@ -634,6 +638,10 @@ assert not complete_fence(fence('$ cat <<"END-INPUT"', 'a', 'END-INPUT')), \
     'double-quoted heredoc delimiter and its terminator must not count as output'
 assert complete_fence(fence("$ cat <<'END-INPUT'", 'a', 'END-INPUT', 'a')), \
     'heredoc plus output must count'
+assert not complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l')), \
+    'a continued heredoc command and its PS2 line must not count as output'
+assert complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l', '1')), \
+    'a continued heredoc plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
