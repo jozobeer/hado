@@ -3375,9 +3375,24 @@ impl Lowerer {
         let body = self.expression(body);
         self.scope = saved;
         let body = body?.in_tail_position();
-        if body.ty() != signature.result {
+        // 効果を持つ本体は Outcome へ落ちる。handler が解釈するのは呼び出し側なので、
+        // 閉包の結果型も Outcome にして呼び出し側の outcome と型を揃える。
+        let lowered = body.ty();
+        let result = if is_outcome(&lowered) {
+            let (success, _, _) = outcome_parts(&lowered)?;
+            if success != signature.result {
+                return Err("lambda return type mismatch".into());
+            }
+            lowered
+        } else if lowered == signature.result {
+            lowered
+        } else {
             return Err("lambda return type mismatch".into());
-        }
+        };
+        let signature = Signature {
+            parameters: signature.parameters.clone(),
+            result,
+        };
         self.functions.push(Function {
             id,
             name: format!("lambda_{}", id.0),
