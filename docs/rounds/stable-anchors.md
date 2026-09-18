@@ -60,4 +60,19 @@ stdlib/io.hd:0
 # 最終の木での全走
 cargo test --offline -> cargo-test-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3751/3751 passed; red: none
+
+# 一次レビュー（Codex）の指摘 4 件を門番と規約に取り込んだ（補修）
+# (1) 参照が 1 つも無い原因が通っていた（前の門番の assert found に当たる）
+# (2) エラーコードがバッククォート無しだと読まれていなかった
+# (3) 識別子を部分文字列で照合していた（`make_is` が `make_isa` に一致）
+# (4) 別のパスが続く並びで、識別子が前のパスに結び付いていた
+bash scripts/lint-docs.sh -> PASSED: 10/10
+
+# (1) の探針（参照の無い原因を一時ファイルで作る）
+AssertionError: zz-probe.md: 原因 points at nothing（`パス` の `識別子`、§N、Exxx のどれかを書く）
+# (2)(3)(4) の探針（doc_issue_causes の python ブロックを exec して呼ぶ）
+error_code.findall('E602 と `E100` と E3xx と E1000') -> ['E602', 'E100']
+mentions('fn make_isa() -> Isa {', 'make_is') -> False
+pairs('`crates/hado/src/lib.rs` の `check_ast`、`crates/hado/src/check.rs` の `check_ast`') ->
+  [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/check.rs', 'check_ast')]
 ```
