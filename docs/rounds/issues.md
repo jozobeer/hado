@@ -281,3 +281,27 @@ crates/hado/tests/r34_bytes.rs:263:    struct { size_t length; unsigned char byt
 sed -n '1289p' docs/plan.md
 | L4 | 診断の位置 | `--format json` に終端の位置を足す | §58.4 |
 ```
+
+### 十一次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 を閉じた非空のフェンスか完備した表に強めた
+
+# 検査 9 の負の探針: 未閉じフェンス、コマンドだけのフェンス、ヘッダだけの表、孤立したパイプの 4 種が赤
+AssertionError: 現象 has no closed nonempty fence or complete table: zz-probe.md
+NG: each issue 現象 carries measured evidence in a fence or table
+
+# String の比較は hado_string_compare を通る（Int は derive_scalar_compare が直接 emit する）
+sed -n '254,257p' crates/hado/src/runtime_abi.rs
+            Self::StringCompare => &Declaration {
+                symbol: "hado_string_compare",
+                parameters: &[AbiType::Pointer, AbiType::Pointer],
+                result: Some(AbiType::I64),
+sed -n '3411,3413p' crates/hado/src/mono.rs
+    fn derive_scalar_compare(&mut self, ty: Type) -> (FunctionId, Signature) {
+        let signature = Signature {
+            parameters: vec![ty.clone(), ty.clone()],
+```
