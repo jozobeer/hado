@@ -655,6 +655,35 @@ fn effectful_top_level_value_is_lifted_in_argument_position() {
 }
 
 #[test]
+fn effectful_callback_reaches_the_handler_through_prelude_folds() {
+    let cases: [(&str, &str); 4] = [
+        ("handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  List.fold [2, 4] 0 fn(acc, x => acc + 8 / x)\n", "6\n"),
+        ("handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.filter [2, 0, 4] fn(x => 8 / x > 1)\n", "[]\n"),
+        ("handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.map [[2, 0], [4]] fn(xs => List.map xs fn(x => 8 / x))\n", "[]\n"),
+        ("handler Error as Catch\nabort raise _ => None\nreturn value => value\ndef main =\n  with Catch ->\n  Option.map (Some(0)) fn(x => 8 / x)\n", "None\n"),
+    ];
+    for (source, expected) in cases {
+        let case = Case::new();
+        case.write("main.hd", source);
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "{source}");
+        assert!(output.stderr.is_empty(), "{source}");
+    }
+
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => None\nreturn value => value\ndef main =\n  with Catch ->\n  Option.map (Some(4)) fn(x => 8 / x)\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"Some(2)\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
