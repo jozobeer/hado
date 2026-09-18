@@ -338,9 +338,10 @@ struct Lowerer {
     named_constructors: std::collections::HashMap<String, Vec<String>>,
     definitions: std::collections::BTreeMap<String, crate::parser::Def>,
     functions: Vec<Function>,
+    checking_once: std::cell::RefCell<std::collections::BTreeSet<String>>,
     // 継続を張り替える binder は、本体の lower が進んで yield の tag が
     // 登録された後に組む。相互再帰の途中で組むと腕が欠ける。
-    pending_binds: Vec<(FunctionId, Signature)>,
+    pending_binds: Vec<(FunctionId, Signature, std::collections::HashMap<String, Signature>)>,
     active: Vec<(String, FunctionId, Signature)>,
     schemes: std::collections::HashMap<String, crate::types::Scheme>,
     value_types: std::collections::HashMap<(usize, usize), Ty>,
@@ -418,6 +419,30 @@ impl Lowerer {
         }
     }
 
+    // handler の `once` の腕が効果を運ぶか。腕が同じ操作を呼んでも止まるように、
+    // 見ている操作名を控える。
+    fn once_arm_carries_effects(&self, op: &str) -> bool {
+        if self.checking_once.borrow().contains(op) {
+            return false;
+        }
+        let Some(handler) = self.handler_for(op) else { return false; };
+        let arms: Vec<crate::parser::Node> = handler
+            .arms
+            .iter()
+            .filter_map(|arm| match arm {
+                crate::parser::HandlerArm::Operation { name, body, .. } if name == op => Some(body.clone()),
+                _ => None,
+            })
+            .collect();
+        if arms.is_empty() {
+            return false;
+        }
+        self.checking_once.borrow_mut().insert(op.to_owned());
+        let carried = arms.iter().any(|body| self.contains_again(body) || self.contains_handled_call(body));
+        self.checking_once.borrow_mut().remove(op);
+        carried
+    }
+
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
         if matches!(&node.kind, crate::parser::NodeKind::Bin(crate::parser::BinOp::Div | crate::parser::BinOp::Mod, _, _))
             && self.handler_for("raise").is_some()
@@ -425,6 +450,13 @@ impl Lowerer {
             return true;
         }
         if let crate::parser::NodeKind::Name(name) = &node.kind {
+            // 処理中の once 操作でも、handler の腕が効果を運ぶなら outcome になる。
+            if !self.scope.contains_key(name)
+                && self.stack_needs_outcome()
+                && self.once_arm_carries_effects(name)
+            {
+                return true;
+            }
             if !self.scope.contains_key(name) && self.handler_for(name).is_none() && self.stack_needs_outcome() {
                 if self.default_operation_carries_effects(name) {
                     return true;
@@ -579,28 +611,46 @@ impl Lowerer {
                 .get(&(node.span.line, node.span.col))
                 .ok_or("missing list type")?
                 .clone();
+            // 要素が効果を持つ関数なら、mono の要素型は結果が outcome の閉包。
+            let element = match &ty {
+                Ty::Adt(_, arguments) if arguments.len() == 1 => self.outcome_closure_of(&arguments[0]),
+                _ => None,
+            };
+            let resolved = Type::try_from(&self.specialization.resolve(&ty))
+                .map_err(|_| "list type is not concrete")?;
+            let list_ty = match (&element, &resolved) {
+                (Some(element), Type::Data(name, _)) => Type::Data(name.clone(), vec![element.clone()]),
+                _ => resolved,
+            };
             let values = items
                 .iter()
                 .map(|item| self.expression(item))
                 .collect::<Result<Vec<_>, _>>()?;
             let mut list = match tail {
                 Some(tail) => self.expression(tail)?,
-                None => self.construct("Nil", vec![], &ty)?,
+                None => Expression::Construct {
+                    constructor: self.resolve_constructor("Nil"),
+                    fields: vec![],
+                    result: list_ty.clone(),
+                },
             };
+            if tail.is_some() && list.ty() != list_ty {
+                return Err("list element type mismatch".into());
+            }
             for value in values.into_iter().rev() {
                 // 効果多相の callee を通ると、checker が handler の答えの
                 // 制約を落とすことがある。型の食い違った `Cons` を組むと
                 // 実行時に壊れるので、ここで止める。
-                let element = Type::try_from(&self.specialization.resolve(&ty))
-                    .ok()
-                    .and_then(|concrete| match concrete {
-                        Type::Data(_, arguments) => arguments.into_iter().next(),
-                        _ => None,
-                    });
-                if element.is_some_and(|element| element != value.ty()) {
-                    return Err("list element type mismatch".into());
+                if let Type::Data(_, arguments) = &list_ty {
+                    if arguments.first().is_some_and(|element| element != &value.ty()) {
+                        return Err("list element type mismatch".into());
+                    }
                 }
-                list = self.construct("Cons", vec![value, list], &ty)?;
+                list = Expression::Construct {
+                    constructor: self.resolve_constructor("Cons"),
+                    fields: vec![value, list],
+                    result: list_ty.clone(),
+                };
             }
             return Ok(list);
         }
@@ -981,6 +1031,23 @@ fn handles_op(handler: &crate::parser::HandlerDecl, kind: crate::parser::OpKind)
     handler.arms.iter().any(|arm| {
         matches!(arm, crate::parser::HandlerArm::Operation { kind: found, .. } if *found == kind)
     })
+}
+
+fn substitute_fields(ty: &Type, declared: &[Type], actual: &[Type]) -> Type {
+    if let Some(index) = declared.iter().position(|declared| declared == ty) {
+        return actual[index].clone();
+    }
+    match ty {
+        Type::Data(name, arguments) => Type::Data(
+            name.clone(),
+            arguments.iter().map(|argument| substitute_fields(argument, declared, actual)).collect(),
+        ),
+        Type::Closure(arguments, result) => Type::Closure(
+            arguments.iter().map(|argument| substitute_fields(argument, declared, actual)).collect(),
+            Box::new(substitute_fields(result, declared, actual)),
+        ),
+        _ => ty.clone(),
+    }
 }
 
 fn project(value: &Expression, constructor: &str, index: usize, result: Type) -> Expression {
@@ -2140,6 +2207,10 @@ impl Lowerer {
     }
 
     fn constructor_fields(&self, name: &str, ty: &Type) -> Result<Vec<Type>, String> {
+        self.constructor_declared_fields(name, ty)
+    }
+
+    fn constructor_declared_fields(&self, name: &str, ty: &Type) -> Result<Vec<Type>, String> {
         let scheme = self.constructors.get(name).ok_or("unknown constructor")?;
         let mut inference = crate::types::Inference::default();
         let instantiated = inference.instantiate(scheme);
@@ -2160,6 +2231,16 @@ impl Lowerer {
             .collect()
     }
 
+    // 効果を持つ関数値は mono では結果が outcome の閉包になる。constructor の
+    // 結果型も、宣言側の field 型ではなく実際の field 型で組む。
+    fn constructed_type(&self, name: &str, declared: &Type, fields: &[Type]) -> Result<Type, String> {
+        let declared_fields = self.constructor_declared_fields(name, declared).unwrap_or_default();
+        if declared_fields.len() != fields.len() {
+            return Ok(declared.clone());
+        }
+        Ok(substitute_fields(declared, &declared_fields, fields))
+    }
+
     fn named_constructor(
         &mut self, node: &crate::parser::Node, name: &str,
         written: &[(crate::parser::DeclaredName, crate::parser::Node)],
@@ -2177,7 +2258,10 @@ impl Lowerer {
             bindings.push((id, value));
         }
         let fields = declared.iter().map(|name| variables.remove(name).ok_or_else(|| "missing named field".to_owned())).collect::<Result<Vec<_>, _>>()?;
-        let mut body = self.construct(&name, fields, &ty)?;
+        let declared_type = Type::try_from(&self.specialization.resolve(&ty))
+            .map_err(|_| "named constructor type is not concrete")?;
+        let result = self.constructed_type(&name, &declared_type, &fields.iter().map(Expression::ty).collect::<Vec<_>>())?;
+        let mut body = Expression::Construct { constructor: name.clone(), fields, result };
         for (id, value) in bindings.into_iter().rev() {
             body = Expression::Let { id, value: Box::new(value), body: Box::new(body) };
         }
@@ -2294,7 +2378,10 @@ impl Lowerer {
                     .composite_types
                     .get(&(node.span.line, node.span.col))
                     .ok_or("missing constructor result type")?;
-                return self.construct(name, arguments, ty);
+                let declared = Type::try_from(&self.specialization.resolve(ty))
+                    .map_err(|_| "constructor type is not concrete")?;
+                let result = self.constructed_type(&self.resolve_constructor(name), &declared, &arguments.iter().map(Expression::ty).collect::<Vec<_>>())?;
+                return Ok(Expression::Construct { constructor: self.resolve_constructor(name), fields: arguments, result });
             }
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
@@ -3303,20 +3390,27 @@ impl Lowerer {
     // Yield は continuation を張り替える必要があるので登録済みの操作だけを扱う。
     // Fail は成功型だけが変わるので、未登録の tag も含めて outcome をそのまま載せる。
     fn again_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
-        self.pending_binds.push((id, signature.clone()));
+        // 後面で組むときには、この bind を作った時点の操作の型を使う。同じ効果を
+        // 別の型で instantiate すると後勝ちで上書きされるため。
+        self.pending_binds.push((id, signature.clone(), self.operation_types.clone()));
         Ok(())
     }
 
     fn flush_pending_binds(&mut self) -> Result<(), String> {
         while !self.pending_binds.is_empty() {
-            for (id, signature) in std::mem::take(&mut self.pending_binds) {
-                self.build_again_bind(id, &signature)?;
+            for (id, signature, operation_types) in std::mem::take(&mut self.pending_binds) {
+                self.build_again_bind(id, &signature, &operation_types)?;
             }
         }
         Ok(())
     }
 
-    fn build_again_bind(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
+    fn build_again_bind(
+        &mut self,
+        id: FunctionId,
+        signature: &Signature,
+        operation_types: &std::collections::HashMap<String, Signature>,
+    ) -> Result<(), String> {
         let parameters = vec![self.next, self.next + 1];
         self.next += 2;
         let value = Expression::Variable { id: parameters[0], ty: signature.parameters[0].clone() };
@@ -3327,10 +3421,11 @@ impl Lowerer {
         )?)];
         for effect in self.yield_ids.keys().cloned().collect::<Vec<_>>() {
             let constructor = self.yield_constructor(&effect);
-            if !self.operation_types.contains_key(&constructor) {
+            let Some(operation) = operation_types.get(&constructor).or_else(|| self.operation_types.get(&constructor)) else {
                 continue;
-            }
-            let continuation = self.again_bind_yield(&constructor, id, signature, &value, &rest)?;
+            };
+            let input = operation.result.clone();
+            let continuation = self.again_bind_yield(&constructor, &input, id, signature, &value, &rest)?;
             arms.push((constructor.clone(), Expression::Construct {
                 fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?), continuation],
                 constructor,
@@ -3360,12 +3455,13 @@ impl Lowerer {
     fn again_bind_yield(
         &mut self,
         constructor: &str,
+        input: &Type,
         bind: FunctionId,
         signature: &Signature,
         value: &Expression,
         rest: &Expression,
     ) -> Result<Expression, String> {
-        let input = self.operation_types.get(constructor).ok_or("again type missing")?.result.clone();
+        let input = input.clone();
         let param = self.next;
         self.next += 1;
         let continuation = project(value, constructor, 1, Type::Closure(vec![input.clone()], Box::new(value.ty())));
@@ -3551,6 +3647,9 @@ impl Lowerer {
             }
             lowered
         } else if lowered == signature.result {
+            lowered
+        } else if logical_argument(&lowered) == signature.result {
+            // 効果を持つ閉包を返す lambda。宣言側の型は効果行を落としている。
             lowered
         } else {
             return Err("lambda return type mismatch".into());
