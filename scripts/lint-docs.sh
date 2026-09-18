@@ -454,6 +454,12 @@ def complete_fence(lines):
                             for m in here_re.finditer(text)]
 
                 for line in block:
+                    if commands and line.startswith('> '):
+                        # A PS2 line belongs to the command above; never measured output.
+                        # Heredocs may open on several PS2 lines (`$ cat \`, `> <<A \`,
+                        # `> <<B`), so collect them instead of replacing the list.
+                        heredocs.extend(opened_heredocs(line))
+                        continue
                     if heredocs:
                         delimiter, tabs = heredocs[0]
                         candidate = line.lstrip('\t') if tabs else line
@@ -462,11 +468,6 @@ def complete_fence(lines):
                         continue
                     if line.startswith('$ '):
                         commands += 1
-                        heredocs = opened_heredocs(line)
-                        continue
-                    if commands and line.startswith('> '):
-                        # A PS2 line belongs to the command above; never measured output.
-                        # A heredoc may also open here (`$ cat \` then `> <<EOF`).
                         heredocs = opened_heredocs(line)
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
@@ -531,6 +532,11 @@ assert complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '````']), \
 assert not complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '```']), \
     'a shorter fence does not close a longer one'
 
+assert not complete_fence(fence('$ cat \\', '> <<A \\', '> <<B', 'body-a', 'A', 'body-b', 'B')), \
+    'the bodies of several heredocs are not output'
+assert complete_fence( \
+    fence('$ cat \\', '> <<A \\', '> <<B', 'body-a', 'A', 'body-b', 'B', 'done')), \
+    'an output line after the heredoc bodies is evidence'
 assert not complete_fence(fence("$ cat > probe <<'EOF'", 'body', 'EOF')), \
     'single-quoted here-doc body only must not count as output'
 assert not complete_fence(fence('$ cat > probe <<"EOF"', 'body', 'EOF')), \
