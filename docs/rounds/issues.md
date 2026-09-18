@@ -826,3 +826,22 @@ AssertionError: a select loop with a heredoc must not count its body as output
 cargo test --offline -> cargo-test8-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十三次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 検査 9 の自己検査（表の整列記号）
+assert not complete_table(['| metric |', '| --- |', '| :---: |'])
+assert not complete_table(['| metric |', '| --- |', '| :--- |'])
+assert not complete_table(['| metric |', '| --- |', '| ---: |'])
+assert complete_table(['| metric |', '| --- |', '| 1.2 s |'])
+
+# 最終の木での全走
+cargo test --offline -> cargo-test9-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
