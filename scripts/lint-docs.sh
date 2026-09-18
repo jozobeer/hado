@@ -409,6 +409,7 @@ def complete_fence(lines):
                 commands = 0
                 outputs = 0
                 heredoc = None
+                heredoc_tabs = False
                 resume = None
                 shell = None
                 here_re = re.compile(
@@ -506,8 +507,10 @@ def complete_fence(lines):
 
                 for line in block:
                     if heredoc is not None:
-                        if line.strip() == heredoc:
+                        candidate = line.lstrip('\t') if heredoc_tabs else line
+                        if candidate == heredoc:
                             heredoc = None
+                            heredoc_tabs = False
                             shell = resume
                             resume = None
                         continue
@@ -522,6 +525,7 @@ def complete_fence(lines):
                         here = here_re.search(line)
                         if here:
                             heredoc = next(g for g in here.groups() if g)
+                            heredoc_tabs = here.group(0).startswith('<<-')
                             resume = opened if continuing else None
                         elif continuing:
                             shell = opened
@@ -642,6 +646,12 @@ assert not complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l')), \
     'a continued heredoc command and its PS2 line must not count as output'
 assert complete_fence(fence('$ cat <<EOF |', 'a', 'EOF', '> wc -l', '1')), \
     'a continued heredoc plus output must count'
+assert not complete_fence(fence('$ cat <<EOF', 'a', '  EOF', 'b')), \
+    'an indented line is body text for << and must not end the heredoc'
+assert complete_fence(fence('$ cat <<-EOF', 'a', '\tEOF', 'b')), \
+    'leading tabs end a <<- heredoc'
+assert not complete_fence(fence('$ cat <<-EOF', 'a', '  EOF', 'b')), \
+    'spaces do not end a <<- heredoc'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
