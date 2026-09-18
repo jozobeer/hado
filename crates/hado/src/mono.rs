@@ -541,7 +541,8 @@ impl Lowerer {
                 return self.expression(value);
             }
             let source = self.expression(value)?;
-            if is_outcome(&source.ty()) && self.contains_again(value) {
+            let captures = self.contains_again(value) || self.contains_handled_call(value);
+            if is_outcome(&source.ty()) && captures {
                 let name = format!("$do{}", self.next);
                 self.next += 1;
                 let pat = crate::parser::Pattern {
@@ -3750,6 +3751,16 @@ impl Lowerer {
         }
         let definition = self.definitions.get(name).ok_or_else(|| format!("unknown function {name}"))?.clone();
         let scheme = self.schemes.get(name).ok_or_else(|| format!("missing inferred signature for {name}"))?.clone();
+        // 効果を持つ関数値を高階関数へ渡すと、閉包の結果型が `$Outcome` のまま
+        // callee の成功型へ入り、型の合わない実体ができる。直接呼ぶ形に限る。
+        let mut parameter_inference = crate::types::Inference::default();
+        if let Ty::Fn(expected_parameters, _, _) = parameter_inference.instantiate(&scheme) {
+            for (ty, expected) in types.iter().zip(expected_parameters.iter()) {
+                if matches!(ty, Type::Closure(_, result) if is_outcome(result)) && matches!(expected, Ty::Fn(..)) {
+                    return Err(format!("effectful function value cannot be passed to {name}"));
+                }
+            }
+        }
         let key = self.specialized_name(name);
         let (params, body, scheme) = match definition.kind {
             crate::parser::DefKind::Function { params, body, .. } => (params, body, scheme),
