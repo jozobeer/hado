@@ -624,3 +624,38 @@ $ cat <<EOF | / a / EOF / > wc -l / 1 のフェンスは緑
 file:///work + file:///work/app + 契約 file:///work/application/c.hdi
 根は file:///work（文字列の接頭辞では file:///work/app を選び候補 0）
 ```
+
+### 二十五次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 最終の木での全走（lint-docs を触ったラウンドなので 1 回だけ回す）
+cargo test --offline > target/pr5/gates/cargo-test2.log 2>&1; echo cargo-test2-exit=$?
+cargo-test2-exit=0
+grep -c FAILED target/pr5/gates/cargo-test2.log
+0
+
+# 層別は quick -> core -> full の順に回す
+bash scripts/run-gates.sh --tier core --jobs 2 target/pr5/gates/core
+TALLY: 561/561 passed; red: none
+bash scripts/run-gates.sh --tier full --jobs 4 target/pr5/gates/full2
+TALLY: 3742/3742 passed; red: none
+
+# 最初の full 走行は赤だった（wants.md から R51 の記録が消えていた）
+bash scripts/run-gates.sh --tier full --jobs 4 target/pr5/gates/full
+TALLY: 3741/3742 passed; red: verify-r51.log
+NG: 51-d tier, wiring, wants    # AssertionError: wants.md does not record R51
+# 記録を残して再走行
+bash scripts/verify-r51.sh
+PASSED: 5/5
+
+# 付録C の反復する各段の左結合（golden の探針を足した）
+a - b - c  -> `-` の下に `-`
+a / b / c  -> `/` の下に `/`
+a && b && c  -> `&&` の下に `&&`
+a || b || c  -> `||` の下に `||`
+```
