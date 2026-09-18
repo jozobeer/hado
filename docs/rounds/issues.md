@@ -579,3 +579,30 @@ sed -n '1797p;1799p' docs/spec.md
 `main` を持たず、他のプログラムから使われることを意図したプログラムをライブラリと呼ぶ。`hado check` に `main` の無い `.hd` を渡すとライブラリとして検査し（第10節、第50節）、`hado build` は受け付けない（E206）。ライブラリの未使用の判定は公開面を根にする（第39節）。
 ライブラリであることは `library` 宣言で示す。ディレクトリの 1 つのファイルの外（最初の見出しより前）に `library` を書くと、そのディレクトリがライブラリ根になる。ライブラリ根は独立した根で、パス（第51節）はそこから解く。これにより、ライブラリは利用側の根の下のどの位置に置かれても、内部の参照と外の `def` の規則が変わらない。
 ```
+
+### 二十三次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は `<<'END-INPUT'` のような区切り語も数える
+
+# 検査 9 の自己検査: hyphen 付き heredoc の本文と終端が出力に数えられない（実行時に確認）
+$ cat <<'END-INPUT' / a / END-INPUT だけのフェンス
+AssertionError: heredoc with a hyphenated delimiter and its terminator must not count as output
+
+# 検査 8 と 9 を入れたコミットは scripts/lint-docs.sh だけを触る
+git show --name-only --format='%h %s' 11a4ece | head -3
+11a4ece test: issue の原因アンカーを実ファイルと行数で照合する
+
+scripts/lint-docs.sh
+git show --name-only --format='%h %s' 0525f91 | head -3
+0525f91 test: issue の現象の実測を lint-docs で検査する
+
+scripts/lint-docs.sh
+
+# main..issues で scripts/lint-docs.sh と docs/issues/・docs/plan.md の両方を触るコミットは無い
+for c in $(git rev-list main..origin/issues); do ... done
+mixed=0
+```
