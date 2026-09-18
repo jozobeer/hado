@@ -970,3 +970,24 @@ bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: 
 # 前回の full は 3742/3742。lint-docs の検査が 9 から 10 に増えた分だけ総数が +1 する
 # （full の集計は lint-docs の検査も 1 本ずつ数える。他の 75 本のゲートは不変）
 ```
+
+### 三十九次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# 中間値の丸めの実測（反対の偶奇）
+python3 -c "print(float(9007199254740993), float(9007199254740995))"
+9007199254740992.0 9007199254740996.0
+
+# 半分ちょうどの不足側の境界の桁数
+python3 -c "print(len(str(5**1075)))"
+752    # `0.` の後に 0 が 323 個 + 752 桁 = 2^-1075 の正確な十進展開（1075 桁）
+
+# 最終の木での全走
+cargo test --offline -> cargo-test15-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
+```
