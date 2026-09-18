@@ -324,7 +324,20 @@ import re
 import tempfile
 from pathlib import Path
 
-anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)(?:-([0-9]+))?')
+anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?')
+
+def causes(text):
+    """file:line anchors, excluding numeric-only runs such as `12:30`."""
+    return [m for m in anchor.findall(text) if not re.fullmatch(r'[0-9.]+', m[0])]
+
+assert causes('.gitignore:1') == [('.gitignore', '1', '')], \
+    'a dotfile anchor must keep its leading dot'
+assert causes('Dockerfile:5') == [('Dockerfile', '5', '')], \
+    'an extensionless anchor must be found'
+assert causes('.cargo/config.toml:1-3') == [('.cargo/config.toml', '1', '3')], \
+    'a dot directory must stay in the path'
+assert causes('12:30') == [], 'a numeric-only pair is not an anchor'
+assert causes('crates/hado/src/mono.rs:3845') == [('crates/hado/src/mono.rs', '3845', '')]
 root = Path.cwd().resolve()
 
 def classify(root, target):
@@ -370,7 +383,7 @@ for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     assert match, f'{path.name}: no 原因 section'
-    found = anchor.findall(match.group(1))
+    found = causes(match.group(1))
     assert found, f'{path.name}: 原因 has no file:line anchor'
     for target, line, end in found:
         status = classify(root, target)
@@ -408,8 +421,7 @@ def complete_fence(lines):
             if j < len(lines):
                 commands = 0
                 outputs = 0
-                heredoc = None
-                heredoc_tabs = False
+                heredocs = []
                 resume = None
                 shell = None
                 here_re = re.compile(
@@ -501,11 +513,13 @@ def complete_fence(lines):
                         previous = None
                         for token in words:
                             if token == '{':
-                                # `f() {` and `function f {` open a group outside command position.
+                                # `f() {`, `function f {`, `a && {` and `${name:-` open a group.
                                 if self.header:
                                     self.header = False
                                     self.expect.append('}')
-                                elif previous == ')' or previous is None or words[0] == 'function':
+                                elif (previous == ')' or previous is None or previous == '$'
+                                        or words[0] == 'function'
+                                        or previous in self.COMMAND_AFTER):
                                     self.expect.append('}')
                             elif position and token in self.OPEN:
                                 self.expect.append(self.OPEN[token])
@@ -523,21 +537,26 @@ def complete_fence(lines):
                         return (self.single or self.double or self.backtick or self.depth > 0
                                 or self.tail or self.header or bool(self.expect) or trailing)
 
+                def opened_heredocs(text):
+                    return [(next(g for g in m.groups() if g),
+                             m.group(0).startswith('<<-'))
+                            for m in here_re.finditer(text)]
+
                 for line in block:
-                    if heredoc is not None:
-                        candidate = line.lstrip('\t') if heredoc_tabs else line
-                        if candidate == heredoc:
-                            heredoc = None
-                            heredoc_tabs = False
-                            shell = resume
-                            resume = None
+                    if heredocs:
+                        delimiter, tabs = heredocs[0]
+                        candidate = line.lstrip('\t') if tabs else line
+                        if candidate == delimiter:
+                            heredocs.pop(0)
+                            if not heredocs:
+                                shell = resume
+                                resume = None
                         continue
                     if shell is not None:
                         continuing = shell.feed(line)
-                        here = here_re.search(line)
-                        if here:
-                            heredoc = next(g for g in here.groups() if g)
-                            heredoc_tabs = here.group(0).startswith('<<-')
+                        found_heres = opened_heredocs(line)
+                        if found_heres:
+                            heredocs = found_heres
                             resume = shell if continuing else None
                             shell = None
                         elif not continuing:
@@ -547,13 +566,15 @@ def complete_fence(lines):
                         commands += 1
                         opened = Shell()
                         continuing = opened.feed(line)
-                        here = here_re.search(line)
-                        if here:
-                            heredoc = next(g for g in here.groups() if g)
-                            heredoc_tabs = here.group(0).startswith('<<-')
+                        found_heres = opened_heredocs(line)
+                        if found_heres:
+                            heredocs = found_heres
                             resume = opened if continuing else None
                         elif continuing:
                             shell = opened
+                        continue
+                    if commands and line.startswith('> '):
+                        # A PS2 line belongs to the command above; never measured output.
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
@@ -689,6 +710,20 @@ assert not complete_fence(fence('$ echo `', '> date', '> `')), \
     'a backtick substitution across PS2 lines must not count as output'
 assert complete_fence(fence('$ echo `', '> date', '> `', 'x')), \
     'a backtick substitution plus output must count'
+assert not complete_fence(fence('$ true && {', '> echo x', '> }')), \
+    'a brace group after && must stay open'
+assert complete_fence(fence('$ true && {', '> echo x', '> }', 'x')), \
+    'a brace group after && plus output must count'
+assert not complete_fence(fence('$ : ${UNSET:-', '> fallback}')), \
+    'a parameter expansion across PS2 lines must not count as output'
+assert complete_fence(fence('$ : ${UNSET:-', '> fallback}', 'x')), \
+    'a parameter expansion plus output must count'
+assert not complete_fence(fence('$ cat <<A <<B', 'a', 'A', 'b', 'B')), \
+    'a second heredoc body must not count as output'
+assert complete_fence(fence('$ cat <<A <<B', 'a', 'A', 'b', 'B', 'x')), \
+    'two heredocs plus output must count'
+assert not complete_fence(fence('$ echo hi', '> out')), \
+    'a PS2 line after a command is not measured output'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
