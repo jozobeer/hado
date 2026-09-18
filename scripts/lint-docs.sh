@@ -327,7 +327,7 @@ line_anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:
 path_token = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`')
 location = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`[ \t]*の[ \t]*`([^`]+)`')
 section = re.compile(r'(§[0-9]+(?:\.[0-9]+)?|付録[A-Z])')
-error_code = re.compile(r'`(E[0-9]{3})`')
+error_code = re.compile(r'(?<![A-Za-z0-9_])E[0-9]{3}(?![0-9])')
 
 bare_line = re.compile(r'(?<![0-9A-Za-z_.:]):([0-9]+)(?![0-9:])')
 
@@ -341,19 +341,28 @@ def paths(text):
     return path_token.findall(text)
 
 def pairs(text):
-    """`パス` の `識別子`。同じパスの識別子は続けて書ける。"""
+    """`パス` の `識別子`。同じパスの識別子は `・` か `、` か空白で続けて書ける。"""
     found = []
     for match in location.finditer(text):
         target = match.group(1)
         found.append((target, match.group(2)))
         rest = text[match.end():]
         while True:
-            following = re.match(r'[ \t]*`([^`]+)`', rest)
-            if not following:
+            following = re.match(r'[ \t]*[・、]?[ \t]*`([^`]+)`', rest)
+            if not following or is_path(following.group(1)):
                 break
             found.append((target, following.group(1)))
             rest = rest[following.end():]
     return found
+
+def is_path(token):
+    """バッククォートの中身がパスか（`/` を含むものだけをパスと読む）。"""
+    return re.fullmatch(r'(?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+', token) is not None
+
+def mentions(source, ident):
+    """識別子は語の全体で照合する（`make_is` は `make_isa` に一致しない）。"""
+    pattern = r'(?<![A-Za-z0-9_])' + re.escape(ident) + r'(?![A-Za-z0-9_])'
+    return re.search(pattern, source) is not None
 
 assert lines('crates/hado/src/mono.rs:4407') == [('crates/hado/src/mono.rs', '4407', '')], \
     'a file:line spelling is detected so that it can be rejected'
@@ -379,8 +388,26 @@ assert pairs('`crates/hado/src/lib.rs` の `check_ast` `diagnostic_order`。次'
 assert pairs('`crates/hado/src/lib.rs` の `check_ast` が') == \
     [('crates/hado/src/lib.rs', 'check_ast')], 'prose after the identifier ends the pair'
 assert section.findall('§26.1 と §55 と 付録C') == ['§26.1', '§55', '付録C']
-assert error_code.findall('`E602` と E3xx と `E100`') == ['E602', 'E100'], \
-    'a range such as E3xx is not an error code'
+assert error_code.findall('E602 と `E100` と E3xx と E1000') == ['E602', 'E100'], \
+    'an error code is read with or without backticks, and E3xx and E1000 are not codes'
+assert mentions('fn make_isa() -> Isa {', 'make_isa'), 'a whole word matches'
+assert not mentions('fn make_isa() -> Isa {', 'make_is'), \
+    'a prefix of an identifier does not match (make_is is not make_isa)'
+assert not mentions('fn make_isa_slow()', 'make_isa'), \
+    'an identifier that extends the name does not match'
+assert mentions('def rec to_list values =>', 'to_list'), 'a Hado def matches'
+assert not mentions('def rec to_listx values =>', 'to_list'), 'a longer Hado name does not'
+assert pairs('`crates/hado/src/lib.rs` の `check_ast`・`diagnostic_order`。') == \
+    [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/lib.rs', 'diagnostic_order')], \
+    'identifiers separated by a middle dot belong to the same file'
+assert pairs('`crates/hado/src/lib.rs` の `check_ast`、`diagnostic_order`') == \
+    [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/lib.rs', 'diagnostic_order')], \
+    'identifiers separated by a comma belong to the same file'
+assert pairs('`crates/hado/src/lib.rs` の `check_ast`、`crates/hado/src/check.rs` の `check_ast`') == \
+    [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/check.rs', 'check_ast')], \
+    'a second path starts its own location instead of continuing the first'
+assert is_path('crates/hado/src/lib.rs'), 'a path is a path'
+assert not is_path('check_ast'), 'an identifier is not a path'
 root = Path.cwd().resolve()
 
 def classify(root, target):
@@ -452,11 +479,14 @@ for path in sorted(Path('docs/issues').glob('*.md')):
         assert classify(root, target) == 'ok', \
             f'{path.name}: 原因 location file does not exist: {target} の {ident}'
         source = (root / target).read_text(errors='replace')
-        assert ident in source, f'{path.name}: 原因 identifier is not in {target}: {ident}'
+        assert mentions(source, ident), f'{path.name}: 原因 identifier is not in {target}: {ident}'
     for ref in section.findall(body):
         assert known_section(ref), f'{path.name}: 原因 section does not exist in the spec: {ref}'
     for code in error_code.findall(body):
         assert code in spec_codes, f'{path.name}: 原因 error code is not in the spec table: {code}'
+    located = pairs(body) or section.findall(body) or error_code.findall(body)
+    assert located, \
+        f'{path.name}: 原因 points at nothing（`パス` の `識別子`、§N、Exxx のどれかを書く）'
 PY
 }
 
