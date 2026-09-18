@@ -606,3 +606,21 @@ scripts/lint-docs.sh
 for c in $(git rev-list main..origin/issues); do ... done
 mixed=0
 ```
+
+### 二十四次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は継続する heredoc の PS2 行も数える
+
+# 検査 9 の自己検査: 継続する heredoc の後の PS2 行が出力に数えられない（実行時に確認）
+$ cat <<EOF | / a / EOF / > wc -l だけのフェンス
+AssertionError: a continued heredoc command and its PS2 line must not count as output
+$ cat <<EOF | / a / EOF / > wc -l / 1 のフェンスは緑
+
+# 複数の workspace folder の名前が接頭辞になる対照（path 要素で比べる）
+file:///work + file:///work/app + 契約 file:///work/application/c.hdi
+根は file:///work（文字列の接頭辞では file:///work/app を選び候補 0）
+```
