@@ -2466,11 +2466,18 @@ impl Lowerer {
     }
 
     fn specialized_name(&self, name: &str) -> String {
-        if self.handler_stack.is_empty() {
+        // 腕を実行中の handler は、その腕から見て外にあるので stack に数えない。
+        let handlers = self
+            .handler_stack
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| Some(*index) != self.arm_handler)
+            .map(|(_, handler)| handler.name.as_str())
+            .collect::<Vec<_>>();
+        if handlers.is_empty() {
             return name.into();
         }
-        let handlers = self.handler_stack.iter().map(|handler| handler.name.as_str()).collect::<Vec<_>>().join("/");
-        format!("{name}#{handlers}")
+        format!("{name}#{}", handlers.join("/"))
     }
 
     fn scheme_carries_effects(scheme: &crate::types::Scheme) -> bool {
