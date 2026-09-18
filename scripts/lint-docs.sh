@@ -321,10 +321,49 @@ PY
 doc_issue_causes() {
     python3 - <<'PY'
 import re
+import tempfile
 from pathlib import Path
 
-anchor = re.compile(r'([A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)')
+anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)')
 root = Path.cwd().resolve()
+
+def classify(root, target):
+    fp = (root / target).resolve()
+    if not fp.is_relative_to(root):
+        return 'escapes'
+    if not fp.is_file():
+        return 'missing'
+    return 'ok'
+
+assert classify(root, 'AGENTS.md') == 'ok'
+assert classify(root, 'crates/../AGENTS.md') == 'ok'
+assert classify(root, 'crates/../../AGENTS.md') == 'escapes', \
+    'path that leaves the repository must not pass'
+assert classify(root, '../local-notes.rs') == 'escapes', \
+    'parent-relative path must not pass'
+assert classify(root, 'missing.rs') == 'missing'
+assert anchor.findall('../local-notes.rs:1 and crates/hado/src/emit.rs:23') == [
+    ('../local-notes.rs', '1'),
+    ('crates/hado/src/emit.rs', '23'),
+], 'leading ../ must be captured as an anchor'
+assert anchor.findall('crates/../../AGENTS.md:1') == [('crates/../../AGENTS.md', '1')]
+
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td).resolve()
+    repo = td / 'repo'
+    repo.mkdir()
+    outside = td / 'local-notes.rs'
+    outside.write_text('x\n')
+    (repo / 'inside.rs').write_text('x\n')
+    (repo / 'link.rs').symlink_to(outside)
+    assert classify(repo, 'inside.rs') == 'ok'
+    assert classify(repo, '../local-notes.rs') == 'escapes', \
+        'parent-relative existing file must not pass'
+    assert classify(repo, 'link.rs') == 'escapes', \
+        'symlink target outside the repository must not pass'
+    assert classify(repo, 'crates/../../local-notes.rs') == 'escapes', \
+        'resolved path outside the repository must not pass even if that file exists'
+
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
@@ -332,10 +371,12 @@ for path in sorted(Path('docs/issues').glob('*.md')):
     found = anchor.findall(match.group(1))
     assert found, f'{path.name}: 原因 has no file:line anchor'
     for target, line in found:
-        fp = (root / target).resolve()
-        assert fp.is_relative_to(root), \
+        status = classify(root, target)
+        assert status != 'escapes', \
             f'{path.name}: 原因 anchor escapes the repository: {target}:{line}'
-        assert fp.is_file(), f'{path.name}: 原因 anchor file does not exist: {target}:{line}'
+        assert status != 'missing', \
+            f'{path.name}: 原因 anchor file does not exist: {target}:{line}'
+        fp = (root / target).resolve()
         count = len(fp.read_text().splitlines())
         assert 1 <= int(line) <= count, \
             f'{path.name}: 原因 anchor line is out of range: {target}:{line} (file has {count} lines)'
