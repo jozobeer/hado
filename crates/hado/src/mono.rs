@@ -3313,7 +3313,11 @@ impl Lowerer {
     }
 
     fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
-        for handler in &self.handler_stack {
+        for (index, handler) in self.handler_stack.iter().enumerate() {
+            // 腕の本体から呼ぶ callee を、その腕の handler では捕まえない。
+            if Some(index) == self.arm_handler {
+                continue;
+            }
             if Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect) {
                 if let Some(answer) = &self.context_answer {
                     return Ok(Some(answer.clone()));
