@@ -479,6 +479,16 @@ assert not complete_fence(fence("$ printf '%s\\n' \\", '> foo \\', '> bar')), \
     'continued-only multiline command must not count as output'
 assert complete_fence(fence("$ printf '%s\\n' \\", '> input.txt', 'input.txt')), \
     'continued command plus transcript output must count'
+assert not complete_table(['| metric |', '| : |', '| TBD |']), \
+    'colon-only separator is not a table'
+assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
+    'one-hyphen aligned separator is not a table'
+assert not complete_table(['| metric |', '| -- |', '| TBD |']), \
+    'two-hyphen separator is not a table'
+assert complete_table(['| metric |', '| --- |', '| 1.2 |']), \
+    'three-hyphen separator is a table'
+assert complete_table(['| left | mid | right |', '| :--- | :---: | ---: |', '| a | b | c |']), \
+    'aligned three-hyphen separators are a table'
 
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
