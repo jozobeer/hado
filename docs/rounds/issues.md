@@ -708,3 +708,23 @@ bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: 
 # quote_text のバイト数の再計算（"あ\n" の引用付き）
 1（開き引用符）+ 3（あ の UTF-8）+ 2（\ と n）+ 1（閉じ引用符）= 7 バイト、5 スカラ
 ```
+
+### 二十八次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は PS2 行で開く heredoc も数える
+
+# 検査 9 の自己検査: 継続行で開く heredoc の本文を出力に数えない
+AssertionError: a heredoc opened on a PS2 line must not count its body as output
+
+# 最終の木での全走（検査 9 の実装を変えたので 1 回だけ回す）
+cargo test --offline > target/pr5/gates/cargo-test4.log 2>&1; echo cargo-test4-exit=$?
+cargo-test4-exit=0
+grep -c FAILED target/pr5/gates/cargo-test4.log
+0
+bash scripts/run-gates.sh --tier full --jobs 4 target/pr5/gates/full4
+TALLY: 3742/3742 passed; red: none
+```
