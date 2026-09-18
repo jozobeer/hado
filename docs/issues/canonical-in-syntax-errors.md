@@ -26,7 +26,7 @@ main.hd:4:12: error[E101]: branches cannot be nested inside another branch
 
 ## 原因
 
-E100 は parser の期待トークンをそのまま出す。E101 は禁止だけを述べ、§26.1 が定める正準形（腕の条件列）を示さない。`docs/wants.md` 1 は冗長の診断（E5xx）に正準形を足す項目で、E100 と E101 は対象に入っていない。E100 と E101 は `crates/hado/src/project.rs:313-339` の解析段階で `LoadError::Diagnostic` になり、`crates/hado/src/main.rs:119-125` が `report_json` を通さず既定の 1 行を出す。`hado check --format json` でも JSON は出ず、`canonical` の有無を機械可読に確かめられない（2026-09-17、`tests/reject/E101/main.hd` で実測。E505 は JSON 1 行になる対照）。
+E100 は parser の期待トークンをそのまま出す。E101 は禁止だけを述べ、§26.1 が定める正準形（腕の条件列）を示さない。`docs/wants.md` 1 は冗長の診断（E5xx）に正準形を足す項目で、E100 と E101 は対象に入っていない。E100 と E101 は `crates/hado/src/project.rs` の `parse_file` の解析段階で `LoadError::Diagnostic` になり、`crates/hado/src/main.rs` の `main` が `report_json` を通さず既定の 1 行を出す。`hado check --format json` でも JSON は出ず、`canonical` の有無を機械可読に確かめられない（2026-09-17、`tests/reject/E101/main.hd` で実測。E505 は JSON 1 行になる対照）。
 
 ## 案
 

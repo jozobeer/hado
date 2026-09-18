@@ -18,7 +18,7 @@ Char のリテラル比較（`c == 'a'`）と `Float.to_string`、`Int.parse` �
 
 ## 原因
 
-§55 の関数集合に `Char` module が無く、`Float` は `to_string` だけである。`docs/spec.md:1904` の効果を持たない member の一覧に `Char` は無く、`stdlib/float.hd:2-4` も `to_string` だけである。
+§55 の関数集合に `Char` module が無く、`Float` は `to_string` だけである。`docs/spec.md` の §55 の効果を持たない member の一覧に `Char` は無く、`stdlib/float.hd` も `to_string` だけである。
 
 ## 案
 
