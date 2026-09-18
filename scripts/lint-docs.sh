@@ -433,6 +433,7 @@ def complete_fence(lines):
                         self.depth = 0
                         self.expect = []
                         self.tail = False
+                        self.header = False
 
                     def feed(self, text):
                         if text.startswith('$ ') or text.startswith('> '):
@@ -491,7 +492,10 @@ def complete_fence(lines):
                         for token in words:
                             if token == '{':
                                 # `f() {` and `function f {` open a group outside command position.
-                                if previous == ')' or previous is None or words[0] == 'function':
+                                if self.header:
+                                    self.header = False
+                                    self.expect.append('}')
+                                elif previous == ')' or previous is None or words[0] == 'function':
                                     self.expect.append('}')
                             elif position and token in self.OPEN:
                                 self.expect.append(self.OPEN[token])
@@ -499,11 +503,15 @@ def complete_fence(lines):
                                 self.expect.pop()
                             position = token in self.COMMAND_AFTER
                             previous = token
+                        if (len(words) >= 3 and words[-2] == '(' and words[-1] == ')'
+                                and words[0] not in self.COMMAND_AFTER):
+                            # `f()` alone: the body brace arrives on the next PS2 line.
+                            self.header = True
                         trailing = bool(cont_re.search(text.rstrip()))
                         if words and words[-1] in ('|', '&', '('):
                             trailing = True
                         return (self.single or self.double or self.depth > 0 or self.tail
-                                or bool(self.expect) or trailing)
+                                or self.header or bool(self.expect) or trailing)
 
                 for line in block:
                     if heredoc is not None:
@@ -663,6 +671,10 @@ assert not complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF')), \
     'a heredoc opened on a PS2 line must not count its body as output'
 assert complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF', 'body')), \
     'a heredoc opened on a PS2 line plus output must count'
+assert not complete_fence(fence('$ f()', '> {', '> echo x', '> }')), \
+    'a function header with the body brace on the next line must stay open'
+assert complete_fence(fence('$ f()', '> {', '> echo x', '> }', 'x')), \
+    'a function header closed on a later line plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
