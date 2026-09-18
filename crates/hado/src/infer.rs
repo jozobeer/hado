@@ -1341,10 +1341,12 @@ impl Checker<'_> {
         message: &str,
         first: Option<Span>,
     ) -> Diagnostic {
-        let related = first.map(|first| crate::parser::Related {
-            path: self.path.into(),
-            line: first.line,
-            col: first.col,
+        let related = first.map(|first| {
+            Box::new(crate::parser::Related {
+                path: self.path.into(),
+                line: first.line,
+                col: first.col,
+            })
         });
         Diagnostic {
             related,
@@ -2388,7 +2390,7 @@ impl Checker<'_> {
         if !args.is_empty() {
             return Err(self.error(span, None, "type annotation is not implemented"));
         }
-        crate::types::builtin_type(&name).ok_or_else(|| {
+        crate::types::builtin_type(name).ok_or_else(|| {
             self.error(
                 annotation.name_span,
                 Some("E204"),

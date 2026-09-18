@@ -708,11 +708,11 @@ fn register(
 ) -> Result<(), crate::parser::Diagnostic> {
     if let Some(&first) = names.get(name) {
         return Err(crate::parser::Diagnostic {
-            related: Some(crate::parser::Related {
+            related: Some(Box::new(crate::parser::Related {
                 path: path.into(),
                 line: first.line,
                 col: first.col,
-            }),
+            })),
             path: path.into(),
             line: span.line,
             col: span.col,

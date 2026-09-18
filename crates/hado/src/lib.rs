@@ -447,7 +447,7 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
         code: None,
         message: "main must be a value definition for lowering".into(),
     })?;
-    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic {
+    let program = mono::lower_program(ast, &checked).map_err(|message| parser::Diagnostic {
         related: None,
         path: path.into(),
         line: main.span.line,

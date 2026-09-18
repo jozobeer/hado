@@ -291,6 +291,7 @@ fn boolean_branch_fix(
 /// still bound there and the arm is the fallback with a name. A `check --fix` run
 /// applies only one range, so the rewrite is one edit: the pattern through the end
 /// of the arm becomes the body with the binding replaced by the scrutinee.
+#[allow(clippy::too_many_arguments)]
 fn catch_all_variable_fix(
     node: &Node,
     arms: &[(Vec<Pattern>, Node)],
@@ -447,6 +448,7 @@ fn discard_let_fix(
 
 /// §42: when both results of a condition branch are the same, the condition is
 /// redundant and the branch collapses to that one result. One range.
+#[allow(clippy::too_many_arguments)]
 fn identical_bool_fix(
     node: &Node,
     then: &Node,
@@ -581,6 +583,7 @@ fn identity_let_fix(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn literal_pattern_fix(
     node: &Node,
     arms: &[(Node, Node)],
@@ -778,7 +781,7 @@ fn condition_arm_fix(
     })
 }
 
-fn def_at<'a>(items: &'a [Item], span: Span) -> Option<&'a parser::Def> {
+fn def_at(items: &[Item], span: Span) -> Option<&parser::Def> {
     for item in items {
         match item {
             Item::Def(def) if def.span == span => return Some(def),
@@ -1057,9 +1060,7 @@ fn rewrap_arm_fix(
     index: &TokenIndex,
     branches: &[(Span, Span, Span)],
 ) -> Option<Fix> {
-    if crate::check::rewrap_branch(node).is_none() {
-        return None;
-    }
+    crate::check::rewrap_branch(node)?;
     let NodeKind::PatternBranch { fallback, .. } = &node.kind else {
         return None;
     };

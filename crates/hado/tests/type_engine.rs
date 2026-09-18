@@ -42,7 +42,7 @@ fn generalize_preserves_environment_variables_and_freshens_others() {
     let captured = inference.fresh();
     let parameter = inference.fresh();
     let function = Ty::fn_of(vec![parameter.clone()], captured.clone());
-    let scheme = inference.generalize(&function, &[captured.clone()]);
+    let scheme = inference.generalize(&function, std::slice::from_ref(&captured));
     let first = inference.instantiate(&scheme);
     let second = inference.instantiate(&scheme);
     inference

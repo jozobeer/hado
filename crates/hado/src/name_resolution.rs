@@ -118,10 +118,12 @@ impl Resolver<'_> {
     }
 
     fn reported(&mut self, span: Span, code: &str, name: &str, first: Option<Span>) {
-        let related = first.map(|first| crate::parser::Related {
-            path: self.path.into(),
-            line: first.line,
-            col: first.col,
+        let related = first.map(|first| {
+            Box::new(crate::parser::Related {
+                path: self.path.into(),
+                line: first.line,
+                col: first.col,
+            })
         });
         self.diagnostics.push(Diagnostic {
             related,

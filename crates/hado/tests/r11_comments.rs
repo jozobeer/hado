@@ -8,7 +8,7 @@ fn generated_comment_markers_preserve_tokens_or_report_first_character() {
         let padding = " ".repeat((state >> 32) as usize % 17);
         let value = (state % 1000) as i64;
         for (prefix, suffix) in [
-            (format!("{padding}"), format!("\ndef main = {value}")),
+            (padding.to_string(), format!("\ndef main = {value}")),
             (format!("def main = {padding}"), format!("\n{value}")),
             (format!("def main = {value} {padding}"), "\n".into()),
         ] {
@@ -41,7 +41,7 @@ fn slash_division_and_comment_have_distinct_runtime_results() {
         ("comment", "def main = 1 // 2", "1\n"),
         ("quoted", "def main = \"-- # //\"", "-- # //\n"),
     ] {
-        let case_dir = dir.join(format!("{name}"));
+        let case_dir = dir.join(name);
         std::fs::create_dir_all(&case_dir).unwrap();
         let path = case_dir.join("main.hd");
         std::fs::write(&path, source).unwrap();

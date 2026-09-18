@@ -316,13 +316,13 @@ impl Resolver<'_> {
 
     /// §56: `first` is the first declaration of the name the report is about.
     fn error_at(&mut self, span: Span, code: &str, message: &str, first: Option<Span>) {
-        let related = first
-            .filter(|first| first.line != 0)
-            .map(|first| crate::parser::Related {
+        let related = first.filter(|first| first.line != 0).map(|first| {
+            Box::new(crate::parser::Related {
                 path: self.path.into(),
                 line: first.line,
                 col: first.col,
-            });
+            })
+        });
         self.result.diagnostics.push(Diagnostic {
             related,
             path: self.path.into(),

@@ -791,9 +791,9 @@ pub(crate) fn rewrap_branch(node: &Node) -> Option<&Node> {
     let [scrutinee] = scrutinees.as_slice() else {
         return None;
     };
-    let fallback_unchanged = fallback.as_ref().map_or(true, |body| {
-        crate::normalize::same_expression(scrutinee, body)
-    });
+    let fallback_unchanged = fallback
+        .as_ref()
+        .is_none_or(|body| crate::normalize::same_expression(scrutinee, body));
     if !arms.is_empty()
         && arms.iter().all(|(patterns, _)| matches!(patterns.as_slice(), [pattern]
             if !matches!(&pattern.kind, PatternKind::Underscore)

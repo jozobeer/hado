@@ -117,7 +117,7 @@ fn generated_type(state: &mut u64, depth: usize) -> Type {
 
 #[test]
 fn generated_types_roundtrip_in_canonical_form() {
-    let mut state = 0x18_71_9;
+    let mut state = 0x18719;
     for _ in 0..32 {
         let ty = Type::Function(
             vec![generated_type(&mut state, 2), Type::Atom("Y.T")],

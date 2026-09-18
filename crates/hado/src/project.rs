@@ -335,11 +335,13 @@ pub fn test_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
         .collect())
 }
 
+/// The root, the paths of the project in reading order, and the namespace
+/// directories `read_files` needs.
+type CollectedPaths = (PathBuf, Vec<PathBuf>, BTreeSet<Vec<String>>);
+
 /// The paths of the project in reading order, with the root and the namespace
 /// directories `read_files` needs.
-fn collect_paths(
-    entry: &Path,
-) -> Result<(PathBuf, Vec<PathBuf>, BTreeSet<Vec<String>>), LoadError> {
+fn collect_paths(entry: &Path) -> Result<CollectedPaths, LoadError> {
     let root = root_directory(entry).to_path_buf();
     let mut paths = Vec::new();
     let mut directories = BTreeSet::from([Vec::new()]);
@@ -489,13 +491,13 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                 continue;
             }
             if declared || roots.contains(&file.source.directory) {
-                let related = firsts
-                    .get(&file.source.directory)
-                    .map(|(path, first)| Related {
+                let related = firsts.get(&file.source.directory).map(|(path, first)| {
+                    Box::new(Related {
                         path: path.clone(),
                         line: first.line,
                         col: first.col,
-                    });
+                    })
+                });
                 let error = Diagnostic {
                     related,
                     path: file.source.path.clone(),
@@ -504,7 +506,7 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     code: Some("E205".into()),
                     message: "duplicate library declaration".into(),
                 };
-                if duplicate.as_ref().map_or(true, |current| {
+                if duplicate.as_ref().is_none_or(|current| {
                     crate::diagnostic_order(&error) < crate::diagnostic_order(current)
                 }) {
                     duplicate = Some(error);

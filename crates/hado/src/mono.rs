@@ -1352,6 +1352,9 @@ pub struct Program {
     pub functions: Vec<Function>,
 }
 
+/// A switch's arms (label, body) and its fallback body.
+type SwitchArms = (Vec<(String, Expression)>, Option<Box<Expression>>);
+
 impl Lowerer {
     fn call(
         &mut self,
@@ -3803,7 +3806,7 @@ impl Lowerer {
         &self,
         mut arms: Vec<(String, Expression)>,
         mut fallback: Option<Box<Expression>>,
-    ) -> Result<(Vec<(String, Expression)>, Option<Box<Expression>>), String> {
+    ) -> Result<SwitchArms, String> {
         let outcome = arms
             .iter()
             .map(|(_, body)| body.ty())
@@ -3819,7 +3822,7 @@ impl Lowerer {
         }
         if let Some(body) = fallback.as_mut() {
             if !is_outcome(&body.ty()) {
-                *body = Box::new(self.done(body.as_ref().clone(), &outcome)?);
+                **body = self.done(body.as_ref().clone(), &outcome)?;
             }
         }
         Ok((arms, fallback))

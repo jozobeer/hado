@@ -34,7 +34,7 @@ impl Generator {
         match ty {
             Ty::Int => value.to_string(),
             Ty::Float => format!("{value}.25"),
-            Ty::Bool => (value % 2 == 0).to_string(),
+            Ty::Bool => value.is_multiple_of(2).to_string(),
             Ty::Char => format!("'{}'", (b'a' + (value % 26) as u8) as char),
             Ty::String => format!("\"value{value}\""),
             Ty::Void => "()".into(),

@@ -454,7 +454,7 @@ impl Checker<'_> {
         if self.type_arities.get(name) == Some(&args.len()) {
             return Some(Ty::Adt(name.to_owned(), args));
         }
-        crate::types::builtin_type(&name)
+        crate::types::builtin_type(name)
     }
 
     fn functor(

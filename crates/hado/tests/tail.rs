@@ -74,7 +74,7 @@ fn define_f2(module: &mut ObjectModule, f2: FuncIdAlias, g9: FuncIdAlias) {
     for _ in 0..7 {
         args.push(zero);
     }
-    let callee = module.declare_func_in_func(g9.inner(), &mut bcx.func);
+    let callee = module.declare_func_in_func(g9.inner(), bcx.func);
     bcx.ins().return_call(callee, &args);
     bcx.seal_all_blocks();
     bcx.finalize(module.target_config());
@@ -108,7 +108,7 @@ fn define_g9(module: &mut ObjectModule, f2: FuncIdAlias, g9: FuncIdAlias) {
     let one = bcx.ins().iconst(types::I64, 1);
     let depth1 = bcx.ins().isub(depth, one);
     let count1 = bcx.ins().iadd(count, one);
-    let callee = module.declare_func_in_func(f2.inner(), &mut bcx.func);
+    let callee = module.declare_func_in_func(f2.inner(), bcx.func);
     bcx.ins().return_call(callee, &[depth1, count1]);
     bcx.seal_all_blocks();
     bcx.finalize(module.target_config());
@@ -171,8 +171,8 @@ fn tail() {
         let mut bcx = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
         let block = bcx.create_block();
         bcx.switch_to_block(block);
-        let f2_ref = module.declare_func_in_func(f2_id.inner(), &mut bcx.func);
-        let print_ref = module.declare_func_in_func(print_id, &mut bcx.func);
+        let f2_ref = module.declare_func_in_func(f2_id.inner(), bcx.func);
+        let print_ref = module.declare_func_in_func(print_id, bcx.func);
         let depth = bcx.ins().iconst(types::I64, DEPTH);
         let zero = bcx.ins().iconst(types::I64, 0);
         let call = bcx.ins().call(f2_ref, &[depth, zero]);

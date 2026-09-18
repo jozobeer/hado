@@ -283,7 +283,7 @@ fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
 
 #[test]
 fn abort_handler_catches_integer_division_by_zero() {
-    let mut state = 0x26_32;
+    let mut state = 0x2632;
     for _ in 0..8 {
         let caught = random(&mut state, 1000);
         let left = random(&mut state, 50) + 1;

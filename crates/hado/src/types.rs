@@ -525,8 +525,8 @@ impl Inference {
         self.unify_matching_labels(required, actual)?;
         let rest: Vec<_> = actual
             .iter()
+            .filter(|&ty| !required_names.contains(&effect_ctor(&self.resolve(ty))))
             .cloned()
-            .filter(|ty| !required_names.contains(&effect_ctor(&self.resolve(ty))))
             .collect();
         self.bind_row(
             tail,

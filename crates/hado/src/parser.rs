@@ -547,7 +547,7 @@ pub struct Diagnostic {
     pub col: usize,
     pub code: Option<String>,
     pub message: String,
-    pub related: Option<Related>,
+    pub related: Option<Box<Related>>,
 }
 
 impl fmt::Display for Diagnostic {

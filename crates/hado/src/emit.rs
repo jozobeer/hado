@@ -98,8 +98,8 @@ pub fn compile_to_object(prog: &Program, obj_path: &Path) -> Result<(), String> 
         let mut bcx = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
         let block = bcx.create_block();
         bcx.switch_to_block(block);
-        let main_ref = module.declare_func_in_func(main_id, &mut bcx.func);
-        let print_ref = module.declare_func_in_func(print_id, &mut bcx.func);
+        let main_ref = module.declare_func_in_func(main_id, bcx.func);
+        let print_ref = module.declare_func_in_func(print_id, bcx.func);
         let call = bcx.ins().call(main_ref, &[]);
         let result = bcx.inst_results(call)[0];
         bcx.ins().call(print_ref, &[result]);
