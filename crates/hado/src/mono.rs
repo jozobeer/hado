@@ -66,17 +66,31 @@ fn is_outcome(ty: &Type) -> bool {
 }
 
 // 効果を持つ関数値は mono では結果型に `$Outcome` を載せる。callee を
-// 単一化するときは source 側の結果型（成功型）に戻す。
+// 単一化するときは source 側の結果型（成功型）に戻す。ADT の型引数や入れ子の
+// 閉包の結果に載っている場合も、内側を戻す。
 fn logical_argument(ty: &Type) -> Type {
-    let Type::Closure(parameters, result) = ty else {
-        return ty.clone();
-    };
-    if let Type::Data(name, args) = &**result {
-        if name == OUTCOME && !args.is_empty() {
-            return Type::Closure(parameters.clone(), Box::new(args[0].clone()));
-        }
+    match ty {
+        Type::Closure(parameters, result) => {
+            let result = logical_argument(result);
+            Type::Closure(parameters.clone(), Box::new(strip_outcome(result)))
+        },
+        Type::Data(name, arguments) => {
+            Type::Data(name.clone(), arguments.iter().map(logical_argument).collect())
+        },
+        Type::Abstract(name, arguments) => {
+            Type::Abstract(name.clone(), arguments.iter().map(logical_argument).collect())
+        },
+        _ => ty.clone(),
     }
-    ty.clone()
+}
+
+fn strip_outcome(ty: Type) -> Type {
+    match ty {
+        Type::Data(name, arguments) if name == OUTCOME && !arguments.is_empty() => {
+            arguments.into_iter().next().unwrap()
+        },
+        ty => ty,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,7 +372,8 @@ struct Lowerer {
     rewriting_return: bool,
     /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
     /// 腕は自分の handler の外で走るので、handler は自分の腕を捕まえない。
-    arm_handler: Option<usize>,
+    /// 腕の中でさらに別の handler の腕を lower するので、入れ子の分だけ積む。
+    arm_handlers: Vec<usize>,
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
     operation_types: std::collections::HashMap<String, Signature>,
@@ -2297,22 +2312,64 @@ impl Lowerer {
     // 今の stack の handler が扱う効果を運ぶ関数型か。
     fn row_carries_handled_effect(&self, row: &crate::types::Row) -> bool {
         self.handler_stack.iter().enumerate().any(|(index, handler)| {
-            Some(index) != self.arm_handler
+            !self.arm_handlers.contains(&index)
                 && Self::handler_has_propagation_ops(handler)
                 && row.without_effect(&handler.effect) != *row
         })
     }
 
     // checker の型が効果を運ぶ関数なら、mono では結果が outcome の閉包になる。
+    // ADT の型引数や、効果を運ばない関数の引数・結果に入れ子で載る場合も、
+    // その内側だけを直す。
     fn outcome_closure_of(&self, ty: &Ty) -> Option<Type> {
-        let Ty::Fn(arguments, result, row) = ty else { return None; };
-        if !self.row_carries_handled_effect(row) {
-            return None;
-        }
         let answer = self.context_answer.clone().or_else(|| self.again_answers.last().cloned())?;
-        let arguments: Vec<Type> = arguments.iter().map(|argument| Type::try_from(argument).ok()).collect::<Option<_>>()?;
-        let result = Type::try_from(&**result).ok()?;
-        Some(Type::Closure(arguments, Box::new(self.outcome_of(&result, &answer).ok()?)))
+        let (converted, changed) = self.nested_outcome_closure(ty, &answer).ok()?;
+        changed.then_some(converted)
+    }
+
+    // 効果を運ぶ関数を outcome の閉包へ直し、直した箇所があったかを返す。
+    fn nested_outcome_closure(&self, ty: &Ty, answer: &Type) -> Result<(Type, bool), UnresolvedType> {
+        match ty {
+            Ty::Fn(arguments, result, row) => {
+                let mut converted_arguments = Vec::with_capacity(arguments.len());
+                let mut changed = false;
+                for argument in arguments {
+                    let (argument, nested) = self.nested_outcome_closure(argument, answer)?;
+                    changed |= nested;
+                    converted_arguments.push(argument);
+                }
+                let (converted_result, nested) = self.nested_outcome_closure(result, answer)?;
+                changed |= nested;
+                if self.row_carries_handled_effect(row) {
+                    let outcome = self
+                        .outcome_of(&converted_result, answer)
+                        .map_err(|_| UnresolvedType::Invalid)?;
+                    return Ok((Type::Closure(converted_arguments, Box::new(outcome)), true));
+                }
+                Ok((Type::Closure(converted_arguments, Box::new(converted_result)), changed))
+            },
+            Ty::Adt(name, arguments) => {
+                let mut changed = false;
+                let mut converted = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    let (argument, nested) = self.nested_outcome_closure(argument, answer)?;
+                    changed |= nested;
+                    converted.push(argument);
+                }
+                Ok((Type::Data(name.clone(), converted), changed))
+            },
+            Ty::Abstract(name, arguments) => {
+                let mut changed = false;
+                let mut converted = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    let (argument, nested) = self.nested_outcome_closure(argument, answer)?;
+                    changed |= nested;
+                    converted.push(argument);
+                }
+                Ok((Type::Abstract(name.clone(), converted), changed))
+            },
+            _ => Ok((Type::try_from(ty)?, false)),
+        }
     }
 
     fn record_get(&self, record: Expression, field: &str) -> Result<Expression, String> {
@@ -2592,12 +2649,11 @@ impl Lowerer {
             _ => None,
         }).ok_or_else(|| format!("missing handler arm for {name}"))?;
         self.with_params(&params, arguments, |this| {
-            let arm = this.handler_index(&handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
+            let entered = this.enter_arm(&handler);
             let result = this.expression(&body);
             this.rewriting_return = saved;
-            this.arm_handler = saved_arm;
+            this.leave_arm(entered);
             result
         })
     }
@@ -2697,7 +2753,7 @@ impl Lowerer {
             .enumerate()
             .rev()
             .find(|(index, handler)| {
-                Some(*index) != self.arm_handler
+                !self.arm_handlers.contains(index)
                     && handler.arms.iter().any(|arm| {
                         matches!(arm, crate::parser::HandlerArm::Operation { name, .. } if name == operation)
                     })
@@ -2709,6 +2765,24 @@ impl Lowerer {
         self.handler_stack
             .iter()
             .rposition(|candidate| candidate.name == handler.name && candidate.effect == handler.effect)
+    }
+
+    // 腕の本体を lower している間、その腕の handler を除外する。腕の中でさらに
+    // 別の handler の腕を lower しても外側の腕の除外が消えないよう、積む。
+    fn enter_arm(&mut self, handler: &crate::parser::HandlerDecl) -> bool {
+        match self.handler_index(handler) {
+            Some(index) => {
+                self.arm_handlers.push(index);
+                true
+            },
+            None => false,
+        }
+    }
+
+    fn leave_arm(&mut self, entered: bool) {
+        if entered {
+            self.arm_handlers.pop();
+        }
     }
 
     fn handler_for_node(&self, node: &crate::parser::Node) -> Option<&crate::parser::HandlerDecl> {
@@ -2726,7 +2800,7 @@ impl Lowerer {
             .handler_stack
             .iter()
             .enumerate()
-            .filter(|(index, _)| Some(*index) != self.arm_handler)
+            .filter(|(index, _)| !self.arm_handlers.contains(index))
             .map(|(_, handler)| handler.name.as_str())
             .collect::<Vec<_>>();
         if handlers.is_empty() {
@@ -2996,7 +3070,7 @@ impl Lowerer {
         let (success, answer, payload) = outcome_parts(&incoming)?;
         // 腕の本体を単相化している間、その handler の枠は外にあるものとして数えない。
         let forwarding = (0..self.handler_stack.len().saturating_sub(1))
-            .any(|index| Some(index) != self.arm_handler);
+            .any(|index| !self.arm_handlers.contains(&index));
         let handler_answer = self.handler_answers.last().cloned().flatten();
         let outgoing = if forwarding {
             Type::Data(
@@ -3224,12 +3298,11 @@ impl Lowerer {
             _ => return Err("abort arm arity mismatch".into()),
         };
         self.with_params(&params, arguments, |this| {
-            let arm = this.handler_index(handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
+            let entered = this.enter_arm(handler);
             let result = this.expression(&body);
             this.rewriting_return = saved;
-            this.arm_handler = saved_arm;
+            this.leave_arm(entered);
             result
         })
     }
@@ -3256,12 +3329,11 @@ impl Lowerer {
         let resume_ty = resume.ty();
         let saved_resume = self.resume_binding.replace((id, resume_ty));
         let result = self.with_params(&params, vec![value], |this| {
-            let arm = this.handler_index(handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
+            let entered = this.enter_arm(handler);
             let result = this.expression(&body);
             this.rewriting_return = saved;
-            this.arm_handler = saved_arm;
+            this.leave_arm(entered);
             result
         });
         self.resume_binding = saved_resume;
@@ -3319,12 +3391,11 @@ impl Lowerer {
         else {
             return Ok(value);
         };
-        let arm = self.handler_index(handler);
         let saved = std::mem::replace(&mut self.rewriting_return, true);
-        let saved_arm = std::mem::replace(&mut self.arm_handler, arm);
+        let entered = self.enter_arm(handler);
         let result = self.with_params(&[param], vec![value], |this| this.expression(&ret));
         self.rewriting_return = saved;
-        self.arm_handler = saved_arm;
+        self.leave_arm(entered);
         result
     }
 
@@ -3580,7 +3651,7 @@ impl Lowerer {
     // 場合は、この選択が yield を捕まえる handler と一致しないことがある。
     fn callback_answer(&self) -> Result<Option<Type>, String> {
         for (index, handler) in self.handler_stack.iter().enumerate() {
-            if Some(index) == self.arm_handler || !Self::handler_has_propagation_ops(handler) {
+            if self.arm_handlers.contains(&index) || !Self::handler_has_propagation_ops(handler) {
                 continue;
             }
             if let Some(answer) = &self.context_answer {
@@ -3594,7 +3665,7 @@ impl Lowerer {
     fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
         for (index, handler) in self.handler_stack.iter().enumerate() {
             // 腕の本体から呼ぶ callee を、その腕の handler では捕まえない。
-            if Some(index) == self.arm_handler {
+            if self.arm_handlers.contains(&index) {
                 continue;
             }
             if Self::handler_has_propagation_ops(handler) && Self::scheme_carries_effect(scheme, &handler.effect) {
