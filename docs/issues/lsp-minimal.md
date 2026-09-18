@@ -18,7 +18,7 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 
 ## 原因
 
-各段階は診断を `Vec` に集めてから `min_by_key(diagnostic_order)` で 1 件を選ぶ（`crates/hado/src/lib.rs:213-233`、`crates/hado/src/check.rs:27`）。E3xx は最初の致命的な型エラーで `Err` を返し（`crates/hado/src/infer.rs:258`）、E1xx は parser に回復が無い。型付け結果 `Checked` は E4xx・E5xx・E6xx で止まっているときも手元にあり、`crates/hado/src/lib.rs:231` が診断があれば捨てる。
+各段階は診断を `Vec` に集めてから `min_by_key(diagnostic_order)` で 1 件を選ぶ（`crates/hado/src/lib.rs:213-233`、`crates/hado/src/check.rs:27`）。E3xx は最初の致命的な型エラーで `Err` を返し（`crates/hado/src/infer.rs:258`）、E1xx は parser に回復が無い。型付け結果 `Checked` は E4xx・E5xx・E6xx で止まっているときも手元にあり、`crates/hado/src/lib.rs:227-229` が診断があれば捨てる。
 
 対象エディタは Neovim（0.12.5、`vim.lsp.config` / `vim.lsp.enable`）。offline の cargo cache に `lsp-server` `lsp-types` `tower-lsp` は無く、`serde_json` はある。
 
@@ -52,4 +52,4 @@ LSP にすると見える設計上の穴が 3 つある（2026-09-17）。
 
 ## 由来
 
-`docs/wants.md` 2、14、15（1 件報告は `docs/plan.md` 35 の L1）。§56、§58.3、§58.4。highlight-treesitter の後。
+`docs/wants.md` 2、7、14、15（1 件報告は `docs/plan.md` 35 の L1）。§56、§58.3、§58.4。highlight-treesitter の後。
