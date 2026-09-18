@@ -65,6 +65,20 @@ fn is_outcome(ty: &Type) -> bool {
     matches!(ty, Type::Data(name, _) if name == OUTCOME)
 }
 
+// 効果を持つ関数値は mono では結果型に `$Outcome` を載せる。callee を
+// 単一化するときは source 側の結果型（成功型）に戻す。
+fn logical_argument(ty: &Type) -> Type {
+    let Type::Closure(parameters, result) = ty else {
+        return ty.clone();
+    };
+    if let Type::Data(name, args) = &**result {
+        if name == OUTCOME && !args.is_empty() {
+            return Type::Closure(parameters.clone(), Box::new(args[0].clone()));
+        }
+    }
+    ty.clone()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
@@ -324,6 +338,9 @@ struct Lowerer {
     named_constructors: std::collections::HashMap<String, Vec<String>>,
     definitions: std::collections::BTreeMap<String, crate::parser::Def>,
     functions: Vec<Function>,
+    // 継続を張り替える binder は、本体の lower が進んで yield の tag が
+    // 登録された後に組む。相互再帰の途中で組むと腕が欠ける。
+    pending_binds: Vec<(FunctionId, Signature)>,
     active: Vec<(String, FunctionId, Signature)>,
     schemes: std::collections::HashMap<String, crate::types::Scheme>,
     value_types: std::collections::HashMap<(usize, usize), Ty>,
@@ -373,6 +390,31 @@ impl Lowerer {
             .is_some_and(Self::scheme_carries_effects)
     }
 
+    // callee が閉包を返す式（分岐や record field など）でも、結果が outcome の
+    // 閉包を見つけたら同じく継続に載せる。
+    fn callee_is_outcome_closure(&self, callee: &crate::parser::Node) -> bool {
+        use crate::parser::NodeKind;
+        match &callee.kind {
+            NodeKind::Name(name) => self
+                .scope
+                .get(name)
+                .is_some_and(|(_, ty)| matches!(ty, Type::Closure(_, result) if is_outcome(result))),
+            NodeKind::BoolBranch { then, els, .. } => {
+                self.callee_is_outcome_closure(then) || self.callee_is_outcome_closure(els)
+            },
+            NodeKind::CondBranch { arms, fallback } => {
+                arms.iter().any(|(_, body)| self.callee_is_outcome_closure(body))
+                    || fallback.as_ref().is_some_and(|fallback| self.callee_is_outcome_closure(fallback))
+            },
+            NodeKind::PatternBranch { arms, fallback, .. } => {
+                arms.iter().any(|(_, body)| self.callee_is_outcome_closure(body))
+                    || fallback.as_ref().is_some_and(|fallback| self.callee_is_outcome_closure(fallback))
+            },
+            NodeKind::Field(value, _) => self.callee_is_outcome_closure(value),
+            _ => false,
+        }
+    }
+
     fn contains_handled_call(&self, node: &crate::parser::Node) -> bool {
         if matches!(&node.kind, crate::parser::NodeKind::Bin(crate::parser::BinOp::Div | crate::parser::BinOp::Mod, _, _))
             && self.handler_for("raise").is_some()
@@ -380,18 +422,28 @@ impl Lowerer {
             return true;
         }
         if let crate::parser::NodeKind::Name(name) = &node.kind {
-            if !self.scope.contains_key(name)
-                && self.handler_for(name).is_none()
-                && self.stack_needs_outcome()
-                && self.default_operation_carries_effects(name)
-            {
-                return true;
+            if !self.scope.contains_key(name) && self.handler_for(name).is_none() && self.stack_needs_outcome() {
+                if self.default_operation_carries_effects(name) {
+                    return true;
+                }
+                // 効果を運ぶトップレベルの値（`def current = cwd`）も引数の位置で
+                // outcome になる。
+                if self
+                    .schemes
+                    .get(&self.resolve_definition(name))
+                    .is_some_and(Self::scheme_carries_effects)
+                {
+                    return true;
+                }
             }
         }
         if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
             return true;
         }
         if let crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) = &node.kind {
+            if self.stack_needs_outcome() && self.callee_is_outcome_closure(callee) {
+                return true;
+            }
             let name = match &callee.kind {
                 crate::parser::NodeKind::Name(name) if !self.scope.contains_key(name) => Some(name.clone()),
                 crate::parser::NodeKind::Field(module, member) => match &module.kind {
@@ -404,14 +456,7 @@ impl Lowerer {
                 self.schemes.get(&self.resolve_definition(&name)).is_some_and(Self::scheme_carries_effects)
                     || self.default_operation_carries_effects(&name)
             }) { return true; }
-            // 局所の閉包でも、結果が outcome なら呼び出し側で継続に載せる。
-            if self.stack_needs_outcome() {
-                if let crate::parser::NodeKind::Name(name) = &callee.kind {
-                    if self.scope.get(name).is_some_and(|(_, ty)| matches!(ty, Type::Closure(_, result) if is_outcome(result))) {
-                        return true;
-                    }
-                }
-            }
+
         }
         crate::check::children(node).iter().any(|child| self.contains_handled_call(child))
     }
@@ -869,6 +914,7 @@ pub fn lower_program(
     lowerer.collect_modules(&instances, "");
     lowerer.schemes.extend(checked.module_definitions.clone());
     let body = lowerer.expression(ast.main().ok_or("main must be a value definition")?)?;
+    lowerer.flush_pending_binds()?;
     Ok(Program {
         entry: body.in_tail_position(),
         functions: lowerer.functions,
@@ -3191,6 +3237,20 @@ impl Lowerer {
     // Yield は continuation を張り替える必要があるので登録済みの操作だけを扱う。
     // Fail は成功型だけが変わるので、未登録の tag も含めて outcome をそのまま載せる。
     fn again_bind_function(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
+        self.pending_binds.push((id, signature.clone()));
+        Ok(())
+    }
+
+    fn flush_pending_binds(&mut self) -> Result<(), String> {
+        while !self.pending_binds.is_empty() {
+            for (id, signature) in std::mem::take(&mut self.pending_binds) {
+                self.build_again_bind(id, &signature)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn build_again_bind(&mut self, id: FunctionId, signature: &Signature) -> Result<(), String> {
         let parameters = vec![self.next, self.next + 1];
         self.next += 2;
         let value = Expression::Variable { id: parameters[0], ty: signature.parameters[0].clone() };
@@ -3321,6 +3381,22 @@ impl Lowerer {
             crate::types::Ty::Fn(_, _, row) => row.without_effect(effect) != *row,
             _ => false,
         }
+    }
+
+    // 高階の引数に効果付きの閉包を渡す場合の答え。効果の名前は scheme の行に
+    // 現れない（未確定）ので、腕を実行中の handler を除いた最も内側の
+    // propagation handler を使う。
+    fn callback_answer(&self) -> Result<Option<Type>, String> {
+        for (index, handler) in self.handler_stack.iter().enumerate() {
+            if Some(index) == self.arm_handler || !Self::handler_has_propagation_ops(handler) {
+                continue;
+            }
+            if let Some(answer) = &self.context_answer {
+                return Ok(Some(answer.clone()));
+            }
+            return self.answer_for_handler(handler).map(Some);
+        }
+        Ok(None)
     }
 
     fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
@@ -3780,16 +3856,6 @@ impl Lowerer {
         }
         let definition = self.definitions.get(name).ok_or_else(|| format!("unknown function {name}"))?.clone();
         let scheme = self.schemes.get(name).ok_or_else(|| format!("missing inferred signature for {name}"))?.clone();
-        // 効果を持つ関数値を高階関数へ渡すと、閉包の結果型が `$Outcome` のまま
-        // callee の成功型へ入り、型の合わない実体ができる。直接呼ぶ形に限る。
-        let mut parameter_inference = crate::types::Inference::default();
-        if let Ty::Fn(expected_parameters, _, _) = parameter_inference.instantiate(&scheme) {
-            for (ty, expected) in types.iter().zip(expected_parameters.iter()) {
-                if matches!(ty, Type::Closure(_, result) if is_outcome(result)) && matches!(expected, Ty::Fn(..)) {
-                    return Err(format!("effectful function value cannot be passed to {name}"));
-                }
-            }
-        }
         let key = self.specialized_name(name);
         let (params, body, scheme) = match definition.kind {
             crate::parser::DefKind::Function { params, body, .. } => (params, body, scheme),
@@ -3804,16 +3870,31 @@ impl Lowerer {
         if params.len() != types.len() {
             return Err("function arity mismatch".into());
         }
-        let outcome_answer = self.specialization_answer(&scheme)?;
+        // 効果を持つ関数値を引数に取る callee は、その効果を自分の効果行に載せる。
+        // scheme の行が未確定（省略された効果行）でも、渡された閉包が outcome を
+        // 返すなら handler の答えを使う。
+        let callback_answer = if types.iter().any(|ty| matches!(ty, Type::Closure(_, result) if is_outcome(result))) {
+            self.callback_answer()?
+        } else {
+            None
+        };
+        let outcome_answer = self.specialization_answer(&scheme)?.or(callback_answer);
         let outcome = outcome_answer.is_some();
-        let inferred = Signature::specialize_result(&scheme, &types, expected_result.filter(|_| !outcome))?;
+        // 効果を持つ関数値を引数に取る callee は、その値の outcome を本体で
+        // ほどいて伝播させる。scheme の単一化には source 側の結果型（outcome を
+        // 外した形）を使い、引数の型は実際の閉包型のまま残す。
+        let logical: Vec<Type> = types.iter().map(logical_argument).collect();
+        let inferred = Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
         let signature = if let Some(answer) = &outcome_answer {
             Signature {
-                parameters: inferred.parameters.clone(),
+                parameters: types.clone(),
                 result: self.outcome_of(&inferred.result, answer)?,
             }
         } else {
-            inferred.clone()
+            Signature {
+                parameters: types.clone(),
+                result: inferred.result.clone(),
+            }
         };
         if let Some(function) = self.functions.iter().find(|function| {
             function.name == key
@@ -3829,7 +3910,7 @@ impl Lowerer {
             return Ok((*id, active.clone()));
         }
         let mut specialization = crate::types::Inference::default();
-        let concrete_parameters: Vec<Ty> = types
+        let concrete_parameters: Vec<Ty> = logical
             .iter()
             .map(|ty| ty_with_fresh_rows(ty, &mut specialization))
             .collect();
