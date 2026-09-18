@@ -409,22 +409,54 @@ def complete_fence(lines):
                 commands = 0
                 outputs = 0
                 heredoc = None
-                continuation = False
+                shell = None
                 here_re = re.compile(
                     r"""<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))"""
                 )
                 cont_re = re.compile(r'(\||&&|\\)\s*$')
 
-                def continues(text):
-                    return bool(cont_re.search(text.rstrip()))
+                class Shell:
+                    """State of one command line, so a PS2 line that closes a quote is not output."""
+
+                    def __init__(self):
+                        self.single = False
+                        self.double = False
+                        self.depth = 0
+
+                    def feed(self, text):
+                        i = 0
+                        while i < len(text):
+                            char = text[i]
+                            if self.single:
+                                if char == "'":
+                                    self.single = False
+                            elif self.double:
+                                if char == '\\':
+                                    i += 1
+                                elif char == '"':
+                                    self.double = False
+                            elif char == '\\':
+                                i += 1
+                            elif char == "'":
+                                self.single = True
+                            elif char == '"':
+                                self.double = True
+                            elif char == '(':
+                                self.depth += 1
+                            elif char == ')':
+                                self.depth = max(0, self.depth - 1)
+                            i += 1
+                        return (self.single or self.double or self.depth > 0
+                                or bool(cont_re.search(text.rstrip())))
 
                 for line in block:
                     if heredoc is not None:
                         if line.strip() == heredoc:
                             heredoc = None
                         continue
-                    if continuation:
-                        continuation = continues(line)
+                    if shell is not None:
+                        if not shell.feed(line):
+                            shell = None
                         continue
                     if line.startswith('$ '):
                         commands += 1
@@ -432,7 +464,9 @@ def complete_fence(lines):
                         if here:
                             heredoc = next(g for g in here.groups() if g)
                         else:
-                            continuation = continues(line)
+                            shell = Shell()
+                            if not shell.feed(line):
+                                shell = None
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
@@ -508,6 +542,18 @@ assert not complete_fence(fence('$ printf x &&', '> tee result.txt')), \
     'and-and continuation and PS2 line must not count as output'
 assert complete_fence(fence('$ printf x |', '> tee result.txt', 'x')), \
     'continued pipeline plus output must count'
+assert not complete_fence(fence('$ printf \'%s\\n\' "', '> input"')), \
+    'unmatched double quote and PS2 line must not count as output'
+assert not complete_fence(fence("$ printf '%s\\n' '", "> input'")), \
+    'unmatched single quote and PS2 line must not count as output'
+assert not complete_fence(fence('$ (cd sub', '> )')), \
+    'unbalanced parenthesis and PS2 line must not count as output'
+assert complete_fence(fence('$ printf \'%s\\n\' "', '> input"', 'input')), \
+    'quoted continuation plus output must count'
+assert complete_fence(fence("$ awk '/^## 現象/{p=1}' file.md", 'a')) , \
+    'balanced quotes in a single command must count as complete'
+assert complete_fence(fence('$ echo "(x)"', 'x')) , \
+    'balanced quotes and parentheses must count as complete'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
