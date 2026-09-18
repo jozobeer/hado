@@ -429,3 +429,33 @@ exit=1
 sed -n '1684p' docs/spec.md
 同じ契約を複数の実装が満たせる。
 ```
+
+### 十八次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 8 は範囲 anchor の終端を、検査 9 は | と && の継続行を数える
+
+# 検査 8 の負の探針: 範囲の終端が範囲外、逆順の範囲が赤
+AssertionError: zz-probe.md: 原因 anchor range end is out of range: crates/hado/src/emit.rs:1-999999 (file has 773 lines)
+AssertionError: zz-probe.md: 原因 anchor range is reversed: crates/hado/src/emit.rs:5-2
+
+# 検査 9 の自己検査に | と && の継続行の探針を足した（赤になることを実行時に確認）
+
+# コンパイラ側の印字も HadoString を組む（length だけを設定する）
+sed -n '13,17p;39,45p' crates/hado/runtime_print.c
+static HadoString *quote_text(const HadoString *value, unsigned char quote) {
+  if (value->length > (SIZE_MAX - sizeof(HadoString) - 2) / 2) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + 2 * value->length + 2);
+  if (result == NULL) abort();
+  size_t length = 0;
+HadoString *hado_canonical_float(double value) {
+  unsigned char bytes[400];
+  size_t length = hado_format_float(value, bytes, sizeof(bytes));
+  if (length == 0 || length > sizeof(bytes)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + length);
+  if (result == NULL) abort();
+  result->length = length;
+```
