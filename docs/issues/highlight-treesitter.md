@@ -45,7 +45,7 @@ filetype と parser は取れるが、`FileType` で `vim.treesitter.start()` �
 ## 完了条件
 
 - 受理コーパスと stdlib の全ファイルが `tree-sitter parse` で `ERROR` も `MISSING` も無し。門番は件数を直書きせずディスクの実数を数える。
-- 代表ファイル（`def` の 4 形、`if` の腕、`let`/`do`/`with` の継続、`|>` の優先順位、外の `library`、`module`、`implement`、functor の `implement ... (params)` とその適用、`shared` 付きの型、`effect`、`handler`）の parse 木の node 列を golden として門番に置き、約束した構造がその通りになることを判定する。約束した宣言形のそれぞれに golden を置き、キーワードと文字列に extmark が付くだけでは、catch-all の文法でも通る。
+- 代表ファイル（`def` の 4 形、`if` の腕、`let`/`do`/`with` の継続、`|>` の優先順位、外の `library`、`module`、本文付きの `implement`、functor の定義、functor の適用、`shared` 付きの型、`effect`、`handler`）の parse 木の node 列を golden として門番に置き、約束した構造がその通りになることを判定する。宣言形は付録C の形ごとに 1 本の golden を置く。`library` は最初の見出しより前の outer_item。`module` は `module Name` のあと抽象型または型付き `def`。本文付きの `implement X as Y` と、`(Name: Contract)` を持つ functor 定義と、`= Functor(Arg)` で本文の無い適用は 3 本を別の node 列にする。`shared type T = ...` は `implement` 本文の等式で、`shared` の無い `type T = ...` では満たさない。`effect` は `once`/`abort`/`again` の操作、`handler` は `as` と腕。適用を本文付き `implement` や functor 定義と同じ node にする文法、`shared` を通常の type 実体化と同じ node にする文法、`implement` と `handler` だけの golden、キーワードと文字列の extmark だけ、catch-all の 1 節では通らない。
 - `nvim --headless` で `.hd` と `.hdi` をそれぞれ通常どおり開き、`vim.bo.filetype == "hado"`、言語を明示しない `vim.treesitter.get_parser(0)` が返ること、`vim.treesitter.query.get("hado", "highlights")` が runtimepath の `queries/hado/highlights.scm` から引けること、そのバッファで highlighter が active で、キーワードと文字列の位置に highlight の extmark が実際に付くことを順に判定する。`highlighter.active` だけや capture の照会だけでは、ハイライトが出ていなくても通る。
 - `AGENTS.md` の環境だけを入れた clean checkout で setup script を実行した後、tree-sitter CLI と Neovim の版・checksum が固定値と一致し、上の 2 本が緑。既に PATH に同名のツールがあっても使わない。
 
