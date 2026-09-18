@@ -726,6 +726,45 @@ fn do_binds_a_callback_held_in_a_record_field() {
 }
 
 #[test]
+fn an_effectful_closure_in_an_adt_field_keeps_its_outcome() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let opt = Some(fn(x => 8 / x)) ->\n  if opt | Some(f) => f 0 | None => 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn a_lambda_may_return_an_effectful_lambda() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => fn(y => x / y)) ->\n  let divide = make 8 ->\n  divide 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn a_handled_once_operation_with_a_yielding_arm_is_lifted() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}effect Fixed\nonce ask: Int {{Int Yield}}\nhandler Fixed as H\nonce ask => do yield 1 -> 4\ndef main =\n  with Collect ->\n  with H ->\n  1 + ask\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
