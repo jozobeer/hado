@@ -672,6 +672,36 @@ assert not missing, '現象 has no closed nonempty fence or complete table: ' + 
 PY
 }
 
+# --- 検査 10: issue のファイル名が slug で、見出しの slug と一致する（docs/issues.md の識別子） ---
+doc_issue_names() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+slug = re.compile(r'[a-z0-9][a-z0-9-]*')
+reserved = re.compile(r'r[0-9]+(-r[0-9]+)?')
+
+def usable(name):
+    return bool(slug.fullmatch(name)) and not reserved.fullmatch(name)
+
+assert usable('dogfood-text-tool')
+assert not usable('bad_name'), 'an underscore is not in the slug grammar'
+assert not usable('Bad-Name'), 'an uppercase letter is not in the slug grammar'
+assert not usable('-lead'), 'a leading hyphen is not in the slug grammar'
+assert not usable('r82'), 'r<digits> is reserved for the old round files'
+assert not usable('r50-r51'), 'r<digits>-r<digits> is reserved'
+
+for path in sorted(Path('docs/issues').glob('*.md')):
+    name = path.stem
+    assert usable(name), f'{path.name}: file name is not a usable slug'
+    head = path.read_text().split('\n', 1)[0]
+    match = re.fullmatch(r'# (.+)（([^（）]+)）', head)
+    assert match, f'{path.name}: heading is not `# <題>（<slug>）`'
+    assert match.group(2) == name, \
+        f'{path.name}: heading slug {match.group(2)} does not match the file name'
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -681,6 +711,7 @@ check 'each gate with a round header has a round file with recorded results' doc
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 check 'each issue cause cites a file:line anchor' doc_issue_causes
 check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
+check 'each issue file name is a usable slug matching its heading' doc_issue_names
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
