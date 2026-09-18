@@ -345,15 +345,44 @@ doc_issue_evidence() {
 import re
 from pathlib import Path
 
+def complete_fence(lines):
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith('```'):
+            block = []
+            j = i + 1
+            while j < len(lines) and not lines[j].startswith('```'):
+                block.append(lines[j])
+                j += 1
+            if j < len(lines):
+                commands = [line for line in block if line.startswith('$ ')]
+                outputs = [line for line in block if line.strip() and not line.startswith('$ ')]
+                if commands and outputs:
+                    return True
+            i = j + 1
+        else:
+            i += 1
+    return False
+
+def complete_table(lines):
+    for i in range(len(lines) - 2):
+        if not lines[i].startswith('|'):
+            continue
+        separator = lines[i + 1].replace('|', '').replace(' ', '')
+        if separator and set(separator) <= set('-:'):
+            if lines[i + 2].startswith('|') and lines[i + 2].strip('| '):
+                return True
+    return False
+
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 現象$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     assert match, f'{path.name}: no 現象 section'
-    body = match.group(1)
-    if not (re.search(r'^```', body, re.M) or re.search(r'^\|', body, re.M)):
+    lines = match.group(1).split('\n')
+    if not (complete_fence(lines) or complete_table(lines)):
         missing.append(path.name)
-assert not missing, '現象 has no code fence or table: ' + ', '.join(missing)
+assert not missing, '現象 has no closed nonempty fence or complete table: ' + ', '.join(missing)
 PY
 }
 
