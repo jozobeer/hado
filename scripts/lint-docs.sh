@@ -440,20 +440,31 @@ def cells(line):
         parts = parts[:-1]
     return [part.replace('\\|', '|').strip() for part in parts]
 
+placeholders = {'', '?', '-', '--', '---', '...', '…', 'tbd', 'todo', 'xxx', 'n/a', 'na', '未定', '未計測'}
+
+def measured(row):
+    return any(cell and cell.lower() not in placeholders for cell in row)
+
 def complete_table(lines):
     for i in range(len(lines) - 2):
         if not (lines[i].startswith('|') and lines[i + 1].startswith('|') and lines[i + 2].startswith('|')):
             continue
         header = cells(lines[i])
         separator = cells(lines[i + 1])
-        data = cells(lines[i + 2])
         if not header or any(not cell for cell in header):
             continue
         if len(separator) != len(header) or any(not re.fullmatch(r':?-{3,}:?', cell) for cell in separator):
             continue
-        if len(data) != len(header) or not any(cell for cell in data):
-            continue
-        return True
+        j = i + 2
+        ok = True
+        while j < len(lines) and lines[j].startswith('|'):
+            row = cells(lines[j])
+            if len(row) != len(header) or not measured(row):
+                ok = False
+                break
+            j += 1
+        if ok:
+            return True
     return False
 
 def fence(*inner):
@@ -489,6 +500,14 @@ assert complete_table(['| metric |', '| --- |', '| 1.2 |']), \
     'three-hyphen separator is a table'
 assert complete_table(['| left | mid | right |', '| :--- | :---: | ---: |', '| a | b | c |']), \
     'aligned three-hyphen separators are a table'
+assert not complete_table(['| metric |', '| --- |', '| TBD |']), \
+    'placeholder-only data row is not evidence'
+assert not complete_table(['| metric |', '| --- |', '| - |']), \
+    'dash-only data row is not evidence'
+assert not complete_table(['| metric |', '| --- |', '| real |', '| TBD |']), \
+    'a placeholder data row invalidates the table'
+assert complete_table(['| 対象 | 入力 | 時間 |', '| --- | --- | --- |', '| 同 | 20,000 行 | 0.33 s |']), \
+    'measured data row counts'
 
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
