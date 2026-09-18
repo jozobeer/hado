@@ -411,7 +411,7 @@ def complete_fence(lines):
                 heredoc = None
                 shell = None
                 here_re = re.compile(
-                    r"""<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))"""
+                    r"""<<-?\s*(?:'([^'\s]+)'|"([^"\s]+)"|\\?([^\s'"<>|&;()]+))"""
                 )
                 cont_re = re.compile(r'(\||&&|\\)\s*$')
 
@@ -628,6 +628,12 @@ assert complete_fence(fence('$ f() {', '> echo x', '> }', 'x')), \
     'function definition plus output must count'
 assert complete_fence(fence('$ echo a{b', 'a{b')), \
     'a brace inside a word must not open a group'
+assert not complete_fence(fence("$ cat <<'END-INPUT'", 'a', 'END-INPUT')), \
+    'heredoc with a hyphenated delimiter and its terminator must not count as output'
+assert not complete_fence(fence('$ cat <<"END-INPUT"', 'a', 'END-INPUT')), \
+    'double-quoted heredoc delimiter and its terminator must not count as output'
+assert complete_fence(fence("$ cat <<'END-INPUT'", 'a', 'END-INPUT', 'a')), \
+    'heredoc plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
