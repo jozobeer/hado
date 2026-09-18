@@ -324,6 +324,7 @@ import re
 from pathlib import Path
 
 anchor = re.compile(r'([A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)')
+root = Path.cwd().resolve()
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
@@ -331,7 +332,9 @@ for path in sorted(Path('docs/issues').glob('*.md')):
     found = anchor.findall(match.group(1))
     assert found, f'{path.name}: 原因 has no file:line anchor'
     for target, line in found:
-        fp = Path(target)
+        fp = (root / target).resolve()
+        assert fp.is_relative_to(root), \
+            f'{path.name}: 原因 anchor escapes the repository: {target}:{line}'
         assert fp.is_file(), f'{path.name}: 原因 anchor file does not exist: {target}:{line}'
         count = len(fp.read_text().splitlines())
         assert 1 <= int(line) <= count, \
@@ -358,6 +361,7 @@ def complete_fence(lines):
                 commands = 0
                 outputs = 0
                 heredoc = None
+                continuation = False
                 here_re = re.compile(
                     r"""<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))"""
                 )
@@ -366,11 +370,16 @@ def complete_fence(lines):
                         if line.strip() == heredoc:
                             heredoc = None
                         continue
+                    if continuation:
+                        continuation = line.rstrip().endswith('\\')
+                        continue
                     if line.startswith('$ '):
                         commands += 1
                         here = here_re.search(line)
                         if here:
                             heredoc = next(g for g in here.groups() if g)
+                        else:
+                            continuation = line.rstrip().endswith('\\')
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
@@ -399,7 +408,7 @@ def complete_table(lines):
         data = cells(lines[i + 2])
         if not header or any(not cell for cell in header):
             continue
-        if len(separator) != len(header) or any(not cell or not set(cell) <= set('-:') for cell in separator):
+        if len(separator) != len(header) or any(not re.fullmatch(r':?-{3,}:?', cell) for cell in separator):
             continue
         if len(data) != len(header) or not any(cell for cell in data):
             continue
