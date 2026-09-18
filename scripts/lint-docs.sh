@@ -443,7 +443,7 @@ def cells(line):
 placeholders = {'', '?', '-', '--', '---', '...', '…', 'tbd', 'todo', 'xxx', 'n/a', 'na', '未定', '未計測'}
 
 def measured(row):
-    return any(cell and cell.lower() not in placeholders for cell in row)
+    return all(cell and cell.lower() not in placeholders for cell in row)
 
 def complete_table(lines):
     for i in range(len(lines) - 2):
@@ -504,6 +504,10 @@ assert not complete_table(['| metric |', '| --- |', '| TBD |']), \
     'placeholder-only data row is not evidence'
 assert not complete_table(['| metric |', '| --- |', '| - |']), \
     'dash-only data row is not evidence'
+assert not complete_table(['| case | result |', '| --- | --- |', '| case-a | TBD |']), \
+    'a placeholder in a result cell is not evidence'
+assert not complete_table(['| case | result | time |', '| --- | --- | --- |', '| case-a | ok | TBD |']), \
+    'a placeholder in any cell is not evidence'
 assert not complete_table(['| metric |', '| --- |', '| real |', '| TBD |']), \
     'a placeholder data row invalidates the table'
 assert complete_table(['| 対象 | 入力 | 時間 |', '| --- | --- | --- |', '| 同 | 20,000 行 | 0.33 s |']), \
