@@ -430,6 +430,7 @@ def complete_fence(lines):
                     def __init__(self):
                         self.single = False
                         self.double = False
+                        self.backtick = False
                         self.depth = 0
                         self.expect = []
                         self.tail = False
@@ -450,7 +451,12 @@ def complete_fence(lines):
                         i = 0
                         while i < len(text):
                             char = text[i]
-                            if self.single:
+                            if self.backtick:
+                                if char == '`':
+                                    self.backtick = False
+                                elif char == '\\':
+                                    i += 1
+                            elif self.single:
                                 if char == "'":
                                     self.single = False
                                 else:
@@ -462,6 +468,8 @@ def complete_fence(lines):
                                         word.append(text[i])
                                 elif char == '"':
                                     self.double = False
+                                elif char == '`':
+                                    self.backtick = True
                                 else:
                                     word.append(char)
                             elif char == '\\':
@@ -474,6 +482,8 @@ def complete_fence(lines):
                                 self.single = True
                             elif char == '"':
                                 self.double = True
+                            elif char == '`':
+                                self.backtick = True
                             elif char in self.BREAK:
                                 flush()
                                 words.append(char)
@@ -510,8 +520,8 @@ def complete_fence(lines):
                         trailing = bool(cont_re.search(text.rstrip()))
                         if words and words[-1] in ('|', '&', '('):
                             trailing = True
-                        return (self.single or self.double or self.depth > 0 or self.tail
-                                or self.header or bool(self.expect) or trailing)
+                        return (self.single or self.double or self.backtick or self.depth > 0
+                                or self.tail or self.header or bool(self.expect) or trailing)
 
                 for line in block:
                     if heredoc is not None:
@@ -675,6 +685,10 @@ assert not complete_fence(fence('$ f()', '> {', '> echo x', '> }')), \
     'a function header with the body brace on the next line must stay open'
 assert complete_fence(fence('$ f()', '> {', '> echo x', '> }', 'x')), \
     'a function header closed on a later line plus output must count'
+assert not complete_fence(fence('$ echo `', '> date', '> `')), \
+    'a backtick substitution across PS2 lines must not count as output'
+assert complete_fence(fence('$ echo `', '> date', '> `', 'x')), \
+    'a backtick substitution plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
