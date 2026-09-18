@@ -777,3 +777,35 @@ grep -n 'BytesDisplay' crates/hado/src/mono.rs
 cargo test --offline -> cargo-test6-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十一次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 検査 9 の自己検査（PS2 行・&& の後のブレース・パラメータ展開・複数 heredoc）
+AssertionError: a PS2 line after a command is not measured output
+AssertionError: a brace group after && must stay open
+AssertionError: a parameter expansion across PS2 lines must not count as output
+AssertionError: a second heredoc body must not count as output
+
+# 検査 8 の自己検査（ドット付き・拡張子なしの anchor）
+assert causes('.gitignore:1') == [('.gitignore', '1', '')]
+assert causes('Dockerfile:5') == [('Dockerfile', '5', '')]
+assert causes('.cargo/config.toml:1-3') == [('.cargo/config.toml', '1', '3')]
+assert causes('12:30') == []
+
+# 不足側の境界（十進表記の丸め）
+python3 -c "mn=float.fromhex('0x0.0000000000001p-1022'); [print(e, float('%de-324'%e)==0.0, float('%de-324'%e)==mn) for e in (1,2,3,5)]"
+1 True False
+2 True False
+3 False True
+5 False True
+
+# 最終の木での全走
+cargo test --offline -> cargo-test7-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
