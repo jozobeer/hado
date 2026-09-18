@@ -896,3 +896,26 @@ wc -l scripts/lint-docs.sh
 cargo test --offline -> cargo-test11-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十六次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 の終端は開き以上のバッククォートと末尾の空白だけ
+
+# 検査 9 の自己検査
+assert not complete_fence(['```', '$ cargo test', '```not-a-closing-fence'])
+assert complete_fence(['```', '$ cargo test', 'PASSED: 9/9', '```   '])
+assert complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '````'])
+assert not complete_fence(['````', '$ cargo test', 'PASSED: 9/9', '```'])
+
+# 4 連バッククォートのフェンスは docs に無い
+grep -rn '^````' docs/ | wc -l
+0
+
+# 最終の木での全走
+cargo test --offline -> cargo-test12-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
