@@ -756,3 +756,24 @@ grep -n 'fn derive_comparison\|fn derive_scalar_compare' crates/hado/src/mono.rs
 cargo test --offline -> cargo-test5-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 はバッククォート置換の継続行も数える
+
+# 検査 9 の自己検査: バッククォートの PS2 行を出力に数えない
+AssertionError: a backtick substitution across PS2 lines must not count as output
+
+# mono.rs の取り込み後の BytesDisplay の箇所
+grep -n 'BytesDisplay' crates/hado/src/mono.rs
+4407:        Type::Bytes => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::BytesDisplay, vec![value])?),
+4532:        Type::Bytes => RuntimeFunction::BytesDisplay,
+
+# 最終の木での全走
+cargo test --offline -> cargo-test6-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
