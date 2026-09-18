@@ -331,3 +331,18 @@ sed -n '146,148p' crates/hado/tests/repr.rs
     for (width, order, prefix) in [
         (4, ByteOrder::Little, vec![5, 0, 0, 0]),
 ```
+
+### 十三次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# 検査 9 の負の探針: 継続行だけのコマンド、区切りが : だけの表が赤
+AssertionError: 現象 has no closed nonempty fence or complete table: zz-probe.md
+
+# 検査 8 の負の探針: リポジトリの外へ出る anchor が赤
+AssertionError: zz-probe.md: 原因 anchor escapes the repository: crates/../../AGENTS.md:1
+```
