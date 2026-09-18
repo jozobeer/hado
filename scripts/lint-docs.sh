@@ -317,35 +317,70 @@ print('coverage: ' + ' '.join(f'§{section}={sum(1 for s, _ in rules.values() if
 PY
 }
 
-# --- 検査 8: issue の原因が file:line を指す（docs/issues.md のファイルの形） ---
+# --- 検査 8: issue の原因がパスと識別子で場所を指す（docs/issues.md のファイルの形） ---
 doc_issue_causes() {
     python3 - <<'PY'
 import re
-import tempfile
 from pathlib import Path
 
-anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?(?!:?[0-9])')
+line_anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?(?!:?[0-9])')
+path_token = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`')
+location = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`[ \t]*の[ \t]*`([^`]+)`')
+section = re.compile(r'(§[0-9]+(?:\.[0-9]+)?|付録[A-Z])')
+error_code = re.compile(r'`(E[0-9]{3})`')
 
-def causes(text):
-    """file:line anchors, excluding numeric-only runs such as `12:30` and
-    diagnostic spans such as `main.hd:1:36` (a path:line:column, not a source anchor)."""
-    return [m for m in anchor.findall(text) if not re.fullmatch(r'[0-9.]+', m[0])]
+bare_line = re.compile(r'(?<![0-9A-Za-z_.:]):([0-9]+)(?![0-9:])')
 
-assert causes('.gitignore:1') == [('.gitignore', '1', '')], \
-    'a dotfile anchor must keep its leading dot'
-assert causes('Dockerfile:5') == [('Dockerfile', '5', '')], \
-    'an extensionless anchor must be found'
-assert causes('.cargo/config.toml:1-3') == [('.cargo/config.toml', '1', '3')], \
-    'a dot directory must stay in the path'
-assert causes('12:30') == [], 'a numeric-only pair is not an anchor'
-assert causes('main.hd:1:36') == [], \
-    'a diagnostic span path:line:column is not a source anchor'
-assert causes('tests/reject/E507/main.hd:3') == [('tests/reject/E507/main.hd', '3', '')], \
-    'a repository path with a trailing line is an anchor'
-assert causes('main.hd:1:36 の `crates/hado/src/lib.rs:227-229` による') == \
-    [('crates/hado/src/lib.rs', '227', '229')], \
-    'the repository anchor is still found next to a diagnostic span'
-assert causes('crates/hado/src/mono.rs:3845') == [('crates/hado/src/mono.rs', '3845', '')]
+def lines(text):
+    """`file:line` と、パスを省いた `:line` の綴り。規約により原因は行番号を書かない。"""
+    spelled = [m for m in line_anchor.findall(text) if not re.fullmatch(r'[0-9.]+', m[0])]
+    return spelled + [('', m.group(1), '') for m in bare_line.finditer(text)]
+
+def paths(text):
+    """バッククォートで囲んだリポジトリのパス。`List.length` のような member は含まない。"""
+    return path_token.findall(text)
+
+def pairs(text):
+    """`パス` の `識別子`。同じパスの識別子は続けて書ける。"""
+    found = []
+    for match in location.finditer(text):
+        target = match.group(1)
+        found.append((target, match.group(2)))
+        rest = text[match.end():]
+        while True:
+            following = re.match(r'[ \t]*`([^`]+)`', rest)
+            if not following:
+                break
+            found.append((target, following.group(1)))
+            rest = rest[following.end():]
+    return found
+
+assert lines('crates/hado/src/mono.rs:4407') == [('crates/hado/src/mono.rs', '4407', '')], \
+    'a file:line spelling is detected so that it can be rejected'
+assert lines('crates/hado/src/mono.rs:4407-4532') == [('crates/hado/src/mono.rs', '4407', '4532')], \
+    'a ranged file:line spelling is detected too'
+assert lines('main.hd:1:36') == [], 'a diagnostic span is not a line anchor'
+assert lines('§47 と `E602`') == [], 'a section number or error code is not a line anchor'
+assert lines('と `:391` の `hado_string_find`') == [('', '391', '')], \
+    'a line number without its path is still a line number'
+assert lines('12:30 と main.hd:1:36') == [], \
+    'a time and a diagnostic span are not line anchors'
+assert paths('`crates/hado/src/mono.rs` の `derive_comparison`') == ['crates/hado/src/mono.rs']
+assert paths('`docs/wants.md` 53 と `stdlib/float.hd`') == ['docs/wants.md', 'stdlib/float.hd'], \
+    'a document path and a stdlib path are both found'
+assert paths('`List.length` は member であってパスではない') == [], \
+    'a dotted member name is not a path'
+assert paths('`E602` と `§47`') == [], 'an error code and a section are not paths'
+assert pairs('`crates/hado/src/mono.rs` の `derive_comparison`') == \
+    [('crates/hado/src/mono.rs', 'derive_comparison')]
+assert pairs('`crates/hado/src/lib.rs` の `check_ast` `diagnostic_order`。次') == \
+    [('crates/hado/src/lib.rs', 'check_ast'), ('crates/hado/src/lib.rs', 'diagnostic_order')], \
+    'identifiers written after the path belong to the same file'
+assert pairs('`crates/hado/src/lib.rs` の `check_ast` が') == \
+    [('crates/hado/src/lib.rs', 'check_ast')], 'prose after the identifier ends the pair'
+assert section.findall('§26.1 と §55 と 付録C') == ['§26.1', '§55', '付録C']
+assert error_code.findall('`E602` と E3xx と `E100`') == ['E602', 'E100'], \
+    'a range such as E3xx is not an error code'
 root = Path.cwd().resolve()
 
 def classify(root, target):
@@ -363,14 +398,12 @@ assert classify(root, 'crates/../../AGENTS.md') == 'escapes', \
 assert classify(root, '../local-notes.rs') == 'escapes', \
     'parent-relative path must not pass'
 assert classify(root, 'missing.rs') == 'missing'
-assert anchor.findall('../local-notes.rs:1 and crates/hado/src/emit.rs:23') == [
-    ('../local-notes.rs', '1', ''),
-    ('crates/hado/src/emit.rs', '23', ''),
-], 'leading ../ must be captured as an anchor'
-assert anchor.findall('crates/../../AGENTS.md:1') == [('crates/../../AGENTS.md', '1', '')]
-assert anchor.findall('crates/hado/src/project.rs:313-339') == [('crates/hado/src/project.rs', '313', '339')], \
-    'a ranged anchor must capture its end line'
+assert path_token.findall('`../local-notes.rs` と `crates/hado/src/emit.rs`') == [
+    '../local-notes.rs', 'crates/hado/src/emit.rs',
+], 'a leading ../ stays in the path'
+assert classify(root, 'crates/../../AGENTS.md') == 'escapes'
 
+import tempfile
 with tempfile.TemporaryDirectory() as td:
     td = Path(td).resolve()
     repo = td / 'repo'
@@ -387,27 +420,43 @@ with tempfile.TemporaryDirectory() as td:
     assert classify(repo, 'crates/../../local-notes.rs') == 'escapes', \
         'resolved path outside the repository must not pass even if that file exists'
 
+spec_text = (root / 'docs/spec.md').read_text()
+spec_headings = re.findall(r'^## .*$', spec_text, re.M)
+spec_codes = set(re.findall(r'^\| (E[0-9]{3}) \|', spec_text, re.M))
+
+def known_section(ref):
+    if ref.startswith('付録'):
+        return any(heading.startswith(f'## {ref} ') for heading in spec_headings)
+    return f'## {ref[1:]}. ' in spec_text
+
+assert known_section('§55'), 'the spec has §55'
+assert known_section('§26.1'), 'the spec has §26.1'
+assert known_section('付録C'), 'the spec has 付録C'
+assert not known_section('§999'), 'an unknown section is rejected'
+assert not known_section('付録Z'), 'an unknown appendix is rejected'
+assert spec_codes, 'the spec has an error code table'
+
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 原因$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     assert match, f'{path.name}: no 原因 section'
-    found = causes(match.group(1))
-    assert found, f'{path.name}: 原因 has no file:line anchor'
-    for target, line, end in found:
+    body = match.group(1)
+    spelled = lines(body)
+    assert not spelled, \
+        f'{path.name}: 原因 writes a line number: {spelled[0][0]}:{spelled[0][1]}（`パス` の `識別子` で指す）'
+    for target in paths(body):
         status = classify(root, target)
-        assert status != 'escapes', \
-            f'{path.name}: 原因 anchor escapes the repository: {target}:{line}'
-        assert status != 'missing', \
-            f'{path.name}: 原因 anchor file does not exist: {target}:{line}'
-        fp = (root / target).resolve()
-        count = len(fp.read_text().splitlines())
-        assert 1 <= int(line) <= count, \
-            f'{path.name}: 原因 anchor line is out of range: {target}:{line} (file has {count} lines)'
-        if end:
-            assert int(line) <= int(end), \
-                f'{path.name}: 原因 anchor range is reversed: {target}:{line}-{end}'
-            assert int(end) <= count, \
-                f'{path.name}: 原因 anchor range end is out of range: {target}:{line}-{end} (file has {count} lines)'
+        assert status != 'escapes', f'{path.name}: 原因 path escapes the repository: {target}'
+        assert status != 'missing', f'{path.name}: 原因 path does not exist: {target}'
+    for target, ident in pairs(body):
+        assert classify(root, target) == 'ok', \
+            f'{path.name}: 原因 location file does not exist: {target} の {ident}'
+        source = (root / target).read_text(errors='replace')
+        assert ident in source, f'{path.name}: 原因 identifier is not in {target}: {ident}'
+    for ref in section.findall(body):
+        assert known_section(ref), f'{path.name}: 原因 section does not exist in the spec: {ref}'
+    for code in error_code.findall(body):
+        assert code in spec_codes, f'{path.name}: 原因 error code is not in the spec table: {code}'
 PY
 }
 
@@ -659,7 +708,7 @@ check 'condition column prose does not require a newline' doc_condition_column
 check 'spec and spec-coverage name the same version' doc_version
 check 'each gate with a round header has a round file with recorded results' doc_round_files
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
-check 'each issue cause cites a file:line anchor' doc_issue_causes
+check 'each issue cause points at a path and an identifier' doc_issue_causes
 check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
 check 'each issue document has the required name, priority and sections' doc_issue_names
 
