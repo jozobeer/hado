@@ -355,8 +355,23 @@ def complete_fence(lines):
                 block.append(lines[j])
                 j += 1
             if j < len(lines):
-                commands = [line for line in block if line.startswith('$ ')]
-                outputs = [line for line in block if line.strip() and not line.startswith('$ ')]
+                commands = 0
+                outputs = 0
+                heredoc = None
+                for line in block:
+                    if heredoc is not None:
+                        if line.strip() == heredoc:
+                            heredoc = None
+                        continue
+                    if line.startswith('$ '):
+                        commands += 1
+                        here = re.search(r"<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?", line)
+                        if here:
+                            heredoc = here.group(1)
+                        continue
+                    if line.startswith('#') or not line.strip():
+                        continue
+                    outputs += 1
                 if commands and outputs:
                     return True
             i = j + 1
@@ -364,14 +379,28 @@ def complete_fence(lines):
             i += 1
     return False
 
+def cells(line):
+    parts = re.split(r'(?<!\\)\|', line.strip())
+    if parts and not parts[0].strip():
+        parts = parts[1:]
+    if parts and not parts[-1].strip():
+        parts = parts[:-1]
+    return [part.replace('\\|', '|').strip() for part in parts]
+
 def complete_table(lines):
     for i in range(len(lines) - 2):
-        if not lines[i].startswith('|'):
+        if not (lines[i].startswith('|') and lines[i + 1].startswith('|') and lines[i + 2].startswith('|')):
             continue
-        separator = lines[i + 1].replace('|', '').replace(' ', '')
-        if separator and set(separator) <= set('-:'):
-            if lines[i + 2].startswith('|') and lines[i + 2].strip('| '):
-                return True
+        header = cells(lines[i])
+        separator = cells(lines[i + 1])
+        data = cells(lines[i + 2])
+        if not header or any(not cell for cell in header):
+            continue
+        if len(separator) != len(header) or any(not cell or not set(cell) <= set('-:') for cell in separator):
+            continue
+        if len(data) != len(header) or not any(cell for cell in data):
+            continue
+        return True
     return False
 
 missing = []
