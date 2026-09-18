@@ -543,6 +543,7 @@ impl Lowerer {
             List(items, tail) => items.iter_mut().chain(tail.iter_mut().map(Box::as_mut)).collect(),
             Record(fields) | NamedConstructor(_, fields) => fields.iter_mut().map(|(_, value)| value).collect(),
             BoolBranch { cond, .. } => vec![cond],
+            CondBranch { arms, .. } => arms.iter_mut().map(|(condition, _)| condition).collect(),
             PatternBranch { scrutinees, .. } => scrutinees.iter_mut().collect(),
             _ => Vec::new(),
         };
@@ -3522,9 +3523,10 @@ impl Lowerer {
                 continue;
             };
             let input = operation.result.clone();
+            let payload = operation.parameters.first().cloned().unwrap_or(Type::Void);
             let continuation = self.again_bind_yield(&constructor, &input, id, signature, &value, &rest)?;
             arms.push((constructor.clone(), Expression::Construct {
-                fields: vec![project(&value, &constructor, 0, self.outcome_payload(&constructor)?), continuation],
+                fields: vec![project(&value, &constructor, 0, payload), continuation],
                 constructor,
                 result: signature.result.clone(),
             }));
