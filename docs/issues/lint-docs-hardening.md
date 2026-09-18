@@ -12,6 +12,8 @@
 | 原因の `file:///work/app/x.hdi:1` | `causes=[('work/app/x.hdi', '1', '')]`（実在しない相対パスとして赤になる） |
 | 原因の `crates/hado/src/mono.rs:4407–4532`（en ダッシュの範囲） | `causes=[('crates/hado/src/mono.rs', '4407', '')]`（範囲として読まない） |
 | CRLF の終端フェンス | `complete_fence=True` |
+| 見出しだけで本文が空の `## 案` `## 完了条件` `## 由来` | `issue_problem=None`（通る。`docs/issues.md:21` は案・完了条件・由来を要求する） |
+| 実測フェンスの出力が `TBD` だけ（`$ cargo test` の次の行） | `complete_fence=True`（通る。表の経路は `complete_table=False` で拒む） |
 
 `> ` で始まる行を PS2 の入力として無条件に読み飛ばす規約（`scripts/lint-docs.sh:457`）は、`\` による継続を見ていないので、コマンドの終わりと heredoc の本文の始まりを区別しない。この区別を求める綴りは無限に作れるので、PR #5 では既知の形（PS2 行に並ぶ複数の heredoc、情報文字列のバッククォート、`<<-`、here-string）だけを探針で固定し、残りはここで扱う。
 
@@ -36,6 +38,8 @@
 - PS2 の分岐が直前の行の `\` で継続を判定する。`$ cat \`・`> <<A \`・`> <<B` の順（本文が 2 つ）と、コマンドの後に置いた本文が `> ` で始まる形の探針で測る。
 - `causes` が `scheme://` を含む綴りを除外し、`–`（en ダッシュ）の範囲を `-` と同じに読む。`file:///work/app/x.hdi:1` が `[]`、`crates/hado/src/mono.rs:4407–4532` が `[('crates/hado/src/mono.rs', '4407', '4532')]` になる探針で測る。
 - 引用の中の表を実測として読む（または `docs/issues.md` に引用の外に限ると明記し、検査 9 のメッセージにも書く）。どちらを選んだかをラウンドファイルに書く。
+- 検査 10 が、必須の節それぞれに空白でない本文があることを見る（見出しだけで通る形の探針で測る）。
+- 検査 9 のフェンスの経路にも、表と同じプレースホルダの判定（`TBD` `TODO` `...` `未計測`）を入れる。案 A を採る場合は実測が生成物になって消えるので、探針は生成側に置く。
 - `bash scripts/lint-docs.sh` が `PASSED: 10/10`、`git diff --check` が 0、`cargo test --offline` が 0 failed、`bash scripts/run-gates.sh --tier full --jobs 4` が red なし。
 
 ## 由来
