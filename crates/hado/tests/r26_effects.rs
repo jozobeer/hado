@@ -564,6 +564,34 @@ fn effectful_callback_is_rejected_for_a_higher_order_call() {
 }
 
 #[test]
+fn do_binds_a_local_closure_callee_with_the_caller_continuation() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def main =\n  with Collect ->\n  let f = fn(x => do yield x -> ()) ->\n  do f 1 -> do yield 2 -> ()\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn once_operation_with_a_handled_effect_is_lifted_in_argument_position() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  String.length cwd\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.trim().parse::<i64>().is_ok(), "{stdout}");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
