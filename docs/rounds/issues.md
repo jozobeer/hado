@@ -728,3 +728,31 @@ grep -c FAILED target/pr5/gates/cargo-test4.log
 bash scripts/run-gates.sh --tier full --jobs 4 target/pr5/gates/full4
 TALLY: 3742/3742 passed; red: none
 ```
+
+### 二十九次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は `name()` の次の行の本文ブレースも数える
+
+# 検査 9 の自己検査: 本文ブレースが次の行の関数定義を出力に数えない
+AssertionError: a function header with the body brace on the next line must stay open
+
+# 最大有限値の正準形（指数を使わない 309 桁）
+$ cargo run --offline -q -- run main.hd    # main.hd は最大有限値とその負の .0 リテラル
+[179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0, -179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0]
+# 桁数の確認: 309 桁、末尾の 0 は 292 個、両符号で同じ
+pos len 309 zeros_tail 292 canonical_matches_literal True
+neg len 309 zeros_tail 292 canonical_matches_literal True
+
+# mono.rs の取り込み後の anchor
+grep -n 'fn derive_comparison\|fn derive_scalar_compare' crates/hado/src/mono.rs
+3845:    fn derive_comparison(&mut self, ty: Type) -> Result<(FunctionId, Signature), String> {
+3962:    fn derive_scalar_compare(&mut self, ty: Type) -> (FunctionId, Signature) {
+
+# 最終の木での全走
+cargo test --offline -> cargo-test5-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
