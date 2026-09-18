@@ -503,6 +503,18 @@ fn callee_case_from_a_handler_arm_escapes_that_handler() {
 }
 
 #[test]
+fn arm_call_does_not_reuse_a_body_specialization() {
+    let case = Case::new();
+    case.write("main.hd", "effect A\nabort a\nhandler A as OuterA\nabort a => 100\nreturn value => value\nhandler Error as Catch\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {A, Error}\n| x < 0 => a\n| x == 0 => raise { message = \"f\" }\n| x\ndef main =\n  with OuterA ->\n  with Catch ->\n  do f 1 -> raise { message = \"body\" }\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
+    assert_eq!(output.stderr, b"f\n");
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
