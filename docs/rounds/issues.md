@@ -374,3 +374,26 @@ diff-check=0
 bash scripts/lint-docs.sh 2>&1 | tail -1
 PASSED: 9/9
 ```
+
+### 十六次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 の表は、全てのデータ行が placeholder でないことを要求する
+
+# 正しいエスケープ（文字列 \n \t \\ \"、文字 \n \t \\ \'）
+sed -n '2334,2337p' docs/spec.md
+char            := "'" (char_escape | 文字) "'"          ちょうど 1 文字（E111）
+char_escape     := "\n" | "\t" | "\\" | "\'"
+string          := '"' (string_escape | 文字)* '"'
+string_escape   := "\n" | "\t" | "\\" | '\"'           これ以外は E110
+
+# .hdi は project loader が同じ根の source として読む（単体では CLI の入口にできない）
+sed -n '232p;344p' crates/hado/src/project.rs
+            && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+    let interface = path.extension().is_some_and(|extension| extension == "hdi");
+```
+
+レビューの `first:100` は 103 スレッドで頭打ちになるので、以後は `pageInfo` で全件を辿って未解決を数える。
