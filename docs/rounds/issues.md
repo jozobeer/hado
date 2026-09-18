@@ -939,3 +939,32 @@ grep -n 'E204\|E403\|E505\|E602\|E703' docs/spec.md | head -5
 cargo test --offline -> cargo-test13-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十八次レビュー対応（2026-09-18）
+
+検査 10 を足したので、以後の実測は `PASSED: 10/10` になる。
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# 検査 10 の負の探針（一時ファイルで確認してから消す）
+cp docs/issues/lsp-minimal.md docs/issues/bad_name.md
+bash scripts/lint-docs.sh 2>&1 | grep -E 'AssertionError|NG:' | head -2
+AssertionError: bad_name.md: file name is not a usable slug
+NG: each issue file name is a usable slug matching its heading
+cp docs/issues/lsp-minimal.md docs/issues/r82.md
+AssertionError: r82.md: file name is not a usable slug
+cp docs/issues/lsp-minimal.md docs/issues/valid-slug-here.md
+AssertionError: valid-slug-here.md: heading slug lsp-minimal does not match the file name
+
+# P1 の決定に足した例外
+grep -n '添字が取れる列' docs/plan.md
+1285:| P1 | prelude の再帰 | `stdlib/` の非末尾再帰を累積 + `reverse` の末尾形にする。... 添字が取れる列（Array・Bytes・argv・`read_dir`）は末尾から先頭へ累積して `reverse` を省く（同じ末尾形。slug `prelude-tail-recursion`） | §55 |
+
+# 最終の木での全走
+cargo test --offline -> cargo-test14-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
