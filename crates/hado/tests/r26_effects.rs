@@ -530,6 +530,40 @@ fn arm_call_does_not_reuse_a_body_specialization() {
 }
 
 #[test]
+fn do_binds_a_named_again_callee_with_the_caller_continuation() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def f (x: Int): Void {{Int Yield}} => do yield x -> ()\ndef main =\n  with Collect ->\n  do f 1 -> do yield 2 -> ()\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn effectful_callback_is_rejected_for_a_higher_order_call() {
+    let sources = [
+        "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.map [2, 0] fn(x => 8 / x)\n",
+        "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef f (x: Int): Int {Error} => 8 / x\ndef main =\n  with Catch ->\n  List.map [2, 0] f\n",
+    ];
+    for source in sources {
+        let case = Case::new();
+        case.write("main.hd", source);
+        let output = case.command("dump-mono", "main.hd");
+        assert_eq!(output.status.code(), Some(1), "{source}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("effectful function value cannot be passed to List.map"),
+            "{source}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
