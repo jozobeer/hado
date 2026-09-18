@@ -503,6 +503,21 @@ fn callee_case_from_a_handler_arm_escapes_that_handler() {
 }
 
 #[test]
+fn mutual_recursion_forwards_a_late_raise_across_a_success_type_change() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef rec f (x: Int): String {Error} =>\n  if x > 0 =>\n    let n = g (x - 1) ->\n    Int.to_string n\n  | raise { message = \"f\" }\ndef rec g (x: Int): Int {Error} =>\n  if x == 0 =>\n    let s = f (x - 1) ->\n    String.length s\n  | raise { message = \"g\" }\ndef main =\n  with Catch ->\n  f 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"caught\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn arm_call_does_not_reuse_a_body_specialization() {
     let case = Case::new();
     case.write("main.hd", "effect A\nabort a\nhandler A as OuterA\nabort a => 100\nreturn value => value\nhandler Error as Catch\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {A, Error}\n| x < 0 => a\n| x == 0 => raise { message = \"f\" }\n| x\ndef main =\n  with OuterA ->\n  with Catch ->\n  do f 1 -> raise { message = \"body\" }\n");
