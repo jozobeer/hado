@@ -432,6 +432,12 @@ assert complete_fence(fence("$ python3 - <<'PY'", 'print(1)', 'PY', '1')), \
     'here-doc followed by transcript output must count'
 assert complete_fence(fence('$ cargo test', 'PASSED: 9/9')), \
     'command plus transcript output must count'
+assert not complete_fence(fence("$ printf '%s\\n' \\", '> input.txt')), \
+    'backslash continuation and PS2 line must not count as output'
+assert not complete_fence(fence("$ printf '%s\\n' \\", '> foo \\', '> bar')), \
+    'continued-only multiline command must not count as output'
+assert complete_fence(fence("$ printf '%s\\n' \\", '> input.txt', 'input.txt')), \
+    'continued command plus transcript output must count'
 
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
