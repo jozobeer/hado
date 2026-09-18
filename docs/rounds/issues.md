@@ -845,3 +845,23 @@ assert complete_table(['| metric |', '| --- |', '| 1.2 s |'])
 cargo test --offline -> cargo-test9-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十四次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# main の Float の印字が通る経路（PrintFloat ではない）
+grep -n 'CanonicalFloat' crates/hado/src/mono.rs
+4409:        Type::Float => (RuntimeFunction::PrintString, Expression::call_runtime(RuntimeFunction::CanonicalFloat, vec![value])?),
+4534:        Type::Float => RuntimeFunction::CanonicalFloat,
+grep -rn 'PrintFloat' crates/hado/src/*.rs
+crates/hado/src/runtime_abi.rs:19:    PrintFloat,      # 宣言のみ。呼び出しは無い
+
+# 最終の木での全走
+cargo test --offline -> cargo-test10-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
