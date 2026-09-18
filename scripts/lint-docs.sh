@@ -358,6 +358,9 @@ def complete_fence(lines):
                 commands = 0
                 outputs = 0
                 heredoc = None
+                here_re = re.compile(
+                    r"""<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))"""
+                )
                 for line in block:
                     if heredoc is not None:
                         if line.strip() == heredoc:
@@ -365,11 +368,11 @@ def complete_fence(lines):
                         continue
                     if line.startswith('$ '):
                         commands += 1
-                        here = re.search(r"<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?", line)
+                        here = here_re.search(line)
                         if here:
-                            heredoc = here.group(1)
+                            heredoc = next(g for g in here.groups() if g)
                         continue
-                    if line.startswith('#') or not line.strip():
+                    if not line.strip() or line.lstrip().startswith('#'):
                         continue
                     outputs += 1
                 if commands and outputs:
@@ -402,6 +405,24 @@ def complete_table(lines):
             continue
         return True
     return False
+
+def fence(*inner):
+    return ['```', *inner, '```']
+
+assert not complete_fence(fence("$ cat > probe <<'EOF'", 'body', 'EOF')), \
+    'single-quoted here-doc body only must not count as output'
+assert not complete_fence(fence('$ cat > probe <<"EOF"', 'body', 'EOF')), \
+    'double-quoted here-doc body only must not count as output'
+assert not complete_fence(fence(r'$ cat > probe <<\EOF', 'body', 'EOF')), \
+    'backslash-quoted here-doc body only must not count as output'
+assert not complete_fence(fence('$ cargo test', '# output TBD')), \
+    'comment-only output must not count'
+assert not complete_fence(fence('$ cargo test', '  # output TBD')), \
+    'indented comment-only output must not count'
+assert complete_fence(fence("$ python3 - <<'PY'", 'print(1)', 'PY', '1')), \
+    'here-doc followed by transcript output must count'
+assert complete_fence(fence('$ cargo test', 'PASSED: 9/9')), \
+    'command plus transcript output must count'
 
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
