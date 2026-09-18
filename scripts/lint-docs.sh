@@ -416,38 +416,87 @@ def complete_fence(lines):
                 cont_re = re.compile(r'(\||&&|\\)\s*$')
 
                 class Shell:
-                    """State of one command line, so a PS2 line that closes a quote is not output."""
+                    """State of one command, so PS2 input lines are never counted as measured output."""
+
+                    OPEN = {'if': 'fi', 'for': 'done', 'while': 'done', 'until': 'done',
+                            'case': 'esac', '{': '}'}
+                    CLOSE = {'fi', 'done', 'esac', '}'}
+                    COMMAND_AFTER = {';', '|', '&', '(', '{', '!',
+                                     'if', 'then', 'else', 'elif', 'do', 'for', 'while', 'until', 'case'}
+                    BREAK = set(';{}|&()')
 
                     def __init__(self):
                         self.single = False
                         self.double = False
                         self.depth = 0
+                        self.expect = []
+                        self.tail = False
 
                     def feed(self, text):
+                        if text.startswith('$ ') or text.startswith('> '):
+                            text = text[2:]
+                        words = []
+                        word = []
+
+                        def flush():
+                            if word:
+                                words.append(''.join(word))
+                                word.clear()
+
+                        self.tail = False
                         i = 0
                         while i < len(text):
                             char = text[i]
                             if self.single:
                                 if char == "'":
                                     self.single = False
+                                else:
+                                    word.append(char)
                             elif self.double:
                                 if char == '\\':
                                     i += 1
+                                    if i < len(text):
+                                        word.append(text[i])
                                 elif char == '"':
                                     self.double = False
+                                else:
+                                    word.append(char)
                             elif char == '\\':
-                                i += 1
+                                if i + 1 >= len(text):
+                                    self.tail = True
+                                else:
+                                    i += 1
+                                    word.append(text[i])
                             elif char == "'":
                                 self.single = True
                             elif char == '"':
                                 self.double = True
-                            elif char == '(':
-                                self.depth += 1
-                            elif char == ')':
-                                self.depth = max(0, self.depth - 1)
+                            elif char in self.BREAK:
+                                flush()
+                                words.append(char)
+                                if char == '(':
+                                    self.depth += 1
+                                elif char == ')':
+                                    self.depth = max(0, self.depth - 1)
+                            elif char.isspace():
+                                flush()
+                            else:
+                                word.append(char)
                             i += 1
-                        return (self.single or self.double or self.depth > 0
-                                or bool(cont_re.search(text.rstrip())))
+                        flush()
+                        position = True
+                        for token in words:
+                            if position:
+                                if token in self.OPEN:
+                                    self.expect.append(self.OPEN[token])
+                                elif token in self.CLOSE and self.expect and self.expect[-1] == token:
+                                    self.expect.pop()
+                            position = token in self.COMMAND_AFTER
+                        trailing = bool(cont_re.search(text.rstrip()))
+                        if words and words[-1] in self.BREAK:
+                            trailing = True
+                        return (self.single or self.double or self.depth > 0 or self.tail
+                                or bool(self.expect) or trailing)
 
                 for line in block:
                     if heredoc is not None:
@@ -554,6 +603,18 @@ assert complete_fence(fence("$ awk '/^## 現象/{p=1}' file.md", 'a')) , \
     'balanced quotes in a single command must count as complete'
 assert complete_fence(fence('$ echo "(x)"', 'x')) , \
     'balanced quotes and parentheses must count as complete'
+assert not complete_fence(fence('$ if true; then', '> echo x', '> fi')), \
+    'if/then/fi compound and PS2 lines must not count as output'
+assert not complete_fence(fence('$ for i in a; do', '> echo $i', '> done')), \
+    'for/do/done compound and PS2 lines must not count as output'
+assert not complete_fence(fence('$ { echo a;', '> }')), \
+    'brace group and PS2 line must not count as output'
+assert complete_fence(fence('$ if true; then', '> echo x', '> fi', 'x')), \
+    'compound continuation plus output must count'
+assert complete_fence(fence('$ while read x; do echo $x; done', 'x')), \
+    'a compound on one line must count as complete'
+assert complete_fence(fence('$ grep -w if file', 'if')), \
+    'if as an argument must not open a compound'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
