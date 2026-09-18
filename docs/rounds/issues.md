@@ -365,3 +365,12 @@ grep -n 'show-all' docs/plan.md | cut -c1-60
 grep -c '^7\.' docs/wants.md
 0
 ```
+
+### 十五次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+```
