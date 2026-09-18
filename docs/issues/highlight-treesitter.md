@@ -1,0 +1,54 @@
+# Neovim 用の tree-sitter 文法（highlight-treesitter）
+優先度: 中。
+
+## 現象
+
+`.hd` を開いても色が付かない。対象エディタは Neovim（0.12.5、nvim-treesitter、`vim.treesitter.language.add` で動的に足す設定）。tree-sitter CLI と node は入っている（2026-09-17）。
+
+```
+$ nvim --version | head -1
+NVIM v0.12.5
+$ cat > hl.lua <<'LUA'
+vim.cmd("filetype on")
+vim.filetype.add({ extension = { hd = "hado", hdi = "hado" } })
+vim.treesitter.language.register("lua", "hado")
+vim.cmd("edit main.hd")
+local buf = vim.api.nvim_get_current_buf()
+print("filetype=" .. vim.bo.filetype)
+print("parser=" .. tostring(pcall(vim.treesitter.get_parser, 0)))
+print("active_before_start=" .. tostring(vim.treesitter.highlighter.active[buf] ~= nil))
+vim.treesitter.start()
+print("active_after_start=" .. tostring(vim.treesitter.highlighter.active[buf] ~= nil))
+vim.cmd("qa!")
+LUA
+$ nvim --headless -u NONE -i NONE -l hl.lua
+filetype=hado
+parser=true
+active_before_start=false
+active_after_start=true
+```
+
+filetype と parser は取れるが、`FileType` で `vim.treesitter.start()` を呼ぶまで highlighter は動かない。`queries/hado/highlights.scm` も無いので capture も付かない。
+
+## 原因
+
+文法は `docs/spec.md:2325` の付録C に散文で置かれ、機械可読ではない。`docs/wants.md` 51 は付録C からの生成を想定するが、生成の前に付録C を文法ファイルにする工程が要る。
+
+## 案
+
+- 第一段は手書きの `grammar.js`。字句（付録C の `int` `float` `char` `string` `comment` `name` `upper_name`）、キーワード、見出し（外の `library`、`module` `implement` `effect` `handler`、functor の `implement ... (params)` とその適用）、`shared` 付きの型、`def` の 4 形、`if` の腕、`let`/`do`/`with` の継続、`|>` を覆う。式の優先順位は §7 の表を写す。
+- 置き場は `editors/tree-sitter-hado/`（`grammar.js`、`queries/hado/highlights.scm`）。Neovim への足し方は `README` に `vim.filetype.add({ extension = { hd = "hado", hdi = "hado" } })`、`vim.treesitter.language.add("hado", { path = ... })`、`vim.opt.runtimepath:prepend(".../editors/tree-sitter-hado")`、`FileType` で `vim.treesitter.start()` を呼ぶ autocmd の形で書く。契約の `.hdi` も同じ filetype にする。`language.add` も `runtimepath:prepend` も、文法リポジトリ慣例の `queries/highlights.scm` を Neovim の `queries/hado/highlights.scm` には変えない。`-u NONE` では `query.lua` が runtimepath から `queries/%s/%s.scm` を探すので、query は prepend したディレクトリ直下の `queries/hado/highlights.scm` に置く。`filetype.add` と `language.add` だけではハイライトは始まらない。
+- 門番が使う tree-sitter CLI、必要なら Node、Neovim 0.12.5 は版と checksum を固定する。標準環境から一時ディレクトリへ取得する setup script を置き、その前提となる取得・展開ツールは `AGENTS.md` の環境に足す。門番は PATH 上の偶然の導入ではなく、setup script が返した絶対パスを使う。
+- ずれの検出: 受理コーパス全件と `stdlib/*.hd` を `tree-sitter parse` に通し、`ERROR` ノードも `MISSING` ノードも無いことを門番にする。拒否コーパスの E100 のケースが `ERROR` を持つことは求めない（tree-sitter の文法は寛容でよい）。
+- 付録C からの生成（wants 51）は、手書きで形が固まってから。
+
+## 完了条件
+
+- 受理コーパスと stdlib の全ファイルが `tree-sitter parse` で `ERROR` も `MISSING` も無し。門番は件数を直書きせずディスクの実数を数える。
+- 代表ファイル（`def` の 4 形、`if` の腕、`let`/`do`/`with` の継続、`|>` の優先順位、外の `library`、`module`、本文付きの `implement`、functor の定義、functor の適用、`shared` 付きの型、`effect`、`handler`）の parse 木の node 列を golden として門番に置き、約束した構造がその通りになることを判定する。宣言形は付録C の形ごとに 1 本の golden を置く。`library` は最初の見出しより前の outer_item。`module` は `module Name` のあと抽象型または型付き `def`。本文付きの `implement X as Y` と、`(Name: Contract)` を持つ functor 定義と、`= Functor(Arg)` で本文の無い適用は 3 本を別の node 列にする。`shared type T = ...` は `implement` 本文の等式で、`shared` の無い `type T = ...` では満たさない。`effect` は `once`/`abort`/`again` の操作、`handler` は `as` と腕。適用を本文付き `implement` や functor 定義と同じ node にする文法、`shared` を通常の type 実体化と同じ node にする文法、`implement` と `handler` だけの golden、キーワードと文字列の extmark だけ、catch-all の 1 節では通らない。加えて、§7 の優先順位（`docs/spec.md:294`）の各境界に node 列の golden を 1 本ずつ置く。`1 + 2 * 3` と `1 * 2 + 3` は `+` の下に `*`、`a |> b |> c` は左結合、`-f x` は単項 `-` の下に適用、`a.b c` は適用の下に field access、`not a && b` は `&&` の下に `not`、`a && b || c` は `||` の下に `&&`、`a + b == c` は `==` の下に `+` になる。隣り合う境界も落とさない。`-a * b` は `*` の下に単項 `-`（`-` の下に `*` を置く文法では通らない）、`a < b && c < d` は `&&` の下に 2 つの `<`（`&&` を比較の下に置く文法では通らない）、`a || b |> c` は `|>` の下に `||`（`|>` を最も低い位置から動かす文法では通らない）になる。同じ高さが続く演算子は、`|>` だけでなく付録C の反復する各段（`a - b - c` は `-` の下に `-`、`a / b / c` は `/` の下に `/`、`a && b && c` は `&&` の下に `&&`、`a || b || c` は `||` の下に `||`）でも左結合の node 列を測る。付録C が反復を許す各段で左結合を測らない門番、`a - b - c` や `a / b / c` を右結合にする文法では通らない。比較の非結合は `a < b < c` の parse 木が `ERROR` を含む golden で測る（いまの実装は `E100` を出す。`docs/spec.md:294`）。`|>` 1 本だけの golden、二項演算子を 1 つの高さにする文法、比較を左結合にする文法、単項と適用の順序を入れ替える文法では通らない。
+- `nvim --headless` で `.hd` と `.hdi` をそれぞれ通常どおり開き、`vim.bo.filetype == "hado"`、言語を明示しない `vim.treesitter.get_parser(0)` が返ること、`vim.treesitter.query.get("hado", "highlights")` が runtimepath の `queries/hado/highlights.scm` から引けること、そのバッファで highlighter が active で、約束した字句のそれぞれのトークン範囲に highlight の extmark が実際に付き、extmark の highlight group がその字句の約束した capture の名前（`@comment`・`@number`・`@string`・`@character`・`@variable`・`@type`・`@constructor`・`@keyword` など。`queries/hado/highlights.scm` が capture ごとに 1 つの group を決め、門番はその対応表を query から読む）と一致することを順に判定する。字句はキーワードと文字列に加え、付録C のコメント（`//` から行末）、`int`（`digit+`。文字列やコメントの中の数字では満たさない）、`float`（`digit+ "." digit+`。`int` だけでは満たさない）、`char`、`name`（小文字の識別子。キーワードでは満たさない）、型の `upper_name` と constructor の `upper_name` を別のトークンで測る。`--` と `#` は E104、`{- -}` は付録C に無いのでコメントの探針にしない。文字列と文字のリテラルは、付録C の正しいエスケープ（文字列の `\n` `\t` `\\` `\"`、文字の `\n` `\t` `\\` `\'`）をそれぞれ含むトークンでも、受理コーパスと `stdlib/` にエスケープ付きのリテラルが無くても、parse 木に `ERROR` / `MISSING` が出ず、その字句に extmark が付くことを測る（エスケープを受理しない文法では通らない）。`highlighter.active` だけ、capture の照会だけ、キーワードと文字列だけの extmark、コメント探針を `--` や `{- -}` にする門番、ファイル全体や行全体を覆う 1 つの extmark、どれか 1 つの字句を欠く query、全ての字句を同じ capture（`@string` 1 つなど）にする query、型と constructor を同じ capture にする query、extmark の範囲だけを見て group を見ない門番では通らない。
+- `AGENTS.md` の環境だけを入れた clean checkout で setup script を実行した後、tree-sitter CLI と Neovim の版・checksum が固定値と一致し、上の 2 本が緑。既に PATH に同名のツールがあっても使わない。
+
+## 由来
+
+`docs/wants.md` 14、51。付録C、§7。

@@ -1275,3 +1275,16 @@ R38 の全走は 81 分、本節の実測でも 76.8 分かかった。原因は
 ### 報告
 
 (1) 34-a〜34-i の実測（コマンドと出力の末尾）、(2) 赤の一覧と理由、(3) `git log --oneline` の増分と `git status --short`、(4) 仕様への疑義、審査の指摘と対応、迷った点。
+
+## 35. v0.5 の範囲と決定（2026-09-17）
+
+slug `prelude-tail-recursion`、`highlight-treesitter`、`lsp-minimal` を次の版にする。着手前の根拠は各 `docs/issues/<slug>.md` の現象欄、着手後の手順と実測は `docs/rounds/<slug>.md` が持つ。順は prelude → highlight → lsp で、lsp の門番が highlight のファイルタイプ判定に乗る。判断基準は 7 節と同じ（迷ったら拒否、新機能は最小形）。
+
+| ID | 論点 | 決定 | 仕様の節 |
+|---|---|---|---|
+| P1 | prelude の再帰 | `stdlib/` の非末尾再帰を累積 + `reverse` の末尾形にする。新しい言語構成は足さない。`map` と `filter` は先頭から順に適用すると書く（`filter` の適用順が変わり、§55 に足す仕様変更になる）。添字が取れる列（Array・Bytes・argv・`read_dir`）は末尾から先頭へ累積して `reverse` を省く（同じ末尾形。slug `prelude-tail-recursion`）。`sort` は奇数位置（1 番目、3 番目、…）の部分列を偶数位置（2 番目、4 番目、…）の部分列より先に整列してから `merge` し、`merge` は左の先頭と右の先頭を比べる順に比較子を呼ぶことを §55 に書く（`stdlib/list.hd:22-23` の `odds` / `evens` と `:31` の適用順をそのまま仕様にする。効果を持つ比較子の痕跡が一意になる） | §55 |
+| L1 | 診断の件数 | `--show-all` を opt-in で足す。同じ段階の全件をアンカー順に出す。E1xx と E3xx の致命は 1 件のまま。既定と拒否コーパスの判定は変えない | §56, §58.4 |
+| L2 | 止まった後の型 | 冗長・網羅性・契約の検査で止まっていても型を返す。`--print-type` と LSP の hover は同じ意味。字句・構文・名前解決・型の致命で止まったときは型が無い | §58.3 |
+| L3 | サーバの形 | `hado lsp` サブコマンド。JSON-RPC は `serde_json` で書く。機能は診断・hover（最上位の `def`）・正準形への code action の 3 つ。補完は入れない | §58 |
+| L4 | 診断の位置 | `--format json` に終端の位置を足す | §58.4 |
+| H1 | ハイライト | Neovim 用の手書き tree-sitter 文法を `editors/tree-sitter-hado/` に置く。受理コーパスと stdlib が `ERROR` 無しで読めることを門番にする。付録C からの生成は形が固まってから | 付録C |
