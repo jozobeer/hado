@@ -8,10 +8,7 @@ fn unify_substitutes_nested_types() {
         vec![variable.clone()],
         Ty::Adt("Option".into(), vec![variable]),
     );
-    let concrete = Ty::fn_of(
-        vec![Ty::Int],
-        Ty::Adt("Option".into(), vec![Ty::Int]),
-    );
+    let concrete = Ty::fn_of(vec![Ty::Int], Ty::Adt("Option".into(), vec![Ty::Int]));
     inference.unify(&generic, &concrete).unwrap();
     assert_eq!(inference.resolve(&generic), concrete);
     assert_eq!(
@@ -68,17 +65,30 @@ fn constrained_scheme_instantiates_predicate_with_function_type() {
     let variable = inference.fresh();
     let function = hado::types::Ty::fn_of(vec![variable.clone()], hado::types::Ty::Bool);
     let origin = Some(hado::lexer::Span { line: 7, col: 13 });
-    let scheme = inference.generalize_constrained(&function, &[], &[hado::types::ComparisonConstraint { ty: variable, code: "E704", span: origin }], &[]);
+    let scheme = inference.generalize_constrained(
+        &function,
+        &[],
+        &[hado::types::ComparisonConstraint {
+            ty: variable,
+            code: "E704",
+            span: origin,
+        }],
+        &[],
+    );
     let (first, constraints, _) = inference.instantiate_constrained(&scheme);
     let hado::types::Ty::Fn(args, _, _) = first else {
         panic!("expected function")
     };
-    assert_eq!(constraints, vec![hado::types::ComparisonConstraint { ty: args[0].clone(), code: "E704", span: origin }]);
-    let (second, _, _) = inference.instantiate_constrained(&scheme);
-    assert_ne!(
-        second,
-        hado::types::Ty::fn_of(args, hado::types::Ty::Bool)
+    assert_eq!(
+        constraints,
+        vec![hado::types::ComparisonConstraint {
+            ty: args[0].clone(),
+            code: "E704",
+            span: origin
+        }]
     );
+    let (second, _, _) = inference.instantiate_constrained(&scheme);
+    assert_ne!(second, hado::types::Ty::fn_of(args, hado::types::Ty::Bool));
 }
 
 #[test]

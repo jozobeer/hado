@@ -54,30 +54,53 @@ fn bytes_length_rejects_string() {
 #[test]
 fn runtime_declarations_expose_bytes_symbols() {
     use hado::runtime_abi::{AbiType, RuntimeFunction};
-    assert_eq!(RuntimeFunction::BytesLength.declaration().symbol, "hado_bytes_length");
-    assert_eq!(RuntimeFunction::BytesGet.declaration().symbol, "hado_bytes_get");
-    assert_eq!(RuntimeFunction::BytesIsUtf8.declaration().symbol, "hado_bytes_is_utf8");
-    assert_eq!(RuntimeFunction::BytesDisplay.declaration().symbol, "hado_bytes_display");
-    assert_eq!(RuntimeFunction::BytesOfString.declaration().symbol, "hado_bytes_of_string");
+    assert_eq!(
+        RuntimeFunction::BytesLength.declaration().symbol,
+        "hado_bytes_length"
+    );
+    assert_eq!(
+        RuntimeFunction::BytesGet.declaration().symbol,
+        "hado_bytes_get"
+    );
+    assert_eq!(
+        RuntimeFunction::BytesIsUtf8.declaration().symbol,
+        "hado_bytes_is_utf8"
+    );
+    assert_eq!(
+        RuntimeFunction::BytesDisplay.declaration().symbol,
+        "hado_bytes_display"
+    );
+    assert_eq!(
+        RuntimeFunction::BytesOfString.declaration().symbol,
+        "hado_bytes_of_string"
+    );
     assert_eq!(
         RuntimeFunction::BytesToStringUnchecked.declaration().symbol,
         "hado_bytes_to_string_unchecked"
     );
-    assert_eq!(RuntimeFunction::BytesAlloc.declaration().symbol, "hado_bytes_alloc");
+    assert_eq!(
+        RuntimeFunction::BytesAlloc.declaration().symbol,
+        "hado_bytes_alloc"
+    );
     assert_eq!(
         RuntimeFunction::BytesFillUnchecked.declaration().symbol,
         "hado_bytes_fill_unchecked"
     );
-    assert_eq!(RuntimeFunction::BytesIsUtf8.declaration().result, Some(AbiType::I8));
+    assert_eq!(
+        RuntimeFunction::BytesIsUtf8.declaration().result,
+        Some(AbiType::I8)
+    );
 }
 
 #[test]
 fn utf8_case_count_is_seed_independent() {
     let generator = include_str!("../../../scripts/verify-r34.sh")
         .split_once("# BEGIN UTF8 CASE GENERATOR\n")
-        .unwrap().1
+        .unwrap()
+        .1
         .split_once("# END UTF8 CASE GENERATOR")
-        .unwrap().0;
+        .unwrap()
+        .0;
     let output = std::process::Command::new("python3")
         .arg("-c")
         .arg(format!(
@@ -94,16 +117,24 @@ assert len(counts) == 1, counts
         ))
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
 fn string_probe_classes_cover_all_utf8_widths() {
     let generator = include_str!("../../../scripts/verify-r34.sh")
-        .split_once("# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n")
-        .unwrap().1
+        .split_once(
+            "# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n",
+        )
+        .unwrap()
+        .1
         .split_once("with open(os.path.join(base, \"manifest.tsv\"), \"w\")")
-        .unwrap().0;
+        .unwrap()
+        .0;
     let output = std::process::Command::new("python3")
         .arg("-c")
         .arg(format!(r#"
@@ -171,19 +202,28 @@ assert len(counts) == 1, counts
 "#))
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
 fn string_generator_rejects_surrogates_before_generating_probes() {
     let generator = include_str!("../../../scripts/verify-r34.sh")
-        .split_once("# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n")
-        .unwrap().1
+        .split_once(
+            "# 34-a / 34-b: Unicode の索引と境界を分類から生成し、Python を oracle にする。\n",
+        )
+        .unwrap()
+        .1
         .split_once("strings = {")
-        .unwrap().0;
+        .unwrap()
+        .0;
     let output = std::process::Command::new("python3")
         .arg("-c")
-        .arg(format!(r#"
+        .arg(format!(
+            r#"
 import random
 for scalar in (0xd800, 0xdbff, 0xdc00, 0xdfff):
     random.randint = lambda lower, upper: scalar
@@ -192,10 +232,15 @@ for scalar in (0xd800, 0xdbff, 0xdc00, 0xdfff):
     except UnicodeEncodeError:
         continue
     raise AssertionError(f'generator accepted surrogate U+{{scalar:04X}}')
-"#))
+"#
+        ))
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn write_utf8_cases(path: &std::path::Path) {
@@ -243,7 +288,9 @@ fn bytes_is_utf8_and_display_at_the_c_level() {
     let source = dir.join("test.c");
     let object = dir.join("test.o");
     let executable = dir.join("test");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 #include "hado_runtime.h"
 #include <assert.h>
 #include <string.h>
@@ -292,11 +339,24 @@ int32_t hado_entry(void) {
     assert(memcmp(empty_display->bytes, "Bytes.of_list []", empty_display->length) == 0);
     return 0;
 }
-"#).unwrap();
-    let status = std::process::Command::new("cc").args(["-std=c11", "-Wall", "-Werror", "-c"]).arg(&source).arg("-I").arg(root.join("runtime")).arg("-o").arg(&object).status().unwrap();
+"#,
+    )
+    .unwrap();
+    let status = std::process::Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Werror", "-c"])
+        .arg(&source)
+        .arg("-I")
+        .arg(root.join("runtime"))
+        .arg("-o")
+        .arg(&object)
+        .status()
+        .unwrap();
     assert!(status.success());
     hado::link_executable(&object, &executable).unwrap();
-    assert!(std::process::Command::new(executable).status().unwrap().success());
+    assert!(std::process::Command::new(executable)
+        .status()
+        .unwrap()
+        .success());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -310,12 +370,20 @@ fn string_intrinsics_use_scalar_indices_at_the_c_level() {
     let object = dir.join("test.o");
     let status = std::process::Command::new("cc")
         .args(["-std=c11", "-Wall", "-Werror", "-c"])
-        .arg(&source).arg("-I").arg(root.join("runtime"))
-        .arg("-o").arg(&object).status().unwrap();
+        .arg(&source)
+        .arg("-I")
+        .arg(root.join("runtime"))
+        .arg("-o")
+        .arg(&object)
+        .status()
+        .unwrap();
     assert!(status.success());
     let executable = dir.join("test");
     hado::link_executable(&object, &executable).unwrap();
-    assert!(std::process::Command::new(executable).status().unwrap().success());
+    assert!(std::process::Command::new(executable)
+        .status()
+        .unwrap()
+        .success());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -324,16 +392,27 @@ fn string_operations_probe() -> String {
     for text in ["", "ababa", "éあ😀あ", "a\0éあ😀\0a"] {
         code.push_str("{\n");
         code.push_str(&c_string_value("value", text));
-        let boundaries: Vec<_> = text.char_indices().map(|(offset, _)| offset)
-            .chain(std::iter::once(text.len())).collect();
+        let boundaries: Vec<_> = text
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(text.len()))
+            .collect();
         for (index, scalar) in text.chars().enumerate() {
-            code.push_str(&format!("assert(hado_string_get(value, {index}) == {});\n", scalar as u32));
+            code.push_str(&format!(
+                "assert(hado_string_get(value, {index}) == {});\n",
+                scalar as u32
+            ));
         }
         for start in 0..boundaries.len() {
             for end in start..boundaries.len() {
                 code.push_str("{\n");
-                code.push_str(&c_string_value("expected", &text[boundaries[start]..boundaries[end]]));
-                code.push_str(&format!("HadoString *actual = hado_string_slice(value, {start}, {end});\n"));
+                code.push_str(&c_string_value(
+                    "expected",
+                    &text[boundaries[start]..boundaries[end]],
+                ));
+                code.push_str(&format!(
+                    "HadoString *actual = hado_string_slice(value, {start}, {end});\n"
+                ));
                 code.push_str("assert(actual != value);\nassert(actual->length == expected->length);\nassert(memcmp(actual->bytes, expected->bytes, expected->length) == 0);\n}\n");
             }
         }
@@ -345,20 +424,39 @@ fn string_operations_probe() -> String {
 }
 
 fn c_string_value(name: &str, text: &str) -> String {
-    let bytes = text.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
+    let bytes = text
+        .bytes()
+        .map(|byte| byte.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     format!("struct {{ size_t length; unsigned char bytes[{}]; }} {name}_storage = {{{}, {{{}}}}};\nconst HadoString *{name} = (const HadoString *)&{name}_storage;\n",
         text.len().max(1), text.len(), if text.is_empty() { "0" } else { &bytes })
 }
 
 fn string_find_assertions(text: &str, boundaries: &[usize]) -> String {
     let mut code = String::new();
-    for separator in ["a", "aba", "é", "あ", "😀", "あ😀", "\0", "\0a", "Z", "longer than the input"] {
+    for separator in [
+        "a",
+        "aba",
+        "é",
+        "あ",
+        "😀",
+        "あ😀",
+        "\0",
+        "\0a",
+        "Z",
+        "longer than the input",
+    ] {
         code.push_str("{\n");
         code.push_str(&c_string_value("separator", separator));
         for (from, byte) in boundaries.iter().enumerate() {
-            let expected = text[*byte..].find(separator)
-                .map(|offset| text[..byte + offset].chars().count() as i64).unwrap_or(-1);
-            code.push_str(&format!("assert(hado_string_find(value, separator, {from}) == {expected});\n"));
+            let expected = text[*byte..]
+                .find(separator)
+                .map(|offset| text[..byte + offset].chars().count() as i64)
+                .unwrap_or(-1);
+            code.push_str(&format!(
+                "assert(hado_string_find(value, separator, {from}) == {expected});\n"
+            ));
         }
         code.push_str("}\n");
     }

@@ -9,11 +9,24 @@ fn every_user_declaration_kind_is_checked_for_reachability() {
             format!("module Unused{padding} def value(x: Int): Int"),
             format!("implement S as M{padding} def value x => x + 1"),
         ] {
-            let contract = if declaration.starts_with("implement") { "module S def value(x: Int): Int" } else { "" };
-            let source = format!("def main = 1\n{}{declaration}\n{contract}", " ".repeat(padding));
-            let error = check_source(&source, "unused.hd").err().expect("unused declaration accepted");
+            let contract = if declaration.starts_with("implement") {
+                "module S def value(x: Int): Int"
+            } else {
+                ""
+            };
+            let source = format!(
+                "def main = 1\n{}{declaration}\n{contract}",
+                " ".repeat(padding)
+            );
+            let error = check_source(&source, "unused.hd")
+                .err()
+                .expect("unused declaration accepted");
             assert_eq!(error.code.as_deref(), Some("E513"), "{source}: {error}");
-            assert_eq!((error.line, error.col), (2, padding + 1), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (2, padding + 1),
+                "{source}: {error}"
+            );
         }
     }
 }
@@ -56,10 +69,17 @@ fn definitions_and_modules_follow_dependencies_in_any_source_order() {
         for reverse in [false, true] {
             let mut items = declarations.to_vec();
             items.rotate_left(rotation);
-            if reverse { items.reverse(); }
-            let (sections, outer): (Vec<_>, Vec<_>) = items.into_iter().partition(|item| item.starts_with("module") || item.starts_with("implement"));
+            if reverse {
+                items.reverse();
+            }
+            let (sections, outer): (Vec<_>, Vec<_>) = items
+                .into_iter()
+                .partition(|item| item.starts_with("module") || item.starts_with("implement"));
             let source = format!("{}\n{}", outer.join("\n"), sections.join("\n"));
-            assert_eq!(check_source(&source, "dependencies.hd").unwrap().main, hado::types::Ty::Int);
+            assert_eq!(
+                check_source(&source, "dependencies.hd").unwrap().main,
+                hado::types::Ty::Int
+            );
         }
     }
 }
@@ -72,8 +92,16 @@ fn module_calls_to_outer_definitions_execute() {
     let path = dir.join("main.hd");
     let source = "def main = M.run 20\n\ndef add x => x + 1\nimplement S as M def run x => add (add x)\nmodule S def run(x: Int): Int";
     std::fs::write(&path, source).unwrap();
-    let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
-    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let built = Command::new(env!("CARGO_BIN_EXE_hado"))
+        .arg("build")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = Command::new(path.with_extension("")).output().unwrap();
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stdout, b"22\n");

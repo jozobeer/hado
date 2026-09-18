@@ -1,4 +1,4 @@
-use hado::lexer::{TokKind, lex_full};
+use hado::lexer::{lex_full, TokKind};
 use hado::parser::parse_source;
 
 #[test]
@@ -9,7 +9,10 @@ fn module_declarations_are_top_level_only() {
             "module Inner",
             "implement S as Inner def broken = )",
         ] {
-            let prefix = format!("def main = 1\nmodule S\nimplement S as Outer def run x => (\n{}", " ".repeat(padding));
+            let prefix = format!(
+                "def main = 1\nmodule S\nimplement S as Outer def run x => (\n{}",
+                " ".repeat(padding)
+            );
             let source = format!("{prefix}{nested})");
             let error = parse_source(&source, "nested-module.hd").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
@@ -234,7 +237,14 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
         "def main = 1 + if true => 2 | 3",
         "def main = - if true => 2 | 3",
     ] {
-        assert_eq!(parse_source(source, "generated").unwrap_err().code.as_deref(), Some("E100"), "{source}");
+        assert_eq!(
+            parse_source(source, "generated")
+                .unwrap_err()
+                .code
+                .as_deref(),
+            Some("E100"),
+            "{source}"
+        );
     }
     for source in [
         "def main = f fn(x => x)",
@@ -251,7 +261,8 @@ fn integer_field_receivers_remain_separate_from_float_tokens() {
         let source = format!("def main = {value} . field{value}");
         let ast = parse_source(&source, "generated").unwrap();
         let normal = hado::parser::canonical_program(&ast);
-        let restored = parse_source(&normal, "normalized").unwrap_or_else(|error| panic!("{error}: {normal}"));
+        let restored =
+            parse_source(&normal, "normalized").unwrap_or_else(|error| panic!("{error}: {normal}"));
         assert_eq!(ast.main(), restored.main());
     }
 }
@@ -261,14 +272,21 @@ fn implementation_aliases_only_realize_declared_abstract_types() {
     for index in 0..20 {
         let prefix = format!("implement S{index} as M{index} type ");
         for body in ["Int", "Int List", "Fn(Int => Int)", "Other.T"] {
-            let source = format!("def main = 1\n{prefix}Extra{index} = {body}\nmodule S{index} type T");
+            let source =
+                format!("def main = 1\n{prefix}Extra{index} = {body}\nmodule S{index} type T");
             parse_source(&source, "generated").unwrap();
             let error = hado::check_source(&source, "generated").err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
             assert_eq!((error.line, error.col), (2, prefix.len() + 1));
         }
-        for body in ["type T = Int", "type Private = | Wrap(Int) type T = Private", "type Private = { value: Int } type T = Private"] {
-            let source = format!("def main = 1\nimplement S{index} as M{index} {body}\nmodule S{index} type T");
+        for body in [
+            "type T = Int",
+            "type Private = | Wrap(Int) type T = Private",
+            "type Private = { value: Int } type T = Private",
+        ] {
+            let source = format!(
+                "def main = 1\nimplement S{index} as M{index} {body}\nmodule S{index} type T"
+            );
             parse_source(&source, "generated").unwrap_or_else(|error| panic!("{error}: {source}"));
         }
     }
@@ -281,7 +299,13 @@ fn abstract_aliases_reject_legacy_type_parameter_spelling() {
         let source = format!("{prefix}<A> = A List");
         let error = parse_source(&source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-        assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1));
+        assert_eq!(
+            (error.line, error.col),
+            (
+                prefix.lines().count(),
+                prefix.rsplit('\n').next().unwrap().len() + 1
+            )
+        );
     }
 }
 
@@ -294,7 +318,10 @@ fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
     assert_eq!((error.line, error.col), (2, prefix.len() + 1));
     for (source, code) in [
         ("def main = 1\nimplement Missing as M type T = Int", "E204"),
-        ("def main = 1\nmodule S type T\nmodule S\nimplement S as M type T = Int", "E205"),
+        (
+            "def main = 1\nmodule S type T\nmodule S\nimplement S as M type T = Int",
+            "E205",
+        ),
     ] {
         let error = hado::check_source(source, "generated").err().unwrap();
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
@@ -307,13 +334,23 @@ fn syntax_errors_precede_alias_name_errors_across_section_boundaries() {
         for broken in ["def broken = [)", "def broken x => [)"] {
             let signature = "module S type T";
             let implementation = format!("implement S as M type Extra = Int {broken}");
-            let sections = if signature_first { format!("{signature}\n{implementation}") }
-                else { format!("{implementation}\n{signature}") };
+            let sections = if signature_first {
+                format!("{signature}\n{implementation}")
+            } else {
+                format!("{implementation}\n{signature}")
+            };
             let source = format!("def main = 1\n{sections}");
             let error = hado::check_source(&source, "generated").err().unwrap();
             let before = &source[..source.find(')').unwrap()];
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-            assert_eq!((error.line, error.col), (before.lines().count(), before.rsplit('\n').next().unwrap().len() + 1), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (
+                    before.lines().count(),
+                    before.rsplit('\n').next().unwrap().len() + 1
+                ),
+                "{source}: {error}"
+            );
         }
     }
     let source = "def main = [)\nimplement List as M type Extra = Int";
@@ -334,7 +371,10 @@ fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
     }
     let source = "implement S as M type T = Int\nmodule S type T def broken(x: Int) Int";
     let error = parse_source(source, "generated").unwrap_err();
-    assert_eq!(error.line, 2, "an incomplete signature cannot prove an alias invalid: {error}");
+    assert_eq!(
+        error.line, 2,
+        "an incomplete signature cannot prove an alias invalid: {error}"
+    );
     for source in [
         "module S type T\nimplement S as M type T = Int def broken = [)",
         "module S type T\nimplement S as M type T =",
@@ -359,7 +399,11 @@ fn legacy_alias_parameters_precede_a_malformed_alias_body() {
     let source = format!("{prefix}<A> = (Int, ) List");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
-    assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+    assert_eq!(
+        (error.line, error.col),
+        (2, prefix.rsplit('\n').next().unwrap().len() + 1),
+        "{error}"
+    );
 }
 
 #[test]
@@ -368,7 +412,11 @@ fn malformed_alias_body_precedes_alias_name_resolution() {
     let source = format!("{prefix}(Int, ) Result\nmodule S type T");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
-    assert_eq!((error.line, error.col), (1, prefix.len() + "(Int, ".len() + 1), "{error}");
+    assert_eq!(
+        (error.line, error.col),
+        (1, prefix.len() + "(Int, ".len() + 1),
+        "{error}"
+    );
 }
 
 #[test]
@@ -384,13 +432,23 @@ fn functor_and_application_lists_require_uppercase_nonempty_items() {
         ("implement S as A = Make(I, ", ")"),
     ] {
         for padding in 0..5 {
-            let source = format!("{}{}{}{}", "\n".repeat(padding % 3), prefix, " ".repeat(padding), invalid);
+            let source = format!(
+                "{}{}{}{}",
+                "\n".repeat(padding % 3),
+                prefix,
+                " ".repeat(padding),
+                invalid
+            );
             let error = parse_source(&source, "functor-list.hd").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
             assert_eq!(error.path, "functor-list.hd");
             let unit = padding == 0 && prefix.ends_with('(') && invalid == ")";
             let column = prefix.len() + padding + 1 - usize::from(unit);
-            assert_eq!((error.line, error.col), (padding % 3 + 1, column), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (padding % 3 + 1, column),
+                "{source}: {error}"
+            );
         }
     }
 }
@@ -406,10 +464,17 @@ fn applications_end_before_the_next_section_and_cannot_have_items() {
             assert_eq!(error.path, "application-body.hd");
             assert_eq!((error.line, error.col), (2, padding + 1));
         }
-        for section in ["module Next", "implement S as Next", "implement S as Next(P: S)", "implement S as Next = Make(J)"] {
+        for section in [
+            "module Next",
+            "implement S as Next",
+            "implement S as Next(P: S)",
+            "implement S as Next = Make(J)",
+        ] {
             let source = format!("{prefix}{section}");
             let ast = parse_source(&source, "application-section.hd").unwrap();
-            assert!(matches!(&ast.items[0], hado::parser::Item::ModuleImpl(module) if matches!(module.form, hado::parser::ImplementationForm::Application { .. }) && module.items.is_empty()));
+            assert!(
+                matches!(&ast.items[0], hado::parser::Item::ModuleImpl(module) if matches!(module.form, hado::parser::ImplementationForm::Application { .. }) && module.items.is_empty())
+            );
             assert_eq!(ast.items.len(), 2);
         }
     }
@@ -417,23 +482,53 @@ fn applications_end_before_the_next_section_and_cannot_have_items() {
 
 #[test]
 fn functor_forms_preserve_generated_names_and_argument_order() {
-    use hado::parser::{ImplementationForm, Item, canonical_program};
+    use hado::parser::{canonical_program, ImplementationForm, Item};
     for count in 1..4 {
         let params: Vec<_> = (0..count).map(|i| format!("P{i}: S{i}")).collect();
         let arguments: Vec<_> = (0..count).rev().map(|i| format!("I{i}")).collect();
-        let source = format!("implement Result as Make({}) type T = Int\nimplement Result as Applied = Make({})", params.join(", "), arguments.join(", "));
+        let source = format!(
+            "implement Result as Make({}) type T = Int\nimplement Result as Applied = Make({})",
+            params.join(", "),
+            arguments.join(", ")
+        );
         let ast = parse_source(&source, "functor-forms.hd").unwrap();
         for source in [&source, &canonical_program(&ast)] {
             let ast = parse_source(source, "functor-forms.hd").unwrap();
-            let Item::ModuleImpl(definition) = &ast.items[0] else { panic!("missing functor"); };
-            let ImplementationForm::Functor(actual) = &definition.form else { panic!("functor form lost"); };
+            let Item::ModuleImpl(definition) = &ast.items[0] else {
+                panic!("missing functor");
+            };
+            let ImplementationForm::Functor(actual) = &definition.form else {
+                panic!("functor form lost");
+            };
             assert_eq!(definition.name, "Make");
-            assert_eq!(actual.iter().map(|param| (param.name.clone(), param.contract.clone())).collect::<Vec<_>>(), (0..count).map(|i| (format!("P{i}"), format!("S{i}"))).collect::<Vec<_>>());
-            let Item::ModuleImpl(application) = &ast.items[1] else { panic!("missing application"); };
-            let ImplementationForm::Application { functor, arguments: actual } = &application.form else { panic!("application form lost"); };
+            assert_eq!(
+                actual
+                    .iter()
+                    .map(|param| (param.name.clone(), param.contract.clone()))
+                    .collect::<Vec<_>>(),
+                (0..count)
+                    .map(|i| (format!("P{i}"), format!("S{i}")))
+                    .collect::<Vec<_>>()
+            );
+            let Item::ModuleImpl(application) = &ast.items[1] else {
+                panic!("missing application");
+            };
+            let ImplementationForm::Application {
+                functor,
+                arguments: actual,
+            } = &application.form
+            else {
+                panic!("application form lost");
+            };
             assert_eq!(application.name, "Applied");
             assert_eq!(functor.name, "Make");
-            assert_eq!(actual.iter().map(|argument| argument.name.clone()).collect::<Vec<_>>(), arguments);
+            assert_eq!(
+                actual
+                    .iter()
+                    .map(|argument| argument.name.clone())
+                    .collect::<Vec<_>>(),
+                arguments
+            );
             assert!(application.items.is_empty());
         }
     }

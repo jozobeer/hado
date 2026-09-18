@@ -27,7 +27,12 @@ fn covers_shape(previous: &PatternShape, next: &PatternShape) -> bool {
                 && left.iter().zip(right).all(|(a, b)| covers_shape(a, b))
         }
         (PatternShape::NamedConstructor(a, left), PatternShape::NamedConstructor(b, right)) => {
-            a == b && left.iter().all(|(field, pattern)| right.get(field).is_some_and(|other| covers_shape(pattern, other)))
+            a == b
+                && left.iter().all(|(field, pattern)| {
+                    right
+                        .get(field)
+                        .is_some_and(|other| covers_shape(pattern, other))
+                })
         }
         (PatternShape::Record(left), PatternShape::Record(right)) => {
             left.iter().all(|(field, pattern)| {
@@ -67,7 +72,9 @@ fn pattern_shape(pattern: &Pattern) -> PatternShape {
                 .collect();
             if let PatternKind::NamedConstructor(name, _) = &pattern.kind {
                 PatternShape::NamedConstructor(name.name.clone(), fields)
-            } else { PatternShape::Record(fields) }
+            } else {
+                PatternShape::Record(fields)
+            }
         }
     }
 }
@@ -82,10 +89,13 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
         (_, NodeKind::List(items, tail)) => rebuilds_list(pattern, items, tail.as_deref()),
         (PatternKind::Name(a), NodeKind::Name(b)) => a == b,
         (PatternKind::Literal(a), _) => same_expression(a, node),
-        (PatternKind::NamedConstructor(pattern_name, patterns), NodeKind::NamedConstructor(value_name, fields)) => {
-            pattern_name.name == value_name.name && rebuilds_fields(patterns, fields)
+        (
+            PatternKind::NamedConstructor(pattern_name, patterns),
+            NodeKind::NamedConstructor(value_name, fields),
+        ) => pattern_name.name == value_name.name && rebuilds_fields(patterns, fields),
+        (PatternKind::Record(patterns), NodeKind::Record(fields)) => {
+            rebuilds_fields(patterns, fields)
         }
-        (PatternKind::Record(patterns), NodeKind::Record(fields)) => rebuilds_fields(patterns, fields),
         (PatternKind::Constructor(name, patterns), NodeKind::Call(callee, args)) => {
             matches!(&callee.kind, NodeKind::Name(called) if called == name)
                 && patterns.len() == args.len()
@@ -98,7 +108,10 @@ pub fn rebuilds_pattern(pattern: &Pattern, node: &Node) -> bool {
     }
 }
 
-fn rebuilds_fields(patterns: &[(crate::parser::DeclaredName, Option<Pattern>)], fields: &[(crate::parser::DeclaredName, Node)]) -> bool {
+fn rebuilds_fields(
+    patterns: &[(crate::parser::DeclaredName, Option<Pattern>)],
+    fields: &[(crate::parser::DeclaredName, Node)],
+) -> bool {
     patterns.len() == fields.len() && patterns.iter().all(|(name, pattern)| {
         fields.iter().find(|(field, _)| field.name == name.name).is_some_and(|(_, value)| match pattern {
             Some(pattern) => rebuilds_pattern(pattern, value),
@@ -114,9 +127,13 @@ fn rebuilds_list(pattern: &Pattern, items: &[Node], tail: Option<&Node>) -> bool
             None => matches!(&pattern.kind, PatternKind::Name(name) if name == "Nil"),
         };
     };
-    let PatternKind::Constructor(name, parts) = &pattern.kind else { return false; };
-    name == "Cons" && parts.len() == 2
-        && rebuilds_pattern(&parts[0], head) && rebuilds_list(&parts[1], rest, tail)
+    let PatternKind::Constructor(name, parts) = &pattern.kind else {
+        return false;
+    };
+    name == "Cons"
+        && parts.len() == 2
+        && rebuilds_pattern(&parts[0], head)
+        && rebuilds_list(&parts[1], rest, tail)
 }
 
 fn normalized(node: &Node) -> Node {
@@ -220,7 +237,9 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
             }
         }
         NodeKind::NamedConstructor(_, fields) => {
-            for (_, value) in fields { rename(value, scope, next); }
+            for (_, value) in fields {
+                rename(value, scope, next);
+            }
         }
         NodeKind::Record(fields) => {
             fields.sort_by(|a, b| a.0.name.cmp(&b.0.name));

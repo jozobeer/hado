@@ -1,8 +1,13 @@
 mod functors;
 mod named;
 use crate::parser::{Ast, BinOp, DefKind, Diagnostic, Item, Node, NodeKind, Span};
-use crate::parser::{DeclaredName, EffectRow, FieldName, HandlerArm, HandlerDecl, OpKind, Param, Pattern, PatternKind, TypeExpr, TypeKind};
-use crate::types::{ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError, TypeRealization};
+use crate::parser::{
+    DeclaredName, EffectRow, FieldName, HandlerArm, HandlerDecl, OpKind, Param, Pattern,
+    PatternKind, TypeExpr, TypeKind,
+};
+use crate::types::{
+    ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError, TypeRealization,
+};
 use crate::Checked;
 use std::collections::{HashMap, HashSet};
 
@@ -63,8 +68,16 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
     check_ast_with_prelude(ast, path, None)
 }
 
-pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>) -> Result<Checked, Diagnostic> {
-    let inspection = if crate::has_main_definition(ast) { crate::Inspection::Entry } else { crate::Inspection::Library };
+pub(crate) fn check_ast_with_prelude(
+    ast: &Ast,
+    path: &str,
+    trusted_start: Option<usize>,
+) -> Result<Checked, Diagnostic> {
+    let inspection = if crate::has_main_definition(ast) {
+        crate::Inspection::Entry
+    } else {
+        crate::Inspection::Library
+    };
     let (checked, deferred) = infer_with_diagnostics(ast, path, trusted_start, inspection, 0)?;
     match deferred.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
@@ -72,12 +85,25 @@ pub(crate) fn check_ast_with_prelude(ast: &Ast, path: &str, trusted_start: Optio
     }
 }
 
-pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection, prelude_items: usize) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
+pub(crate) fn infer_with_diagnostics(
+    ast: &Ast,
+    path: &str,
+    trusted_start: Option<usize>,
+    inspection: crate::Inspection,
+    prelude_items: usize,
+) -> Result<(Checked, Vec<Diagnostic>), Diagnostic> {
     let contracts = crate::contract_types::Contracts::collect(&ast.items);
     let contract_diagnostics = contracts.diagnostics(ast, path);
     let mut checker = Checker {
         functors: HashMap::new(),
-        source_modules: ast.items.iter().filter_map(|item| match item { Item::ModuleImpl(module) => Some((module.name.clone(), module.clone())), _ => None }).collect(),
+        source_modules: ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::ModuleImpl(module) => Some((module.name.clone(), module.clone())),
+                _ => None,
+            })
+            .collect(),
         instantiated_modules: Vec::new(),
         next_instance_line: crate::functor_instances::max_line(ast) + 1,
         contract_types: contracts,
@@ -113,16 +139,24 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         projections: Vec::new(),
         comparison_constraints: Vec::new(),
         row_constraints: Vec::new(),
-        equality_anchors: ast.equality_anchors.iter().map(|(left, right, operator)|
-            ((left.line, left.col, right.line, right.col), *operator)).collect(),
+        equality_anchors: ast
+            .equality_anchors
+            .iter()
+            .map(|(left, right, operator)| {
+                ((left.line, left.col, right.line, right.col), *operator)
+            })
+            .collect(),
         recursive_calls: HashMap::new(),
         eval_effects: Row::pure(),
         main_effects: Row::pure(),
         effects: HashMap::new(),
-        prelude_effects: ast.items[..prelude_items].iter().filter_map(|item| match item {
-            Item::Effect(effect) => Some(effect_print_name(&effect.name)),
-            _ => None,
-        }).collect(),
+        prelude_effects: ast.items[..prelude_items]
+            .iter()
+            .filter_map(|item| match item {
+                Item::Effect(effect) => Some(effect_print_name(&effect.name)),
+                _ => None,
+            })
+            .collect(),
         handlers: HashMap::new(),
         handler_decls: HashMap::new(),
         operations: HashMap::new(),
@@ -130,20 +164,33 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         operation_result_rows: HashMap::new(),
         resume_type: None,
     };
-    checker.deferred.extend(functors::duplicate_applications(ast, path));
+    checker
+        .deferred
+        .extend(functors::duplicate_applications(ast, path));
     let mut definitions = HashMap::new();
     let inferred = (|| -> Result<Ty, Diagnostic> {
         let comparable = checker.inference.fresh();
         let compare = Ty::fn_of(vec![comparable.clone(), comparable.clone()], Ty::Int);
         checker.values.insert(
             "compare".into(),
-            checker.inference.generalize_constrained(&compare, &[], &[ComparisonConstraint { ty: comparable, code: "E704", span: None }], &[]),
+            checker.inference.generalize_constrained(
+                &compare,
+                &[],
+                &[ComparisonConstraint {
+                    ty: comparable,
+                    code: "E704",
+                    span: None,
+                }],
+                &[],
+            ),
         );
         let ambiguous_values = checker.prepare_ambiguous_declarations(&ast.items);
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
                 if !checker.ambiguous_types.contains(&def.name) {
-                    checker.type_arities.insert(def.name.clone(), def.params.len());
+                    checker
+                        .type_arities
+                        .insert(def.name.clone(), def.params.len());
                 }
             }
         }
@@ -170,19 +217,30 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         let violations = crate::type_cycles::violations(ast, path);
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
-                let rejected: Vec<_> = violations.iter().filter(|violation| violation.definition == def.name)
-                    .map(|violation| violation.reference).collect();
+                let rejected: Vec<_> = violations
+                    .iter()
+                    .filter(|violation| violation.definition == def.name)
+                    .map(|violation| violation.reference)
+                    .collect();
                 checker.register_type(def, &rejected)?;
             }
         }
-        checker.deferred.extend(violations.into_iter().map(|violation| violation.diagnostic));
+        checker
+            .deferred
+            .extend(violations.into_iter().map(|violation| violation.diagnostic));
         for item in &ast.items {
             match item {
                 Item::Def(def) => {
                     definitions.entry(def.name.clone()).or_insert(def);
                 }
-                Item::TypeDef(_) | Item::ModuleSig(_) | Item::ModuleImpl(_) | Item::Effect(_) | Item::Handler(_) => {}
-                _ => return Err(checker.error(ast.span, None, "item inference is not implemented")),
+                Item::TypeDef(_)
+                | Item::ModuleSig(_)
+                | Item::ModuleImpl(_)
+                | Item::Effect(_)
+                | Item::Handler(_) => {}
+                _ => {
+                    return Err(checker.error(ast.span, None, "item inference is not implemented"))
+                }
             }
         }
         checker.register_effects(&ast.items, prelude_items)?;
@@ -191,11 +249,15 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
             for item in group {
                 match item {
                     Item::ModuleImpl(module) => checker.module(module, &signatures)?,
-                    Item::Def(def) if !ambiguous_values.contains(&def.name) => functions.push(def.name.clone()),
+                    Item::Def(def) if !ambiguous_values.contains(&def.name) => {
+                        functions.push(def.name.clone())
+                    }
                     _ => {}
                 }
             }
-            if !functions.is_empty() { checker.definition_group(&functions, &definitions)?; }
+            if !functions.is_empty() {
+                checker.definition_group(&functions, &definitions)?;
+            }
         }
         checker.check_operation_defaults(&ast.items[..prelude_items])?;
         checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
@@ -203,27 +265,46 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         checker.resolve_projections(true)?;
         checker.check_realization_cycles(&ast.items);
         for constraint in &checker.comparison_constraints {
-            if checker.contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new()) {
-                checker.deferred.push(checker.error(constraint.span.expect("comparison use has an origin"), Some(constraint.code), "values containing functions cannot be compared"));
+            if checker
+                .contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new())
+            {
+                checker.deferred.push(checker.error(
+                    constraint.span.expect("comparison use has an origin"),
+                    Some(constraint.code),
+                    "values containing functions cannot be compared",
+                ));
             }
         }
         for constraint in &checker.row_constraints {
             let violated = if constraint.code == "E303" {
-                !checker.inference.resolve_row(&constraint.row).has_known_effects()
+                !checker
+                    .inference
+                    .resolve_row(&constraint.row)
+                    .has_known_effects()
             } else {
-                !checker.inference.row_within(&constraint.row, &constraint.bound)
+                !checker
+                    .inference
+                    .row_within(&constraint.row, &constraint.bound)
             };
-            if !violated { continue; }
+            if !violated {
+                continue;
+            }
             let message = match constraint.code {
                 "E308" => "effects are not allowed in branch conditions",
                 "E303" => "do requires an effect or Option",
                 _ => "effect row mismatch",
             };
-            checker.deferred.push(checker.error(constraint.span.expect("row constraint has an origin"), Some(constraint.code), message));
+            checker.deferred.push(checker.error(
+                constraint.span.expect("row constraint has an origin"),
+                Some(constraint.code),
+                message,
+            ));
         }
         // A library has no entry: skip the `main` type rules (E206 stays in
         // `entry_form`, and E701/E702/E705/E706 need a `main` to apply).
-        if inspection == crate::Inspection::Library { return Ok(Ty::Void); }
+        if inspection == crate::Inspection::Library {
+            return Ok(Ty::Void);
+        }
         let scheme = checker
             .values
             .get("main")
@@ -238,16 +319,35 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         checker.main_effects = checker.inference.close_row(&checker.main_effects);
         let main = checker.reveal_shared(&checker.inference.resolve(&main));
         if !main.is_monomorphic() {
-            checker.deferred.push(checker.error(definitions["main"].span, Some("E701"), "main must have a monomorphic type"));
+            checker.deferred.push(checker.error(
+                definitions["main"].span,
+                Some("E701"),
+                "main must have a monomorphic type",
+            ));
         }
         if checker.contains_function(&main, &mut Vec::new()) {
-            checker.deferred.push(checker.error(definitions["main"].span, Some("E702"), "main cannot return a value containing a function"));
+            checker.deferred.push(checker.error(
+                definitions["main"].span,
+                Some("E702"),
+                "main cannot return a value containing a function",
+            ));
         }
         if checker.contains_abstract(&main, &mut Vec::new()) {
-            checker.deferred.push(checker.error(definitions["main"].span, Some("E705"), "main cannot return a value containing an abstract type"));
+            checker.deferred.push(checker.error(
+                definitions["main"].span,
+                Some("E705"),
+                "main cannot return a value containing an abstract type",
+            ));
         }
-        if checker.main_effects.has_user_effect(&checker.prelude_effects) {
-            checker.deferred.push(checker.error(definitions["main"].span, Some("E706"), "main cannot have a user-defined effect"));
+        if checker
+            .main_effects
+            .has_user_effect(&checker.prelude_effects)
+        {
+            checker.deferred.push(checker.error(
+                definitions["main"].span,
+                Some("E706"),
+                "main cannot have a user-defined effect",
+            ));
         }
         Ok(main)
     })();
@@ -255,35 +355,54 @@ pub(crate) fn infer_with_diagnostics(ast: &Ast, path: &str, trusted_start: Optio
         Ok(main) => main,
         Err(error) => {
             checker.deferred.push(error);
-            return Err(checker.deferred.into_iter().min_by_key(crate::diagnostic_order).unwrap());
+            return Err(checker
+                .deferred
+                .into_iter()
+                .min_by_key(crate::diagnostic_order)
+                .unwrap());
         }
     };
-    Ok((Checked {
-        instantiated_modules: checker.instantiated_modules,
-        abstract_representations: checker.abstract_representations,
-        module_constructors: checker.module_constructors,
-        module_records: checker.module_records,
-        module_named_constructors: checker.module_named_constructors,
-        named_constructors: checker.named_constructors.clone(),
-        module_definitions: checker.module_definitions.clone(),
-        modules: checker.modules.clone(),
-        constructor_tags: checker.constructor_tags.clone(),
-        constructors: checker.constructors.clone(),
-        records: checker.records.clone(),
-        composite_types: checker.composite_types.iter().map(|(span, ty)| (*span, checker.inference.resolve(ty))).collect(),
-        value_types: checker.value_types.iter().map(|(span, ty)| (*span, checker.inference.resolve(ty))).collect(),
-        main: checker.inference.resolve(&main),
-        effects: checker.inference.resolve_row(&checker.main_effects),
-        definitions: definitions.keys().map(|name| (name.clone(), checker.values[name].clone())).collect(),
-        operations: checker.operations.clone(),
-        default_operations: checker.default_operations.clone(),
-    }, checker.deferred))
+    Ok((
+        Checked {
+            instantiated_modules: checker.instantiated_modules,
+            abstract_representations: checker.abstract_representations,
+            module_constructors: checker.module_constructors,
+            module_records: checker.module_records,
+            module_named_constructors: checker.module_named_constructors,
+            named_constructors: checker.named_constructors.clone(),
+            module_definitions: checker.module_definitions.clone(),
+            modules: checker.modules.clone(),
+            constructor_tags: checker.constructor_tags.clone(),
+            constructors: checker.constructors.clone(),
+            records: checker.records.clone(),
+            composite_types: checker
+                .composite_types
+                .iter()
+                .map(|(span, ty)| (*span, checker.inference.resolve(ty)))
+                .collect(),
+            value_types: checker
+                .value_types
+                .iter()
+                .map(|(span, ty)| (*span, checker.inference.resolve(ty)))
+                .collect(),
+            main: checker.inference.resolve(&main),
+            effects: checker.inference.resolve_row(&checker.main_effects),
+            definitions: definitions
+                .keys()
+                .map(|name| (name.clone(), checker.values[name].clone()))
+                .collect(),
+            operations: checker.operations.clone(),
+            default_operations: checker.default_operations.clone(),
+        },
+        checker.deferred,
+    ))
 }
 
 impl Checker<'_> {
     fn prepare_ambiguous_declarations(&mut self, items: &[Item]) -> HashSet<String> {
         self.prepare_module_ambiguities(items);
-        let ambiguous = crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
+        let ambiguous =
+            crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
         for name in &ambiguous.declared_types {
             self.ambiguous_types.remove(name);
             self.type_arities.remove(name);
@@ -293,27 +412,38 @@ impl Checker<'_> {
         for name in &ambiguous.declared_constructors {
             self.ambiguous_constructors.remove(name);
             let hidden = format!("{}$outer${name}", self.module_path.join("."));
-            if let Some(scheme) = self.constructors.remove(name) { self.constructors.insert(hidden.clone(), scheme); }
-            if let Some(tag) = self.constructor_tags.remove(name) { self.constructor_tags.insert(hidden.clone(), tag); }
-            if let Some(fields) = self.named_constructors.remove(name) { self.named_constructors.insert(hidden, fields); }
+            if let Some(scheme) = self.constructors.remove(name) {
+                self.constructors.insert(hidden.clone(), scheme);
+            }
+            if let Some(tag) = self.constructor_tags.remove(name) {
+                self.constructor_tags.insert(hidden.clone(), tag);
+            }
+            if let Some(fields) = self.named_constructors.remove(name) {
+                self.named_constructors.insert(hidden, fields);
+            }
         }
         self.ambiguous_types.extend(ambiguous.types);
         self.ambiguous_constructors.extend(ambiguous.constructors);
         for name in &ambiguous.values {
-            self.values.insert(name.clone(), Scheme::monomorphic(Ty::Error));
+            self.values
+                .insert(name.clone(), Scheme::monomorphic(Ty::Error));
         }
         for name in &self.ambiguous_constructors {
-            self.constructors.insert(name.clone(), Scheme::monomorphic(Ty::Error));
+            self.constructors
+                .insert(name.clone(), Scheme::monomorphic(Ty::Error));
         }
         self.deferred.extend(ambiguous.diagnostics);
         ambiguous.values
     }
 
     fn prepare_module_ambiguities(&mut self, items: &[Item]) {
-        let ambiguous = crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
-        self.ambiguous_signatures.retain(|name| !ambiguous.declared_signatures.contains(name));
+        let ambiguous =
+            crate::ambiguous_declarations::AmbiguousDeclarations::collect(items, self.path);
+        self.ambiguous_signatures
+            .retain(|name| !ambiguous.declared_signatures.contains(name));
         self.ambiguous_signatures.extend(ambiguous.signatures);
-        self.ambiguous_modules.retain(|name| !ambiguous.declared_modules.contains(name));
+        self.ambiguous_modules
+            .retain(|name| !ambiguous.declared_modules.contains(name));
         self.ambiguous_modules.extend(ambiguous.modules);
         for item in items {
             if let Item::ModuleImpl(module) = item {
@@ -327,28 +457,53 @@ impl Checker<'_> {
     fn check_ambiguous_definitions(&mut self, items: &[Item], ambiguous: &HashSet<String>) {
         for item in items {
             let Item::Def(def) = item else { continue };
-            if !ambiguous.contains(&def.name) { continue; }
+            if !ambiguous.contains(&def.name) {
+                continue;
+            }
             let saved = self.clone();
             self.current_definition = Some(def.name.clone());
             let result = self.definition(def);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
-            if let Err(error) = result { diagnostics.push(error); }
+            if let Err(error) = result {
+                diagnostics.push(error);
+            }
             *self = saved;
             self.deferred.extend(diagnostics);
         }
     }
 
-    fn check_ambiguous_modules(&mut self, items: &[Item], signatures: &HashMap<String, &crate::parser::ModuleSig>) {
+    fn check_ambiguous_modules(
+        &mut self,
+        items: &[Item],
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) {
         for item in items {
-            let Item::ModuleImpl(module) = item else { continue };
-            if !self.ambiguous_modules.contains(&module.name) { continue; }
+            let Item::ModuleImpl(module) = item else {
+                continue;
+            };
+            if !self.ambiguous_modules.contains(&module.name) {
+                continue;
+            }
             let saved = self.clone();
             self.module_path.push(module.name.clone());
-            let ast = Ast { items: module.items.clone(), span: module.span, library: None,
-                branches_after_fallback: Vec::new(), branch_anchors: Vec::new(), branch_spans: Vec::new(), written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new() };
+            let ast = Ast {
+                items: module.items.clone(),
+                span: module.span,
+                library: None,
+                branches_after_fallback: Vec::new(),
+                branch_anchors: Vec::new(),
+                branch_spans: Vec::new(),
+                written_list_patterns: Vec::new(),
+                long_condition_functions: Vec::new(),
+                equality_anchors: Vec::new(),
+                qualified_type_anchors: Vec::new(),
+                name_sites: Vec::new(),
+            };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
-            if let Err(error) = result { diagnostics.push(error); }
+            if let Err(error) = result {
+                diagnostics.push(error);
+            }
             *self = saved;
             self.deferred.extend(diagnostics);
         }
@@ -359,14 +514,18 @@ impl Checker<'_> {
         module: &crate::parser::ModuleImpl,
         signatures: &HashMap<String, &crate::parser::ModuleSig>,
     ) -> Result<(), Diagnostic> {
-        if self.ambiguous_modules.contains(&module.name) { return Ok(()); }
+        if self.ambiguous_modules.contains(&module.name) {
+            return Ok(());
+        }
         let name = &module.sig;
         let signature = signatures
             .get(name)
             .ok_or_else(|| self.error(module.sig_span, Some("E204"), "unknown signature"))?;
         let saved = self.clone();
-        let saved_value_spans: std::collections::HashSet<_> = self.value_types.keys().copied().collect();
-        let saved_composite_spans: std::collections::HashSet<_> = self.composite_types.keys().copied().collect();
+        let saved_value_spans: std::collections::HashSet<_> =
+            self.value_types.keys().copied().collect();
+        let saved_composite_spans: std::collections::HashSet<_> =
+            self.composite_types.keys().copied().collect();
         self.module_path.push(module.name.clone());
         let mut exports = match self.module_body(module, signature, signatures) {
             Ok(exports) => exports,
@@ -381,10 +540,17 @@ impl Checker<'_> {
             }
         };
         {
-            let type_names: HashMap<_, _> = module.items.iter().filter_map(|item| match item {
-                Item::TypeDef(definition) => Some((definition.name.clone(), format!("{}.{}", self.module_path.join("."), definition.name))),
-                _ => None,
-            }).collect();
+            let type_names: HashMap<_, _> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::TypeDef(definition) => Some((
+                        definition.name.clone(),
+                        format!("{}.{}", self.module_path.join("."), definition.name),
+                    )),
+                    _ => None,
+                })
+                .collect();
             let prefix = format!("{}.", self.module_path.join("."));
             for (name, representation) in &mut self.abstract_representations {
                 if name.starts_with(&prefix) {
@@ -401,11 +567,15 @@ impl Checker<'_> {
             // 公開面にも同じ修飾を通す。shared の本体と公開面が食い違うと、
             // 実装の member 呼び出しで型が一致しなくなる。
             for scheme in exports.values_mut() {
-                *scheme = scheme.resolved(&self.inference).qualify_data_types(&type_names);
+                *scheme = scheme
+                    .resolved(&self.inference)
+                    .qualify_data_types(&type_names);
             }
             for (name, scheme) in &mut self.module_definitions {
                 if name.starts_with(&prefix) {
-                    *scheme = scheme.resolved(&self.inference).qualify_data_types(&type_names);
+                    *scheme = scheme
+                        .resolved(&self.inference)
+                        .qualify_data_types(&type_names);
                 }
             }
             for (span, ty) in &mut self.value_types {
@@ -420,18 +590,37 @@ impl Checker<'_> {
             }
             for item in &module.items {
                 if let Item::TypeDef(definition) = item {
-                    if matches!(definition.ty.as_ref().map(|ty| &ty.kind), Some(TypeKind::Record(_))) {
+                    if matches!(
+                        definition.ty.as_ref().map(|ty| &ty.kind),
+                        Some(TypeKind::Record(_))
+                    ) {
                         if let Some(record) = self.records.get(&definition.name) {
-                            self.module_records.insert(format!("{}.{}", self.module_path.join("."), definition.name), (record.0.clone(), record.1.qualify_data_types(&type_names)));
+                            self.module_records.insert(
+                                format!("{}.{}", self.module_path.join("."), definition.name),
+                                (record.0.clone(), record.1.qualify_data_types(&type_names)),
+                            );
                         }
                     } else {
                         for (name, scheme) in &self.constructors {
-                            let result = match scheme.body() { Ty::Fn(_, result, _) => result.as_ref(), ty => ty };
-                            if matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name) {
+                            let result = match scheme.body() {
+                                Ty::Fn(_, result, _) => result.as_ref(),
+                                ty => ty,
+                            };
+                            if matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name)
+                            {
                                 if let Some(fields) = self.named_constructors.get(name) {
-                                    self.module_named_constructors.insert(format!("{}.{}", self.module_path.join("."), name), fields.clone());
+                                    self.module_named_constructors.insert(
+                                        format!("{}.{}", self.module_path.join("."), name),
+                                        fields.clone(),
+                                    );
                                 }
-                                self.module_constructors.insert(format!("{}.{}", self.module_path.join("."), name), (self.constructor_tags[name], scheme.qualify_data_types(&type_names)));
+                                self.module_constructors.insert(
+                                    format!("{}.{}", self.module_path.join("."), name),
+                                    (
+                                        self.constructor_tags[name],
+                                        scheme.qualify_data_types(&type_names),
+                                    ),
+                                );
                             }
                         }
                     }
@@ -458,15 +647,24 @@ impl Checker<'_> {
     }
 
     fn module_abstract_parameters(
-        &mut self, module: &crate::parser::ModuleImpl, signature: &crate::parser::ModuleSig,
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        signature: &crate::parser::ModuleSig,
     ) -> HashMap<String, Ty> {
-        if self.ambiguous_modules.contains(&module.name) { return HashMap::new(); }
+        if self.ambiguous_modules.contains(&module.name) {
+            return HashMap::new();
+        }
         let mut parameters = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
                 let local = format!("{}.{}", module.name, def.name);
-                let qualified = if self.module_path.is_empty() { local.clone() } else { format!("{}.{}", self.module_path.join("."), local) };
-                self.abstract_types.insert(local, (def.params.len(), qualified.clone()));
+                let qualified = if self.module_path.is_empty() {
+                    local.clone()
+                } else {
+                    format!("{}.{}", self.module_path.join("."), local)
+                };
+                self.abstract_types
+                    .insert(local, (def.params.len(), qualified.clone()));
                 parameters.insert(def.name.clone(), Ty::Abstract(qualified, vec![]));
             }
         }
@@ -474,7 +672,9 @@ impl Checker<'_> {
     }
 
     fn module_signature_exports(
-        &mut self, module: &crate::parser::ModuleImpl, signature: &crate::parser::ModuleSig,
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        signature: &crate::parser::ModuleSig,
     ) -> Result<HashMap<String, Scheme>, Diagnostic> {
         let abstracts = self.module_abstract_parameters(module, signature);
         let mut exports = HashMap::new();
@@ -492,7 +692,9 @@ impl Checker<'_> {
     }
 
     fn infer_module_items<'a>(
-        &mut self, ast: &'a Ast, signatures: &HashMap<String, &crate::parser::ModuleSig>,
+        &mut self,
+        ast: &'a Ast,
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
     ) -> Result<(HashMap<String, &'a crate::parser::Def>, HashSet<String>), Diagnostic> {
         crate::type_cycles::check(ast, self.path)?;
         self.prepare_module_ambiguities(&ast.items);
@@ -511,12 +713,15 @@ impl Checker<'_> {
         let mut definitions = HashMap::new();
         for item in &ast.items {
             if let Item::TypeDef(def) = item {
-                if self.ambiguous_types.contains(&def.name) { continue; }
+                if self.ambiguous_types.contains(&def.name) {
+                    continue;
+                }
                 self.type_arities.insert(def.name.clone(), def.params.len());
                 self.aliases.remove(&def.name);
                 if let Some(ty) = &def.ty {
                     if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
-                        self.aliases.insert(def.name.clone(), (def.params.clone(), ty.clone(), ast.span));
+                        self.aliases
+                            .insert(def.name.clone(), (def.params.clone(), ty.clone(), ast.span));
                     }
                 }
             }
@@ -529,21 +734,25 @@ impl Checker<'_> {
                 }
                 Item::ModuleImpl(_) | Item::ModuleSig(_) | Item::Effect(_) | Item::Handler(_) => {}
                 _ => {
-                    return Err(self.error(
-                        ast.span,
-                        None,
-                        "unexpected signature member in module",
-                    ))
+                    return Err(self.error(ast.span, None, "unexpected signature member in module"))
                 }
             }
         }
         for group in crate::names::definition_groups(ast) {
-            let group: Vec<_> = group.into_iter().filter(|name| !ambiguous_values.contains(name)).collect();
-            if !group.is_empty() { self.definition_group(&group, &definitions)?; }
+            let group: Vec<_> = group
+                .into_iter()
+                .filter(|name| !ambiguous_values.contains(name))
+                .collect();
+            if !group.is_empty() {
+                self.definition_group(&group, &definitions)?;
+            }
         }
         self.check_ambiguous_definitions(&ast.items, &ambiguous_values);
         for name in definitions.keys() {
-            self.module_definitions.insert(format!("{}.{}", self.module_path.join("."), name), self.values[name].clone());
+            self.module_definitions.insert(
+                format!("{}.{}", self.module_path.join("."), name),
+                self.values[name].clone(),
+            );
         }
         self.check_ambiguous_modules(&ast.items, &signatures);
         Ok((definitions, ambiguous_values))
@@ -562,18 +771,31 @@ impl Checker<'_> {
             branches_after_fallback: Vec::new(),
             branch_anchors: Vec::new(),
             branch_spans: Vec::new(),
-            written_list_patterns: Vec::new(), long_condition_functions: Vec::new(), equality_anchors: Vec::new(), qualified_type_anchors: Vec::new(), name_sites: Vec::new(),
+            written_list_patterns: Vec::new(),
+            long_condition_functions: Vec::new(),
+            equality_anchors: Vec::new(),
+            qualified_type_anchors: Vec::new(),
+            name_sites: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let mut abstract_names = HashMap::new();
         for item in &signature.items {
             if let Item::TypeDef(def) = item {
                 let actual = ast.items.iter().find_map(|item| match item {
-                    Item::TypeDef(actual) if actual.name == def.name && actual.params.len() == def.params.len() => Some(actual),
+                    Item::TypeDef(actual)
+                        if actual.name == def.name && actual.params.len() == def.params.len() =>
+                    {
+                        Some(actual)
+                    }
                     _ => None,
                 });
                 let Some(actual) = actual else {
-                    return Err(self.error_related(module.span, Some("E602"), "missing signature type", Some(def.name_span)));
+                    return Err(self.error_related(
+                        module.span,
+                        Some("E602"),
+                        "missing signature type",
+                        Some(def.name_span),
+                    ));
                 };
                 if def.ty.is_some() {
                     return Err(self.error(
@@ -583,17 +805,48 @@ impl Checker<'_> {
                     ));
                 }
                 let qualified = format!("{}.{}", self.module_path.join("."), def.name);
-                let parameters: HashMap<_, _> = def.params.iter().map(|p| (p.name.clone(), self.inference.fresh())).collect();
-                let arguments: Vec<_> = def.params.iter().map(|p| TypeExpr { kind: TypeKind::Name(p.name.clone()), span: p.span, name_span: p.span, effects: None }).collect();
-                let kind = if arguments.is_empty() { TypeKind::Name(def.name.clone()) } else { TypeKind::Apply(def.name.clone(), arguments) };
-                let reference = TypeExpr { kind, span: def.name_span, name_span: def.name_span, effects: None };
+                let parameters: HashMap<_, _> = def
+                    .params
+                    .iter()
+                    .map(|p| (p.name.clone(), self.inference.fresh()))
+                    .collect();
+                let arguments: Vec<_> = def
+                    .params
+                    .iter()
+                    .map(|p| TypeExpr {
+                        kind: TypeKind::Name(p.name.clone()),
+                        span: p.span,
+                        name_span: p.span,
+                        effects: None,
+                    })
+                    .collect();
+                let kind = if arguments.is_empty() {
+                    TypeKind::Name(def.name.clone())
+                } else {
+                    TypeKind::Apply(def.name.clone(), arguments)
+                };
+                let reference = TypeExpr {
+                    kind,
+                    span: def.name_span,
+                    name_span: def.name_span,
+                    effects: None,
+                };
                 let body = self.payload_type(&reference, &parameters, def.name_span)?;
-                let parameters = def.params.iter().map(|p| match parameters[&p.name] { Ty::Var(id) => id, _ => unreachable!() }).collect();
+                let parameters = def
+                    .params
+                    .iter()
+                    .map(|p| match parameters[&p.name] {
+                        Ty::Var(id) => id,
+                        _ => unreachable!(),
+                    })
+                    .collect();
                 let realization = TypeRealization { parameters, body };
                 if actual.shared {
-                    self.shared_realizations.insert(qualified.clone(), realization.clone());
+                    self.shared_realizations
+                        .insert(qualified.clone(), realization.clone());
                 }
-                self.abstract_representations.insert(qualified.clone(), realization);
+                self.abstract_representations
+                    .insert(qualified.clone(), realization);
                 abstract_names.insert(def.name.clone(), qualified);
             }
         }
@@ -610,53 +863,107 @@ impl Checker<'_> {
                 ));
             };
             if !definitions.contains_key(&declaration.name) {
-                return Err(self.error_related(module.span, Some("E602"), "missing signature member", Some(declaration.name_span)));
+                return Err(self.error_related(
+                    module.span,
+                    Some("E602"),
+                    "missing signature member",
+                    Some(declaration.name_span),
+                ));
             }
-            if matches!(definitions[&declaration.name].kind, DefKind::Value(_)) != declaration.params.is_empty() {
-                return Err(self.error_related(module.span, Some("E602"), "signature member requires the declared definition form", Some(declaration.name_span)));
+            if matches!(definitions[&declaration.name].kind, DefKind::Value(_))
+                != declaration.params.is_empty()
+            {
+                return Err(self.error_related(
+                    module.span,
+                    Some("E602"),
+                    "signature member requires the declared definition form",
+                    Some(declaration.name_span),
+                ));
             }
             let scheme = self.values[&declaration.name].clone();
             let (mut actual, constraints, rows) = self.inference.instantiate_constrained(&scheme);
-            if !ambiguous_values.contains(&declaration.name) && self.inference.resolve(&actual).has_error() {
+            if !ambiguous_values.contains(&declaration.name)
+                && self.inference.resolve(&actual).has_error()
+            {
                 let known = self.invalid_definition_type(definitions[&declaration.name]);
                 actual = self.inference.freshen_errors(&known);
             }
             self.record_comparisons(constraints, declaration.span);
             self.record_row_constraints(rows, declaration.span);
-            let parameters: HashMap<_, _> = declaration.type_params.iter().map(|name| (name.name.clone(), self.inference.fresh())).collect();
+            let parameters: HashMap<_, _> = declaration
+                .type_params
+                .iter()
+                .map(|name| (name.name.clone(), self.inference.fresh()))
+                .collect();
             let expected = self.signature_type(declaration, &parameters, false)?;
-            self.inference
-                .unify(&actual, &expected)
-                .map_err(|_| self.error_related(module.span, Some("E602"), "signature type mismatch", Some(declaration.name_span)))?;
+            self.inference.unify(&actual, &expected).map_err(|_| {
+                self.error_related(
+                    module.span,
+                    Some("E602"),
+                    "signature type mismatch",
+                    Some(declaration.name_span),
+                )
+            })?;
             let mut resolved_parameters = Vec::new();
             for parameter in parameters.values() {
                 let resolved = self.inference.resolve(parameter);
                 if !matches!(resolved, Ty::Var(_)) || resolved_parameters.contains(&resolved) {
-                    return Err(self.error_related(module.span, Some("E602"), "signature implementation is not sufficiently polymorphic", Some(declaration.name_span)));
+                    return Err(self.error_related(
+                        module.span,
+                        Some("E602"),
+                        "signature implementation is not sufficiently polymorphic",
+                        Some(declaration.name_span),
+                    ));
                 }
                 resolved_parameters.push(resolved);
             }
-            let mut public_parameters: HashMap<_, _> = abstract_names.iter().map(|(name, public)|
-                (name.clone(), Ty::Abstract(public.clone(), vec![]))).collect();
+            let mut public_parameters: HashMap<_, _> = abstract_names
+                .iter()
+                .map(|(name, public)| (name.clone(), Ty::Abstract(public.clone(), vec![])))
+                .collect();
             public_parameters.extend(parameters);
             let public_type = self.signature_type(declaration, &public_parameters, true)?;
             let resolved = self.inference.resolve(&expected);
             let _ = self.inference.unify(&public_type, &resolved);
-            exports.insert(declaration.name.clone(), self.inference.generalize_constrained(&public_type, &[], &self.comparison_constraints, &self.row_constraints));
+            exports.insert(
+                declaration.name.clone(),
+                self.inference.generalize_constrained(
+                    &public_type,
+                    &[],
+                    &self.comparison_constraints,
+                    &self.row_constraints,
+                ),
+            );
         }
         self.resolve_projections(false)?;
         let roots = exports.keys().cloned().collect::<Vec<_>>();
         if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
-            self.deferred.push(self.error(definitions[name].span, Some("E514"), &format!("unused module definition {name}")));
+            self.deferred.push(self.error(
+                definitions[name].span,
+                Some("E514"),
+                &format!("unused module definition {name}"),
+            ));
         }
         Ok(exports)
     }
 
-    fn signature_type(&mut self, declaration: &crate::parser::SigDef, parameters: &HashMap<String, Ty>, public: bool) -> Result<Ty, Diagnostic> {
-        let mut bindings: HashMap<_, _> = self.contract_types.types.iter().map(|(name, implementation)| {
-            let ty = implementation.as_ref().map_or(Ty::Error, |name| Ty::Abstract(name.clone(), vec![]));
-            (name.clone(), ty)
-        }).collect();
+    fn signature_type(
+        &mut self,
+        declaration: &crate::parser::SigDef,
+        parameters: &HashMap<String, Ty>,
+        public: bool,
+    ) -> Result<Ty, Diagnostic> {
+        let mut bindings: HashMap<_, _> = self
+            .contract_types
+            .types
+            .iter()
+            .map(|(name, implementation)| {
+                let ty = implementation
+                    .as_ref()
+                    .map_or(Ty::Error, |name| Ty::Abstract(name.clone(), vec![]));
+                (name.clone(), ty)
+            })
+            .collect();
         bindings.extend(parameters.clone());
         let parameters = &bindings;
         let mut args = Vec::new();
@@ -672,10 +979,16 @@ impl Checker<'_> {
         let result = self.payload_type(result_ty, parameters, declaration.span)?;
         let row = self.row_annotation(&result_ty.effects)?;
         let ty = Ty::fn_with(args, result, row);
-        if public { return Ok(self.reveal_shared(&ty)); }
+        if public {
+            return Ok(self.reveal_shared(&ty));
+        }
         let prefix = format!("{}.", self.module_path.join("."));
-        let local = self.abstract_representations.iter().filter(|(name, _)| name.starts_with(&prefix))
-            .map(|(name, representation)| (name.clone(), representation.clone())).collect();
+        let local = self
+            .abstract_representations
+            .iter()
+            .filter(|(name, _)| name.starts_with(&prefix))
+            .map(|(name, representation)| (name.clone(), representation.clone()))
+            .collect();
         Ok(self.reveal_shared(&ty.reveal(&local)))
     }
 
@@ -688,15 +1001,20 @@ impl Checker<'_> {
         group: &[String],
         definitions: &HashMap<String, &crate::parser::Def>,
     ) -> Result<(), Diagnostic> {
-        let inherited_projections: std::collections::HashSet<_> = self.projections.iter()
-            .map(|(_, field, _, _)| (field.dot.line, field.dot.col)).collect();
+        let inherited_projections: std::collections::HashSet<_> = self
+            .projections
+            .iter()
+            .map(|(_, field, _, _)| (field.dot.line, field.dot.col))
+            .collect();
         let placeholders: HashMap<_, _> = group
             .iter()
             .map(|name| (name.clone(), self.inference.fresh()))
             .collect();
         for (name, ty) in &placeholders {
             if definitions[name].rec {
-                let Ty::Var(id) = ty else { unreachable!("fresh recursive placeholder") };
+                let Ty::Var(id) = ty else {
+                    unreachable!("fresh recursive placeholder")
+                };
                 self.recursive_calls.insert(*id, Vec::new());
             }
             self.values
@@ -728,9 +1046,13 @@ impl Checker<'_> {
         invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
         let result = self.resolve_projections(false);
         invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
-        invalid_group |= self.deferred[deferred_start..].iter().any(|error| crate::diagnostic_order(error).0 == 3);
+        invalid_group |= self.deferred[deferred_start..]
+            .iter()
+            .any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
-            self.projections.retain(|(_, field, _, _)| inherited_projections.contains(&(field.dot.line, field.dot.col)));
+            self.projections.retain(|(_, field, _, _)| {
+                inherited_projections.contains(&(field.dot.line, field.dot.col))
+            });
             for name in group {
                 let ty = self.invalid_definition_type(definitions[name]);
                 self.values.insert(name.clone(), Scheme::monomorphic(ty));
@@ -743,45 +1065,92 @@ impl Checker<'_> {
             .flat_map(|(input, _, output, _)| [input.clone(), output.clone()])
             .collect();
         for (name, ty) in placeholders {
-            self.values
-                .insert(name, self.inference.generalize_constrained(&ty, &environment, &self.comparison_constraints, &self.row_constraints));
+            self.values.insert(
+                name,
+                self.inference.generalize_constrained(
+                    &ty,
+                    &environment,
+                    &self.comparison_constraints,
+                    &self.row_constraints,
+                ),
+            );
         }
         Ok(())
     }
 
-    fn check_definition(&mut self, def: &crate::parser::Def, placeholder: &Ty) -> Result<(), Diagnostic> {
+    fn check_definition(
+        &mut self,
+        def: &crate::parser::Def,
+        placeholder: &Ty,
+    ) -> Result<(), Diagnostic> {
         let ty = self.definition(def)?;
-        if def.rec { self.check_recursive_arguments(placeholder, &ty, def.span)?; }
+        if def.rec {
+            self.check_recursive_arguments(placeholder, &ty, def.span)?;
+        }
         self.unify(placeholder, &ty, def.span)
     }
 
     fn invalid_definition_type(&mut self, def: &crate::parser::Def) -> Ty {
         let (params, ret) = match &def.kind {
             DefKind::Function { params, ret, .. } => (params, ret.as_ref()),
-            DefKind::Value(Node { kind: NodeKind::Fn { params, .. }, .. }) => (params, None),
+            DefKind::Value(Node {
+                kind: NodeKind::Fn { params, .. },
+                ..
+            }) => (params, None),
             DefKind::Value(_) => return Ty::Error,
         };
-        let args = params.iter().map(|param| param.ty.as_ref()
-            .and_then(|ty| self.annotation(ty, param.span).ok()).unwrap_or(Ty::Error)).collect();
-        let result = ret.and_then(|ty| self.annotation(ty, def.span).ok()).unwrap_or(Ty::Error);
+        let args = params
+            .iter()
+            .map(|param| {
+                param
+                    .ty
+                    .as_ref()
+                    .and_then(|ty| self.annotation(ty, param.span).ok())
+                    .unwrap_or(Ty::Error)
+            })
+            .collect();
+        let result = ret
+            .and_then(|ty| self.annotation(ty, def.span).ok())
+            .unwrap_or(Ty::Error);
         Ty::fn_of(args, result)
     }
 
-    fn check_recursive_arguments(&self, calls: &Ty, definition: &Ty, span: Span) -> Result<(), Diagnostic> {
+    fn check_recursive_arguments(
+        &self,
+        calls: &Ty,
+        definition: &Ty,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
         let recursive_calls = match calls {
             Ty::Var(id) => self.recursive_calls.get(id),
             _ => None,
         };
-        if let (Some(calls), Ty::Fn(parameters, _, _)) = (recursive_calls, self.inference.resolve(definition)) {
-            let first = calls.iter().filter(|(arguments, _)| self.recursive_arguments_occur(arguments, &parameters))
-                .map(|(_, span)| *span).min_by_key(|span| (span.line, span.col));
+        if let (Some(calls), Ty::Fn(parameters, _, _)) =
+            (recursive_calls, self.inference.resolve(definition))
+        {
+            let first = calls
+                .iter()
+                .filter(|(arguments, _)| self.recursive_arguments_occur(arguments, &parameters))
+                .map(|(_, span)| *span)
+                .min_by_key(|span| (span.line, span.col));
             if let Some(span) = first {
-                return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
+                return Err(self.error(
+                    span,
+                    Some("E307"),
+                    "recursive calls change the argument type",
+                ));
             }
         }
-        if let (Ty::Fn(calls, _, _), Ty::Fn(parameters, _, _)) = (self.inference.resolve(calls), self.inference.resolve(definition)) {
+        if let (Ty::Fn(calls, _, _), Ty::Fn(parameters, _, _)) = (
+            self.inference.resolve(calls),
+            self.inference.resolve(definition),
+        ) {
             if self.recursive_arguments_occur(&calls, &parameters) {
-                return Err(self.error(span, Some("E307"), "recursive calls change the argument type"));
+                return Err(self.error(
+                    span,
+                    Some("E307"),
+                    "recursive calls change the argument type",
+                ));
             }
         }
         Ok(())
@@ -789,7 +1158,12 @@ impl Checker<'_> {
 
     fn recursive_arguments_occur(&self, arguments: &[Ty], parameters: &[Ty]) -> bool {
         let mut inference = self.inference.clone();
-        arguments.iter().zip(parameters).any(|(argument, parameter)| inference.unify(argument, parameter) == Err(TypeError::Occurs))
+        arguments
+            .iter()
+            .zip(parameters)
+            .any(|(argument, parameter)| {
+                inference.unify(argument, parameter) == Err(TypeError::Occurs)
+            })
     }
 
     fn definition(&mut self, def: &crate::parser::Def) -> Result<Ty, Diagnostic> {
@@ -805,21 +1179,37 @@ impl Checker<'_> {
             }
             DefKind::Function { params, ret, body } => {
                 let ty = self.function(params, body)?;
-                let Some(annotation) = ret else { return Ok(ty); };
-                let Ty::Fn(args, result, inferred) = ty else { return Ok(ty); };
+                let Some(annotation) = ret else {
+                    return Ok(ty);
+                };
+                let Ty::Fn(args, result, inferred) = ty else {
+                    return Ok(ty);
+                };
                 let expected = self.annotation(annotation, def.span)?;
                 self.expect(&expected, &result, def.span, Some(annotation.span))?;
                 let expected_row = self.row_annotation(&annotation.effects)?;
                 self.contain_row(&inferred, &expected_row, def.span)?;
-                let row = if annotation.effects.is_some() { expected_row } else { *inferred };
+                let row = if annotation.effects.is_some() {
+                    expected_row
+                } else {
+                    *inferred
+                };
                 Ok(Ty::fn_with(args, *result, row))
             }
         }
     }
 
-    fn register_type(&mut self, def: &crate::parser::TypeDef, rejected: &[Span]) -> Result<(), Diagnostic> {
-        if self.ambiguous_types.contains(&def.name) { return Ok(()); }
-        if self.aliases.contains_key(&def.name) { return Ok(()); }
+    fn register_type(
+        &mut self,
+        def: &crate::parser::TypeDef,
+        rejected: &[Span],
+    ) -> Result<(), Diagnostic> {
+        if self.ambiguous_types.contains(&def.name) {
+            return Ok(());
+        }
+        if self.aliases.contains_key(&def.name) {
+            return Ok(());
+        }
         let parameters: HashMap<_, _> = def
             .params
             .iter()
@@ -839,11 +1229,11 @@ impl Checker<'_> {
         if let TypeKind::Record(fields) = &body.kind {
             let payload = fields
                 .iter()
-                .map(|field| self.registered_payload_type(&field.ty, &parameters, def.span, rejected))
+                .map(|field| {
+                    self.registered_payload_type(&field.ty, &parameters, def.span, rejected)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            let scheme = self
-                .inference
-                .generalize(&Ty::fn_of(payload, result), &[]);
+            let scheme = self.inference.generalize(&Ty::fn_of(payload, result), &[]);
             self.records.insert(
                 def.name.clone(),
                 (
@@ -860,7 +1250,8 @@ impl Checker<'_> {
         for (tag, variant) in variants.iter().enumerate() {
             self.register_constructor(variant, &parameters, &result, def.span, rejected)?;
             let name = &variant.name.name;
-            let tag = u32::try_from(tag).map_err(|_| self.error(def.span, None, "too many constructors"))?;
+            let tag = u32::try_from(tag)
+                .map_err(|_| self.error(def.span, None, "too many constructors"))?;
             self.constructor_tags.insert(name.clone(), tag);
         }
         Ok(())
@@ -876,9 +1267,14 @@ impl Checker<'_> {
     ) -> Result<(), Diagnostic> {
         let name = &variant.name.name;
         if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
-            self.named_constructors.insert(name.clone(), fields.iter().map(|field| field.name.name.clone()).collect());
+            self.named_constructors.insert(
+                name.clone(),
+                fields.iter().map(|field| field.name.name.clone()).collect(),
+            );
         }
-        let payload = variant.payload.types()
+        let payload = variant
+            .payload
+            .types()
             .map(|arg| self.registered_payload_type(arg, parameters, span, rejected))
             .collect::<Result<Vec<_>, _>>()?;
         let ty = if payload.is_empty() {
@@ -886,7 +1282,9 @@ impl Checker<'_> {
         } else {
             Ty::fn_of(payload, result.clone())
         };
-        if self.ambiguous_constructors.contains(name) { return Ok(()); }
+        if self.ambiguous_constructors.contains(name) {
+            return Ok(());
+        }
         let scheme = self.inference.generalize(&ty, &[]);
         if self.constructors.insert(name.clone(), scheme).is_some() {
             return Err(self.error(span, None, "duplicate constructor"));
@@ -895,7 +1293,11 @@ impl Checker<'_> {
     }
 
     fn registered_payload_type(
-        &mut self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
+        &mut self,
+        expr: &TypeExpr,
+        parameters: &HashMap<String, Ty>,
+        span: Span,
+        rejected: &[Span],
     ) -> Result<Ty, Diagnostic> {
         let result = self.recovering_payload_type(expr, parameters, span, rejected);
         self.recover_inference_error(result, Ty::Error)
@@ -911,9 +1313,16 @@ impl Checker<'_> {
     }
 
     fn recovering_payload_type(
-        &mut self, expr: &TypeExpr, parameters: &HashMap<String, Ty>, span: Span, rejected: &[Span],
+        &mut self,
+        expr: &TypeExpr,
+        parameters: &HashMap<String, Ty>,
+        span: Span,
+        rejected: &[Span],
     ) -> Result<Ty, Diagnostic> {
-        if rejected.iter().any(|reference| reference.line == expr.span.line && reference.col == expr.span.col) {
+        if rejected
+            .iter()
+            .any(|reference| reference.line == expr.span.line && reference.col == expr.span.col)
+        {
             return Ok(Ty::Error);
         }
         self.annotation_inner(expr, span, parameters, rejected, &mut Vec::new())
@@ -925,9 +1334,20 @@ impl Checker<'_> {
 
     /// §56: `first` is the contract's declaration of the member the report is
     /// about (a `.hdi` file may hold it; the print path localizes the position).
-    fn error_related(&self, span: Span, code: Option<&str>, message: &str, first: Option<Span>) -> Diagnostic {
-        let related = first.map(|first| crate::parser::Related { path: self.path.into(), line: first.line, col: first.col });
-        Diagnostic { related,
+    fn error_related(
+        &self,
+        span: Span,
+        code: Option<&str>,
+        message: &str,
+        first: Option<Span>,
+    ) -> Diagnostic {
+        let related = first.map(|first| crate::parser::Related {
+            path: self.path.into(),
+            line: first.line,
+            col: first.col,
+        });
+        Diagnostic {
+            related,
             path: self.path.into(),
             line: span.line,
             col: span.col,
@@ -944,11 +1364,19 @@ impl Checker<'_> {
                 TypeError::Occurs => "E306",
             };
             let (left, right) = crate::types::readable_pair(a, b);
-            self.error(span, Some(code), &format!("cannot unify {left} with {right}"))
+            self.error(
+                span,
+                Some(code),
+                &format!("cannot unify {left} with {right}"),
+            )
         })
     }
 
-    fn recover_inference_error<T>(&mut self, result: Result<T, Diagnostic>, fallback: T) -> Result<T, Diagnostic> {
+    fn recover_inference_error<T>(
+        &mut self,
+        result: Result<T, Diagnostic>,
+        fallback: T,
+    ) -> Result<T, Diagnostic> {
         match result {
             Err(error) if matches!(crate::diagnostic_order(&error).0, 2 | 3) => {
                 self.deferred.push(error);
@@ -961,8 +1389,18 @@ impl Checker<'_> {
     fn expression(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
         let result = self.expression_inner(node);
         let ty = self.recover_inference_error(result, Ty::Error)?;
-        if matches!(node.kind, NodeKind::Apply(..) | NodeKind::Call(..) | NodeKind::Pipe(..) | NodeKind::List(..) | NodeKind::Record(..) | NodeKind::NamedConstructor(..) | NodeKind::With { .. }) {
-            self.composite_types.insert((node.span.line, node.span.col), ty.clone());
+        if matches!(
+            node.kind,
+            NodeKind::Apply(..)
+                | NodeKind::Call(..)
+                | NodeKind::Pipe(..)
+                | NodeKind::List(..)
+                | NodeKind::Record(..)
+                | NodeKind::NamedConstructor(..)
+                | NodeKind::With { .. }
+        ) {
+            self.composite_types
+                .insert((node.span.line, node.span.col), ty.clone());
         }
         Ok(ty)
     }
@@ -997,42 +1435,41 @@ impl Checker<'_> {
                         "intrinsics cannot be used as values",
                     ));
                 }
-                let scheme = self
-                    .values
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| {
-                        self.error(
-                            node.span,
-                            Some(if self.current_definition.as_deref() == Some(name) {
-                                "E201"
-                            } else {
-                                "E204"
-                            }),
-                            &format!("unbound name {name}"),
-                        )
-                    })?;
+                let scheme = self.values.get(name).cloned().ok_or_else(|| {
+                    self.error(
+                        node.span,
+                        Some(if self.current_definition.as_deref() == Some(name) {
+                            "E201"
+                        } else {
+                            "E204"
+                        }),
+                        &format!("unbound name {name}"),
+                    )
+                })?;
                 let (ty, constraints, rows) = self.inference.instantiate_constrained(&scheme);
                 let ty = self.unwrap_operation(name, ty);
                 let ty = self.unwrap_thunk(ty);
-                self.value_types.insert((node.span.line, node.span.col), ty.clone());
+                self.value_types
+                    .insert((node.span.line, node.span.col), ty.clone());
                 self.record_comparisons(constraints, node.span);
                 self.record_row_constraints(rows, node.span);
                 Ok(ty)
             }
             NodeKind::Fn { params, body } => {
                 let ty = self.function(params, body)?;
-                self.value_types.insert((node.span.line, node.span.col), ty.clone());
+                self.value_types
+                    .insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
-            },
+            }
             NodeKind::List(items, tail) => self.list(items, tail.as_deref()),
             NodeKind::Record(fields) => self.record(fields, node.span),
             NodeKind::NamedConstructor(name, fields) => self.named_construct(name, fields),
             NodeKind::Field(value, field) => {
                 let ty = self.project(value, field)?;
-                self.value_types.insert((node.span.line, node.span.col), ty.clone());
+                self.value_types
+                    .insert((node.span.line, node.span.col), ty.clone());
                 Ok(ty)
-            },
+            }
             NodeKind::PatternBranch {
                 scrutinees,
                 arms,
@@ -1052,12 +1489,23 @@ impl Checker<'_> {
                 Ok(self.inference.resolve(&result))
             }
             NodeKind::CondBranch { arms, fallback } => self.conditions(arms, fallback.as_deref()),
-            NodeKind::With { handler, args, body } => self.with_handler(handler, args, body),
-            NodeKind::Resume => Ok(self.resume_type.clone().unwrap_or_else(|| self.inference.fresh())),
+            NodeKind::With {
+                handler,
+                args,
+                body,
+            } => self.with_handler(handler, args, body),
+            NodeKind::Resume => Ok(self
+                .resume_type
+                .clone()
+                .unwrap_or_else(|| self.inference.fresh())),
         }
     }
 
-    fn record(&mut self, fields: &[(crate::parser::DeclaredName, Node)], span: Span) -> Result<Ty, Diagnostic> {
+    fn record(
+        &mut self,
+        fields: &[(crate::parser::DeclaredName, Node)],
+        span: Span,
+    ) -> Result<Ty, Diagnostic> {
         let candidates: Vec<_> = self
             .records
             .values()
@@ -1081,7 +1529,11 @@ impl Checker<'_> {
             unreachable!()
         };
         for (name, ty) in names.iter().zip(&payload) {
-            let value = &fields.iter().find(|(field, _)| &field.name == name).unwrap().1;
+            let value = &fields
+                .iter()
+                .find(|(field, _)| &field.name == name)
+                .unwrap()
+                .1;
             self.branch_result_expect(value, ty, None)?;
         }
         Ok(self.inference.resolve(&result))
@@ -1089,7 +1541,9 @@ impl Checker<'_> {
 
     fn project(&mut self, value: &Node, field: &FieldName) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &value.kind {
-            if self.ambiguous_modules.contains(name) { return Ok(Ty::Error); }
+            if self.ambiguous_modules.contains(name) {
+                return Ok(Ty::Error);
+            }
             if let Some(exports) = self.modules.get(name) {
                 let scheme = exports.get(&field.name).cloned().ok_or_else(|| {
                     self.error(field.span, Some("E204"), "module member is not exported")
@@ -1108,7 +1562,11 @@ impl Checker<'_> {
         for (input, field, output, receiver) in std::mem::take(&mut self.projections) {
             if matches!(self.inference.resolve(&input), Ty::Var(_)) {
                 if final_pass {
-                    self.deferred.push(self.error(receiver, Some("E304"), "record type could not be inferred"));
+                    self.deferred.push(self.error(
+                        receiver,
+                        Some("E304"),
+                        "record type could not be inferred",
+                    ));
                 } else {
                     self.projections.push((input, field, output, receiver));
                 }
@@ -1148,10 +1606,21 @@ impl Checker<'_> {
         self.unify(ty, &result, span)
     }
 
-    fn project_type(&mut self, ty: &Ty, field: &FieldName, receiver: Span) -> Result<Ty, Diagnostic> {
-        if self.inference.resolve(ty) == Ty::Error { return Ok(Ty::Error); }
+    fn project_type(
+        &mut self,
+        ty: &Ty,
+        field: &FieldName,
+        receiver: Span,
+    ) -> Result<Ty, Diagnostic> {
+        if self.inference.resolve(ty) == Ty::Error {
+            return Ok(Ty::Error);
+        }
         if matches!(self.inference.resolve(ty), Ty::Abstract(_, _)) {
-            return Err(self.error(field.dot, Some("E601"), "abstract type has no accessible fields"));
+            return Err(self.error(
+                field.dot,
+                Some("E601"),
+                "abstract type has no accessible fields",
+            ));
         }
         self.infer_record_from_field(ty, &field.name, field.dot)?;
         if matches!(self.inference.resolve(ty), Ty::Var(_)) {
@@ -1163,12 +1632,23 @@ impl Checker<'_> {
         let Ty::Adt(name, _) = self.inference.resolve(ty) else {
             return Err(self.error(receiver, Some("E305"), "field access requires a record"));
         };
-        let schema = self.records.get(&name).cloned()
+        let schema = self
+            .records
+            .get(&name)
+            .cloned()
             .or_else(|| self.module_records.get(&name).cloned())
             .or_else(|| self.named_projection_schema(&name));
         let (names, scheme) = schema.ok_or_else(|| {
-            let code = if self.has_named_variant(&name) { "E204" } else { "E305" };
-            self.error(if code == "E204" { field.span } else { receiver }, Some(code), "field access requires a single record constructor")
+            let code = if self.has_named_variant(&name) {
+                "E204"
+            } else {
+                "E305"
+            };
+            self.error(
+                if code == "E204" { field.span } else { receiver },
+                Some(code),
+                "field access requires a single record constructor",
+            )
         })?;
         let index = names
             .iter()
@@ -1187,7 +1667,9 @@ impl Checker<'_> {
             self.branch_result(item, &element)?;
         }
         let list = Ty::Adt("List".into(), vec![element]);
-        if let Some(tail) = tail { self.branch_result(tail, &list)?; }
+        if let Some(tail) = tail {
+            self.branch_result(tail, &list)?;
+        }
         Ok(self.inference.resolve(&list))
     }
 
@@ -1217,11 +1699,28 @@ impl Checker<'_> {
             self.branch_result(body, &result)?;
         }
         let groups = self.constructor_groups();
-        let families = groups.values().flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-        let rows: Vec<Vec<_>> = arms.iter().map(|(patterns, _)| {
-            patterns.iter().map(|pattern| crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned)).collect()
-        }).collect();
-        if let Err(error) = crate::check::matrix_coverage(branch_span, &rows, fallback, &families, self.path) {
+        let families = groups
+            .values()
+            .flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone())))
+            .collect();
+        let rows: Vec<Vec<_>> = arms
+            .iter()
+            .map(|(patterns, _)| {
+                patterns
+                    .iter()
+                    .map(|pattern| {
+                        crate::named_patterns::positional(
+                            pattern,
+                            &self.named_constructors,
+                            &str::to_owned,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        if let Err(error) =
+            crate::check::matrix_coverage(branch_span, &rows, fallback, &families, self.path)
+        {
             self.deferred.push(error);
         }
         Ok(self.inference.resolve(&result))
@@ -1243,7 +1742,9 @@ impl Checker<'_> {
                 self.constructor_pattern(name, args, expected, pattern.span)
             }
             PatternKind::Record(fields) => self.record_pattern(fields, expected, pattern.span),
-            PatternKind::NamedConstructor(name, fields) => self.named_pattern(name, fields, expected),
+            PatternKind::NamedConstructor(name, fields) => {
+                self.named_pattern(name, fields, expected)
+            }
         }
     }
 
@@ -1253,25 +1754,45 @@ impl Checker<'_> {
         expected: &Ty,
         span: Span,
     ) -> Result<(), Diagnostic> {
-        if matches!(self.inference.resolve(expected), Ty::Adt(ref name, _) if self.has_named_variant(name)) {
-            return Err(self.error(span, Some("E305"), "record pattern requires a constructor name"));
+        if matches!(self.inference.resolve(expected), Ty::Adt(ref name, _) if self.has_named_variant(name))
+        {
+            return Err(self.error(
+                span,
+                Some("E305"),
+                "record pattern requires a constructor name",
+            ));
         }
         if matches!(self.inference.resolve(expected), Ty::Var(_)) {
-            let candidates: Vec<_> = self.records.values().filter(|(names, _)|
-                fields.iter().all(|(field, _)| names.contains(&field.name))).map(|(_, scheme)| scheme.clone()).collect();
+            let candidates: Vec<_> = self
+                .records
+                .values()
+                .filter(|(names, _)| fields.iter().all(|(field, _)| names.contains(&field.name)))
+                .map(|(_, scheme)| scheme.clone())
+                .collect();
             let [scheme] = candidates.as_slice() else {
-                return Err(self.error(span, Some("E304"), "record pattern fields must identify one nominal type"));
+                return Err(self.error(
+                    span,
+                    Some("E304"),
+                    "record pattern fields must identify one nominal type",
+                ));
             };
-            let Ty::Fn(_, result, _) = self.inference.instantiate(scheme) else { unreachable!() };
+            let Ty::Fn(_, result, _) = self.inference.instantiate(scheme) else {
+                unreachable!()
+            };
             self.unify(expected, &result, span)?;
         }
         for (name, pattern) in fields {
-            let field = FieldName { name: name.name.clone(), dot: span, span: name.span };
+            let field = FieldName {
+                name: name.name.clone(),
+                dot: span,
+                span: name.span,
+            };
             let ty = self.project_type(expected, &field, span)?;
             match pattern {
                 Some(pattern) => self.pattern(pattern, &ty)?,
                 None => {
-                    self.values.insert(name.name.clone(), Scheme::monomorphic(ty));
+                    self.values
+                        .insert(name.name.clone(), Scheme::monomorphic(ty));
                 }
             }
         }
@@ -1286,7 +1807,11 @@ impl Checker<'_> {
         span: Span,
     ) -> Result<(), Diagnostic> {
         if self.named_constructors.contains_key(name) {
-            return Err(self.error(span, Some("E301"), "constructor pattern requires named fields"));
+            return Err(self.error(
+                span,
+                Some("E301"),
+                "constructor pattern requires named fields",
+            ));
         }
         let scheme = self
             .constructors
@@ -1295,7 +1820,9 @@ impl Checker<'_> {
             .ok_or_else(|| self.error(span, Some("E204"), "unknown constructor"))?;
         let ty = self.inference.instantiate(&scheme);
         if ty == Ty::Error {
-            for pattern in args { self.pattern(pattern, &Ty::Error)?; }
+            for pattern in args {
+                self.pattern(pattern, &Ty::Error)?;
+            }
             return Ok(());
         }
         match ty {
@@ -1332,9 +1859,18 @@ impl Checker<'_> {
         let ty = ty?;
         self.expect(&Ty::Bool, &ty, node.span, None)?;
         if row.has_known_effects() {
-            return Err(self.error(node.span, Some("E308"), "effects are not allowed in branch conditions"));
+            return Err(self.error(
+                node.span,
+                Some("E308"),
+                "effects are not allowed in branch conditions",
+            ));
         }
-        self.row_constraints.push(RowConstraint { row, bound: Row::pure(), code: "E308", span: Some(node.span) });
+        self.row_constraints.push(RowConstraint {
+            row,
+            bound: Row::pure(),
+            code: "E308",
+            span: Some(node.span),
+        });
         Ok(())
     }
 
@@ -1347,7 +1883,13 @@ impl Checker<'_> {
     /// pair instead of the two types as equals. `expected_at` is where the
     /// program spells the expectation out, for the related position (§56): the
     /// declared return type, or the first arm of a conditional.
-    fn expect(&mut self, expected: &Ty, found: &Ty, span: Span, expected_at: Option<Span>) -> Result<(), Diagnostic> {
+    fn expect(
+        &mut self,
+        expected: &Ty,
+        found: &Ty,
+        span: Span,
+        expected_at: Option<Span>,
+    ) -> Result<(), Diagnostic> {
         self.inference.unify(expected, found).map_err(|error| {
             let code = match error {
                 TypeError::Mismatch => "E305",
@@ -1356,11 +1898,21 @@ impl Checker<'_> {
             };
             let (expected, found) = crate::types::readable_pair(expected, found);
             let related = expected_at.filter(|at| at.line != span.line || at.col != span.col);
-            self.error_related(span, Some(code), &format!("expected {expected}, found {found}"), related)
+            self.error_related(
+                span,
+                Some(code),
+                &format!("expected {expected}, found {found}"),
+                related,
+            )
         })
     }
 
-    fn branch_result_expect(&mut self, node: &Node, expected: &Ty, expected_at: Option<Span>) -> Result<(), Diagnostic> {
+    fn branch_result_expect(
+        &mut self,
+        node: &Node,
+        expected: &Ty,
+        expected_at: Option<Span>,
+    ) -> Result<(), Diagnostic> {
         let ty = self.expression(node)?;
         self.expect(expected, &ty, node.span, expected_at)
     }
@@ -1399,7 +1951,8 @@ impl Checker<'_> {
                 None => self.inference.fresh(),
             };
             if param.name != "_" {
-                self.values.insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
+                self.values
+                    .insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
             }
             args.push(ty);
         }
@@ -1421,9 +1974,12 @@ impl Checker<'_> {
     fn callee(&mut self, node: &Node) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &node.kind {
             if name.starts_with("__") {
-                if !self.trusted_start.is_some_and(|line| node.span.line >= line) && !std::path::Path::new(self.path)
-                    .components()
-                    .any(|part| part.as_os_str() == "stdlib")
+                if !self
+                    .trusted_start
+                    .is_some_and(|line| node.span.line >= line)
+                    && !std::path::Path::new(self.path)
+                        .components()
+                        .any(|part| part.as_os_str() == "stdlib")
                 {
                     return Err(self.error(
                         node.span,
@@ -1441,12 +1997,19 @@ impl Checker<'_> {
                         RuntimeFunction::ArrayLength => Ty::fn_of(vec![array], Ty::Int),
                         RuntimeFunction::ArrayGet => Ty::fn_of(vec![array, Ty::Int], element),
                         RuntimeFunction::ArrayAlloc => Ty::fn_of(vec![Ty::Int], array),
-                        RuntimeFunction::ArrayFillUnchecked => Ty::fn_of(vec![array.clone(), Ty::Int, element], array),
+                        RuntimeFunction::ArrayFillUnchecked => {
+                            Ty::fn_of(vec![array.clone(), Ty::Int, element], array)
+                        }
                         _ => unreachable!(),
                     });
                 }
-                let signature = function.value_signature().ok_or_else(|| self.error(node.span, Some("E204"), "intrinsic has no value signature"))?;
-                return Ok(Ty::fn_of(signature.parameters.iter().map(Ty::from).collect(), Ty::from(&signature.result)));
+                let signature = function.value_signature().ok_or_else(|| {
+                    self.error(node.span, Some("E204"), "intrinsic has no value signature")
+                })?;
+                return Ok(Ty::fn_of(
+                    signature.parameters.iter().map(Ty::from).collect(),
+                    Ty::from(&signature.result),
+                ));
             }
         }
         self.expression(node)
@@ -1464,9 +2027,16 @@ impl Checker<'_> {
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
         let recursive = if let Ty::Var(id) = &function {
-            self.recursive_calls.get_mut(id).map(|calls| calls.push((argument_types.clone(), span))).is_some()
-        } else { false };
-        if self.inference.resolve(&function) == Ty::Error { return Ok(Ty::Error); }
+            self.recursive_calls
+                .get_mut(id)
+                .map(|calls| calls.push((argument_types.clone(), span)))
+                .is_some()
+        } else {
+            false
+        };
+        if self.inference.resolve(&function) == Ty::Error {
+            return Ok(Ty::Error);
+        }
         let result = self.inference.fresh();
         let row = self.inference.fresh_row();
         // §20: a definition that omits its row gets an implicit effect variable,
@@ -1474,13 +2044,23 @@ impl Checker<'_> {
         // to the effects of this one call. The call's effects are their own row,
         // and they reach the definition's row through the body's row, which is
         // what the definition unifies with at the end of its group.
-        let callee_row = if recursive { self.inference.fresh_row() } else { row.clone() };
-        self.unify(&function, &Ty::fn_with(argument_types.clone(), result.clone(), callee_row), span).map_err(|mut error| {
+        let callee_row = if recursive {
+            self.inference.fresh_row()
+        } else {
+            row.clone()
+        };
+        self.unify(
+            &function,
+            &Ty::fn_with(argument_types.clone(), result.clone(), callee_row),
+            span,
+        )
+        .map_err(|mut error| {
             if recursive && error.code.as_deref() == Some("E306") {
                 error.code = Some("E307".into());
                 error.message = "recursive calls change the argument type".into();
             } else if matches!(error.code.as_deref(), Some("E305" | "E306")) {
-                let (anchor, pair) = self.application_mismatch(&function, &argument_types, args, callee.span);
+                let (anchor, pair) =
+                    self.application_mismatch(&function, &argument_types, args, callee.span);
                 error.line = anchor.line;
                 error.col = anchor.col;
                 // §15.1: at an argument the roles are certain, so the message
@@ -1503,12 +2083,21 @@ impl Checker<'_> {
     /// types. The probe is a copy of the inference, and the pair is resolved
     /// before the unification it is about is attempted, so a failed
     /// unification's partial state is never printed.
-    fn application_mismatch(&self, function: &Ty, types: &[Ty], args: &[Node], fallback: Span) -> (Span, Option<(Ty, Ty)>) {
+    fn application_mismatch(
+        &self,
+        function: &Ty,
+        types: &[Ty],
+        args: &[Node],
+        fallback: Span,
+    ) -> (Span, Option<(Ty, Ty)>) {
         let mut probe = self.inference.clone();
         let parameters: Vec<_> = types.iter().map(|_| probe.fresh()).collect();
         let result = probe.fresh();
         let row = probe.fresh_row();
-        if probe.unify(function, &Ty::fn_with(parameters.clone(), result, row)).is_err() {
+        if probe
+            .unify(function, &Ty::fn_with(parameters.clone(), result, row))
+            .is_err()
+        {
             return (fallback, None);
         }
         for ((parameter, actual), argument) in parameters.iter().zip(types).zip(args) {
@@ -1523,12 +2112,16 @@ impl Checker<'_> {
 
     fn construct(&mut self, name: &str, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
         if self.named_constructors.contains_key(name) {
-            for arg in args { self.expression(arg)?; }
+            for arg in args {
+                self.expression(arg)?;
+            }
             return Err(self.error(span, Some("E301"), "constructor requires named fields"));
         }
         let scheme = self.constructors[name].clone();
         if scheme.body() == &Ty::Error {
-            for argument in args { self.expression(argument)?; }
+            for argument in args {
+                self.expression(argument)?;
+            }
             return Ok(Ty::Error);
         }
         // Constructor schemes describe payloads internally; source expressions yield only data.
@@ -1550,7 +2143,8 @@ impl Checker<'_> {
             })?;
         }
         let result = self.inference.resolve(&result);
-        self.value_types.insert((span.line, span.col), result.clone());
+        self.value_types
+            .insert((span.line, span.col), result.clone());
         Ok(result)
     }
 
@@ -1574,7 +2168,9 @@ impl Checker<'_> {
             checked?;
             return Ok(Ty::Error);
         }
-        if self.option_container(&container) || (pattern.is_some() && matches!(self.inference.resolve(&container), Ty::Var(_))) {
+        if self.option_container(&container)
+            || (pattern.is_some() && matches!(self.inference.resolve(&container), Ty::Var(_)))
+        {
             return self.option_propagation(pattern, &container, value, body);
         }
         if pattern.is_some() {
@@ -1609,7 +2205,9 @@ impl Checker<'_> {
             self.values = saved;
             let result = checked?;
             let (_, input) = self.propagation_types(&result, value.span)?;
-            let Ty::Adt(name, mut args) = input else { unreachable!() };
+            let Ty::Adt(name, mut args) = input else {
+                unreachable!()
+            };
             args[0] = payload;
             self.unify(container, &Ty::Adt(name, args), value.span)?;
             return Ok(self.inference.resolve(&result));
@@ -1631,7 +2229,10 @@ impl Checker<'_> {
                 ty => (ty, 0),
             };
             if let Ty::Adt(result, _) = result {
-                groups.entry(result.clone()).or_default().push((name.clone(), arity));
+                groups
+                    .entry(result.clone())
+                    .or_default()
+                    .push((name.clone(), arity));
             }
         }
         groups
@@ -1639,11 +2240,18 @@ impl Checker<'_> {
 
     fn check_irrefutable(&mut self, pattern: &Pattern) {
         let groups = self.constructor_groups();
-        let families = groups.values().flat_map(|group|
-            group.iter().map(|(name, _)| (name.clone(), group.clone()))).collect();
-        let expanded = crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned);
+        let families = groups
+            .values()
+            .flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone())))
+            .collect();
+        let expanded =
+            crate::named_patterns::positional(pattern, &self.named_constructors, &str::to_owned);
         if crate::coverage::covers_pattern(&expanded, &families) != Some(true) {
-            self.deferred.push(self.error(pattern.span, Some("E402"), "binding pattern does not cover its type"));
+            self.deferred.push(self.error(
+                pattern.span,
+                Some("E402"),
+                "binding pattern does not cover its type",
+            ));
         }
     }
 
@@ -1660,11 +2268,7 @@ impl Checker<'_> {
         self.expression(body)
     }
 
-    fn propagation_types(
-        &mut self,
-        container: &Ty,
-        span: Span,
-    ) -> Result<(Ty, Ty), Diagnostic> {
+    fn propagation_types(&mut self, container: &Ty, span: Span) -> Result<(Ty, Ty), Diagnostic> {
         match self.inference.resolve(container) {
             Ty::Adt(name, args) if name == "Option" && args.len() == 1 => {
                 let output = self.inference.fresh();
@@ -1690,10 +2294,16 @@ impl Checker<'_> {
     }
 
     fn annotation_inner(
-        &mut self, annotation: &TypeExpr, span: Span, parameters: &HashMap<String, Ty>,
-        rejected: &[Span], visiting: &mut Vec<String>,
+        &mut self,
+        annotation: &TypeExpr,
+        span: Span,
+        parameters: &HashMap<String, Ty>,
+        rejected: &[Span],
+        visiting: &mut Vec<String>,
     ) -> Result<Ty, Diagnostic> {
-        if rejected.iter().any(|reference| reference.line == annotation.span.line && reference.col == annotation.span.col) {
+        if rejected.iter().any(|reference| {
+            reference.line == annotation.span.line && reference.col == annotation.span.col
+        }) {
             return Ok(Ty::Error);
         }
         let (name, arguments) = match &annotation.kind {
@@ -1701,24 +2311,47 @@ impl Checker<'_> {
             TypeKind::Apply(name, args) => (name, args.as_slice()),
             _ => return Err(self.error(span, None, "type annotation is not implemented")),
         };
-        if name.split_once('.').is_some_and(|(module, _)| self.ambiguous_modules.contains(module))
-            || self.ambiguous_types.contains(name) { return Ok(Ty::Error); }
+        if name
+            .split_once('.')
+            .is_some_and(|(module, _)| self.ambiguous_modules.contains(module))
+            || self.ambiguous_types.contains(name)
+        {
+            return Ok(Ty::Error);
+        }
         if name == "Fn" && arguments.len() == 2 {
-            let inputs = match &arguments[0].kind { TypeKind::Group(inputs) => inputs.as_slice(), _ => &arguments[..1] };
-            let inputs = inputs.iter().map(|input| self.annotation_inner(input, span, parameters, rejected, visiting)).collect::<Result<_, _>>()?;
-            let output = self.annotation_inner(&arguments[1], span, parameters, rejected, visiting)?;
+            let inputs = match &arguments[0].kind {
+                TypeKind::Group(inputs) => inputs.as_slice(),
+                _ => &arguments[..1],
+            };
+            let inputs = inputs
+                .iter()
+                .map(|input| self.annotation_inner(input, span, parameters, rejected, visiting))
+                .collect::<Result<_, _>>()?;
+            let output =
+                self.annotation_inner(&arguments[1], span, parameters, rejected, visiting)?;
             let row = self.row_annotation(&arguments[1].effects)?;
             return Ok(Ty::fn_with(inputs, output, row));
         }
-        let args = arguments.iter().map(|arg| self.annotation_inner(arg, span, parameters, rejected, visiting)).collect::<Result<Vec<_>, _>>()?;
+        let args = arguments
+            .iter()
+            .map(|arg| self.annotation_inner(arg, span, parameters, rejected, visiting))
+            .collect::<Result<Vec<_>, _>>()?;
         if let Some(ty) = parameters.get(name) {
             return match ty {
                 Ty::Abstract(public, _) => {
-                    if self.abstract_types.values().any(|(arity, name)| name == public && *arity != args.len()) {
-                        return Err(self.error(annotation.span, None, "type argument count differs"));
+                    if self
+                        .abstract_types
+                        .values()
+                        .any(|(arity, name)| name == public && *arity != args.len())
+                    {
+                        return Err(self.error(
+                            annotation.span,
+                            None,
+                            "type argument count differs",
+                        ));
                     }
                     Ok(Ty::Abstract(public.clone(), args))
-                },
+                }
                 Ty::Error => Ok(Ty::Error),
                 _ if args.is_empty() => Ok(ty.clone()),
                 _ => Err(self.error(span, None, "type parameter cannot take arguments")),
@@ -1733,19 +2366,35 @@ impl Checker<'_> {
             if visiting.iter().any(|name| name == alias_name) {
                 return Err(self.error(module, Some("E602"), "cyclic abstract type instantiation"));
             }
-            let substituted = formal.iter().zip(args).map(|(formal, arg)| (formal.name.clone(), arg)).collect();
+            let substituted = formal
+                .iter()
+                .zip(args)
+                .map(|(formal, arg)| (formal.name.clone(), arg))
+                .collect();
             visiting.push(alias_name.to_owned());
-            let result = self.annotation_inner(&target, target.span, &substituted, rejected, visiting);
+            let result =
+                self.annotation_inner(&target, target.span, &substituted, rejected, visiting);
             visiting.pop();
             return result;
         }
         if let Some((arity, qualified)) = self.abstract_types.get(name) {
-            if *arity == args.len() { return Ok(self.reveal_shared(&Ty::Abstract(qualified.clone(), args))); }
+            if *arity == args.len() {
+                return Ok(self.reveal_shared(&Ty::Abstract(qualified.clone(), args)));
+            }
         }
-        if self.type_arities.get(name) == Some(&args.len()) { return Ok(Ty::Adt(name.clone(), args)); }
-        if !args.is_empty() { return Err(self.error(span, None, "type annotation is not implemented")); }
-        crate::types::builtin_type(&name)
-            .ok_or_else(|| self.error(annotation.name_span, Some("E204"), &format!("unknown type {name}")))
+        if self.type_arities.get(name) == Some(&args.len()) {
+            return Ok(Ty::Adt(name.clone(), args));
+        }
+        if !args.is_empty() {
+            return Err(self.error(span, None, "type annotation is not implemented"));
+        }
+        crate::types::builtin_type(&name).ok_or_else(|| {
+            self.error(
+                annotation.name_span,
+                Some("E204"),
+                &format!("unknown type {name}"),
+            )
+        })
     }
 
     fn default_numbers(&mut self) -> Result<(), Diagnostic> {
@@ -1764,7 +2413,14 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn default_division(&mut self, op: BinOp, operand: &Ty, result: &Ty, span: Span, site: &Row) -> Result<(), Diagnostic> {
+    fn default_division(
+        &mut self,
+        op: BinOp,
+        operand: &Ty,
+        result: &Ty,
+        span: Span,
+        site: &Row,
+    ) -> Result<(), Diagnostic> {
         if matches!(self.inference.resolve(operand), Ty::Var(_)) {
             self.unify(operand, &Ty::Int, span)?;
         }
@@ -1806,8 +2462,16 @@ impl Checker<'_> {
         self.unify(&left, &right, a.span)?;
         match op {
             BinOp::Eq | BinOp::Ne => {
-                let span = self.equality_anchors.get(&(a.span.line, a.span.col, b.span.line, b.span.col)).copied().unwrap_or(a.span);
-                self.comparison_constraints.push(ComparisonConstraint { ty: left.clone(), code: "E703", span: Some(span) });
+                let span = self
+                    .equality_anchors
+                    .get(&(a.span.line, a.span.col, b.span.line, b.span.col))
+                    .copied()
+                    .unwrap_or(a.span);
+                self.comparison_constraints.push(ComparisonConstraint {
+                    ty: left.clone(),
+                    code: "E703",
+                    span: Some(span),
+                });
                 Ok(Ty::Bool)
             }
             BinOp::And | BinOp::Or => {
@@ -1816,7 +2480,8 @@ impl Checker<'_> {
             }
             _ => {
                 let result = self.numeric_binary(op, &left, a.span)?;
-                if matches!(op, BinOp::Div | BinOp::Mod) && self.inference.resolve(&left) == Ty::Int {
+                if matches!(op, BinOp::Div | BinOp::Mod) && self.inference.resolve(&left) == Ty::Int
+                {
                     self.add_effects(&Self::error_row());
                 }
                 Ok(result)
@@ -1825,77 +2490,136 @@ impl Checker<'_> {
     }
 
     fn record_comparisons(&mut self, mut constraints: Vec<ComparisonConstraint>, span: Span) {
-        for constraint in &mut constraints { constraint.span.get_or_insert(span); }
+        for constraint in &mut constraints {
+            constraint.span.get_or_insert(span);
+        }
         self.comparison_constraints.extend(constraints);
     }
 
     fn record_row_constraints(&mut self, mut constraints: Vec<RowConstraint>, span: Span) {
-        for constraint in &mut constraints { constraint.span.get_or_insert(span); }
+        for constraint in &mut constraints {
+            constraint.span.get_or_insert(span);
+        }
         self.row_constraints.extend(constraints);
     }
 
     fn check_realization_cycles(&mut self, items: &[Item]) {
-        let graph: HashMap<_, _> = self.abstract_representations.iter().map(|(name, representation)| {
-            let mut references = std::collections::BTreeSet::new();
-            representation.body.abstract_names(&mut references);
-            (name.clone(), references)
-        }).collect();
+        let graph: HashMap<_, _> = self
+            .abstract_representations
+            .iter()
+            .map(|(name, representation)| {
+                let mut references = std::collections::BTreeSet::new();
+                representation.body.abstract_names(&mut references);
+                (name.clone(), references)
+            })
+            .collect();
         for item in items {
-            let Item::ModuleImpl(module) = item else { continue; };
+            let Item::ModuleImpl(module) = item else {
+                continue;
+            };
             let prefix = format!("{}.", module.name);
-            let cyclic = graph.keys().filter(|name| name.starts_with(&prefix)).any(|name|
-                realization_reaches(name, name, &graph, &mut HashSet::new()));
+            let cyclic = graph
+                .keys()
+                .filter(|name| name.starts_with(&prefix))
+                .any(|name| realization_reaches(name, name, &graph, &mut HashSet::new()));
             if cyclic {
-                self.deferred.push(self.error(module.span, Some("E602"), "cyclic abstract type instantiation"));
+                self.deferred.push(self.error(
+                    module.span,
+                    Some("E602"),
+                    "cyclic abstract type instantiation",
+                ));
             }
         }
     }
 
     fn contains_abstract(&self, ty: &Ty, visited: &mut Vec<Ty>) -> bool {
-        if matches!(ty, Ty::Abstract(..)) { return true; }
-        if visited.contains(ty) { return false; }
+        if matches!(ty, Ty::Abstract(..)) {
+            return true;
+        }
+        if visited.contains(ty) {
+            return false;
+        }
         visited.push(ty.clone());
         match ty {
-            Ty::Fn(args, result, _) => return args.iter().any(|arg| self.contains_abstract(arg, visited)) || self.contains_abstract(result, visited),
-            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_abstract(arg, visited)) => return true,
+            Ty::Fn(args, result, _) => {
+                return args.iter().any(|arg| self.contains_abstract(arg, visited))
+                    || self.contains_abstract(result, visited)
+            }
+            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_abstract(arg, visited)) => {
+                return true
+            }
             _ => {}
         }
-        let Ty::Adt(name, _) = ty else { return false; };
-        self.constructors.values()
+        let Ty::Adt(name, _) = ty else {
+            return false;
+        };
+        self.constructors
+            .values()
             .chain(self.records.values().map(|(_, scheme)| scheme))
             .chain(self.module_constructors.values().map(|(_, scheme)| scheme))
             .chain(self.module_records.values().map(|(_, scheme)| scheme))
             .any(|scheme| {
                 let mut inference = self.inference.clone();
                 let instantiated = inference.instantiate(scheme);
-                let Ty::Fn(payload, result, _) = instantiated else { return false; };
-                if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
-                payload.iter().any(|field| self.contains_abstract(&self.reveal_shared(&inference.resolve(field)), visited))
+                let Ty::Fn(payload, result, _) = instantiated else {
+                    return false;
+                };
+                if !matches!(&*result, Ty::Adt(result, _) if result == name)
+                    || inference.unify(&result, ty).is_err()
+                {
+                    return false;
+                }
+                payload.iter().any(|field| {
+                    self.contains_abstract(&self.reveal_shared(&inference.resolve(field)), visited)
+                })
             })
     }
 
     fn contains_function(&self, ty: &Ty, visited: &mut Vec<Ty>) -> bool {
-        if matches!(ty, Ty::Fn(..)) { return true; }
-        if visited.contains(ty) { return false; }
+        if matches!(ty, Ty::Fn(..)) {
+            return true;
+        }
+        if visited.contains(ty) {
+            return false;
+        }
         visited.push(ty.clone());
         match ty {
-            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_function(arg, visited)) => return true,
-            Ty::Abstract(name, args) => return self.abstract_representations.get(name).is_some_and(|representation|
-                self.contains_function(&representation.apply(args), visited)),
+            Ty::Adt(_, args) if args.iter().any(|arg| self.contains_function(arg, visited)) => {
+                return true
+            }
+            Ty::Abstract(name, args) => {
+                return self
+                    .abstract_representations
+                    .get(name)
+                    .is_some_and(|representation| {
+                        self.contains_function(&representation.apply(args), visited)
+                    })
+            }
             _ => {}
         }
-        let Ty::Adt(name, _) = ty else { return false; };
-        self.constructors.values()
+        let Ty::Adt(name, _) = ty else {
+            return false;
+        };
+        self.constructors
+            .values()
             .chain(self.records.values().map(|(_, scheme)| scheme))
             .chain(self.module_constructors.values().map(|(_, scheme)| scheme))
             .chain(self.module_records.values().map(|(_, scheme)| scheme))
             .any(|scheme| {
-            let mut inference = self.inference.clone();
-            let instantiated = inference.instantiate(scheme);
-            let Ty::Fn(payload, result, _) = instantiated else { return false; };
-            if !matches!(&*result, Ty::Adt(result, _) if result == name) || inference.unify(&result, ty).is_err() { return false; }
-            payload.iter().any(|field| self.contains_function(&self.reveal_shared(&inference.resolve(field)), visited))
-        })
+                let mut inference = self.inference.clone();
+                let instantiated = inference.instantiate(scheme);
+                let Ty::Fn(payload, result, _) = instantiated else {
+                    return false;
+                };
+                if !matches!(&*result, Ty::Adt(result, _) if result == name)
+                    || inference.unify(&result, ty).is_err()
+                {
+                    return false;
+                }
+                payload.iter().any(|field| {
+                    self.contains_function(&self.reveal_shared(&inference.resolve(field)), visited)
+                })
+            })
     }
 
     fn numeric_binary(&mut self, op: BinOp, ty: &Ty, span: Span) -> Result<Ty, Diagnostic> {
@@ -1903,7 +2627,8 @@ impl Checker<'_> {
         let ty = self.inference.resolve(ty);
         if matches!(op, BinOp::Div | BinOp::Mod) && matches!(ty, Ty::Var(_)) {
             let result = self.inference.fresh();
-            self.divisions.push((op, ty, result.clone(), span, self.eval_effects.clone()));
+            self.divisions
+                .push((op, ty, result.clone(), span, self.eval_effects.clone()));
             return Ok(result);
         }
         match op {
@@ -1920,21 +2645,45 @@ impl Checker<'_> {
         for item in items {
             let Item::Effect(effect) = item else { continue };
             for op in &effect.ops {
-                if op.kind != OpKind::Once { continue; }
+                if op.kind != OpKind::Once {
+                    continue;
+                }
                 let definition = &self.default_operations[&op.name];
-                let scheme = self.module_definitions.get(definition)
-                    .ok_or_else(|| self.error(op.name_span, Some("E305"), "default operation requires a definition"))?;
+                let scheme = self.module_definitions.get(definition).ok_or_else(|| {
+                    self.error(
+                        op.name_span,
+                        Some("E305"),
+                        "default operation requires a definition",
+                    )
+                })?;
                 let actual = self.inference.instantiate(scheme);
                 let Ty::Fn(args, result, row) = actual else {
-                    return Err(self.error(op.name_span, Some("E305"), "default operation requires a definition"));
+                    return Err(self.error(
+                        op.name_span,
+                        Some("E305"),
+                        "default operation requires a definition",
+                    ));
                 };
                 let wrapped = self.inference.instantiate(&self.values[&op.name]);
-                let Ty::Fn(mut payload, _, _) = wrapped else { unreachable!("operation scheme") };
+                let Ty::Fn(mut payload, _, _) = wrapped else {
+                    unreachable!("operation scheme")
+                };
                 let expected = payload.remove(0);
-                let expected = if op.params.is_empty() { Ty::fn_of(vec![], expected) } else { expected };
+                let expected = if op.params.is_empty() {
+                    Ty::fn_of(vec![], expected)
+                } else {
+                    expected
+                };
                 self.unify(&Ty::fn_of(args, *result), &expected, op.name_span)?;
-                if !self.inference.row_within(&row, &self.operation_result_rows[&op.name]) {
-                    return Err(self.error(op.name_span, Some("E305"), "default operation exceeds declared effects"));
+                if !self
+                    .inference
+                    .row_within(&row, &self.operation_result_rows[&op.name])
+                {
+                    return Err(self.error(
+                        op.name_span,
+                        Some("E305"),
+                        "default operation exceeds declared effects",
+                    ));
                 }
             }
         }
@@ -1944,14 +2693,26 @@ impl Checker<'_> {
     fn register_effects(&mut self, items: &[Item], prelude_items: usize) -> Result<(), Diagnostic> {
         for item in items {
             let Item::Effect(effect) = item else { continue };
-            let parameters: HashMap<_, _> = effect.type_params.iter()
-                .map(|name| (name.name.clone(), self.inference.fresh())).collect();
-            let template = Ty::Adt(effect.name.clone(), effect.type_params.iter().map(|name| parameters[&name.name].clone()).collect());
+            let parameters: HashMap<_, _> = effect
+                .type_params
+                .iter()
+                .map(|name| (name.name.clone(), self.inference.fresh()))
+                .collect();
+            let template = Ty::Adt(
+                effect.name.clone(),
+                effect
+                    .type_params
+                    .iter()
+                    .map(|name| parameters[&name.name].clone())
+                    .collect(),
+            );
             let mut ops = Vec::new();
             for op in &effect.ops {
                 let mut args = Vec::new();
                 for param in &op.params {
-                    let annotation = param.ty.as_ref().ok_or_else(|| self.error(param.span, None, "operation parameter requires a type"))?;
+                    let annotation = param.ty.as_ref().ok_or_else(|| {
+                        self.error(param.span, None, "operation parameter requires a type")
+                    })?;
                     args.push(self.payload_type(annotation, &parameters, param.span)?);
                 }
                 let result = match &op.ret {
@@ -1963,9 +2724,16 @@ impl Checker<'_> {
                     Some(ty) if ty.effects.is_some() => self.row_annotation(&ty.effects)?,
                     _ => Row::pure(),
                 };
-                self.operation_result_rows.insert(op.name.clone(), result_row);
-                let op_ty = if args.is_empty() { result } else { Ty::fn_of(args, result) };
-                let scheme = self.inference.generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
+                self.operation_result_rows
+                    .insert(op.name.clone(), result_row);
+                let op_ty = if args.is_empty() {
+                    result
+                } else {
+                    Ty::fn_of(args, result)
+                };
+                let scheme = self
+                    .inference
+                    .generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
                 self.values.insert(op.name.clone(), scheme);
                 self.operations.insert(op.name.clone(), op.kind);
                 ops.push((op.kind, op.name.clone()));
@@ -1975,22 +2743,42 @@ impl Checker<'_> {
         for item in &items[..prelude_items] {
             let Item::Effect(effect) = item else { continue };
             for op in &effect.ops {
-                if op.kind != OpKind::Once { continue; }
+                if op.kind != OpKind::Once {
+                    continue;
+                }
                 let module_name = format!("{}Default", effect.name);
                 let module = items[..prelude_items].iter().find_map(|item| match item {
                     Item::ModuleImpl(module) if module.name == module_name => Some(module),
                     _ => None,
                 });
-                let definition = module.and_then(|module| module.items.iter().find_map(|item| match item {
-                    Item::Def(def) if def.name == op.name => Some(format!("{}.{}", module.name, def.name)),
-                    _ => None,
-                })).ok_or_else(|| self.error(op.name_span, Some("E204"), "prelude once has no default definition"))?;
+                let definition = module
+                    .and_then(|module| {
+                        module.items.iter().find_map(|item| match item {
+                            Item::Def(def) if def.name == op.name => {
+                                Some(format!("{}.{}", module.name, def.name))
+                            }
+                            _ => None,
+                        })
+                    })
+                    .ok_or_else(|| {
+                        self.error(
+                            op.name_span,
+                            Some("E204"),
+                            "prelude once has no default definition",
+                        )
+                    })?;
                 self.default_operations.insert(op.name.clone(), definition);
             }
         }
         for item in items {
-            let Item::Handler(handler) = item else { continue };
-            let expected = self.effects.get(&handler.effect).cloned().unwrap_or_default();
+            let Item::Handler(handler) = item else {
+                continue;
+            };
+            let expected = self
+                .effects
+                .get(&handler.effect)
+                .cloned()
+                .unwrap_or_default();
             let mut written = Vec::new();
             for arm in &handler.arms {
                 if let HandlerArm::Operation { kind, name, .. } = arm {
@@ -1998,15 +2786,24 @@ impl Checker<'_> {
                 }
             }
             if written.len() != expected.len() || written.iter().any(|op| !expected.contains(op)) {
-                self.deferred.push(self.error(handler.span, Some("E605"), "handler operations do not match the effect"));
+                self.deferred.push(self.error(
+                    handler.span,
+                    Some("E605"),
+                    "handler operations do not match the effect",
+                ));
             }
-            self.handlers.insert(handler.name.clone(), effect_print_name(&handler.effect));
-            self.handler_decls.insert(handler.name.clone(), handler.clone());
+            self.handlers
+                .insert(handler.name.clone(), effect_print_name(&handler.effect));
+            self.handler_decls
+                .insert(handler.name.clone(), handler.clone());
         }
         Ok(())
     }
 
-    fn isolate_effects<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>) -> Result<(T, Row), Diagnostic> {
+    fn isolate_effects<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<(T, Row), Diagnostic> {
         let saved = self.eval_effects.clone();
         self.eval_effects = self.inference.fresh_row();
         let result = f(self);
@@ -2022,9 +2819,9 @@ impl Checker<'_> {
     fn contain_row(&mut self, inner: &Row, outer: &Row, span: Span) -> Result<(), Diagnostic> {
         let inner = self.inference.resolve_row(inner);
         let outer = self.inference.resolve_row(outer);
-        self.inference.row_contained(&inner, &outer).map_err(|_| {
-            self.error(span, Some("E305"), "effect row mismatch")
-        })?;
+        self.inference
+            .row_contained(&inner, &outer)
+            .map_err(|_| self.error(span, Some("E305"), "effect row mismatch"))?;
         if let (Row::Open(id, _), Row::Closed(_)) = (&inner, &outer) {
             self.row_constraints.push(RowConstraint {
                 row: Row::Var(*id),
@@ -2042,7 +2839,9 @@ impl Checker<'_> {
             Some(EffectRow::Pure) => Ok(Row::pure()),
             Some(EffectRow::Row(labels)) => {
                 let mut row = Vec::new();
-                for ty in labels { row.push(self.effect_label(ty)?); }
+                for ty in labels {
+                    row.push(self.effect_label(ty)?);
+                }
                 Ok(Row::Closed(row))
             }
         }
@@ -2052,7 +2851,10 @@ impl Checker<'_> {
         match &ty.kind {
             TypeKind::Name(name) => Ok(Ty::Adt(effect_print_name(name), vec![])),
             TypeKind::Apply(name, args) => {
-                let args = args.iter().map(|arg| self.annotation(arg, arg.span)).collect::<Result<Vec<_>, _>>()?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.annotation(arg, arg.span))
+                    .collect::<Result<Vec<_>, _>>()?;
                 Ok(Ty::Adt(name.clone(), args))
             }
             _ => Err(self.error(ty.name_span, Some("E204"), "unknown effect")),
@@ -2069,18 +2871,37 @@ impl Checker<'_> {
         }
     }
 
-    fn with_handler(&mut self, handler: &DeclaredName, args: &[Node], body: &Node) -> Result<Ty, Diagnostic> {
-        for arg in args { self.expression(arg)?; }
+    fn with_handler(
+        &mut self,
+        handler: &DeclaredName,
+        args: &[Node],
+        body: &Node,
+    ) -> Result<Ty, Diagnostic> {
+        for arg in args {
+            self.expression(arg)?;
+        }
         let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
         let Some(effect) = self.handlers.get(&handler.name).cloned() else {
-            return Err(self.error(handler.span, Some("E204"), &format!("unbound name {}", handler.name)));
+            return Err(self.error(
+                handler.span,
+                Some("E204"),
+                &format!("unbound name {}", handler.name),
+            ));
         };
         self.add_effects(&row.without_effect(&effect));
-        let Some(decl) = self.handler_decls.get(&handler.name).cloned() else { return Ok(ty); };
+        let Some(decl) = self.handler_decls.get(&handler.name).cloned() else {
+            return Ok(ty);
+        };
         self.handler_answer(&decl, &ty, &row, handler.span)
     }
 
-    fn handler_answer(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, span: Span) -> Result<Ty, Diagnostic> {
+    fn handler_answer(
+        &mut self,
+        handler: &HandlerDecl,
+        body: &Ty,
+        row: &Row,
+        span: Span,
+    ) -> Result<Ty, Diagnostic> {
         let answer = self.inference.fresh();
         let saved = self.values.clone();
         let result = self.infer_handler_arms(handler, body, row, &answer, span);
@@ -2089,34 +2910,74 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&answer))
     }
 
-    fn infer_handler_arms(&mut self, handler: &HandlerDecl, body: &Ty, row: &Row, answer: &Ty, span: Span) -> Result<(), Diagnostic> {
+    fn infer_handler_arms(
+        &mut self,
+        handler: &HandlerDecl,
+        body: &Ty,
+        row: &Row,
+        answer: &Ty,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
         let mut saw_return = false;
         for arm in &handler.arms {
             match arm {
-                HandlerArm::Return { param, body: ret, span: arm_span } => {
+                HandlerArm::Return {
+                    param,
+                    body: ret,
+                    span: arm_span,
+                } => {
                     saw_return = true;
                     self.bind_param(param, body);
                     let ty = self.expression(ret)?;
                     self.unify(&ty, answer, *arm_span)?;
                 }
-                HandlerArm::Operation { kind: OpKind::Again, name, params, body: ret, span: arm_span, .. } => {
+                HandlerArm::Operation {
+                    kind: OpKind::Again,
+                    name,
+                    params,
+                    body: ret,
+                    span: arm_span,
+                    ..
+                } => {
                     let (types, result) = self.operation_payload(name, row)?;
-                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                    for (param, ty) in params.iter().zip(types) {
+                        self.bind_param(param, &ty);
+                    }
                     let resume = Ty::fn_with(vec![result], answer.clone(), Row::pure());
                     let previous = self.resume_type.replace(resume);
                     let ty = self.expression(ret);
                     self.resume_type = previous;
                     self.unify(&ty?, answer, *arm_span)?;
                 }
-                HandlerArm::Operation { kind: OpKind::Abort, name, params, body: ret, span: arm_span, .. } => {
-                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Void));
-                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                HandlerArm::Operation {
+                    kind: OpKind::Abort,
+                    name,
+                    params,
+                    body: ret,
+                    span: arm_span,
+                    ..
+                } => {
+                    let (types, _) = self
+                        .operation_payload(name, row)
+                        .unwrap_or((Vec::new(), Ty::Void));
+                    for (param, ty) in params.iter().zip(types) {
+                        self.bind_param(param, &ty);
+                    }
                     let ty = self.expression(ret)?;
                     self.unify(&ty, answer, *arm_span)?;
                 }
-                HandlerArm::Operation { name, params, body: ret, .. } => {
-                    let (types, _) = self.operation_payload(name, row).unwrap_or((Vec::new(), Ty::Void));
-                    for (param, ty) in params.iter().zip(types) { self.bind_param(param, &ty); }
+                HandlerArm::Operation {
+                    name,
+                    params,
+                    body: ret,
+                    ..
+                } => {
+                    let (types, _) = self
+                        .operation_payload(name, row)
+                        .unwrap_or((Vec::new(), Ty::Void));
+                    for (param, ty) in params.iter().zip(types) {
+                        self.bind_param(param, &ty);
+                    }
                     let _ = self.expression(ret)?;
                 }
             }
@@ -2129,18 +2990,27 @@ impl Checker<'_> {
 
     fn bind_param(&mut self, param: &Param, ty: &Ty) {
         if param.name != "_" {
-            self.values.insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
+            self.values
+                .insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
         }
     }
 
     fn operation_payload(&mut self, name: &str, row: &Row) -> Result<(Vec<Ty>, Ty), Diagnostic> {
-        let scheme = self.values.get(name).cloned().ok_or_else(|| self.error(Span { line: 1, col: 1 }, Some("E204"), &format!("unbound name {name}")))?;
+        let scheme = self.values.get(name).cloned().ok_or_else(|| {
+            self.error(
+                Span { line: 1, col: 1 },
+                Some("E204"),
+                &format!("unbound name {name}"),
+            )
+        })?;
         let (ty, _, _) = self.inference.instantiate_constrained(&scheme);
         let Ty::Fn(mut args, effect, _) = ty else {
             return Ok((Vec::new(), ty));
         };
         let op_ty = args.pop().unwrap_or(*effect.clone());
-        let _ = self.inference.row_contained(&Row::Closed(vec![*effect]), row);
+        let _ = self
+            .inference
+            .row_contained(&Row::Closed(vec![*effect]), row);
         Ok(match op_ty {
             Ty::Fn(params, result, _) => (params, *result),
             result => (Vec::new(), result),
@@ -2148,14 +3018,24 @@ impl Checker<'_> {
     }
 
     fn unwrap_operation(&mut self, name: &str, ty: Ty) -> Ty {
-        if !self.operations.contains_key(name) { return ty; }
-        if !matches!(&ty, Ty::Fn(_, effect, _) if
-            matches!(&**effect, Ty::Adt(name, _) if self.effects.contains_key(name))) {
+        if !self.operations.contains_key(name) {
             return ty;
         }
-        let Ty::Fn(mut args, effect, _) = ty else { return ty; };
-        let Some(op_ty) = args.pop() else { return Ty::fn_of(vec![], *effect); };
-        let row = self.inference.union_row(&Row::Closed(vec![*effect]), &self.operation_result_rows[name]);
+        if !matches!(&ty, Ty::Fn(_, effect, _) if
+            matches!(&**effect, Ty::Adt(name, _) if self.effects.contains_key(name)))
+        {
+            return ty;
+        }
+        let Ty::Fn(mut args, effect, _) = ty else {
+            return ty;
+        };
+        let Some(op_ty) = args.pop() else {
+            return Ty::fn_of(vec![], *effect);
+        };
+        let row = self.inference.union_row(
+            &Row::Closed(vec![*effect]),
+            &self.operation_result_rows[name],
+        );
         match op_ty {
             Ty::Fn(params, result, _) => Ty::fn_with(params, *result, row),
             result => {
@@ -2167,14 +3047,23 @@ impl Checker<'_> {
 }
 
 fn effect_print_name(name: &str) -> String {
-    name.rsplit_once('$').map_or(name, |(_, name)| name).to_string()
+    name.rsplit_once('$')
+        .map_or(name, |(_, name)| name)
+        .to_string()
 }
 
 fn realization_reaches(
-    current: &str, target: &str, graph: &HashMap<String, std::collections::BTreeSet<String>>,
+    current: &str,
+    target: &str,
+    graph: &HashMap<String, std::collections::BTreeSet<String>>,
     visited: &mut HashSet<String>,
 ) -> bool {
-    if !visited.insert(current.into()) { return false; }
-    graph.get(current).is_some_and(|references| references.iter().any(|next|
-        next == target || realization_reaches(next, target, graph, visited)))
+    if !visited.insert(current.into()) {
+        return false;
+    }
+    graph.get(current).is_some_and(|references| {
+        references
+            .iter()
+            .any(|next| next == target || realization_reaches(next, target, graph, visited))
+    })
 }

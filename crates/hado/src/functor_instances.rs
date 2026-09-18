@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use crate::parser::*;
 
 pub(crate) fn rename(name: &str, modules: &HashMap<String, String>) -> String {
-    if let Some(replacement) = modules.get(name) { return replacement.clone(); }
+    if let Some(replacement) = modules.get(name) {
+        return replacement.clone();
+    }
     if let Some((module, member)) = name.split_once('.') {
         if let Some(replacement) = modules.get(module) {
             return format!("{replacement}.{member}");
@@ -22,18 +24,34 @@ pub(crate) fn instantiate(
     let mut result = application.clone();
     result.form = ImplementationForm::Ordinary;
     result.items = template.items.clone();
-    let instance = Instance { modules, line_offset, maximum: Cell::new(0) };
-    for item in &mut result.items { instance.item(item); }
+    let instance = Instance {
+        modules,
+        line_offset,
+        maximum: Cell::new(0),
+    };
+    for item in &mut result.items {
+        instance.item(item);
+    }
     result
 }
 
 pub(crate) fn max_line(ast: &Ast) -> usize {
     let mut ast = ast.clone();
     let modules = HashMap::new();
-    let instance = Instance { modules: &modules, line_offset: 0, maximum: Cell::new(ast.span.line) };
-    for item in &mut ast.items { instance.item(item); }
-    for span in ast.branches_after_fallback.iter_mut()
-        .chain(&mut ast.written_list_patterns).chain(&mut ast.long_condition_functions) {
+    let instance = Instance {
+        modules: &modules,
+        line_offset: 0,
+        maximum: Cell::new(ast.span.line),
+    };
+    for item in &mut ast.items {
+        instance.item(item);
+    }
+    for span in ast
+        .branches_after_fallback
+        .iter_mut()
+        .chain(&mut ast.written_list_patterns)
+        .chain(&mut ast.long_condition_functions)
+    {
         instance.span(span);
     }
     for (first, second) in &mut ast.branch_anchors {
@@ -56,7 +74,9 @@ pub(crate) fn max_line(ast: &Ast) -> usize {
     }
     for site in &mut ast.name_sites {
         instance.span(&mut site.start);
-        for part in &mut site.parts { instance.declared(part); }
+        for part in &mut site.parts {
+            instance.declared(part);
+        }
     }
     instance.maximum.get()
 }
@@ -73,15 +93,21 @@ impl Instance<'_> {
         self.maximum.set(self.maximum.get().max(span.line));
     }
 
-    fn declared(&self, name: &mut DeclaredName) { self.span(&mut name.span); }
+    fn declared(&self, name: &mut DeclaredName) {
+        self.span(&mut name.span);
+    }
 
     fn qualified_type(&self, name: &mut String) {
-        if name.contains('.') { *name = rename(name, self.modules); }
+        if name.contains('.') {
+            *name = rename(name, self.modules);
+        }
     }
 
     fn parameter(&self, parameter: &mut Param) {
         self.span(&mut parameter.span);
-        if let Some(ty) = &mut parameter.ty { self.ty(ty); }
+        if let Some(ty) = &mut parameter.ty {
+            self.ty(ty);
+        }
     }
 
     fn item(&self, item: &mut Item) {
@@ -94,20 +120,32 @@ impl Instance<'_> {
             Item::TypeDef(definition) => {
                 self.span(&mut definition.span);
                 self.span(&mut definition.name_span);
-                for parameter in &mut definition.params { self.declared(parameter); }
-                if let Some(ty) = &mut definition.ty { self.ty(ty); }
+                for parameter in &mut definition.params {
+                    self.declared(parameter);
+                }
+                if let Some(ty) = &mut definition.ty {
+                    self.ty(ty);
+                }
             }
             Item::SigDef(definition) => {
                 self.span(&mut definition.span);
                 self.span(&mut definition.name_span);
-                for parameter in &mut definition.type_params { self.declared(parameter); }
-                for parameter in &mut definition.params { self.parameter(parameter); }
-                if let Some(ty) = &mut definition.ret { self.ty(ty); }
+                for parameter in &mut definition.type_params {
+                    self.declared(parameter);
+                }
+                for parameter in &mut definition.params {
+                    self.parameter(parameter);
+                }
+                if let Some(ty) = &mut definition.ret {
+                    self.ty(ty);
+                }
             }
             Item::ModuleSig(module) => {
                 self.span(&mut module.span);
                 self.span(&mut module.name_span);
-                for item in &mut module.items { self.item(item); }
+                for item in &mut module.items {
+                    self.item(item);
+                }
             }
             Item::ModuleImpl(module) => self.module(module),
             Item::Effect(_) | Item::Handler(_) => {}
@@ -135,15 +173,21 @@ impl Instance<'_> {
                 }
             }
         }
-        for item in &mut module.items { self.item(item); }
+        for item in &mut module.items {
+            self.item(item);
+        }
     }
 
     fn definition(&self, definition: &mut DefKind) {
         match definition {
             DefKind::Value(body) => self.node(body),
             DefKind::Function { params, ret, body } => {
-                for parameter in params { self.parameter(parameter); }
-                if let Some(ty) = ret { self.ty(ty); }
+                for parameter in params {
+                    self.parameter(parameter);
+                }
+                if let Some(ty) = ret {
+                    self.ty(ty);
+                }
                 self.node(body);
             }
         }
@@ -156,19 +200,27 @@ impl Instance<'_> {
             TypeKind::Name(name) => self.qualified_type(name),
             TypeKind::Apply(name, arguments) => {
                 self.qualified_type(name);
-                for argument in arguments { self.ty(argument); }
+                for argument in arguments {
+                    self.ty(argument);
+                }
             }
             TypeKind::Adt(variants) => {
                 for variant in variants {
                     self.declared(&mut variant.name);
                     if let crate::parser::ConstructorPayload::Named(fields) = &mut variant.payload {
-                        for field in fields { self.declared(&mut field.name); }
+                        for field in fields {
+                            self.declared(&mut field.name);
+                        }
                     }
-                    for ty in variant.payload.types_mut() { self.ty(ty); }
+                    for ty in variant.payload.types_mut() {
+                        self.ty(ty);
+                    }
                 }
             }
             TypeKind::Group(types) => {
-                for ty in types { self.ty(ty); }
+                for ty in types {
+                    self.ty(ty);
+                }
             }
             TypeKind::Record(fields) => {
                 for field in fields {
@@ -178,7 +230,9 @@ impl Instance<'_> {
             }
         }
         if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
-            for ty in effects { self.ty(ty); }
+            for ty in effects {
+                self.ty(ty);
+            }
         }
     }
 
@@ -186,19 +240,25 @@ impl Instance<'_> {
         self.span(&mut pattern.span);
         match &mut pattern.kind {
             PatternKind::Constructor(_, arguments) => {
-                for argument in arguments { self.pattern(argument); }
+                for argument in arguments {
+                    self.pattern(argument);
+                }
             }
             PatternKind::NamedConstructor(name, fields) => {
                 self.declared(name);
                 for (name, pattern) in fields {
                     self.declared(name);
-                    if let Some(pattern) = pattern { self.pattern(pattern); }
+                    if let Some(pattern) = pattern {
+                        self.pattern(pattern);
+                    }
                 }
             }
             PatternKind::Record(fields) => {
                 for (name, pattern) in fields {
                     self.declared(name);
-                    if let Some(pattern) = pattern { self.pattern(pattern); }
+                    if let Some(pattern) = pattern {
+                        self.pattern(pattern);
+                    }
                 }
             }
             PatternKind::Literal(node) => self.node(node),
@@ -207,7 +267,9 @@ impl Instance<'_> {
     }
 
     fn optional_node(&self, node: &mut Option<Box<Node>>) {
-        if let Some(node) = node { self.node(node); }
+        if let Some(node) = node {
+            self.node(node);
+        }
     }
 
     fn node(&self, node: &mut Node) {
@@ -222,7 +284,9 @@ impl Instance<'_> {
                 self.node(base);
             }
             NodeKind::Fn { params, body } => {
-                for parameter in params { self.parameter(parameter); }
+                for parameter in params {
+                    self.parameter(parameter);
+                }
                 self.node(body);
             }
             NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
@@ -230,10 +294,18 @@ impl Instance<'_> {
                 self.node(value);
                 self.node(body);
             }
-            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
-                for scrutinee in scrutinees { self.node(scrutinee); }
+            NodeKind::PatternBranch {
+                scrutinees,
+                arms,
+                fallback,
+            } => {
+                for scrutinee in scrutinees {
+                    self.node(scrutinee);
+                }
                 for (patterns, body) in arms {
-                    for pattern in patterns { self.pattern(pattern); }
+                    for pattern in patterns {
+                        self.pattern(pattern);
+                    }
                     self.node(body);
                 }
                 self.optional_node(fallback);
@@ -255,7 +327,9 @@ impl Instance<'_> {
             }
             NodeKind::Apply(callee, arguments) | NodeKind::Call(callee, arguments) => {
                 self.node(callee);
-                for argument in arguments { self.node(argument); }
+                for argument in arguments {
+                    self.node(argument);
+                }
             }
             _ => self.aggregate_children(node),
         }
@@ -265,7 +339,10 @@ impl Instance<'_> {
         match &mut node.kind {
             NodeKind::NamedConstructor(name, fields) => {
                 self.declared(name);
-                for (name, value) in fields { self.declared(name); self.node(value); }
+                for (name, value) in fields {
+                    self.declared(name);
+                    self.node(value);
+                }
             }
             NodeKind::Record(fields) => {
                 for (name, value) in fields {
@@ -274,7 +351,9 @@ impl Instance<'_> {
                 }
             }
             NodeKind::List(values, tail) => {
-                for value in values { self.node(value); }
+                for value in values {
+                    self.node(value);
+                }
                 self.optional_node(tail);
             }
             NodeKind::BoolBranch { cond, then, els } => {
@@ -289,9 +368,18 @@ impl Instance<'_> {
                 }
                 self.optional_node(fallback);
             }
-            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Void | NodeKind::Name(_) | NodeKind::Resume => {}
+            NodeKind::Int(_)
+            | NodeKind::Float(_)
+            | NodeKind::Char(_)
+            | NodeKind::Str(_)
+            | NodeKind::Bool(_)
+            | NodeKind::Void
+            | NodeKind::Name(_)
+            | NodeKind::Resume => {}
             NodeKind::With { args, body, .. } => {
-                for arg in args { self.node(arg); }
+                for arg in args {
+                    self.node(arg);
+                }
                 self.node(body);
             }
             _ => unreachable!("binding and scalar children are handled first"),

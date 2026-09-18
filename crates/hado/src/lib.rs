@@ -1,12 +1,12 @@
-mod file_scopes;
-mod functor_instances;
-mod namespaces;
 pub mod build;
-pub mod project;
-pub mod fixes;
 pub mod emit;
+mod file_scopes;
+pub mod fixes;
+mod functor_instances;
 pub mod lexer;
+mod namespaces;
 pub mod parser;
+pub mod project;
 pub mod types;
 
 use std::path::Path;
@@ -16,9 +16,14 @@ pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
     compile_source_to_object(source, "main", obj_path)
 }
 
-pub fn compile_source_to_object(source: &str, source_path: &str, obj_path: &Path) -> Result<(), String> {
+pub fn compile_source_to_object(
+    source: &str,
+    source_path: &str,
+    obj_path: &Path,
+) -> Result<(), String> {
     let checked = check_source(source, source_path).map_err(|e| e.to_string())?;
-    let ParsedSource { ast, .. } = parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
+    let ParsedSource { ast, .. } =
+        parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
     let program = mono::lower_program(&ast, &checked)?;
     emit::compile_mono_to_object(&program, &checked, obj_path)
 }
@@ -52,9 +57,9 @@ pub fn link_executable(
     }
 }
 
-pub mod infer;
-mod dependencies;
 mod contract_types;
+mod dependencies;
+pub mod infer;
 mod name_resolution;
 mod named_patterns;
 
@@ -67,7 +72,8 @@ pub struct Checked {
     pub named_constructors: std::collections::HashMap<String, Vec<String>>,
     pub module_records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
     pub module_definitions: std::collections::HashMap<String, types::Scheme>,
-    pub modules: std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
+    pub modules:
+        std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
     pub constructor_tags: std::collections::HashMap<String, u32>,
     pub constructors: std::collections::HashMap<String, types::Scheme>,
     pub records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
@@ -84,17 +90,30 @@ impl Checked {
     pub(crate) fn for_codegen(&self) -> Self {
         let mut checked = self.clone();
         checked.records.extend(self.module_records.clone());
-        checked.named_constructors.extend(self.module_named_constructors.clone());
+        checked
+            .named_constructors
+            .extend(self.module_named_constructors.clone());
         for (name, (tag, scheme)) in &self.module_constructors {
             checked.constructors.insert(name.clone(), scheme.clone());
             checked.constructor_tags.insert(name.clone(), *tag);
         }
         let names = &self.abstract_representations;
-        for scheme in checked.definitions.values_mut().chain(checked.module_definitions.values_mut()).chain(checked.constructors.values_mut()) {
+        for scheme in checked
+            .definitions
+            .values_mut()
+            .chain(checked.module_definitions.values_mut())
+            .chain(checked.constructors.values_mut())
+        {
             *scheme = scheme.reveal(names);
         }
-        for (_, scheme) in checked.records.values_mut() { *scheme = scheme.reveal(names); }
-        for ty in checked.value_types.values_mut().chain(checked.composite_types.values_mut()) {
+        for (_, scheme) in checked.records.values_mut() {
+            *scheme = scheme.reveal(names);
+        }
+        for ty in checked
+            .value_types
+            .values_mut()
+            .chain(checked.composite_types.values_mut())
+        {
             *ty = ty.reveal(names);
         }
         checked.main = checked.main.reveal(names);
@@ -120,14 +139,20 @@ impl Checked {
         // type may be more polymorphic (E602 requires it to be), and its extra
         // definitions are not visible outside at all (E204).
         let (module, member) = name.rsplit_once('.')?;
-        self.modules.get(module)?.get(member).map(types::Scheme::canonical)
+        self.modules
+            .get(module)?
+            .get(member)
+            .map(types::Scheme::canonical)
     }
 }
 
 /// Whether the program passed to `Project::load` (or the single-file API) has an
 /// entry `main`, or is checked as a library (A1, §10, §50, §52).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Inspection { Entry, Library }
+pub(crate) enum Inspection {
+    Entry,
+    Library,
+}
 
 struct ParsedSource {
     ast: parser::Ast,
@@ -142,28 +167,66 @@ struct ParsedSource {
 fn parse_with_prelude(source: &str, path: &str) -> Result<ParsedSource, parser::Diagnostic> {
     let ast = parser::parse_source(source, path)?;
     let mut parsed = with_prelude(ast, path, source.lines().count())?;
-    resolve_namespaces(&mut parsed, &[(0, Vec::new())], &std::collections::BTreeSet::from([Vec::new()]), &std::collections::BTreeSet::new(), path);
+    resolve_namespaces(
+        &mut parsed,
+        &[(0, Vec::new())],
+        &std::collections::BTreeSet::from([Vec::new()]),
+        &std::collections::BTreeSet::new(),
+        path,
+    );
     Ok(parsed)
 }
 
-fn resolve_namespaces(parsed: &mut ParsedSource, files: &[(usize, Vec<String>)], directories: &std::collections::BTreeSet<Vec<String>>, libraries: &std::collections::BTreeSet<Vec<String>>, path: &str) {
-    let resolved = namespaces::resolve(&mut parsed.ast, files, directories, libraries, parsed.prelude_items, path);
+fn resolve_namespaces(
+    parsed: &mut ParsedSource,
+    files: &[(usize, Vec<String>)],
+    directories: &std::collections::BTreeSet<Vec<String>>,
+    libraries: &std::collections::BTreeSet<Vec<String>>,
+    path: &str,
+) {
+    let resolved = namespaces::resolve(
+        &mut parsed.ast,
+        files,
+        directories,
+        libraries,
+        parsed.prelude_items,
+        path,
+    );
     parsed.namespace_diagnostics = resolved.diagnostics;
     parsed.namespace_anchors = resolved.error_anchors;
 }
 
-fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result<ParsedSource, parser::Diagnostic> {
-    let inspection = if has_main_definition(&ast) { Inspection::Entry } else { Inspection::Library };
+fn with_prelude(
+    mut ast: parser::Ast,
+    path: &str,
+    source_lines: usize,
+) -> Result<ParsedSource, parser::Diagnostic> {
+    let inspection = if has_main_definition(&ast) {
+        Inspection::Entry
+    } else {
+        Inspection::Library
+    };
     let mut prelude = Vec::new();
     for (name, source) in [
         ("stdlib/list.hd", include_str!("../../../stdlib/list.hd")),
-        ("stdlib/option.hd", include_str!("../../../stdlib/option.hd")),
+        (
+            "stdlib/option.hd",
+            include_str!("../../../stdlib/option.hd"),
+        ),
         ("stdlib/error.hd", include_str!("../../../stdlib/error.hd")),
     ] {
-        prelude.extend(parser::parse_source(source, name)?.items.into_iter().filter(|item| matches!(item, parser::Item::TypeDef(_))));
+        prelude.extend(
+            parser::parse_source(source, name)?
+                .items
+                .into_iter()
+                .filter(|item| matches!(item, parser::Item::TypeDef(_))),
+        );
     }
     let mut trusted_start = None;
-    if !std::path::Path::new(path).components().any(|part| part.as_os_str() == "stdlib") {
+    if !std::path::Path::new(path)
+        .components()
+        .any(|part| part.as_os_str() == "stdlib")
+    {
         let mut line = source_lines + 2;
         trusted_start = Some(line + 1);
         for module in [
@@ -173,25 +236,51 @@ fn with_prelude(mut ast: parser::Ast, path: &str, source_lines: usize) -> Result
             include_str!("../../../stdlib/list.hd"),
             include_str!("../../../stdlib/option.hd"),
             include_str!("../../../stdlib/array.hd"),
-            include_str!("../../../stdlib/string.hd"), include_str!("../../../stdlib/bytes.hd"), include_str!("../../../stdlib/int.hd"), include_str!("../../../stdlib/float.hd")] {
+            include_str!("../../../stdlib/string.hd"),
+            include_str!("../../../stdlib/bytes.hd"),
+            include_str!("../../../stdlib/int.hd"),
+            include_str!("../../../stdlib/float.hd"),
+        ] {
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;
             ast.branch_anchors.extend(parsed.branch_anchors);
             ast.branch_spans.extend(parsed.branch_spans);
             ast.equality_anchors.extend(parsed.equality_anchors);
-            ast.qualified_type_anchors.extend(parsed.qualified_type_anchors);
+            ast.qualified_type_anchors
+                .extend(parsed.qualified_type_anchors);
             ast.name_sites.extend(parsed.name_sites);
-            ast.written_list_patterns.extend(parsed.written_list_patterns);
-            ast.long_condition_functions.extend(parsed.long_condition_functions);
-            ast.branches_after_fallback.extend(parsed.branches_after_fallback);
-            prelude.extend(parsed.items.into_iter().filter(|item| !matches!(item, parser::Item::TypeDef(_))));
+            ast.written_list_patterns
+                .extend(parsed.written_list_patterns);
+            ast.long_condition_functions
+                .extend(parsed.long_condition_functions);
+            ast.branches_after_fallback
+                .extend(parsed.branches_after_fallback);
+            prelude.extend(
+                parsed
+                    .items
+                    .into_iter()
+                    .filter(|item| !matches!(item, parser::Item::TypeDef(_))),
+            );
             line += module.lines().count() + 1;
         }
     }
-    let prelude_items = prelude.len() + if trusted_start.is_none() { ast.items.len() } else { 0 };
+    let prelude_items = prelude.len()
+        + if trusted_start.is_none() {
+            ast.items.len()
+        } else {
+            0
+        };
     prelude.append(&mut ast.items);
     ast.items = prelude;
-    Ok(ParsedSource { ast, inspection, trusted_start, prelude_items, other_entry_roots: Vec::new(), namespace_diagnostics: Vec::new(), namespace_anchors: Vec::new() })
+    Ok(ParsedSource {
+        ast,
+        inspection,
+        trusted_start,
+        prelude_items,
+        other_entry_roots: Vec::new(),
+        namespace_diagnostics: Vec::new(),
+        namespace_anchors: Vec::new(),
+    })
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
@@ -202,37 +291,79 @@ fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Di
     check_parsed_filtered(parsed, path, true)
 }
 
-pub(crate) fn check_parsed_for_print(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
+pub(crate) fn check_parsed_for_print(
+    parsed: &ParsedSource,
+    path: &str,
+) -> Result<Checked, parser::Diagnostic> {
     check_parsed_filtered(parsed, path, false)
 }
 
-fn check_parsed_filtered(parsed: &ParsedSource, path: &str, reject_user_main_effects: bool) -> Result<Checked, parser::Diagnostic> {
-    let ParsedSource { ast, inspection, trusted_start, prelude_items, other_entry_roots, namespace_diagnostics, namespace_anchors } = parsed;
+fn check_parsed_filtered(
+    parsed: &ParsedSource,
+    path: &str,
+    reject_user_main_effects: bool,
+) -> Result<Checked, parser::Diagnostic> {
+    let ParsedSource {
+        ast,
+        inspection,
+        trusted_start,
+        prelude_items,
+        other_entry_roots,
+        namespace_diagnostics,
+        namespace_anchors,
+    } = parsed;
     let adjust = |error| namespace_diagnostic(check::arm_diagnostic(ast, error), namespace_anchors);
     let name_error = names::resolve_with_prelude(ast, path, *trusted_start, *inspection).err();
-    let (checked, mut diagnostics) = match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection, *prelude_items) {
-        Ok(result) => result,
-        Err(error) => return Err(name_error.into_iter().chain(std::iter::once(error)).chain(namespace_diagnostics.iter().cloned()).map(adjust).min_by_key(diagnostic_order).unwrap()),
-    };
+    let (checked, mut diagnostics) =
+        match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection, *prelude_items)
+        {
+            Ok(result) => result,
+            Err(error) => {
+                return Err(name_error
+                    .into_iter()
+                    .chain(std::iter::once(error))
+                    .chain(namespace_diagnostics.iter().cloned())
+                    .map(adjust)
+                    .min_by_key(diagnostic_order)
+                    .unwrap())
+            }
+        };
     diagnostics.extend(name_error);
     diagnostics.extend(namespace_diagnostics.iter().cloned());
     if let Err(error) = check::check_ast(ast, path) {
         diagnostics.push(error);
     }
-    diagnostics.extend(dependencies::diagnostics(ast, &checked, *prelude_items, other_entry_roots, *inspection, path));
+    diagnostics.extend(dependencies::diagnostics(
+        ast,
+        &checked,
+        *prelude_items,
+        other_entry_roots,
+        *inspection,
+        path,
+    ));
     // Why not keep E706 for --print-type: r24/r25 print `String {Ask}` on main.
     if !reject_user_main_effects {
         diagnostics.retain(|error| error.code.as_deref() != Some("E706"));
     }
-    match diagnostics.into_iter().map(adjust).min_by_key(diagnostic_order) {
+    match diagnostics
+        .into_iter()
+        .map(adjust)
+        .min_by_key(diagnostic_order)
+    {
         Some(error) => Err(error),
         None => Ok(checked),
     }
 }
 
-fn namespace_diagnostic(mut error: parser::Diagnostic, anchors: &[(parser::Span, parser::Span)]) -> parser::Diagnostic {
+fn namespace_diagnostic(
+    mut error: parser::Diagnostic,
+    anchors: &[(parser::Span, parser::Span)],
+) -> parser::Diagnostic {
     if error.code.as_deref() == Some("E204") {
-        if let Some((_, target)) = anchors.iter().find(|(source, _)| source.line == error.line && source.col == error.col) {
+        if let Some((_, target)) = anchors
+            .iter()
+            .find(|(source, _)| source.line == error.line && source.col == error.col)
+        {
             error.line = target.line;
             error.col = target.col;
         }
@@ -241,7 +372,11 @@ fn namespace_diagnostic(mut error: parser::Diagnostic, anchors: &[(parser::Span,
 }
 
 pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize) {
-    let stage = match error.code.as_deref().and_then(|code| code.as_bytes().get(1)) {
+    let stage = match error
+        .code
+        .as_deref()
+        .and_then(|code| code.as_bytes().get(1))
+    {
         Some(b'1') => 1,
         Some(b'2') => 2,
         Some(b'3' | b'6') => 3,
@@ -252,9 +387,9 @@ pub(crate) fn diagnostic_order(error: &parser::Diagnostic) -> (u8, usize, usize)
     (stage, error.line, error.col)
 }
 
+mod ambiguous_declarations;
 mod type_cycles;
 mod type_realizations;
-mod ambiguous_declarations;
 
 pub mod names;
 
@@ -271,8 +406,15 @@ pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic>
 }
 
 pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
-    parser::Diagnostic { related: None, path: path.into(), line: 1, col: 1, code: Some("E206".into()),
-        message: "build requires an entry file with main; check treats this directory as a library".into() }
+    parser::Diagnostic {
+        related: None,
+        path: path.into(),
+        line: 1,
+        col: 1,
+        code: Some("E206".into()),
+        message: "build requires an entry file with main; check treats this directory as a library"
+            .into(),
+    }
 }
 
 /// The span of the `def main` of a file, whatever its form (§52). `Ast::main` is
@@ -297,19 +439,41 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
     }
     let checked = check_parsed(parsed, path)?;
     let ast = &parsed.ast;
-    let main = ast.main().ok_or_else(|| parser::Diagnostic { related: None,
-        path: path.into(), line: ast.span.line, col: ast.span.col, code: None,
+    let main = ast.main().ok_or_else(|| parser::Diagnostic {
+        related: None,
+        path: path.into(),
+        line: ast.span.line,
+        col: ast.span.col,
+        code: None,
         message: "main must be a value definition for lowering".into(),
     })?;
-    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic { related: None,
-        path: path.into(), line: main.span.line, col: main.span.col, code: None, message,
+    let program = mono::lower_program(&ast, &checked).map_err(|message| parser::Diagnostic {
+        related: None,
+        path: path.into(),
+        line: main.span.line,
+        col: main.span.col,
+        code: None,
+        message,
     })?;
     let mut output = format!("fn main() -> {}\n{:?}\n", checked.main, program.entry);
-    let printer_id = mono::FunctionId(program.functions.iter().map(|function| function.id.0).max().map_or(1, |id| id + 2));
+    let printer_id = mono::FunctionId(
+        program
+            .functions
+            .iter()
+            .map(|function| function.id.0)
+            .max()
+            .map_or(1, |id| id + 2),
+    );
     let printer = mono::derive_printers(printer_id, program.entry.ty(), &checked);
-    for function in program.functions { output.push_str(&format!("{function:?}\n")); }
+    for function in program.functions {
+        output.push_str(&format!("{function:?}\n"));
+    }
     match printer {
-        Ok(functions) => for function in functions { output.push_str(&format!("{function:?}\n")); },
+        Ok(functions) => {
+            for function in functions {
+                output.push_str(&format!("{function:?}\n"));
+            }
+        }
         Err(message) => output.push_str(&format!("; main printer unavailable: {message}\n")),
     }
     Ok(output)

@@ -38,8 +38,7 @@ fn lists_and_constructor_patterns_share_element_types() {
         Ty::Adt("List".into(), vec![Ty::Int])
     );
     assert!(check_source("def main = [1, true]", "t").is_err());
-    let source =
-        "def unwrap | Some(value) => value | None => 0\ndef main = unwrap (Some(8))";
+    let source = "def unwrap | Some(value) => value | None => 0\ndef main = unwrap (Some(8))";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
     let source = "def main = if Some(1) | Some(value) => value | None => false";
     assert_eq!(
@@ -79,7 +78,10 @@ fn recursive_type_cycles_preserve_parameters() {
 #[test]
 fn empty_unit_payload_form_is_reserved_for_ok() {
     let invalid = "type Event = | Done(Void) | Failed\ndef main = Done()";
-    assert_eq!(check_source(invalid, "t").err().unwrap().code.as_deref(), Some("E106"));
+    assert_eq!(
+        check_source(invalid, "t").err().unwrap().code.as_deref(),
+        Some("E106")
+    );
     let source = "type Event = | Done(Void) | Failed\ndef main = Done(())";
     assert_eq!(
         check_source(source, "t").unwrap().main,
@@ -103,8 +105,14 @@ fn nullary_constructor_patterns_constrain_the_scrutinee_type() {
 #[test]
 fn main_requires_a_monomorphic_type() {
     for source in ["def main = []", "def main = Some([])"] {
-        assert_eq!(check_source(source, "t").err().unwrap().code.as_deref(), Some("E701"));
+        assert_eq!(
+            check_source(source, "t").err().unwrap().code.as_deref(),
+            Some("E701")
+        );
     }
     let source = "def empty (n: Int): Int List => if n == 0 => [] | [n]\ndef main = empty 0";
-    assert_eq!(check_source(source, "t").unwrap().main, Ty::Adt("List".into(), vec![Ty::Int]));
+    assert_eq!(
+        check_source(source, "t").unwrap().main,
+        Ty::Adt("List".into(), vec![Ty::Int])
+    );
 }

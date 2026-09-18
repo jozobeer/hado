@@ -20,14 +20,8 @@ fn precedence_mul_over_add() {
 
 #[test]
 fn left_assoc_add_and_mul() {
-    assert_eq!(
-        parse_expr_ok("def main = 1 + 2 + 3"),
-        "((1 + 2) + 3)"
-    );
-    assert_eq!(
-        parse_expr_ok("def main = 10 / 2 / 5"),
-        "((10 / 2) / 5)"
-    );
+    assert_eq!(parse_expr_ok("def main = 1 + 2 + 3"), "((1 + 2) + 3)");
+    assert_eq!(parse_expr_ok("def main = 10 / 2 / 5"), "((10 / 2) / 5)");
 }
 
 #[test]
@@ -51,18 +45,12 @@ fn unary_minus_binds_tightest() {
 
 #[test]
 fn parens_override_precedence() {
-    assert_eq!(
-        parse_expr_ok("def main = (1 + 2) * 3"),
-        "((1 + 2) * 3)"
-    );
+    assert_eq!(parse_expr_ok("def main = (1 + 2) * 3"), "((1 + 2) * 3)");
 }
 
 #[test]
 fn comments_and_newlines_are_ignored() {
-    assert_eq!(
-        parse_expr_ok("def main = 1 // hi\n + 2"),
-        "(1 + 2)"
-    );
+    assert_eq!(parse_expr_ok("def main = 1 // hi\n + 2"), "(1 + 2)");
 }
 
 #[test]
@@ -73,30 +61,15 @@ fn non_assoc_comparison_rejected() {
 
 #[test]
 fn application_and_pipe() {
-    assert_eq!(
-        parse_expr_ok("def main = f x y"),
-        "f x y"
-    );
-    assert_eq!(
-        parse_expr_ok("def main = 1 |> add 2 3"),
-        "(1 |> add 2 3)"
-    );
+    assert_eq!(parse_expr_ok("def main = f x y"), "f x y");
+    assert_eq!(parse_expr_ok("def main = 1 |> add 2 3"), "(1 |> add 2 3)");
 }
 
 #[test]
 fn constructor_and_field() {
-    assert_eq!(
-        parse_expr_ok("def main = Some(x)"),
-        "Some(x)"
-    );
-    assert_eq!(
-        parse_expr_ok("def main = M.inc 2"),
-        "M.inc 2"
-    );
-    assert_eq!(
-        parse_expr_ok("def main = user.name"),
-        "user.name"
-    );
+    assert_eq!(parse_expr_ok("def main = Some(x)"), "Some(x)");
+    assert_eq!(parse_expr_ok("def main = M.inc 2"), "M.inc 2");
+    assert_eq!(parse_expr_ok("def main = user.name"), "user.name");
 }
 
 #[test]
@@ -119,10 +92,7 @@ fn bindings_and_fn() {
         parse_expr_ok("def main = let x? = f y -> x"),
         "(let x? = f y -> x)"
     );
-    assert_eq!(
-        parse_expr_ok("def main = do g x -> x"),
-        "(do g x -> x)"
-    );
+    assert_eq!(parse_expr_ok("def main = do g x -> x"), "(do g x -> x)");
     assert_eq!(
         parse_expr_ok("def main = fn(x => x + 1)"),
         "fn(x => (x + 1))"
@@ -156,16 +126,23 @@ fn defs_modules_types() {
 
 #[test]
 fn adt_accepts_leading_pipe() {
-    assert!(parse_source(
-        "type T Nest =\n  | Leaf(T)\n  | Node(T List Nest)",
-        "t",
-    )
-    .is_ok());
+    assert!(parse_source("type T Nest =\n  | Leaf(T)\n  | Node(T List Nest)", "t",).is_ok());
     assert!(parse_source("type Color =\n  | Red\n  | Green\n  | Blue", "t").is_ok());
     assert!(parse_source("type T List2 = | Nil2 | Cons2(T, T List2)", "t").is_ok());
     assert_eq!(
         type_of("type Color =\n  | Red\n  | Green\n  | Blue"),
-        Some(type_expr(TypeKind::Adt(["Red", "Green", "Blue"].into_iter().map(|name| crate::parser::ConstructorDecl { name: crate::parser::DeclaredName { name: name.into(), span: Span { line: 1, col: 1 } }, payload: crate::parser::ConstructorPayload::Nullary }).collect()))),
+        Some(type_expr(TypeKind::Adt(
+            ["Red", "Green", "Blue"]
+                .into_iter()
+                .map(|name| crate::parser::ConstructorDecl {
+                    name: crate::parser::DeclaredName {
+                        name: name.into(),
+                        span: Span { line: 1, col: 1 }
+                    },
+                    payload: crate::parser::ConstructorPayload::Nullary
+                })
+                .collect()
+        ))),
     );
 }
 
@@ -173,12 +150,18 @@ fn adt_accepts_leading_pipe() {
 fn fn_type_group() {
     assert_eq!(
         match type_of("type F = { function: Fn(Int, Int => Int) }") {
-            Some(TypeExpr { kind: TypeKind::Record(mut fields), .. }) => Some(fields.remove(0).ty),
+            Some(TypeExpr {
+                kind: TypeKind::Record(mut fields),
+                ..
+            }) => Some(fields.remove(0).ty),
             _ => None,
         },
         Some(type_expr(TypeKind::Apply(
             "Fn".into(),
-            vec![type_expr(TypeKind::Group(vec![named_type("Int"), named_type("Int")])), named_type("Int")],
+            vec![
+                type_expr(TypeKind::Group(vec![named_type("Int"), named_type("Int")])),
+                named_type("Int")
+            ],
         ))),
     );
     assert!(parse_source("def f(x: Fn(Int, Int => Int)): Int => 1", "t").is_ok());
@@ -195,10 +178,7 @@ fn not_unary_precedence() {
         parse_expr_ok("def main = not true && false"),
         "((not true) && false)"
     );
-    assert_eq!(
-        parse_expr_ok("def main = not 1 == 2"),
-        "((not 1) == 2)"
-    );
+    assert_eq!(parse_expr_ok("def main = not 1 == 2"), "((not 1) == 2)");
     assert_eq!(parse_expr_ok("def main = not not true"), "(not (not true))");
     assert_eq!(parse_expr_ok("def main = - not true"), "(-(not true))");
     assert_eq!(parse_expr_ok("def main = not - 1"), "(not (-1))");
@@ -264,7 +244,14 @@ fn arm_conditions_end_at_fallback_so_later_pattern_arms_remain() {
     let NodeKind::PatternBranch { arms, fallback, .. } = &ast.main().unwrap().kind else {
         panic!("expected pattern branch");
     };
-    assert_eq!(arms.len(), 2, "{:?}", arms.iter().map(|(p, _)| p.iter().map(|p| p.to_string()).collect::<Vec<_>>()).collect::<Vec<_>>());
+    assert_eq!(
+        arms.len(),
+        2,
+        "{:?}",
+        arms.iter()
+            .map(|(p, _)| p.iter().map(|p| p.to_string()).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
     assert!(fallback.is_none());
     assert!(matches!(arms[0].1.kind, NodeKind::CondBranch { .. }));
     assert!(!matches!(arms[1].1.kind, NodeKind::CondBranch { .. }));
@@ -272,10 +259,19 @@ fn arm_conditions_end_at_fallback_so_later_pattern_arms_remain() {
 
 #[test]
 fn pattern_shaped_fallback_before_an_arm_still_records_e404() {
-    let source = "def f (x: Int Option): Int =>\n  if x\n  | None\n  | Some(v) => v\ndef main = f None";
+    let source =
+        "def f (x: Int Option): Int =>\n  if x\n  | None\n  | Some(v) => v\ndef main = f None";
     let ast = parse_source(source, "t").unwrap();
-    assert_eq!(ast.branches_after_fallback.len(), 1, "{:?}", ast.branches_after_fallback);
-    assert_eq!(ast.branches_after_fallback[0], crate::lexer::Span { line: 4, col: 3 });
+    assert_eq!(
+        ast.branches_after_fallback.len(),
+        1,
+        "{:?}",
+        ast.branches_after_fallback
+    );
+    assert_eq!(
+        ast.branches_after_fallback[0],
+        crate::lexer::Span { line: 4, col: 3 }
+    );
 }
 
 #[test]
@@ -340,8 +336,16 @@ fn typedef_preserves_parameters() {
         ("type Count = | Count(Int)", vec![]),
     ] {
         let ast = parse_source(source, "t").unwrap();
-        let Item::TypeDef(def) = &ast.items[0] else { panic!("expected type") };
-        assert_eq!(def.params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>(), expected);
+        let Item::TypeDef(def) = &ast.items[0] else {
+            panic!("expected type")
+        };
+        assert_eq!(
+            def.params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
     }
     println!("typedef_params_ok: 1");
 }
@@ -351,8 +355,7 @@ fn lower_rejects_extra_items() {
     let source = "def other = 1\ndef main = 1 + 2";
     let ast = parse_source(source, "t").unwrap();
     assert!(lower_to_m0(&ast).is_none());
-    let error = crate::compile_to_object(source, std::path::Path::new("unused.o"))
-        .unwrap_err();
+    let error = crate::compile_to_object(source, std::path::Path::new("unused.o")).unwrap_err();
     assert!(error.contains("E513"), "{error}");
     println!("lower_extra_def_ng: 1");
     for extra in ["type Extra = | Extra(Int)", "def main = 4"] {
@@ -374,7 +377,14 @@ fn m0_parse_entry() {
 }
 
 fn type_expr(kind: TypeKind) -> TypeExpr {
-    TypeExpr { kind, span: Span { line: 1, col: 1 }, name_span: Span { line: 1, col: 1 }, effects: None }
+    TypeExpr {
+        kind,
+        span: Span { line: 1, col: 1 },
+        name_span: Span { line: 1, col: 1 },
+        effects: None,
+    }
 }
 
-fn named_type(name: &str) -> TypeExpr { type_expr(TypeKind::Name(name.into())) }
+fn named_type(name: &str) -> TypeExpr {
+    type_expr(TypeKind::Name(name.into()))
+}

@@ -6,11 +6,13 @@
 //! stdout equals the depth constant. A dead constant with a real depth of 1
 //! prints `1` and fails here.
 
-use cranelift_codegen::ir::{AbiParam, InstBuilder, Signature, UserFuncName, condcodes::IntCC, types};
+use cranelift_codegen::ir::{
+    condcodes::IntCC, types, AbiParam, InstBuilder, Signature, UserFuncName,
+};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{Linkage, Module, default_libcall_names};
+use cranelift_module::{default_libcall_names, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use std::path::PathBuf;
 use std::process::Command;
@@ -23,10 +25,7 @@ fn make_isa() -> cranelift_codegen::isa::OwnedTargetIsa {
     flag_builder.set("preserve_frame_pointers", "true").unwrap();
     flag_builder.set("opt_level", "none").unwrap();
     let flags = settings::Flags::new(flag_builder);
-    cranelift_native::builder()
-        .unwrap()
-        .finish(flags)
-        .unwrap()
+    cranelift_native::builder().unwrap().finish(flags).unwrap()
 }
 
 fn workdir() -> PathBuf {
@@ -63,7 +62,8 @@ fn define_f2(module: &mut ObjectModule, f2: FuncIdAlias, g9: FuncIdAlias) {
     let (depth, count) = (params[0], params[1]);
     let zero = bcx.ins().iconst(types::I64, 0);
     let done = bcx.ins().icmp(IntCC::Equal, depth, zero);
-    bcx.ins().brif(done, base, std::iter::empty(), cont, std::iter::empty());
+    bcx.ins()
+        .brif(done, base, std::iter::empty(), cont, std::iter::empty());
     bcx.switch_to_block(base);
     bcx.ins().return_(&[count]);
     bcx.switch_to_block(cont);
@@ -100,7 +100,8 @@ fn define_g9(module: &mut ObjectModule, f2: FuncIdAlias, g9: FuncIdAlias) {
     let (depth, count) = (params[0], params[1]);
     let zero = bcx.ins().iconst(types::I64, 0);
     let done = bcx.ins().icmp(IntCC::Equal, depth, zero);
-    bcx.ins().brif(done, base, std::iter::empty(), cont, std::iter::empty());
+    bcx.ins()
+        .brif(done, base, std::iter::empty(), cont, std::iter::empty());
     bcx.switch_to_block(base);
     bcx.ins().return_(&[count]);
     bcx.switch_to_block(cont);
@@ -192,11 +193,7 @@ fn tail() {
     std::fs::write(&obj, bytes).unwrap();
     hado::link_executable(&obj, &exe).expect("link tail");
     let out = Command::new(&exe).output().expect("run tail");
-    assert!(
-        out.status.success(),
-        "guest exit status: {:?}",
-        out.status
-    );
+    assert!(out.status.success(), "guest exit status: {:?}", out.status);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(stdout.trim(), DEPTH.to_string());
 }

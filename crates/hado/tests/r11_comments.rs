@@ -12,12 +12,19 @@ fn generated_comment_markers_preserve_tokens_or_report_first_character() {
             (format!("def main = {padding}"), format!("\n{value}")),
             (format!("def main = {value} {padding}"), "\n".into()),
         ] {
-            let expected = Span { line: 1, col: prefix.chars().count() + 1 };
+            let expected = Span {
+                line: 1,
+                col: prefix.chars().count() + 1,
+            };
             for marker in ["--", "#"] {
                 let source = format!("{prefix}{marker} comment{suffix}");
                 let error = lexer::lex_full(&source).unwrap_err();
                 assert_eq!(error.code, Some("E104"), "{source}: {error:?}");
-                assert_eq!((error.line, error.col), (expected.line, expected.col), "{source}");
+                assert_eq!(
+                    (error.line, error.col),
+                    (expected.line, expected.col),
+                    "{source}"
+                );
             }
             let source = format!("{prefix}// comment{suffix}");
             hado::check_source(&source, "generated.hd").unwrap();
@@ -39,9 +46,18 @@ fn slash_division_and_comment_have_distinct_runtime_results() {
         let path = case_dir.join("main.hd");
         std::fs::write(&path, source).unwrap();
         let build = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
-            .arg("build").arg(&path).output().unwrap();
-        assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
-        let output = std::process::Command::new(path.with_extension("")).output().unwrap();
+            .arg("build")
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let output = std::process::Command::new(path.with_extension(""))
+            .output()
+            .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, expected.as_bytes());
         assert!(output.stderr.is_empty());

@@ -6,7 +6,11 @@ struct Case(PathBuf);
 impl Case {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!("hado-r26-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "hado-r26-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir(&dir).unwrap();
         Self(dir)
     }
@@ -15,11 +19,24 @@ impl Case {
         std::fs::write(self.0.join(file), source).unwrap();
     }
     fn command(&self, command: &str, entry: &str) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_hado")).arg(command).arg(self.0.join(entry)).output().unwrap()
+        Command::new(env!("CARGO_BIN_EXE_hado"))
+            .arg(command)
+            .arg(self.0.join(entry))
+            .output()
+            .unwrap()
     }
     fn print_type(&self, entry: &str) -> String {
-        let output = Command::new(env!("CARGO_BIN_EXE_hado")).args(["check", "--print-type"]).arg(self.0.join(entry)).output().unwrap();
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let output = Command::new(env!("CARGO_BIN_EXE_hado"))
+            .args(["check", "--print-type"])
+            .arg(self.0.join(entry))
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(output.stderr.is_empty());
         String::from_utf8(output.stdout).unwrap()
     }
@@ -27,39 +44,72 @@ impl Case {
         let source = std::fs::read_to_string(self.0.join(file)).unwrap();
         let before = &source[..offset];
         let output = self.command(command, entry);
-        assert_eq!(output.status.code(), Some(1), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{source}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(output.stdout.is_empty());
         let diagnostic = String::from_utf8(output.stderr).unwrap();
-        let relative = std::path::Path::new(file).strip_prefix(std::path::Path::new(entry).parent().unwrap()).unwrap();
-        let prefix = format!("{}:{}:{}: error[{code}]: ", relative.display(), before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1);
-        assert!(diagnostic.starts_with(&prefix), "expected {prefix}\n{diagnostic}\n{source}");
+        let relative = std::path::Path::new(file)
+            .strip_prefix(std::path::Path::new(entry).parent().unwrap())
+            .unwrap();
+        let prefix = format!(
+            "{}:{}:{}: error[{code}]: ",
+            relative.display(),
+            before.matches('\n').count() + 1,
+            before.rsplit('\n').next().unwrap().chars().count() + 1
+        );
+        assert!(
+            diagnostic.starts_with(&prefix),
+            "expected {prefix}\n{diagnostic}\n{source}"
+        );
         assert_eq!(diagnostic.lines().count(), 1);
     }
     fn build(&self, entry: &str) -> Output {
         self.command("build", entry)
     }
     fn run(&self, entry: &str) -> Output {
-        Command::new(self.0.join(entry).with_extension("")).output().unwrap()
+        Command::new(self.0.join(entry).with_extension(""))
+            .output()
+            .unwrap()
     }
 }
-impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+impl Drop for Case {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 fn random(state: &mut u64, limit: usize) -> usize {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     ((*state >> 32) as usize) % limit
 }
 
 fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
     let offset = source.find(anchor).unwrap();
     let lead = format!("// position {padding}\n{}", "\n".repeat(padding % 3));
-    (format!("{lead}{}{}{}", &source[..offset], " ".repeat(padding), &source[offset..]), lead.len() + offset + padding)
+    (
+        format!(
+            "{lead}{}{}{}",
+            &source[..offset],
+            " ".repeat(padding),
+            &source[offset..]
+        ),
+        lead.len() + offset + padding,
+    )
 }
 
 fn perturb_rejection(case: &Case, file: &str, source: &str, code: &str, anchor: &str) {
     for padding in 0..5 {
         let (source, offset) = shifted(source, anchor, padding);
         case.write(file, &source);
-        for command in ["check", "build", "dump-mono"] { case.reject(command, "main.hd", file, code, offset); }
+        for command in ["check", "build", "dump-mono"] {
+            case.reject(command, "main.hd", file, code, offset);
+        }
     }
 }
 
@@ -84,8 +134,17 @@ fn print_type_still_shows_user_effects_on_main() {
         case.write("main.hd", &format!("effect Ask\nonce ask: String\ndef f x => if true => ask | x\ndef main = f \"{n}\"\n"));
         assert_eq!(case.print_type("main.hd"), "String {Ask}\n");
         let output = case.command("check", "main.hd");
-        assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("error[E706]"), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("error[E706]"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
@@ -99,7 +158,12 @@ fn once_evaluates_the_handler_arm_in_place() {
             "effect Ask\nonce ask: String\nhandler Ask as Fixed\nonce ask => \"{token}\"\ndef main =\n  with Fixed ->\n  ask\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
         assert_eq!(output.status.code(), Some(0));
         assert_eq!(output.stdout, format!("{token}\n").as_bytes());
@@ -113,9 +177,17 @@ fn unhandled_abort_matches_result_stderr_and_status() {
     for _ in 0..8 {
         let token = format!("e{}", random(&mut state, 100_000));
         let case = Case::new();
-        case.write("main.hd", &format!("def main = raise {{ message = \"{token}\" }}\n"));
+        case.write(
+            "main.hd",
+            &format!("def main = raise {{ message = \"{token}\" }}\n"),
+        );
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty(), "{:?}", output.stdout);
@@ -133,9 +205,19 @@ fn abort_handler_turns_raise_into_a_value() {
             "handler Error as ToZero\nabort raise _ => {n}\nreturn value => value\ndef main =\n  with ToZero ->\n  raise {{ message = \"caught\" }}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{n}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -152,9 +234,19 @@ fn abort_handler_skips_do_continuation_when_the_rhs_raises() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 0 ->\n  {continued}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -171,9 +263,19 @@ fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 1 ->\n  {continued}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{continued}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -191,9 +293,19 @@ fn abort_handler_catches_integer_division_by_zero() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  {left} {op} 0\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -210,9 +322,19 @@ fn abort_handler_catches_division_inside_arithmetic_and_calls() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => x / 0\ndef main =\n  with Catch ->\n  1 + (f {left})\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -230,9 +352,19 @@ fn abort_handler_skips_do_continuation_on_division_by_zero() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  do ({left} / 0) ->\n  {continued}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -250,9 +382,19 @@ fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
             "handler Error as Catch\nabort raise _ => \"{caught}\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {x} ->\n  \"{continued}\"\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let expected = if x == 0 { &caught } else { &continued };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
@@ -271,9 +413,19 @@ fn abort_handler_catches_division_outside_an_unrelated_once_handler() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + ({left} {op} 0)\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -290,9 +442,19 @@ fn abort_handler_catches_division_in_a_callee_outside_an_unrelated_once_handler(
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef f x => x / 0\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (f {left})\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -308,9 +470,19 @@ fn abort_handler_catches_raise_outside_an_unrelated_once_handler() {
             "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (raise {{ message = \"x\" }})\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -326,9 +498,19 @@ fn abort_handler_outside_once_still_runs_the_once_body() {
             "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Catch ->\n  with Nop ->\n  loop {n} 0\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{n}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -345,9 +527,19 @@ fn again_handler_outside_abort_handler_collects_callee_yields() {
             collect_handler(),
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("[{}]\n", yielded).as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -366,10 +558,24 @@ fn again_handler_outside_abort_handler_forwards_callee_raise() {
             collect_handler(),
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = if fails { "[]".to_string() } else { format!("[{yielded}]") };
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = if fails {
+            "[]".to_string()
+        } else {
+            format!("[{yielded}]")
+        };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -380,9 +586,19 @@ fn transitive_callee_reuses_the_enclosing_answer_for_abort() {
     let case = Case::new();
     case.write("main.hd", "effect A\nabort a\neffect B\nabort b\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B as InnerB\nabort b => 0\nreturn value => value\ndef g (x: Int): Int {B} =>\n  if x == 0 => b | x\ndef f (x: Int): Int {A, B} =>\n  if x == 0 => a | g x\ndef main =\n  with OuterA ->\n  with InnerB ->\n  f 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"outer-abort\n");
     assert!(output.stderr.is_empty());
 }
@@ -395,9 +611,19 @@ fn transitive_callee_reuses_the_enclosing_answer_for_again() {
             "effect A\nabort a\neffect B YieldB\nagain yieldB(value: Int): Void\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B YieldB as CollectB\nagain yieldB value =>\n  let rest = resume () ->\n  rest\nreturn _ => 0\ndef g (x: Int): Int {{Int YieldB}} =>\n  do yieldB x -> x\ndef f (x: Int): Int {{A, Int YieldB}} =>\n  if x == 0 => a | g x\ndef main =\n  with OuterA ->\n  with CollectB ->\n  f {value}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -412,9 +638,19 @@ fn nested_again_handlers_with_different_answers_align() {
             collect_handler(),
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -432,9 +668,19 @@ fn division_inside_lambda_under_handler_reaches_the_abort_arm() {
             "handler Error as Catch\nabort raise _ => 99\nreturn value => value\ndef main =\n  with Catch ->\n  {body}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{body}\n{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{body}\n{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{body}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{body}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{body}");
         assert!(output.stderr.is_empty(), "{body}");
     }
@@ -445,7 +691,12 @@ fn error_handler_arm_does_not_catch_its_own_raise() {
     let case = Case::new();
     case.write("main.hd", "handler Error as H\nabort raise _ => 1 / 0\nreturn value => value\ndef main =\n  with H ->\n  1 / 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty(), "{:?}", output.stdout);
@@ -457,9 +708,19 @@ fn error_handler_arm_raise_reaches_the_outer_handler() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Outer\nabort raise _ => 42\nreturn value => value\nhandler Error as Inner\nabort raise _ => 1 / 0\nreturn value => value\ndef main =\n  with Outer ->\n  with Inner ->\n  1 / 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"42\n");
     assert!(output.stderr.is_empty());
 }
@@ -473,10 +734,24 @@ fn direct_abort_and_yield_agree_on_the_innermost_answer() {
             collect_handler(),
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{condition}\n{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{condition}\n{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{condition}\n{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(output.stdout, format!("{expected}\n").as_bytes(), "{condition}");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{condition}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            format!("{expected}\n").as_bytes(),
+            "{condition}"
+        );
         assert!(output.stderr.is_empty(), "{condition}");
     }
 }
@@ -486,7 +761,12 @@ fn callee_case_from_a_handler_arm_escapes_that_handler() {
     let case = Case::new();
     case.write("main.hd", "handler Error as H\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {Error} => x / 0\ndef main =\n  with H ->\n  1 / 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty(), "{:?}", output.stdout);
@@ -495,9 +775,19 @@ fn callee_case_from_a_handler_arm_escapes_that_handler() {
     let case = Case::new();
     case.write("main.hd", "handler Error as G\nabort raise _ => 42\nreturn value => value\nhandler Error as H\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {Error} => x / 0\ndef main =\n  with G ->\n  with H ->\n  1 / 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"42\n");
     assert!(output.stderr.is_empty());
 }
@@ -510,9 +800,19 @@ fn mutual_recursion_forwards_a_late_raise_across_a_success_type_change() {
         "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef rec f (x: Int): String {Error} =>\n  if x > 0 =>\n    let n = g (x - 1) ->\n    Int.to_string n\n  | raise { message = \"f\" }\ndef rec g (x: Int): Int {Error} =>\n  if x == 0 =>\n    let s = f (x - 1) ->\n    String.length s\n  | raise { message = \"g\" }\ndef main =\n  with Catch ->\n  f 1\n",
     );
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"caught\n");
     assert!(output.stderr.is_empty());
 }
@@ -522,7 +822,12 @@ fn arm_call_does_not_reuse_a_body_specialization() {
     let case = Case::new();
     case.write("main.hd", "effect A\nabort a\nhandler A as OuterA\nabort a => 100\nreturn value => value\nhandler Error as Catch\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {A, Error}\n| x < 0 => a\n| x == 0 => raise { message = \"f\" }\n| x\ndef main =\n  with OuterA ->\n  with Catch ->\n  do f 1 -> raise { message = \"body\" }\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty(), "{:?}", output.stdout);
@@ -537,9 +842,19 @@ fn do_binds_a_named_again_callee_with_the_caller_continuation() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -554,9 +869,19 @@ fn effectful_callback_runs_under_the_handler() {
         let case = Case::new();
         case.write("main.hd", source);
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{source}\n{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{source}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, b"[]\n", "{source}");
         assert!(output.stderr.is_empty(), "{source}");
     }
@@ -564,21 +889,39 @@ fn effectful_callback_runs_under_the_handler() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.map [2, 4] fn(x => 8 / x)\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stdout, b"[4, 2]\n");
     assert!(output.stderr.is_empty());
 
     let case = Case::new();
-    case.write("main.hd", &format!(
-        "{}def main =\n  with Collect ->\n  List.map [1, 2] fn(x => do yield x -> x)\n",
-        collect_handler(),
-    ));
+    case.write(
+        "main.hd",
+        &format!(
+            "{}def main =\n  with Collect ->\n  List.map [1, 2] fn(x => do yield x -> x)\n",
+            collect_handler(),
+        ),
+    );
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -591,9 +934,19 @@ fn do_binds_a_local_closure_callee_with_the_caller_continuation() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -603,9 +956,19 @@ fn once_operation_with_a_handled_effect_is_lifted_in_argument_position() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  String.length cwd\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.trim().parse::<i64>().is_ok(), "{stdout}");
     assert!(output.stderr.is_empty());
@@ -619,9 +982,19 @@ fn late_registered_yield_composes_with_the_caller_continuation() {
         collect_handler().replace("return _ => []", "return value => [value]"),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 42]\n");
     assert!(output.stderr.is_empty());
 }
@@ -634,9 +1007,19 @@ fn do_binds_a_branch_callee_with_the_caller_continuation() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -646,9 +1029,19 @@ fn effectful_top_level_value_is_lifted_in_argument_position() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef current = cwd\ndef main =\n  with Catch ->\n  String.length current\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.trim().parse::<i64>().is_ok(), "{stdout}");
     assert!(output.stderr.is_empty());
@@ -666,19 +1059,43 @@ fn effectful_callback_reaches_the_handler_through_prelude_folds() {
         let case = Case::new();
         case.write("main.hd", source);
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{source}\n{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "{source}");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{source}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            expected,
+            "{source}"
+        );
         assert!(output.stderr.is_empty(), "{source}");
     }
 
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => None\nreturn value => value\ndef main =\n  with Catch ->\n  Option.map (Some(4)) fn(x => 8 / x)\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"Some(2)\n");
     assert!(output.stderr.is_empty());
 }
@@ -688,9 +1105,19 @@ fn callback_passed_through_a_pure_callee_keeps_its_own_result() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef identity (f: Fn(Int => Int)): Fn(Int => Int) => f\ndef main =\n  with Catch ->\n  let f = identity fn(x => 8 / x) ->\n  f 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -703,9 +1130,19 @@ fn do_binds_a_local_callback_passed_as_an_argument() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -718,9 +1155,19 @@ fn do_binds_a_callback_held_in_a_record_field() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1, 2]\n");
     assert!(output.stderr.is_empty());
 }
@@ -730,9 +1177,19 @@ fn an_effectful_closure_in_an_adt_field_keeps_its_outcome() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let opt = Some(fn(x => 8 / x)) ->\n  if opt | Some(f) => f 0 | None => 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -742,9 +1199,19 @@ fn an_effectful_closure_in_a_monomorphic_adt_field_keeps_its_outcome() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}))\ndef main =\n  with Catch ->\n  let Box(f) = Box(fn(x => 8 / x)) ->\n  f 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -754,9 +1221,19 @@ fn a_lambda_may_return_an_effectful_lambda() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => fn(y => x / y)) ->\n  let divide = make 8 ->\n  divide 0\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -769,9 +1246,19 @@ fn a_handled_once_operation_with_a_yielding_arm_is_lifted() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"[1]\n");
     assert!(output.stderr.is_empty());
 }
@@ -786,14 +1273,29 @@ fn once_tail_recursion_completes_ten_million_iterations() {
             "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
         ));
         let dump = case.command("dump-mono", "main.hd");
-        assert_eq!(dump.status.code(), Some(0), "{}", String::from_utf8_lossy(&dump.stderr));
+        assert_eq!(
+            dump.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&dump.stderr)
+        );
         let ir = String::from_utf8_lossy(&dump.stdout);
         assert!(ir.contains("TailCall"), "{ir}");
         assert!(!ir.contains("Yield"), "{ir}");
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{n}\n").as_bytes());
     }
     let small_n = 1_000_000u64;
@@ -802,9 +1304,12 @@ fn once_tail_recursion_completes_ten_million_iterations() {
     let large = build_once_loop(large_n);
     assert_eq!(small.run.stdout, format!("{small_n}\n").as_bytes());
     assert_eq!(large.run.stdout, format!("{large_n}\n").as_bytes());
-    assert!(large.rss_kb * small_n < small.rss_kb * large_n,
+    assert!(
+        large.rss_kb * small_n < small.rss_kb * large_n,
         "once loop RSS scaled with iterations: {} KB at {small_n}, {} KB at {large_n}",
-        small.rss_kb, large.rss_kb);
+        small.rss_kb,
+        large.rss_kb
+    );
 }
 
 struct Built {
@@ -818,20 +1323,42 @@ fn build_once_loop(n: u64) -> Built {
         "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let bin = case.0.join("main");
     let run = Command::new(&bin).output().unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert!(run.stderr.is_empty());
-    Built { run, rss_kb: max_rss_kb(&bin) }
+    Built {
+        run,
+        rss_kb: max_rss_kb(&bin),
+    }
 }
 
 fn max_rss_kb(bin: &std::path::Path) -> u64 {
-    let output = Command::new("/usr/bin/time").arg("-v").arg(bin).output().unwrap();
-    String::from_utf8_lossy(&output.stderr).lines().find_map(|line| {
-        let (label, value) = line.rsplit_once(':')?;
-        label.contains("Maximum resident set size").then(|| value.trim().parse().unwrap())
-    }).unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(&output.stderr)))
+    let output = Command::new("/usr/bin/time")
+        .arg("-v")
+        .arg(bin)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .find_map(|line| {
+            let (label, value) = line.rsplit_once(':')?;
+            label
+                .contains("Maximum resident set size")
+                .then(|| value.trim().parse().unwrap())
+        })
+        .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(&output.stderr)))
 }
 
 fn collect_handler() -> &'static str {
@@ -839,8 +1366,17 @@ fn collect_handler() -> &'static str {
 }
 
 fn list_literal(values: &[i64]) -> String {
-    if values.is_empty() { "[]".into() } else {
-        format!("[{}]", values.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", "))
+    if values.is_empty() {
+        "[]".into()
+    } else {
+        format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -857,10 +1393,23 @@ fn generator_collects_yielded_values() {
             list_literal(&values),
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(output.stdout, format!("{}\n", list_literal(&values)).as_bytes());
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            format!("{}\n", list_literal(&values)).as_bytes()
+        );
         assert!(output.stderr.is_empty());
     }
 }
@@ -876,14 +1425,29 @@ fn again_loop_counts_each_yield() {
             collect_handler(),
         ));
         let dump = case.command("dump-mono", "main.hd");
-        assert_eq!(dump.status.code(), Some(0), "{}", String::from_utf8_lossy(&dump.stderr));
+        assert_eq!(
+            dump.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&dump.stderr)
+        );
         let ir = String::from_utf8_lossy(&dump.stdout);
         assert!(ir.contains("MakeClosure"), "{ir}");
         assert!(ir.contains("CallClosure"), "{ir}");
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{n}\n").as_bytes());
     }
     let case = Case::new();
@@ -892,9 +1456,19 @@ fn again_loop_counts_each_yield() {
         collect_handler(),
     ));
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"10000\n");
     assert!(output.stderr.is_empty());
 }
@@ -912,10 +1486,23 @@ fn distinct_handlers_specialize_the_same_function_apart() {
             "effect Ask\nonce ask: Int\nhandler Ask as One\nonce ask => {one}\nreturn value => value\nhandler Ask as Two\nonce ask => {two}\nreturn value => value\ndef use (x: Int): Int {{Ask}} => ask + x\ndef main = (with One -> use {left}) + (with Two -> use {right})\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(output.stdout, format!("{}\n", (one + left) + (two + right)).as_bytes());
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            format!("{}\n", (one + left) + (two + right)).as_bytes()
+        );
     }
 }
 
@@ -929,9 +1516,19 @@ fn abort_in_a_branch_skips_the_return_arm() {
             "effect Fail\nabort bail\nhandler Fail as ToZero\nabort bail => 0\nreturn value => value + 1\ndef f (k: Int): Int {{Fail}} => if k > 0 => bail | k\ndef main = with ToZero -> f {n}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let expected = if n > 0 { 0 } else { n + 1 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
@@ -948,10 +1545,24 @@ fn abort_handler_return_arm_changes_the_with_type() {
         ));
         assert_eq!(case.print_type("main.hd"), "Int Option\n");
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = if n > 0 { format!("Some({n})\n") } else { "None\n".into() };
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = if n > 0 {
+            format!("Some({n})\n")
+        } else {
+            "None\n".into()
+        };
         assert_eq!(output.stdout, expected.as_bytes());
     }
 }
@@ -967,9 +1578,19 @@ fn handler_arm_can_call_a_top_level_function() {
             "effect Ask\nonce ask: Int\ndef double (n: Int): Int => n * 2\nhandler Ask as Fixed\nonce ask => double {k}\nreturn value => value\ndef use (y: Int): Int {{Ask}} => ask + y\ndef main = with Fixed -> use {x}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.stdout, format!("{}\n", k * 2 + x).as_bytes());
     }
 }
@@ -985,10 +1606,23 @@ fn again_arm_keeps_pure_helpers_at_their_result_type() {
             "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(output.stdout, format!("{}\n", list_literal(&doubled)).as_bytes());
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            format!("{}\n", list_literal(&doubled)).as_bytes()
+        );
     }
 }
 
@@ -1002,9 +1636,19 @@ fn return_arm_runs_when_types_already_match() {
             "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn _ => 9\ndef f (n: Int): Int {{Fail}} => if n > 0 => n | bail\ndef main = with H -> f {k}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let expected = if k > 0 { 9 } else { 0 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
@@ -1020,9 +1664,19 @@ fn return_arm_does_not_rewrite_a_non_tail_branch() {
             "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn value => value + 1\ndef f (n: Int): Int {{Fail}} => let x = (if n > 0 => n | bail) -> x + 10\ndef main = with H -> f {k}\n"
         ));
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let expected = if k > 0 { k + 10 + 1 } else { 0 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
@@ -1039,10 +1693,24 @@ fn return_arm_does_not_rewrite_a_pure_helper() {
         ));
         assert_eq!(case.print_type("main.hd"), "Int Option\n");
         let built = case.build("main.hd");
-        assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+        assert_eq!(
+            built.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
         let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = if k > 0 { format!("Some({})\n", k * 2) } else { "None\n".into() };
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = if k > 0 {
+            format!("Some({})\n", k * 2)
+        } else {
+            "None\n".into()
+        };
         assert_eq!(output.stdout, expected.as_bytes());
     }
 }
@@ -1052,9 +1720,19 @@ fn an_effectful_closure_nested_in_a_monomorphic_adt_field_arg_keeps_its_outcome(
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}) Option)\ndef main =\n  with Catch ->\n  let Box(g) = Box(Some(fn(x => 8 / x))) ->\n  if g | Some(f) => f 0 | None => -1\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -1064,9 +1742,19 @@ fn a_lambda_may_return_an_adt_holding_an_effectful_lambda() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => Some(fn(y => x / y))) ->\n  let holder = make 8 ->\n  if holder | Some(f) => f 0 | None => -1\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
@@ -1076,9 +1764,19 @@ fn an_operation_in_a_nested_handler_arm_does_not_reach_the_entered_handler() {
     let case = Case::new();
     case.write("main.hd", "effect A\nonce askA: Int\neffect B\nonce askB: Int\nhandler A as HA\nonce askA => with HB -> askB\nreturn value => value\nhandler B as HB\nonce askB => askA\nreturn value => value\nhandler A as HA2\nonce askA => 7\nreturn value => 0\ndef main =\n  with HA2 ->\n  with HA ->\n  askA\n");
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }

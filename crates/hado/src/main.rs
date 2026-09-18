@@ -21,7 +21,10 @@ fn main() -> ExitCode {
         usage();
         return ExitCode::from(2);
     };
-    if !matches!(command, "check" | "dump-mono" | "build" | "run" | "fmt" | "test") {
+    if !matches!(
+        command,
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test"
+    ) {
         usage();
         return ExitCode::from(2);
     }
@@ -148,7 +151,11 @@ fn main() -> ExitCode {
             }
         };
     }
-    match if print { project.check_for_print() } else { project.check() } {
+    match if print {
+        project.check_for_print()
+    } else {
+        project.check()
+    } {
         Ok(checked) => {
             if print {
                 if let Err(code) = print_type(&checked, &project, type_name, input) {
@@ -316,7 +323,11 @@ fn run_tests(input: &Path) -> ExitCode {
         }
     }
     println!("test: {passed}/{} passed", tests.len());
-    if passed == tests.len() { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if passed == tests.len() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 /// `run` reports the program's exit code as its own (§58).

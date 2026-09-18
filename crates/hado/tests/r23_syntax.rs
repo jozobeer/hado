@@ -6,15 +6,22 @@ fn spec() -> &'static str {
 
 fn spec_between(start: &str, end: &str) -> &'static str {
     let text = spec();
-    let from = text.find(start).unwrap_or_else(|| panic!("missing {start}"));
+    let from = text
+        .find(start)
+        .unwrap_or_else(|| panic!("missing {start}"));
     let rest = &text[from..];
-    let until = rest[start.len()..].find(end).map(|index| start.len() + index).unwrap_or(rest.len());
+    let until = rest[start.len()..]
+        .find(end)
+        .map(|index| start.len() + index)
+        .unwrap_or(rest.len());
     &rest[..until]
 }
 
 fn spec_to_end(start: &str) -> &'static str {
     let text = spec();
-    let from = text.find(start).unwrap_or_else(|| panic!("missing {start}"));
+    let from = text
+        .find(start)
+        .unwrap_or_else(|| panic!("missing {start}"));
     &text[from..]
 }
 
@@ -29,11 +36,22 @@ fn ocaml_blocks(section: &str) -> Vec<&str> {
 
 fn location(source: &str, offset: usize) -> (usize, usize) {
     let before = &source[..offset];
-    (before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1)
+    (
+        before.matches('\n').count() + 1,
+        before.rsplit('\n').next().unwrap().chars().count() + 1,
+    )
 }
 
 fn shifted(source: &str, offset: usize, padding: usize) -> (String, usize) {
-    (format!("{}{}{}", &source[..offset], " ".repeat(padding), &source[offset..]), offset + padding)
+    (
+        format!(
+            "{}{}{}",
+            &source[..offset],
+            " ".repeat(padding),
+            &source[offset..]
+        ),
+        offset + padding,
+    )
 }
 
 fn reject(source: &str, code: &str, offset: usize) {
@@ -41,7 +59,11 @@ fn reject(source: &str, code: &str, offset: usize) {
         let (source, offset) = shifted(source, offset, padding);
         let error = parse_source(&source, "generated.hd").expect_err(&source);
         assert_eq!(error.code.as_deref(), Some(code), "{error}\n{source}");
-        assert_eq!((error.line, error.col), location(&source, offset), "{error}\n{source}");
+        assert_eq!(
+            (error.line, error.col),
+            location(&source, offset),
+            "{error}\n{source}"
+        );
     }
 }
 
@@ -56,10 +78,16 @@ fn abort_return_colon(source: &str) -> usize {
 }
 
 fn roundtrip(source: &str) {
-    let ast = parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
+    let ast =
+        parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
     let canonical = parser::canonical_program(&ast);
-    let restored = parse_source(&canonical, "canonical.hd").unwrap_or_else(|error| panic!("{error}\n{source}\n{canonical}"));
-    assert_eq!(canonical, parser::canonical_program(&restored), "{source}\n{canonical}");
+    let restored = parse_source(&canonical, "canonical.hd")
+        .unwrap_or_else(|error| panic!("{error}\n{source}\n{canonical}"));
+    assert_eq!(
+        canonical,
+        parser::canonical_program(&restored),
+        "{source}\n{canonical}"
+    );
 }
 
 fn spec_keywords() -> Vec<String> {
@@ -71,7 +99,11 @@ fn spec_keywords() -> Vec<String> {
         .enumerate()
         .filter(|(index, _)| index % 2 == 1)
         .map(|(_, word)| word.to_string())
-        .filter(|word| word.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic()))
+        .filter(|word| {
+            word.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic())
+        })
         .collect()
 }
 
@@ -82,7 +114,8 @@ fn handler_type_var_before_a_namespaced_effect_parses() {
 
 #[test]
 fn spec_effect_and_handler_examples_parse() {
-    for block in ocaml_blocks(spec_between("## 37.", "## 38.")).into_iter()
+    for block in ocaml_blocks(spec_between("## 37.", "## 38."))
+        .into_iter()
         .chain(ocaml_blocks(spec_between("## 38.", "## 39.")))
     {
         parse_source(block, "spec-example.hd").unwrap_or_else(|error| panic!("{error}\n{block}"));

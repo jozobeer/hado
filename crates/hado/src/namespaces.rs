@@ -7,7 +7,12 @@ pub(crate) struct Resolution {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Space { Type, Contract, Implementation, Constructor }
+enum Space {
+    Type,
+    Contract,
+    Implementation,
+    Constructor,
+}
 
 type Directory = Vec<String>;
 /// §56: each name keeps the position of its first declaration. The prelude and
@@ -42,12 +47,20 @@ struct Resolver<'a> {
 /// §52: the deepest library root that contains `directory`, or the user root
 /// `[]` when the item sits outside every library.
 fn innermost_library_root(directory: &[String], libraries: &BTreeSet<Directory>) -> Directory {
-    libraries.iter().filter(|library| directory.starts_with(library.as_slice()))
-        .max_by_key(|library| library.len()).cloned().unwrap_or_default()
+    libraries
+        .iter()
+        .filter(|library| directory.starts_with(library.as_slice()))
+        .max_by_key(|library| library.len())
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn qualify(directory: &[String], name: &str) -> String {
-    if directory.is_empty() { name.into() } else { format!("{}::{name}", directory.join("::")) }
+    if directory.is_empty() {
+        name.into()
+    } else {
+        format!("{}::{name}", directory.join("::"))
+    }
 }
 
 fn declared_directory(name: &str) -> Directory {
@@ -73,8 +86,16 @@ fn declarations(item: &Item) -> Vec<(Space, &str, Span)> {
     match item {
         Item::TypeDef(def) => {
             let mut names = vec![(Space::Type, def.name.as_str(), def.name_span)];
-            if let Some(TypeExpr { kind: TypeKind::Adt(constructors), .. }) = &def.ty {
-                names.extend(constructors.iter().map(|ctor| (Space::Constructor, ctor.name.name.as_str(), ctor.name.span)));
+            if let Some(TypeExpr {
+                kind: TypeKind::Adt(constructors),
+                ..
+            }) = &def.ty
+            {
+                names.extend(
+                    constructors
+                        .iter()
+                        .map(|ctor| (Space::Constructor, ctor.name.name.as_str(), ctor.name.span)),
+                );
             }
             names
         }
@@ -87,54 +108,121 @@ fn declarations(item: &Item) -> Vec<(Space, &str, Span)> {
 }
 
 fn operation_key(directory: &[String], name: &str) -> String {
-    if directory.is_empty() { name.into() } else { format!("{}${name}", directory.join("$")) }
+    if directory.is_empty() {
+        name.into()
+    } else {
+        format!("{}${name}", directory.join("$"))
+    }
 }
 
 fn file_value(name: &str) -> Option<&str> {
-    name.split_once('$').and_then(|(prefix, rest)| prefix.strip_prefix("file").and_then(|index| {
-        index.chars().all(|ch| ch.is_ascii_digit()).then_some(rest)
-    }))
+    name.split_once('$').and_then(|(prefix, rest)| {
+        prefix
+            .strip_prefix("file")
+            .and_then(|index| index.chars().all(|ch| ch.is_ascii_digit()).then_some(rest))
+    })
 }
 
 pub(crate) fn resolve(
-    ast: &mut Ast, files: &[(usize, Directory)], directories: &BTreeSet<Directory>,
-    libraries: &BTreeSet<Directory>, prelude_items: usize, path: &str,
+    ast: &mut Ast,
+    files: &[(usize, Directory)],
+    directories: &BTreeSet<Directory>,
+    libraries: &BTreeSet<Directory>,
+    prelude_items: usize,
+    path: &str,
 ) -> Resolution {
-    let locations: Vec<_> = ast.items.iter().enumerate().map(|(index, item)| {
-        if index < prelude_items { return Vec::new(); }
-        files.iter().rev().find(|(offset, _)| *offset < item_span(item).line)
-            .map(|(_, directory)| directory.clone()).unwrap_or_default()
-    }).collect();
-    let roots: Vec<_> = locations.iter().map(|directory| innermost_library_root(directory, libraries)).collect();
+    let locations: Vec<_> = ast
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            if index < prelude_items {
+                return Vec::new();
+            }
+            files
+                .iter()
+                .rev()
+                .find(|(offset, _)| *offset < item_span(item).line)
+                .map(|(_, directory)| directory.clone())
+                .unwrap_or_default()
+        })
+        .collect();
+    let roots: Vec<_> = locations
+        .iter()
+        .map(|directory| innermost_library_root(directory, libraries))
+        .collect();
     let mut resolver = Resolver {
-        symbols: BTreeMap::new(), directories,
-        prelude: BTreeMap::new(), prelude_operations: BTreeSet::new(), root: Vec::new(),
-        sites: ast.name_sites.iter().map(|site| ((site.start.line, site.start.col), site.parts.clone())).collect(),
-        renamed: BTreeMap::new(), operations: BTreeMap::new(), path,
-        result: Resolution { diagnostics: Vec::new(), error_anchors: Vec::new() },
+        symbols: BTreeMap::new(),
+        directories,
+        prelude: BTreeMap::new(),
+        prelude_operations: BTreeSet::new(),
+        root: Vec::new(),
+        sites: ast
+            .name_sites
+            .iter()
+            .map(|site| ((site.start.line, site.start.col), site.parts.clone()))
+            .collect(),
+        renamed: BTreeMap::new(),
+        operations: BTreeMap::new(),
+        path,
+        result: Resolution {
+            diagnostics: Vec::new(),
+            error_anchors: Vec::new(),
+        },
     };
-    resolver.symbols.entry((Vec::new(), Space::Type)).or_default()
-        .extend(crate::names::BUILTIN_TYPES.iter().map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })));
-    resolver.prelude.entry(Space::Type).or_default()
-        .extend(crate::names::BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
+    resolver
+        .symbols
+        .entry((Vec::new(), Space::Type))
+        .or_default()
+        .extend(
+            crate::names::BUILTIN_TYPES
+                .iter()
+                .map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })),
+        );
+    resolver.prelude.entry(Space::Type).or_default().extend(
+        crate::names::BUILTIN_TYPES
+            .iter()
+            .map(|name| (*name).to_owned()),
+    );
     for (index, (item, directory)) in ast.items.iter().zip(&locations).enumerate() {
         for (space, name, span) in declarations(item) {
             // §56: only the user's declarations carry a position; the prelude is
             // synthesized outside the user's source.
-            let span = if index < prelude_items { Span { line: 0, col: 0 } } else { span };
-            resolver.symbols.entry((directory.clone(), space)).or_default()
-                .entry(name.into()).or_insert(span);
-            if index < prelude_items { resolver.prelude.entry(space).or_default().insert(name.into()); }
+            let span = if index < prelude_items {
+                Span { line: 0, col: 0 }
+            } else {
+                span
+            };
+            resolver
+                .symbols
+                .entry((directory.clone(), space))
+                .or_default()
+                .entry(name.into())
+                .or_insert(span);
+            if index < prelude_items {
+                resolver
+                    .prelude
+                    .entry(space)
+                    .or_default()
+                    .insert(name.into());
+            }
         }
         if let Item::Effect(effect) = item {
-            resolver.operations.entry(directory.clone()).or_default()
+            resolver
+                .operations
+                .entry(directory.clone())
+                .or_default()
                 .extend(effect.ops.iter().map(|op| op.name.clone()));
             if index < prelude_items {
-                resolver.prelude_operations.extend(effect.ops.iter().map(|op| op.name.clone()));
+                resolver
+                    .prelude_operations
+                    .extend(effect.ops.iter().map(|op| op.name.clone()));
             }
         }
     }
-    for (index, ((item, directory), root)) in ast.items.iter_mut().zip(&locations).zip(&roots).enumerate() {
+    for (index, ((item, directory), root)) in
+        ast.items.iter_mut().zip(&locations).zip(&roots).enumerate()
+    {
         resolver.root = root.clone();
         // §51, §52: a declaration conflicts with the names visible unqualified
         // from its directory. The prelude is visible even at a library root, so
@@ -143,11 +231,16 @@ pub(crate) fn resolve(
         if index >= prelude_items {
             resolver.check_prelude_operation_declarations(item, directory);
             for (space, name, span) in declarations(item) {
-                let conflicts_with_root = directory != root && resolver.has(&resolver.root, space, name);
+                let conflicts_with_root =
+                    directory != root && resolver.has(&resolver.root, space, name);
                 if conflicts_with_root || resolver.has_prelude(space, name) {
                     // §56: the root's declaration is the related position. A name
                     // that only the prelude has (a builtin type) has none.
-                    let first = if conflicts_with_root { resolver.site(&resolver.root, space, name) } else { None };
+                    let first = if conflicts_with_root {
+                        resolver.site(&resolver.root, space, name)
+                    } else {
+                        None
+                    };
                     resolver.error_at(span, "E205", "declaration conflicts with root name", first);
                 }
             }
@@ -168,16 +261,26 @@ impl Resolver<'_> {
             Item::Def(def) => {
                 let bare = file_value(&def.name).unwrap_or(&def.name);
                 if self.prelude_operations.contains(bare) {
-                    self.error(def.name_span, "E205", "declaration conflicts with prelude operation");
+                    self.error(
+                        def.name_span,
+                        "E205",
+                        "declaration conflicts with prelude operation",
+                    );
                 }
             }
             Item::ModuleImpl(module) => {
-                for item in &module.items { self.check_prelude_operation_declarations(item, directory); }
+                for item in &module.items {
+                    self.check_prelude_operation_declarations(item, directory);
+                }
             }
             Item::Effect(effect) if !directory.is_empty() => {
                 for op in &effect.ops {
                     if self.prelude_operations.contains(&op.name) {
-                        self.error(op.name_span, "E205", "declaration conflicts with prelude operation");
+                        self.error(
+                            op.name_span,
+                            "E205",
+                            "declaration conflicts with prelude operation",
+                        );
                     }
                 }
             }
@@ -186,18 +289,25 @@ impl Resolver<'_> {
     }
 
     fn has(&self, directory: &[String], space: Space, name: &str) -> bool {
-        self.symbols.get(&(directory.to_vec(), space)).is_some_and(|names| names.contains_key(name))
+        self.symbols
+            .get(&(directory.to_vec(), space))
+            .is_some_and(|names| names.contains_key(name))
     }
 
     /// §56: the first declaration of `name`, or `None` when it has no position
     /// in the user's source (the builtin types and the prelude).
     fn site(&self, directory: &[String], space: Space, name: &str) -> Option<Span> {
-        self.symbols.get(&(directory.to_vec(), space))
-            .and_then(|names| names.get(name)).copied().filter(|span| span.line != 0)
+        self.symbols
+            .get(&(directory.to_vec(), space))
+            .and_then(|names| names.get(name))
+            .copied()
+            .filter(|span| span.line != 0)
     }
 
     fn has_prelude(&self, space: Space, name: &str) -> bool {
-        self.prelude.get(&space).is_some_and(|names| names.contains(name))
+        self.prelude
+            .get(&space)
+            .is_some_and(|names| names.contains(name))
     }
 
     fn error(&mut self, span: Span, code: &str, message: &str) {
@@ -206,32 +316,65 @@ impl Resolver<'_> {
 
     /// §56: `first` is the first declaration of the name the report is about.
     fn error_at(&mut self, span: Span, code: &str, message: &str, first: Option<Span>) {
-        let related = first.filter(|first| first.line != 0)
-            .map(|first| crate::parser::Related { path: self.path.into(), line: first.line, col: first.col });
-        self.result.diagnostics.push(Diagnostic { related, path: self.path.into(), line: span.line, col: span.col,
-            code: Some(code.into()), message: message.into() });
+        let related = first
+            .filter(|first| first.line != 0)
+            .map(|first| crate::parser::Related {
+                path: self.path.into(),
+                line: first.line,
+                col: first.col,
+            });
+        self.result.diagnostics.push(Diagnostic {
+            related,
+            path: self.path.into(),
+            line: span.line,
+            col: span.col,
+            code: Some(code.into()),
+            message: message.into(),
+        });
     }
 
-    fn reference(&mut self, name: &mut String, span: Span, space: Space, directory: &[String], local: &Local) {
+    fn reference(
+        &mut self,
+        name: &mut String,
+        span: Span,
+        space: Space,
+        directory: &[String],
+        local: &Local,
+    ) {
         let local_names = match space {
             Space::Type => &local.types,
             Space::Constructor => &local.constructors,
             Space::Implementation => &local.implementations,
-            Space::Contract => { self.resolve_global(name, span, space, directory); return; }
+            Space::Contract => {
+                self.resolve_global(name, span, space, directory);
+                return;
+            }
         };
-        if !name.contains("::") && local_names.contains(name) { return; }
+        if !name.contains("::") && local_names.contains(name) {
+            return;
+        }
         self.resolve_global(name, span, space, directory);
     }
 
-    fn resolve_global(&mut self, name: &mut String, span: Span, space: Space, directory: &[String]) {
+    fn resolve_global(
+        &mut self,
+        name: &mut String,
+        span: Span,
+        space: Space,
+        directory: &[String],
+    ) {
         // §51, §52: unqualified names reach the own directory, then the item's
         // root (the innermost library root, or the user root outside a library).
         // The prelude stays visible from everywhere (§55) while the user root
         // does not reach into a library.
         if !name.contains("::") {
-            if self.has(directory, space, name) { *name = qualify(directory, name); }
-            else if self.has(&self.root, space, name) { *name = qualify(&self.root, name); }
-            else if !self.has_prelude(space, name) { self.unknown(span, span); }
+            if self.has(directory, space, name) {
+                *name = qualify(directory, name);
+            } else if self.has(&self.root, space, name) {
+                *name = qualify(&self.root, name);
+            } else if !self.has_prelude(space, name) {
+                self.unknown(span, span);
+            }
             return;
         }
         // Absolute paths are read from the root: the innermost library root
@@ -239,10 +382,18 @@ impl Resolver<'_> {
         let parts: Vec<_> = name.split("::").collect();
         let mut prefix = self.root.clone();
         for (index, part) in parts.iter().enumerate() {
-            let known = if index + 1 == parts.len() { self.has(&prefix, space, part) }
-                else { prefix.push((*part).into()); self.directories.contains(&prefix) };
+            let known = if index + 1 == parts.len() {
+                self.has(&prefix, space, part)
+            } else {
+                prefix.push((*part).into());
+                self.directories.contains(&prefix)
+            };
             if !known {
-                let anchor = self.sites.get(&(span.line, span.col)).and_then(|parts| parts.get(index)).map_or(span, |part| part.span);
+                let anchor = self
+                    .sites
+                    .get(&(span.line, span.col))
+                    .and_then(|parts| parts.get(index))
+                    .map_or(span, |part| part.span);
                 self.unknown(span, anchor);
                 return;
             }
@@ -258,21 +409,44 @@ impl Resolver<'_> {
         self.error(anchor, "E204", "unknown namespace reference");
     }
 
-    fn nested(&mut self, items: &[Item], directory: &[String], inherited: &Local, check_outer: bool) -> Local {
+    fn nested(
+        &mut self,
+        items: &[Item],
+        directory: &[String],
+        inherited: &Local,
+        check_outer: bool,
+    ) -> Local {
         let mut local = inherited.clone();
         for item in items {
             if let Item::TypeDef(def) = item {
-                if check_outer && def.ty.as_ref().is_some_and(|ty| matches!(ty.kind, TypeKind::Adt(_) | TypeKind::Record(_)))
+                if check_outer
+                    && def
+                        .ty
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty.kind, TypeKind::Adt(_) | TypeKind::Record(_)))
                     && (self.has(directory, Space::Type, &def.name)
                         || self.has(&self.root, Space::Type, &def.name)
-                        || self.has_prelude(Space::Type, &def.name)) {
-                    let first = self.site(directory, Space::Type, &def.name)
+                        || self.has_prelude(Space::Type, &def.name))
+                {
+                    let first = self
+                        .site(directory, Space::Type, &def.name)
                         .or_else(|| self.site(&self.root, Space::Type, &def.name));
-                    self.error_at(def.name_span, "E205", "local data type conflicts with a visible outer type", first);
+                    self.error_at(
+                        def.name_span,
+                        "E205",
+                        "local data type conflicts with a visible outer type",
+                        first,
+                    );
                 }
                 local.types.insert(def.name.clone());
-                if let Some(TypeExpr { kind: TypeKind::Adt(constructors), .. }) = &def.ty {
-                    local.constructors.extend(constructors.iter().map(|ctor| ctor.name.name.clone()));
+                if let Some(TypeExpr {
+                    kind: TypeKind::Adt(constructors),
+                    ..
+                }) = &def.ty
+                {
+                    local
+                        .constructors
+                        .extend(constructors.iter().map(|ctor| ctor.name.name.clone()));
                 }
             }
         }
@@ -283,46 +457,88 @@ impl Resolver<'_> {
         match item {
             Item::TypeDef(def) => {
                 let mut scope = local.clone();
-                scope.types.extend(def.params.iter().map(|param| param.name.clone()));
+                scope
+                    .types
+                    .extend(def.params.iter().map(|param| param.name.clone()));
                 if let Some(ty) = &mut def.ty {
                     self.ty(ty, directory, &scope);
                     if outer {
                         if let TypeKind::Adt(constructors) = &mut ty.kind {
-                            for ctor in constructors { ctor.name.name = qualify(directory, &ctor.name.name); }
+                            for ctor in constructors {
+                                ctor.name.name = qualify(directory, &ctor.name.name);
+                            }
                         }
                     }
                 }
-                if outer { def.name = qualify(directory, &def.name); }
+                if outer {
+                    def.name = qualify(directory, &def.name);
+                }
             }
             Item::ModuleSig(module) => {
                 let mut scope = self.nested(&module.items, directory, local, false);
                 scope.contract_types = true;
-                for item in &mut module.items { self.item(item, directory, &scope, false); }
-                if outer { module.name = qualify(directory, &module.name); }
+                for item in &mut module.items {
+                    self.item(item, directory, &scope, false);
+                }
+                if outer {
+                    module.name = qualify(directory, &module.name);
+                }
             }
             Item::ModuleImpl(module) => {
-                self.reference(&mut module.sig, module.sig_span, Space::Contract, directory, local);
+                self.reference(
+                    &mut module.sig,
+                    module.sig_span,
+                    Space::Contract,
+                    directory,
+                    local,
+                );
                 let mut scope = self.nested(&module.items, directory, local, true);
                 scope.contract_types = false;
                 match &mut module.form {
                     ImplementationForm::Ordinary => {}
                     ImplementationForm::Functor(params) => {
                         for param in params {
-                            self.reference(&mut param.contract, param.contract_span, Space::Contract, directory, local);
+                            self.reference(
+                                &mut param.contract,
+                                param.contract_span,
+                                Space::Contract,
+                                directory,
+                                local,
+                            );
                             scope.implementations.insert(param.name.clone());
                         }
                     }
                     ImplementationForm::Application { functor, arguments } => {
-                        self.reference(&mut functor.name, functor.span, Space::Implementation, directory, local);
-                        for argument in arguments { self.reference(&mut argument.name, argument.span, Space::Implementation, directory, local); }
+                        self.reference(
+                            &mut functor.name,
+                            functor.span,
+                            Space::Implementation,
+                            directory,
+                            local,
+                        );
+                        for argument in arguments {
+                            self.reference(
+                                &mut argument.name,
+                                argument.span,
+                                Space::Implementation,
+                                directory,
+                                local,
+                            );
+                        }
                     }
                 }
-                for item in &mut module.items { self.item(item, directory, &scope, false); }
-                if outer { module.name = qualify(directory, &module.name); }
+                for item in &mut module.items {
+                    self.item(item, directory, &scope, false);
+                }
+                if outer {
+                    module.name = qualify(directory, &module.name);
+                }
             }
             Item::SigDef(def) => {
                 let mut scope = local.clone();
-                scope.types.extend(def.type_params.iter().map(|param| param.name.clone()));
+                scope
+                    .types
+                    .extend(def.type_params.iter().map(|param| param.name.clone()));
                 self.annotations(&mut def.params, &mut def.ret, directory, &scope);
             }
             Item::Def(def) => match &mut def.kind {
@@ -334,19 +550,36 @@ impl Resolver<'_> {
             },
             Item::Effect(effect) => {
                 let mut scope = local.clone();
-                scope.types.extend(effect.type_params.iter().map(|param| param.name.clone()));
+                scope
+                    .types
+                    .extend(effect.type_params.iter().map(|param| param.name.clone()));
                 for op in &mut effect.ops {
-                    for ty in op.params.iter_mut().filter_map(|param| param.ty.as_mut()).chain(op.ret.iter_mut()) {
+                    for ty in op
+                        .params
+                        .iter_mut()
+                        .filter_map(|param| param.ty.as_mut())
+                        .chain(op.ret.iter_mut())
+                    {
                         self.ty(ty, directory, &scope);
                     }
                     op.name = operation_key(directory, &op.name);
                 }
-                if outer { effect.name = qualify(directory, &effect.name); }
+                if outer {
+                    effect.name = qualify(directory, &effect.name);
+                }
             }
             Item::Handler(handler) => {
                 let mut scope = local.clone();
-                scope.types.extend(handler.type_params.iter().map(|param| param.name.clone()));
-                self.reference(&mut handler.effect, handler.effect_span, Space::Contract, directory, local);
+                scope
+                    .types
+                    .extend(handler.type_params.iter().map(|param| param.name.clone()));
+                self.reference(
+                    &mut handler.effect,
+                    handler.effect_span,
+                    Space::Contract,
+                    directory,
+                    local,
+                );
                 let prelude_effect = self.has_prelude(Space::Contract, &handler.effect);
                 if !prelude_effect && declared_directory(&handler.effect) != directory {
                     self.unknown(handler.effect_span, handler.effect_span);
@@ -354,24 +587,46 @@ impl Resolver<'_> {
                 self.annotations(&mut handler.params, &mut None, directory, &scope);
                 for arm in &mut handler.arms {
                     match arm {
-                        HandlerArm::Operation { name, params, body, .. } => {
-                            if !prelude_effect { *name = operation_key(directory, name); }
-                            for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) { self.ty(ty, directory, &scope); }
+                        HandlerArm::Operation {
+                            name, params, body, ..
+                        } => {
+                            if !prelude_effect {
+                                *name = operation_key(directory, name);
+                            }
+                            for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
+                                self.ty(ty, directory, &scope);
+                            }
                             self.node(body, directory, local);
                         }
                         HandlerArm::Return { param, body, .. } => {
-                            if let Some(ty) = &mut param.ty { self.ty(ty, directory, &scope); }
+                            if let Some(ty) = &mut param.ty {
+                                self.ty(ty, directory, &scope);
+                            }
                             self.node(body, directory, local);
                         }
                     }
                 }
-                if outer { handler.name = qualify(directory, &handler.name); }
+                if outer {
+                    handler.name = qualify(directory, &handler.name);
+                }
             }
         }
     }
 
-    fn annotations(&mut self, params: &mut [Param], ret: &mut Option<TypeExpr>, directory: &[String], local: &Local) {
-        for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()).chain(ret.iter_mut()) { self.ty(ty, directory, local); }
+    fn annotations(
+        &mut self,
+        params: &mut [Param],
+        ret: &mut Option<TypeExpr>,
+        directory: &[String],
+        local: &Local,
+    ) {
+        for ty in params
+            .iter_mut()
+            .filter_map(|param| param.ty.as_mut())
+            .chain(ret.iter_mut())
+        {
+            self.ty(ty, directory, local);
+        }
     }
 
     fn ty(&mut self, ty: &mut TypeExpr, directory: &[String], local: &Local) {
@@ -380,26 +635,45 @@ impl Resolver<'_> {
                 if let Some((prefix, member)) = name.split_once('.') {
                     let mut prefix = prefix.to_owned();
                     let member = member.to_owned();
-                    let space = if local.contract_types { Space::Contract } else { Space::Implementation };
+                    let space = if local.contract_types {
+                        Space::Contract
+                    } else {
+                        Space::Implementation
+                    };
                     self.reference(&mut prefix, ty.name_span, space, directory, local);
-                    self.renamed.insert((ty.name_span.line, ty.name_span.col), prefix.clone());
+                    self.renamed
+                        .insert((ty.name_span.line, ty.name_span.col), prefix.clone());
                     *name = format!("{prefix}.{member}");
-                } else { self.reference(name, ty.name_span, Space::Type, directory, local); }
+                } else {
+                    self.reference(name, ty.name_span, Space::Type, directory, local);
+                }
             }
             _ => {}
         }
         match &mut ty.kind {
             TypeKind::Apply(_, arguments) | TypeKind::Group(arguments) => {
-                for ty in arguments { self.ty(ty, directory, local); }
+                for ty in arguments {
+                    self.ty(ty, directory, local);
+                }
             }
-            TypeKind::Record(fields) => { for field in fields { self.ty(&mut field.ty, directory, local); } }
+            TypeKind::Record(fields) => {
+                for field in fields {
+                    self.ty(&mut field.ty, directory, local);
+                }
+            }
             TypeKind::Adt(constructors) => {
-                for constructor in constructors { for ty in constructor.payload.types_mut() { self.ty(ty, directory, local); } }
+                for constructor in constructors {
+                    for ty in constructor.payload.types_mut() {
+                        self.ty(ty, directory, local);
+                    }
+                }
             }
             TypeKind::Name(_) => {}
         }
         if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
-            for ty in effects { self.effect_label(ty, directory, local); }
+            for ty in effects {
+                self.effect_label(ty, directory, local);
+            }
         }
     }
 
@@ -412,7 +686,9 @@ impl Resolver<'_> {
         }
         match &mut ty.kind {
             TypeKind::Apply(_, arguments) | TypeKind::Group(arguments) => {
-                for ty in arguments { self.ty(ty, directory, local); }
+                for ty in arguments {
+                    self.ty(ty, directory, local);
+                }
             }
             _ => {}
         }
@@ -420,17 +696,35 @@ impl Resolver<'_> {
 
     fn pattern(&mut self, pattern: &mut Pattern, directory: &[String], local: &Local) {
         match &mut pattern.kind {
-            PatternKind::Name(name) if crate::names::is_upper_reference(name) => self.reference(name, pattern.span, Space::Constructor, directory, local),
+            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
+                self.reference(name, pattern.span, Space::Constructor, directory, local)
+            }
             PatternKind::Constructor(name, patterns) => {
                 self.reference(name, pattern.span, Space::Constructor, directory, local);
-                for pattern in patterns { self.pattern(pattern, directory, local); }
+                for pattern in patterns {
+                    self.pattern(pattern, directory, local);
+                }
             }
             PatternKind::NamedConstructor(name, fields) => {
-                self.reference(&mut name.name, name.span, Space::Constructor, directory, local);
-                for (_, pattern) in fields { if let Some(pattern) = pattern { self.pattern(pattern, directory, local); } }
+                self.reference(
+                    &mut name.name,
+                    name.span,
+                    Space::Constructor,
+                    directory,
+                    local,
+                );
+                for (_, pattern) in fields {
+                    if let Some(pattern) = pattern {
+                        self.pattern(pattern, directory, local);
+                    }
+                }
             }
             PatternKind::Record(fields) => {
-                for (_, pattern) in fields { if let Some(pattern) = pattern { self.pattern(pattern, directory, local); } }
+                for (_, pattern) in fields {
+                    if let Some(pattern) = pattern {
+                        self.pattern(pattern, directory, local);
+                    }
+                }
             }
             PatternKind::Literal(node) => self.node(node, directory, local),
             _ => {}
@@ -441,14 +735,20 @@ impl Resolver<'_> {
         let bare = file_value(name).unwrap_or(name.as_str());
         if self.prelude_operations.contains(bare) {
             *name = bare.to_owned();
-        } else if self.operations.get(directory).is_some_and(|names| names.contains(bare)) {
+        } else if self
+            .operations
+            .get(directory)
+            .is_some_and(|names| names.contains(bare))
+        {
             *name = operation_key(directory, bare);
         }
     }
 
     fn node(&mut self, node: &mut Node, directory: &[String], local: &Local) {
         match &mut node.kind {
-            NodeKind::Name(name) if crate::names::is_upper_reference(name) => self.reference(name, node.span, Space::Constructor, directory, local),
+            NodeKind::Name(name) if crate::names::is_upper_reference(name) => {
+                self.reference(name, node.span, Space::Constructor, directory, local)
+            }
             NodeKind::Name(name) => self.operation(name, directory),
             NodeKind::Field(base, _) => {
                 if let NodeKind::Name(name) = &mut base.kind {
@@ -460,46 +760,103 @@ impl Resolver<'_> {
                 self.node(base, directory, local);
             }
             NodeKind::NamedConstructor(name, fields) => {
-                self.reference(&mut name.name, name.span, Space::Constructor, directory, local);
-                for (_, value) in fields { self.node(value, directory, local); }
+                self.reference(
+                    &mut name.name,
+                    name.span,
+                    Space::Constructor,
+                    directory,
+                    local,
+                );
+                for (_, value) in fields {
+                    self.node(value, directory, local);
+                }
             }
-            NodeKind::Record(fields) => { for (_, value) in fields { self.node(value, directory, local); } }
+            NodeKind::Record(fields) => {
+                for (_, value) in fields {
+                    self.node(value, directory, local);
+                }
+            }
             NodeKind::Neg(value) | NodeKind::Not(value) => self.node(value, directory, local),
-            NodeKind::Bin(_, left, right) | NodeKind::Pipe(left, right) => { self.node(left, directory, local); self.node(right, directory, local); }
+            NodeKind::Bin(_, left, right) | NodeKind::Pipe(left, right) => {
+                self.node(left, directory, local);
+                self.node(right, directory, local);
+            }
             NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) => {
                 self.node(callee, directory, local);
-                for arg in args { self.node(arg, directory, local); }
+                for arg in args {
+                    self.node(arg, directory, local);
+                }
             }
             NodeKind::List(values, tail) => {
-                for value in values { self.node(value, directory, local); }
-                if let Some(tail) = tail { self.node(tail, directory, local); }
+                for value in values {
+                    self.node(value, directory, local);
+                }
+                if let Some(tail) = tail {
+                    self.node(tail, directory, local);
+                }
             }
             NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
-                self.pattern(pat, directory, local); self.node(value, directory, local); self.node(body, directory, local);
+                self.pattern(pat, directory, local);
+                self.node(value, directory, local);
+                self.node(body, directory, local);
             }
-            NodeKind::DoQ { value, body } => { self.node(value, directory, local); self.node(body, directory, local); }
+            NodeKind::DoQ { value, body } => {
+                self.node(value, directory, local);
+                self.node(body, directory, local);
+            }
             NodeKind::Fn { params, body } => {
-                for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) { self.ty(ty, directory, local); }
+                for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
+                    self.ty(ty, directory, local);
+                }
                 self.node(body, directory, local);
             }
             NodeKind::BoolBranch { cond, then, els } => {
-                self.node(cond, directory, local); self.node(then, directory, local); self.node(els, directory, local);
+                self.node(cond, directory, local);
+                self.node(then, directory, local);
+                self.node(els, directory, local);
             }
             NodeKind::CondBranch { arms, fallback } => {
-                for (condition, body) in arms { self.node(condition, directory, local); self.node(body, directory, local); }
-                if let Some(body) = fallback { self.node(body, directory, local); }
-            }
-            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
-                for scrutinee in scrutinees { self.node(scrutinee, directory, local); }
-                for (patterns, body) in arms {
-                    for pattern in patterns { self.pattern(pattern, directory, local); }
+                for (condition, body) in arms {
+                    self.node(condition, directory, local);
                     self.node(body, directory, local);
                 }
-                if let Some(body) = fallback { self.node(body, directory, local); }
+                if let Some(body) = fallback {
+                    self.node(body, directory, local);
+                }
             }
-            NodeKind::With { handler, args, body } => {
-                self.reference(&mut handler.name, handler.span, Space::Implementation, directory, local);
-                for arg in args { self.node(arg, directory, local); }
+            NodeKind::PatternBranch {
+                scrutinees,
+                arms,
+                fallback,
+            } => {
+                for scrutinee in scrutinees {
+                    self.node(scrutinee, directory, local);
+                }
+                for (patterns, body) in arms {
+                    for pattern in patterns {
+                        self.pattern(pattern, directory, local);
+                    }
+                    self.node(body, directory, local);
+                }
+                if let Some(body) = fallback {
+                    self.node(body, directory, local);
+                }
+            }
+            NodeKind::With {
+                handler,
+                args,
+                body,
+            } => {
+                self.reference(
+                    &mut handler.name,
+                    handler.span,
+                    Space::Implementation,
+                    directory,
+                    local,
+                );
+                for arg in args {
+                    self.node(arg, directory, local);
+                }
                 self.node(body, directory, local);
             }
             _ => {}

@@ -28,7 +28,10 @@ fn run_prints_the_main_value_and_leaves_no_binary() {
     assert_eq!(output.stdout, b"3\n");
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
     // 入力の隣には何も残らない（一時ディレクトリは `run` が消す）。
-    let entries: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
     assert_eq!(entries, vec![std::ffi::OsString::from("main.hd")]);
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -36,8 +39,16 @@ fn run_prints_the_main_value_and_leaves_no_binary() {
 #[test]
 fn run_forwards_the_arguments_after_the_separator() {
     let dir = scratch("args");
-    let source = write(&dir, "def main =\n  let argv = args ->\n  List.length argv\n");
-    let output = hado().arg("run").arg(&source).args(["--", "a", "b", "c", "d"]).output().unwrap();
+    let source = write(
+        &dir,
+        "def main =\n  let argv = args ->\n  List.length argv\n",
+    );
+    let output = hado()
+        .arg("run")
+        .arg(&source)
+        .args(["--", "a", "b", "c", "d"])
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b"4\n");
     std::fs::remove_dir_all(dir).unwrap();
@@ -46,7 +57,10 @@ fn run_forwards_the_arguments_after_the_separator() {
 #[test]
 fn run_passes_standard_input_through() {
     let dir = scratch("stdin");
-    let source = write(&dir, "def main =\n  let bytes = read_stdin ->\n  Bytes.to_string bytes\n");
+    let source = write(
+        &dir,
+        "def main =\n  let bytes = read_stdin ->\n  Bytes.to_string bytes\n",
+    );
     let mut child = hado()
         .arg("run")
         .arg(&source)
@@ -68,7 +82,11 @@ fn run_returns_the_program_exit_code() {
     let source = write(&dir, "def main = raise { message = \"boom\" }\n");
     let output = hado().arg("run").arg(&source).output().unwrap();
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("boom"), "{:?}", output.stderr);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("boom"),
+        "{:?}",
+        output.stderr
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -78,7 +96,13 @@ fn build_writes_to_the_requested_output() {
     let source = write(&dir, "def main = 42\n");
     let target = dir.join("out").join("prog");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    let built = hado().arg("build").arg("-o").arg(&target).arg(&source).output().unwrap();
+    let built = hado()
+        .arg("build")
+        .arg("-o")
+        .arg(&target)
+        .arg(&source)
+        .output()
+        .unwrap();
     assert_eq!(built.status.code(), Some(0), "{built:?}");
     assert!(target.is_file(), "no executable at the requested path");
     // 既定の出力先（入力の隣）には書かない。
@@ -138,7 +162,10 @@ fn run_skips_dunder_directories_that_are_not_namespaces() {
 fn run_reads_dunder_named_source_files() {
     let dir = scratch("dunder-file");
     std::fs::write(dir.join("__types.hd"), "type User = { name: String }\n").unwrap();
-    let source = write(&dir, "def name (user: User): String => user.name\ndef main = name { name = \"hello\" }\n");
+    let source = write(
+        &dir,
+        "def name (user: User): String => user.name\ndef main = name { name = \"hello\" }\n",
+    );
     let output = hado().arg("run").arg(&source).output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b"hello\n");

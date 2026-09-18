@@ -26,5 +26,8 @@ fn displayed_types_use_postfix_arguments_and_function_parentheses() {
     let pair = Ty::Adt("Result".into(), vec![Ty::Int, Ty::String]);
     let nested = Ty::Adt("List".into(), vec![pair]);
     let function = Ty::fn_of(vec![abstract_type, nested], Ty::Bool);
-    assert_eq!(function.to_string(), "Fn(Store.T, (Int, String) Result List => Bool)");
+    assert_eq!(
+        function.to_string(),
+        "Fn(Store.T, (Int, String) Result List => Bool)"
+    );
 }

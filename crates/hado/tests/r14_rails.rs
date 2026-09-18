@@ -11,8 +11,10 @@ fn rejected(source: &str, code: &str, anchor: &str) {
     assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
     assert_eq!(
         (error.line, error.col),
-        (prefix.matches('\n').count() + 1,
-         prefix.rsplit('\n').next().unwrap().chars().count() + 1),
+        (
+            prefix.matches('\n').count() + 1,
+            prefix.rsplit('\n').next().unwrap().chars().count() + 1
+        ),
         "{source}: {error}"
     );
 }
@@ -22,8 +24,12 @@ fn generated_patterns_round_trip_with_an_independent_question_token() {
     let mut state = 0x140012;
     for _ in 0..24 {
         let name = format!("value{}", random(&mut state, 10000));
-        for pattern in [name.clone(), format!("{{ field = {name} }}"),
-            format!("Box({name})"), format!("{{ field = Box({name}) }}")] {
+        for pattern in [
+            name.clone(),
+            format!("{{ field = {name} }}"),
+            format!("Box({name})"),
+            format!("{{ field = Box({name}) }}"),
+        ] {
             let source = format!("def f input => let {pattern}? = input -> Some({name})");
             let ast = parser::parse_source(&source, "rails.hd").unwrap();
             let printed = parser::canonical_program(&ast);
@@ -45,8 +51,13 @@ fn old_rail_keywords_are_rejected_at_the_question_mark() {
             let error = parser::parse_source(&source, "rails.hd").unwrap_err();
             let before = &source[..source.find('?').unwrap()];
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-            assert_eq!((error.line, error.col), (before.matches('\n').count() + 1,
-                before.rsplit('\n').next().unwrap().chars().count() + 1));
+            assert_eq!(
+                (error.line, error.col),
+                (
+                    before.matches('\n').count() + 1,
+                    before.rsplit('\n').next().unwrap().chars().count() + 1
+                )
+            );
         }
     }
 }
@@ -57,14 +68,29 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
     for _ in 0..16 {
         let n = random(&mut state, 1000);
         for (body, code, anchor) in [
-            (format!("let x? = {n} -> Some(x + 1)"), "E303", n.to_string()),
+            (
+                format!("let x? = {n} -> Some(x + 1)"),
+                "E303",
+                n.to_string(),
+            ),
             (format!("let _? = {n} -> Some(1)"), "E303", n.to_string()),
             (format!("do {n} -> Some(1)"), "E303", n.to_string()),
-            (format!("let _? = Some({n}) -> Some(1)"), "E504", "_".to_string()),
-            (format!("let Some(x)? = Some(Some({n})) -> Some(x + 1)"), "E402", "Some(x)".to_string()),
+            (
+                format!("let _? = Some({n}) -> Some(1)"),
+                "E504",
+                "_".to_string(),
+            ),
+            (
+                format!("let Some(x)? = Some(Some({n})) -> Some(x + 1)"),
+                "E402",
+                "Some(x)".to_string(),
+            ),
         ] {
-            let padding = format!("{}{}", "\n".repeat(random(&mut state, 4) as usize),
-                " ".repeat(random(&mut state, 7) as usize));
+            let padding = format!(
+                "{}{}",
+                "\n".repeat(random(&mut state, 4) as usize),
+                " ".repeat(random(&mut state, 7) as usize)
+            );
             rejected(&format!("{padding}def main = {body}"), code, &anchor);
         }
     }
@@ -83,9 +109,18 @@ fn run(source: &str, serial: usize) -> (Option<i32>, String, String) {
     let path = dir.join("main.hd");
     std::fs::write(&path, source).unwrap();
     let build = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
-        .arg("build").arg(&path).output().unwrap();
-    assert!(build.status.success(), "{source}\n{}", String::from_utf8_lossy(&build.stderr));
-    let result = std::process::Command::new(path.with_extension("")).output().unwrap();
+        .arg("build")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{source}\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let result = std::process::Command::new(path.with_extension(""))
+        .output()
+        .unwrap();
     let stdout = String::from_utf8(result.stdout).unwrap();
     let stderr = String::from_utf8(result.stderr).unwrap();
     let status = result.status.code();

@@ -21,14 +21,18 @@ pub(crate) fn arm_function(def: &Def) -> String {
 pub(crate) fn list_pattern(pattern: &Pattern) -> Option<String> {
     match &pattern.kind {
         PatternKind::Name(name) if name == "Nil" => return Some("[]".into()),
-        PatternKind::Constructor(name, args) if name == "Nil" && args.is_empty() => return Some("[]".into()),
+        PatternKind::Constructor(name, args) if name == "Nil" && args.is_empty() => {
+            return Some("[]".into())
+        }
         PatternKind::Constructor(name, args) if name == "Cons" && args.len() == 2 => {}
         _ => return None,
     }
     let mut parts = Vec::new();
     let mut rest = pattern;
     while let PatternKind::Constructor(name, args) = &rest.kind {
-        if name != "Cons" || args.len() != 2 { break; }
+        if name != "Cons" || args.len() != 2 {
+            break;
+        }
         parts.push(args[0].to_string());
         rest = &args[1];
     }
@@ -65,7 +69,11 @@ fn item(value: &Item) -> String {
                 .map(|ty| format!(" = {}", type_source(ty)))
                 .unwrap_or_default();
             let shared = if def.shared { "shared " } else { "" };
-            format!("{shared}type {}{}{body}", type_parameters(&def.params), def.name)
+            format!(
+                "{shared}type {}{}{body}",
+                type_parameters(&def.params),
+                def.name
+            )
         }
         Item::SigDef(def) => format!(
             "def {}{}{}{}",
@@ -74,32 +82,63 @@ fn item(value: &Item) -> String {
             parameters(&def.params),
             return_type(def.ret.as_ref())
         ),
-        Item::ModuleSig(module) => format!(
-            "module {}\n{}",
-            module.name,
-            items(&module.items)
-        ),
+        Item::ModuleSig(module) => format!("module {}\n{}", module.name, items(&module.items)),
         Item::ModuleImpl(module) => implementation(module),
         Item::Effect(effect) => {
-            let ops = effect.ops.iter().map(effect_op).collect::<Vec<_>>().join("\n");
-            format!("effect {}{}{}", type_parameters(&effect.type_params), effect.name, if ops.is_empty() { String::new() } else { format!("\n{ops}") })
+            let ops = effect
+                .ops
+                .iter()
+                .map(effect_op)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                "effect {}{}{}",
+                type_parameters(&effect.type_params),
+                effect.name,
+                if ops.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{ops}")
+                }
+            )
         }
         Item::Handler(handler) => {
             let params = if handler.params.is_empty() {
                 String::new()
             } else {
-                format!("({})", handler.params.iter().map(|param| {
-                    format!("{}: {}", param.name, type_source(param.ty.as_ref().expect("handler parameter")))
-                }).collect::<Vec<_>>().join(", "))
+                format!(
+                    "({})",
+                    handler
+                        .params
+                        .iter()
+                        .map(|param| {
+                            format!(
+                                "{}: {}",
+                                param.name,
+                                type_source(param.ty.as_ref().expect("handler parameter"))
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             };
-            let arms = handler.arms.iter().map(handler_arm).collect::<Vec<_>>().join("\n");
+            let arms = handler
+                .arms
+                .iter()
+                .map(handler_arm)
+                .collect::<Vec<_>>()
+                .join("\n");
             format!(
                 "handler {}{} as {}{}{}",
                 type_parameters(&handler.type_params),
                 handler.effect,
                 handler.name,
                 params,
-                if arms.is_empty() { String::new() } else { format!("\n{arms}") }
+                if arms.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{arms}")
+                }
             )
         }
     }
@@ -109,20 +148,55 @@ fn effect_op(op: &EffectOp) -> String {
     let params = if op.params.is_empty() {
         String::new()
     } else {
-        format!("({})", op.params.iter().map(|param| {
-            format!("{}: {}", param.name, type_source(param.ty.as_ref().expect("effect parameter")))
-        }).collect::<Vec<_>>().join(", "))
+        format!(
+            "({})",
+            op.params
+                .iter()
+                .map(|param| {
+                    format!(
+                        "{}: {}",
+                        param.name,
+                        type_source(param.ty.as_ref().expect("effect parameter"))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     };
-    format!("{} {}{}{}", op.kind.as_str(), op.name, params, return_type(op.ret.as_ref()))
+    format!(
+        "{} {}{}{}",
+        op.kind.as_str(),
+        op.name,
+        params,
+        return_type(op.ret.as_ref())
+    )
 }
 
 fn handler_arm(arm: &HandlerArm) -> String {
     match arm {
-        HandlerArm::Operation { kind, name, params, body, .. } => {
-            let params = params.iter().map(|param| format!(" {}", param.name)).collect::<Vec<_>>().join("");
-            format!("{} {}{} => {}", kind.as_str(), name, params, canonical(body))
+        HandlerArm::Operation {
+            kind,
+            name,
+            params,
+            body,
+            ..
+        } => {
+            let params = params
+                .iter()
+                .map(|param| format!(" {}", param.name))
+                .collect::<Vec<_>>()
+                .join("");
+            format!(
+                "{} {}{} => {}",
+                kind.as_str(),
+                name,
+                params,
+                canonical(body)
+            )
         }
-        HandlerArm::Return { param, body, .. } => format!("return {} => {}", param.name, canonical(body)),
+        HandlerArm::Return { param, body, .. } => {
+            format!("return {} => {}", param.name, canonical(body))
+        }
     }
 }
 
@@ -131,20 +205,29 @@ fn implementation(module: &ModuleImpl) -> String {
     match &module.form {
         ImplementationForm::Ordinary => format!("{header}\n{}", items(&module.items)),
         ImplementationForm::Functor(parameters) => {
-            let parameters = parameters.iter().map(|parameter| {
-                format!("{}: {}", parameter.name, parameter.contract)
-            }).collect::<Vec<_>>().join(", ");
+            let parameters = parameters
+                .iter()
+                .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{header}({parameters})\n{}", items(&module.items))
         }
         ImplementationForm::Application { functor, arguments } => {
-            let arguments = arguments.iter().map(|argument| argument.name.as_str()).collect::<Vec<_>>().join(", ");
+            let arguments = arguments
+                .iter()
+                .map(|argument| argument.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{header} = {}({arguments})", functor.name)
         }
     }
 }
 
 fn type_parameters(names: &[DeclaredName]) -> String {
-    let names = names.iter().map(|name| name.name.as_str()).collect::<Vec<_>>();
+    let names = names
+        .iter()
+        .map(|name| name.name.as_str())
+        .collect::<Vec<_>>();
     match names.as_slice() {
         [] => String::new(),
         [name] => format!("{name} "),
@@ -153,20 +236,29 @@ fn type_parameters(names: &[DeclaredName]) -> String {
 }
 
 pub(super) fn lambda_tail(params: &[Param], body: &Node) -> String {
-    let arguments = params.iter().map(|param| {
-        match &param.ty {
+    let arguments = params
+        .iter()
+        .map(|param| match &param.ty {
             Some(ty) => format!("{}: {}", param.name, type_source(ty)),
             None => param.name.clone(),
-        }
-    }).collect::<Vec<_>>().join(", ");
-    function_tail_with_parameters(params, None, body, &arguments).trim_start().into()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    function_tail_with_parameters(params, None, body, &arguments)
+        .trim_start()
+        .into()
 }
 
 pub(super) fn function_tail(params: &[Param], ret: Option<&TypeExpr>, body: &Node) -> String {
     function_tail_with_parameters(params, ret, body, &parameters(params))
 }
 
-fn function_tail_with_parameters(params: &[Param], ret: Option<&TypeExpr>, body: &Node, arguments: &str) -> String {
+fn function_tail_with_parameters(
+    params: &[Param],
+    ret: Option<&TypeExpr>,
+    body: &Node,
+    arguments: &str,
+) -> String {
     if params.len() == 1 && params[0].name == "$argument" {
         if let NodeKind::PatternBranch { arms, fallback, .. } = &body.kind {
             let mut output = String::new();
@@ -186,23 +278,24 @@ fn function_tail_with_parameters(params: &[Param], ret: Option<&TypeExpr>, body:
     if let NodeKind::CondBranch { arms, fallback } = &body.kind {
         let mut output = format!("{}{}", arguments, return_type(ret));
         for (condition, value) in arms {
-            output.push_str(&format!(" | {} => {}", canonical(condition), canonical(value)));
+            output.push_str(&format!(
+                " | {} => {}",
+                canonical(condition),
+                canonical(value)
+            ));
         }
         if let Some(value) = fallback {
             output.push_str(&format!(" | {}", canonical(value)));
         }
         return output;
     }
-    format!(
-        "{}{} => {}",
-        arguments,
-        return_type(ret),
-        canonical(body)
-    )
+    format!("{}{} => {}", arguments, return_type(ret), canonical(body))
 }
 
 fn parameters(params: &[Param]) -> String {
-    if params.is_empty() { return String::new(); }
+    if params.is_empty() {
+        return String::new();
+    }
     if params.iter().all(|param| param.ty.is_none()) {
         return format!(
             " {}",
@@ -242,7 +335,9 @@ fn type_source(ty: &TypeExpr) -> String {
             };
             format!("Fn({inputs} => {})", type_source(&args[1]))
         }
-        TypeKind::Apply(name, args) if args.len() == 1 => format!("{} {name}", type_source(&args[0])),
+        TypeKind::Apply(name, args) if args.len() == 1 => {
+            format!("{} {name}", type_source(&args[0]))
+        }
         TypeKind::Apply(name, args) => format!("({}) {name}", type_list(args)),
         TypeKind::Group(args) => format!("({})", type_list(args)),
         TypeKind::Record(fields) => format!(
@@ -258,9 +353,18 @@ fn type_source(ty: &TypeExpr) -> String {
             .map(|variant| {
                 let name = &variant.name.name;
                 match &variant.payload {
-                    crate::parser::ConstructorPayload::Positional(args) => format!("| {name}({})", type_list(args)),
+                    crate::parser::ConstructorPayload::Positional(args) => {
+                        format!("| {name}({})", type_list(args))
+                    }
                     crate::parser::ConstructorPayload::Nullary => format!("| {name}"),
-                    crate::parser::ConstructorPayload::Named(fields) => format!("| {name} {{ {} }}", fields.iter().map(|field| format!("{}: {}", field.name.name, type_source(&field.ty))).collect::<Vec<_>>().join("; ")),
+                    crate::parser::ConstructorPayload::Named(fields) => format!(
+                        "| {name} {{ {} }}",
+                        fields
+                            .iter()
+                            .map(|field| format!("{}: {}", field.name.name, type_source(&field.ty)))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ),
                 }
             })
             .collect::<Vec<_>>()

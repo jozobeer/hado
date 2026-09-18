@@ -5,8 +5,10 @@ fn scalar_prelude_wrappers_check_and_execute() {
         include_str!("../../../stdlib/string.hd"),
         include_str!("../../../stdlib/int.hd"),
         include_str!("../../../stdlib/float.hd"),
-    ].join("\n");
-    let type_declarations = modules.lines()
+    ]
+    .join("\n");
+    let type_declarations = modules
+        .lines()
         .filter(|line| line.trim_start().starts_with("type "))
         .collect::<Vec<_>>();
     assert_eq!(
@@ -14,16 +16,19 @@ fn scalar_prelude_wrappers_check_and_execute() {
         ["type Exception = { message: String }"],
         "only error.hd's built-in Exception declaration may be excluded"
     );
-    let modules = modules.lines()
+    let modules = modules
+        .lines()
         .filter(|line| !line.starts_with("type "))
-        .collect::<Vec<_>>().join("\n");
+        .collect::<Vec<_>>()
+        .join("\n");
     for (index, expression, expected) in [
         (0, "String.length (String.concat \"あ\" \"😀\")", "2\n"),
         (1, "Int.to_string (-42)", "-42\n"),
         (2, "Float.to_string 1.25", "1.25\n"),
     ] {
         let source = format!("def main = {expression}\n{modules}");
-        let path = std::env::temp_dir().join(format!("hado-prelude-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-prelude-{}-{index}", std::process::id()));
         hado::build::executable(&source, "stdlib/test.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -35,7 +40,12 @@ fn scalar_prelude_wrappers_check_and_execute() {
 #[test]
 fn scalar_prelude_is_implicit_without_exposing_intrinsics() {
     let path = std::env::temp_dir().join(format!("hado-implicit-prelude-{}", std::process::id()));
-    hado::build::executable("def main = String.length (Int.to_string 12345)", "user.hd", &path).unwrap();
+    hado::build::executable(
+        "def main = String.length (Int.to_string 12345)",
+        "user.hd",
+        &path,
+    )
+    .unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
     assert_eq!(output.stdout, b"5\n");
@@ -52,13 +62,19 @@ fn generic_prelude_operations_execute() {
         ("List.reverse [1, 2, 3]", "[3, 2, 1]\n"),
         ("List.append [1, 2] [3]", "[1, 2, 3]\n"),
         ("[3, 1, 2, 1] |> List.sort compare", "[1, 1, 2, 3]\n"),
-        ("Option.unwrap_or (Option.map (Some(41)) fn(x => x + 1)) 0", "42\n"),
+        (
+            "Option.unwrap_or (Option.map (Some(41)) fn(x => x + 1)) 0",
+            "42\n",
+        ),
         ("Option.is_some (Some(true))", "true\n"),
         ("Option.ok_or (Some(42)) { message = \"missing\" }", "42\n"),
         ("7 / 2", "3\n"),
     ];
     for (index, (expression, expected)) in cases.iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-generic-prelude-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hado-generic-prelude-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&format!("def main = {expression}"), "user.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success(), "{expression}: {output:?}");
@@ -76,8 +92,12 @@ fn float_comparison_orders_nan_last_and_equates_signed_zero() {
         ("compare 1.0 (0.0 / 0.0)", "-1\n"),
         ("compare (-0.0) 0.0", "0\n"),
         ("compare (-1.0 / 0.0) (1.0 / 0.0)", "-1\n"),
-    ].iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-float-order-{}-{index}", std::process::id()));
+    ]
+    .iter()
+    .enumerate()
+    {
+        let path =
+            std::env::temp_dir().join(format!("hado-float-order-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def main = {expression}"), "user.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());

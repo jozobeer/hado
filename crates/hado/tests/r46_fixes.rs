@@ -2,7 +2,12 @@ use hado::fixes::{fix_at, fixes, hint};
 
 fn applied(source: &str, index: usize) -> String {
     let fix = &fixes(source)[index];
-    format!("{}{}{}", &source[..fix.start], fix.replacement, &source[fix.end..])
+    format!(
+        "{}{}{}",
+        &source[..fix.start],
+        fix.replacement,
+        &source[fix.end..]
+    )
 }
 
 #[test]
@@ -13,7 +18,11 @@ fn condition_arms_move_next_to_the_parameters() {
     let fix = &list[0];
     assert_eq!(fix.code, "E517");
     assert_eq!((fix.line, fix.col), (1, 1));
-    assert!(fix.canonical.starts_with("def f x | ("), "{}", fix.canonical);
+    assert!(
+        fix.canonical.starts_with("def f x | ("),
+        "{}",
+        fix.canonical
+    );
     let fixed = applied(source, 0);
     assert_eq!(fixed, "def f x\n  | x > 0 => 1\n  | 0\ndef main = f 1\n");
     // 直した形はもう冗長でない（適用は 1 回で止まる）。
@@ -32,8 +41,12 @@ fn written_list_forms_become_literals() {
     assert_eq!(fixed, "def main = [1, 2]\n");
     assert!(fixes(&fixed).is_empty());
 
-    let pattern = "def f (l: Int List): Int =>\n  if l\n  | Cons(x, Nil) => x\n  | 0\ndef main = f [7]\n";
-    let fix = fixes(pattern).into_iter().find(|fix| fix.code == "E516").unwrap();
+    let pattern =
+        "def f (l: Int List): Int =>\n  if l\n  | Cons(x, Nil) => x\n  | 0\ndef main = f [7]\n";
+    let fix = fixes(pattern)
+        .into_iter()
+        .find(|fix| fix.code == "E516")
+        .unwrap();
     assert_eq!((fix.replacement.as_str(), fix.line, fix.col), ("[x]", 3, 5));
     let fixed = applied(pattern, 0);
     assert!(fixed.contains("| [x] => x"), "{fixed}");

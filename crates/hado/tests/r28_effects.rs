@@ -26,7 +26,9 @@ impl Case {
             .unwrap()
     }
     fn run(&self, entry: &str) -> Output {
-        Command::new(self.0.join(entry).with_extension("")).output().unwrap()
+        Command::new(self.0.join(entry).with_extension(""))
+            .output()
+            .unwrap()
     }
 }
 impl Drop for Case {
@@ -36,7 +38,9 @@ impl Drop for Case {
 }
 
 fn random(state: &mut u64, limit: usize) -> usize {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     ((*state >> 32) as usize) % limit
 }
 
@@ -44,7 +48,12 @@ fn run_main(source: &str) -> (i32, String) {
     let case = Case::new();
     case.write("main.hd", source);
     let built = case.build("main.hd");
-    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = case.run("main.hd");
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
     (

@@ -126,8 +126,13 @@ pub fn constructor_layout(
         // Construct/Project nodes, while every effect shares these offsets.
         let fields = match constructor {
             "$Done" => {
-                let Type::Data(_, args) = ty else { unreachable!() };
-                vec![machine_type(args.first().ok_or("outcome missing success type")?, checked)?]
+                let Type::Data(_, args) = ty else {
+                    unreachable!()
+                };
+                vec![machine_type(
+                    args.first().ok_or("outcome missing success type")?,
+                    checked,
+                )?]
             }
             _ if constructor.starts_with("$Yield#") => vec![MachineType::I64, MachineType::Pointer],
             _ if constructor.starts_with("$Fail#") => vec![MachineType::I64],
@@ -194,20 +199,28 @@ pub fn function_signature(
     })
 }
 
-
 pub fn constructor_tag(constructor: &str, ty: &Type, checked: &Checked) -> Result<u32, String> {
     if let Some(tag) = crate::mono::outcome_tag(constructor) {
         return Ok(tag);
     }
-    let scheme = checked.constructors.get(constructor).ok_or("unknown constructor")?;
+    let scheme = checked
+        .constructors
+        .get(constructor)
+        .ok_or("unknown constructor")?;
     let mut inference = crate::types::Inference::default();
     let instantiated = inference.instantiate(scheme);
     let result = match &instantiated {
         Ty::Fn(_, result, _) => result.as_ref(),
         ty => ty,
     };
-    inference.unify(result, &Ty::from(ty)).map_err(|error| format!("constructor type mismatch: {error:?}"))?;
-    checked.constructor_tags.get(constructor).copied().ok_or_else(|| "missing constructor tag".into())
+    inference
+        .unify(result, &Ty::from(ty))
+        .map_err(|error| format!("constructor type mismatch: {error:?}"))?;
+    checked
+        .constructor_tags
+        .get(constructor)
+        .copied()
+        .ok_or_else(|| "missing constructor tag".into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,17 +229,23 @@ pub enum ByteOrder {
     Big,
 }
 
-pub fn string_literal_data(value: &str, pointer_bytes: u32, order: ByteOrder) -> Result<Vec<u8>, String> {
+pub fn string_literal_data(
+    value: &str,
+    pointer_bytes: u32,
+    order: ByteOrder,
+) -> Result<Vec<u8>, String> {
     let mut bytes = match pointer_bytes {
         4 => {
-            let length = u32::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
+            let length =
+                u32::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
             match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),
             }
         }
         8 => {
-            let length = u64::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
+            let length =
+                u64::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
             match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),
