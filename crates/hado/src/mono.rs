@@ -93,6 +93,66 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+// `Array.of_list` のような純粋な callee は、scheme の単一化で入れ子の
+// outcome を落とす。結果型に同じ閉包が載っているなら、引数側の実際の型へ戻す。
+fn restore_nested_outcomes(logical: &Type, actual: &Type, ty: Type) -> Type {
+    apply_type_substitutions(ty, &outcome_closure_substitutions(logical, actual))
+}
+
+fn outcome_closure_substitutions(logical: &Type, actual: &Type) -> Vec<(Type, Type)> {
+    if logical == actual {
+        return vec![];
+    }
+    match (logical, actual) {
+        (Type::Closure(_, _), Type::Closure(_, _)) if logical_argument(actual) == *logical => {
+            vec![(logical.clone(), actual.clone())]
+        },
+        (Type::Data(left, left_args), Type::Data(right, right_args))
+        | (Type::Abstract(left, left_args), Type::Abstract(right, right_args))
+            if left == right && left_args.len() == right_args.len() =>
+        {
+            left_args
+                .iter()
+                .zip(right_args)
+                .flat_map(|(logical, actual)| outcome_closure_substitutions(logical, actual))
+                .collect()
+        },
+        (Type::Closure(left_params, left_result), Type::Closure(right_params, right_result))
+            if left_params.len() == right_params.len() =>
+        {
+            let mut substitutions: Vec<_> = left_params
+                .iter()
+                .zip(right_params)
+                .flat_map(|(logical, actual)| outcome_closure_substitutions(logical, actual))
+                .collect();
+            substitutions.extend(outcome_closure_substitutions(left_result, right_result));
+            substitutions
+        },
+        _ => vec![],
+    }
+}
+
+fn apply_type_substitutions(ty: Type, substitutions: &[(Type, Type)]) -> Type {
+    if let Some((_, replacement)) = substitutions.iter().find(|(from, _)| from == &ty) {
+        return replacement.clone();
+    }
+    match ty {
+        Type::Data(name, arguments) => Type::Data(
+            name,
+            arguments.into_iter().map(|argument| apply_type_substitutions(argument, substitutions)).collect(),
+        ),
+        Type::Abstract(name, arguments) => Type::Abstract(
+            name,
+            arguments.into_iter().map(|argument| apply_type_substitutions(argument, substitutions)).collect(),
+        ),
+        Type::Closure(parameters, result) => Type::Closure(
+            parameters.into_iter().map(|parameter| apply_type_substitutions(parameter, substitutions)).collect(),
+            Box::new(apply_type_substitutions(*result, substitutions)),
+        ),
+        other => other,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
@@ -2429,6 +2489,33 @@ impl Lowerer {
         })
     }
 
+    fn restored_array_allocation(&self, allocation: Type) -> Type {
+        let Some((_, _, active)) = self.active.last() else {
+            return allocation;
+        };
+        if logical_argument(&active.result) == allocation {
+            return active.result.clone();
+        }
+        allocation
+    }
+
+    // 純粋な callee の結果へ戻した入れ子の outcome は、本体の checker 型には
+    // 残らない。abort の成功型も同じ実際の型に揃える。
+    fn restored_success_type(&self, success: Type) -> Type {
+        let Some((_, _, active)) = self.active.last() else {
+            return success;
+        };
+        let restored = match outcome_parts(&active.result) {
+            Ok((payload, _, _)) => payload,
+            Err(_) => active.result.clone(),
+        };
+        if logical_argument(&restored) == success {
+            restored
+        } else {
+            success
+        }
+    }
+
     fn application(
         &mut self,
         node: &crate::parser::Node,
@@ -2448,8 +2535,9 @@ impl Lowerer {
                     let allocation = if function == crate::runtime_abi::RuntimeFunction::ArrayAlloc {
                         let ty = self.composite_types.get(&(node.span.line, node.span.col))
                             .ok_or("missing array allocation result type")?;
-                        Some(Type::try_from(&self.specialization.resolve(ty))
-                            .map_err(|_| "array allocation result type is not concrete")?)
+                        let allocation = Type::try_from(&self.specialization.resolve(ty))
+                            .map_err(|_| "array allocation result type is not concrete")?;
+                        Some(self.restored_array_allocation(allocation))
                     } else { None };
                     return Expression::call_array(function, arguments, allocation);
                 }
@@ -2505,7 +2593,7 @@ impl Lowerer {
             Err(UnresolvedType::Variable(_)) => Type::Void,
             Err(_) => return Err("abort result type is not concrete".into()),
         };
-        self.abort_raise_with(arguments, result)
+        self.abort_raise_with(arguments, self.restored_success_type(result))
     }
 
     fn abort_raise_with(
@@ -3351,7 +3439,7 @@ impl Lowerer {
         arguments: Vec<Expression>,
         effect: &str,
     ) -> Result<Expression, String> {
-        let success = self.node_type(node).unwrap_or(Type::Void);
+        let success = self.restored_success_type(self.node_type(node).unwrap_or(Type::Void));
         self.abort_outcome_with(arguments, effect, success)
     }
 
@@ -4153,15 +4241,19 @@ impl Lowerer {
         // 外した形）を使い、引数の型は実際の閉包型のまま残す。
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred = Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
+        let mut success = inferred.result.clone();
+        for (logical_ty, actual_ty) in logical.iter().zip(&types) {
+            success = restore_nested_outcomes(logical_ty, actual_ty, success);
+        }
         let mut signature = if let Some(answer) = &outcome_answer {
             Signature {
                 parameters: types.clone(),
-                result: self.outcome_of(&inferred.result, answer)?,
+                result: self.outcome_of(&success, answer)?,
             }
         } else {
             Signature {
                 parameters: types.clone(),
-                result: inferred.result.clone(),
+                result: success,
             }
         };
         if let Some(function) = self.functions.iter().find(|function| {
