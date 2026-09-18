@@ -410,7 +410,10 @@ impl Lowerer {
                 arms.iter().any(|(_, body)| self.callee_is_outcome_closure(body))
                     || fallback.as_ref().is_some_and(|fallback| self.callee_is_outcome_closure(fallback))
             },
-            NodeKind::Field(value, _) => self.callee_is_outcome_closure(value),
+            NodeKind::Field(..) => self
+                .value_types
+                .get(&(callee.span.line, callee.span.col))
+                .is_some_and(|ty| self.outcome_closure_of(&self.specialization.resolve(ty)).is_some()),
             _ => false,
         }
     }
@@ -440,7 +443,7 @@ impl Lowerer {
         if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
             return true;
         }
-        if let crate::parser::NodeKind::Apply(callee, _) | crate::parser::NodeKind::Call(callee, _) = &node.kind {
+        if let crate::parser::NodeKind::Apply(callee, arguments) | crate::parser::NodeKind::Call(callee, arguments) = &node.kind {
             if self.stack_needs_outcome() && self.callee_is_outcome_closure(callee) {
                 return true;
             }
@@ -452,10 +455,23 @@ impl Lowerer {
                 },
                 _ => None,
             };
-            if self.stack_needs_outcome() && name.is_some_and(|name| {
+            if self.stack_needs_outcome() && name.clone().is_some_and(|name| {
                 self.schemes.get(&self.resolve_definition(&name)).is_some_and(Self::scheme_carries_effects)
                     || self.default_operation_carries_effects(&name)
             }) { return true; }
+
+            // 効果を持つ閉包を引数に取る定義呼び出しは、callee の本体がその
+            // 閉包を呼ぶので、outcome を呼び出し側の継続に載せる。
+            if self.stack_needs_outcome()
+                && name.clone().is_some_and(|name| {
+                    !self.scope.contains_key(&name)
+                        && !self.operations.contains_key(&name)
+                        && !self.constructors.contains_key(&self.resolve_definition(&name))
+                })
+                && arguments.iter().any(|argument| self.callee_is_outcome_closure(argument))
+            {
+                return true;
+            }
 
         }
         crate::check::children(node).iter().any(|child| self.contains_handled_call(child))
@@ -572,6 +588,18 @@ impl Lowerer {
                 None => self.construct("Nil", vec![], &ty)?,
             };
             for value in values.into_iter().rev() {
+                // 効果多相の callee を通ると、checker が handler の答えの
+                // 制約を落とすことがある。型の食い違った `Cons` を組むと
+                // 実行時に壊れるので、ここで止める。
+                let element = Type::try_from(&self.specialization.resolve(&ty))
+                    .ok()
+                    .and_then(|concrete| match concrete {
+                        Type::Data(_, arguments) => arguments.into_iter().next(),
+                        _ => None,
+                    });
+                if element.is_some_and(|element| element != value.ty()) {
+                    return Err("list element type mismatch".into());
+                }
                 list = self.construct("Cons", vec![value, list], &ty)?;
             }
             return Ok(list);
@@ -2156,6 +2184,27 @@ impl Lowerer {
         Ok(body)
     }
 
+    // 今の stack の handler が扱う効果を運ぶ関数型か。
+    fn row_carries_handled_effect(&self, row: &crate::types::Row) -> bool {
+        self.handler_stack.iter().enumerate().any(|(index, handler)| {
+            Some(index) != self.arm_handler
+                && Self::handler_has_propagation_ops(handler)
+                && row.without_effect(&handler.effect) != *row
+        })
+    }
+
+    // checker の型が効果を運ぶ関数なら、mono では結果が outcome の閉包になる。
+    fn outcome_closure_of(&self, ty: &Ty) -> Option<Type> {
+        let Ty::Fn(arguments, result, row) = ty else { return None; };
+        if !self.row_carries_handled_effect(row) {
+            return None;
+        }
+        let answer = self.context_answer.clone().or_else(|| self.again_answers.last().cloned())?;
+        let arguments: Vec<Type> = arguments.iter().map(|argument| Type::try_from(argument).ok()).collect::<Option<_>>()?;
+        let result = Type::try_from(&**result).ok()?;
+        Some(Type::Closure(arguments, Box::new(self.outcome_of(&result, &answer).ok()?)))
+    }
+
     fn record_get(&self, record: Expression, field: &str) -> Result<Expression, String> {
         let ty = record.ty();
         let Type::Data(name, _) = &ty else {
@@ -2182,8 +2231,11 @@ impl Lowerer {
         inference
             .unify(&result, &expected)
             .map_err(|error| format!("record type mismatch: {error:?}"))?;
-        let result = Type::try_from(&inference.resolve(&fields[index]))
-            .map_err(|_| "record field type is not concrete")?;
+        let field_ty = inference.resolve(&fields[index]);
+        let result = match self.outcome_closure_of(&field_ty) {
+            Some(closure) => closure,
+            None => Type::try_from(&field_ty).map_err(|_| "record field type is not concrete")?,
+        };
         Ok(Expression::RecordGet {
             record: Box::new(record),
             field: field.into(),
@@ -3400,6 +3452,10 @@ impl Lowerer {
     // 高階の引数に効果付きの閉包を渡す場合の答え。効果の名前は scheme の行に
     // 現れない（未確定）ので、腕を実行中の handler を除いた最も内側の
     // propagation handler を使う。
+    // 効果を持つ callback の答え。腕の実行中でなければ、今 lower している
+    // 本体の context（最も内側の handler）の答えを優先し、無ければ最も外側の
+    // propagation handler の答えに落ちる。入れ子の handler で答えが食い違う
+    // 場合は、この選択が yield を捕まえる handler と一致しないことがある。
     fn callback_answer(&self) -> Result<Option<Type>, String> {
         for (index, handler) in self.handler_stack.iter().enumerate() {
             if Some(index) == self.arm_handler || !Self::handler_has_propagation_ops(handler) {
@@ -3899,7 +3955,7 @@ impl Lowerer {
         // 外した形）を使い、引数の型は実際の閉包型のまま残す。
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred = Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
-        let signature = if let Some(answer) = &outcome_answer {
+        let mut signature = if let Some(answer) = &outcome_answer {
             Signature {
                 parameters: types.clone(),
                 result: self.outcome_of(&inferred.result, answer)?,
@@ -3952,6 +4008,11 @@ impl Lowerer {
         self.specialization = saved_specialization;
         self.scope = saved;
         let mut body = lowered?.in_tail_position();
+        // callback を渡されただけで本体が呼ばない callee は、その効果を運ばない。
+        // 引数の型から outcome と決めていた分をここで戻す。
+        if !is_outcome(&body.ty()) && is_outcome(&signature.result) {
+            signature.result = body.ty();
+        }
         if is_outcome(&signature.result) && !is_outcome(&body.ty()) {
             body = self.done(body, &signature.result)?;
         }
