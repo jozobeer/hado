@@ -324,10 +324,11 @@ import re
 import tempfile
 from pathlib import Path
 
-anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?')
+anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?(?!:?[0-9])')
 
 def causes(text):
-    """file:line anchors, excluding numeric-only runs such as `12:30`."""
+    """file:line anchors, excluding numeric-only runs such as `12:30` and
+    diagnostic spans such as `main.hd:1:36` (a path:line:column, not a source anchor)."""
     return [m for m in anchor.findall(text) if not re.fullmatch(r'[0-9.]+', m[0])]
 
 assert causes('.gitignore:1') == [('.gitignore', '1', '')], \
@@ -337,6 +338,13 @@ assert causes('Dockerfile:5') == [('Dockerfile', '5', '')], \
 assert causes('.cargo/config.toml:1-3') == [('.cargo/config.toml', '1', '3')], \
     'a dot directory must stay in the path'
 assert causes('12:30') == [], 'a numeric-only pair is not an anchor'
+assert causes('main.hd:1:36') == [], \
+    'a diagnostic span path:line:column is not a source anchor'
+assert causes('tests/reject/E507/main.hd:3') == [('tests/reject/E507/main.hd', '3', '')], \
+    'a repository path with a trailing line is an anchor'
+assert causes('main.hd:1:36 の `crates/hado/src/lib.rs:227-229` による') == \
+    [('crates/hado/src/lib.rs', '227', '229')], \
+    'the repository anchor is still found next to a diagnostic span'
 assert causes('crates/hado/src/mono.rs:3845') == [('crates/hado/src/mono.rs', '3845', '')]
 root = Path.cwd().resolve()
 
@@ -409,7 +417,7 @@ doc_issue_evidence() {
 import re
 from pathlib import Path
 
-fence_open = re.compile(r'^(`{3,})')
+fence_open = re.compile(r'^(`{3,})([^`]*)$')
 fence_close = re.compile(r'^(`{3,})\s*$')
 
 def closes_fence(line, delimiter):
@@ -512,6 +520,8 @@ def complete_table(lines):
 def fence(*inner):
     return ['```', *inner, '```']
 
+assert not complete_fence(['```lang`bad', '$ cargo test', 'ok', '```']), \
+    'an opening fence whose info string contains a backtick does not open a block'
 assert not complete_fence(['```', '$ cargo test', '```not-a-closing-fence']), \
     'a fence line with trailing text does not close the block'
 assert complete_fence(['```', '$ cargo test', 'PASSED: 9/9', '```   ']), \
