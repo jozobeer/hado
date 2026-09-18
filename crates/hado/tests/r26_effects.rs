@@ -545,22 +545,42 @@ fn do_binds_a_named_again_callee_with_the_caller_continuation() {
 }
 
 #[test]
-fn effectful_callback_is_rejected_for_a_higher_order_call() {
-    let sources = [
+fn effectful_callback_runs_under_the_handler() {
+    let aborting = [
         "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.map [2, 0] fn(x => 8 / x)\n",
         "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef f (x: Int): Int {Error} => 8 / x\ndef main =\n  with Catch ->\n  List.map [2, 0] f\n",
     ];
-    for source in sources {
+    for source in aborting {
         let case = Case::new();
         case.write("main.hd", source);
-        let output = case.command("dump-mono", "main.hd");
-        assert_eq!(output.status.code(), Some(1), "{source}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("effectful function value cannot be passed to List.map"),
-            "{source}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let built = case.build("main.hd");
+        assert_eq!(built.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&built.stderr));
+        let output = case.run("main.hd");
+        assert_eq!(output.status.code(), Some(0), "{source}\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, b"[]\n", "{source}");
+        assert!(output.stderr.is_empty(), "{source}");
     }
+
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Catch ->\n  List.map [2, 4] fn(x => 8 / x)\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"[4, 2]\n");
+    assert!(output.stderr.is_empty());
+
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def main =\n  with Collect ->\n  List.map [1, 2] fn(x => do yield x -> x)\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
@@ -582,6 +602,49 @@ fn do_binds_a_local_closure_callee_with_the_caller_continuation() {
 fn once_operation_with_a_handled_effect_is_lifted_in_argument_position() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  String.length cwd\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.trim().parse::<i64>().is_ok(), "{stdout}");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn late_registered_yield_composes_with_the_caller_continuation() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def rec f (x: Int): Int {{Int Yield}} =>\n  if x == 0 => g 0\n  | do yield x -> 7\ndef rec g (x: Int): Int {{Int Yield}} => do f 1 -> 42 + x\ndef main =\n  with Collect ->\n  f 0\n",
+        collect_handler().replace("return _ => []", "return value => [value]"),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 42]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn do_binds_a_branch_callee_with_the_caller_continuation() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def main =\n  with Collect ->\n  let f = fn(x => do yield x -> ()) ->\n  let g = fn(x => do yield x -> ()) ->\n  do (if true => f | g) 1 -> do yield 2 -> ()\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn effectful_top_level_value_is_lifted_in_argument_position() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef current = cwd\ndef main =\n  with Catch ->\n  String.length current\n");
     let built = case.build("main.hd");
     assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
     let output = case.run("main.hd");
