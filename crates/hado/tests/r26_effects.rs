@@ -684,6 +684,48 @@ fn effectful_callback_reaches_the_handler_through_prelude_folds() {
 }
 
 #[test]
+fn callback_passed_through_a_pure_callee_keeps_its_own_result() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef identity (f: Fn(Int => Int)): Fn(Int => Int) => f\ndef main =\n  with Catch ->\n  let f = identity fn(x => 8 / x) ->\n  f 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn do_binds_a_local_callback_passed_as_an_argument() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}def main =\n  with Collect ->\n  let cb = fn(x => do yield x -> x) ->\n  do List.map [1] cb -> do yield 2 -> ()\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn do_binds_a_callback_held_in_a_record_field() {
+    let case = Case::new();
+    case.write("main.hd", &format!(
+        "{}type Box = {{ run: Fn(Int => Void {{Int Yield}}) }}\ndef main =\n  with Collect ->\n  let box = {{ run = fn(x => do yield x -> ()) }} ->\n  do box.run 1 -> do yield 2 -> ()\n",
+        collect_handler(),
+    ));
+    let built = case.build("main.hd");
+    assert_eq!(built.status.code(), Some(0), "{}", String::from_utf8_lossy(&built.stderr));
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"[1, 2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
     let mut state = 0x26_05;
     for _ in 0..4 {
