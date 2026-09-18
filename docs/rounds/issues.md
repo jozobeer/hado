@@ -1016,3 +1016,26 @@ assert '## 案' in issue_problem('good-slug', full.replace('## 案\n', ''))
 cargo test --offline -> cargo-test16-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
 ```
+
+### 四十一次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# 検査 8: 診断の位置はアンカーにしない（一時 issue で確認してから消す）
+printf '... ## 原因\n\n`main.hd:1:36` の診断による。\n...' > docs/issues/temp-probe2.md
+bash scripts/lint-docs.sh 2>&1 | grep -E 'AssertionError|NG: each issue cause'
+AssertionError: temp-probe2.md: 原因 has no file:line anchor
+NG: each issue cause cites a file:line anchor
+# 探針: causes('main.hd:1:36') == []、causes('main.hd:1:36 の `crates/hado/src/lib.rs:227-229` による') は後者だけを返す
+
+# 検査 9: 情報文字列にバッククォートを含む開きは開きにしない
+assert not complete_fence(['```lang`bad', '$ cargo test', 'ok', '```'])
+
+# 最終の木での全走
+cargo test --offline -> cargo-test17-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: none
+```
