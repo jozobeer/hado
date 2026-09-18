@@ -660,29 +660,68 @@ assert not complete_table(['| metric |', '| --- |', '| real |', '| TBD |']), \
 assert complete_table(['| 対象 | 入力 | 時間 |', '| --- | --- | --- |', '| 同 | 20,000 行 | 0.33 s |']), \
     'measured data row counts'
 
+def outside_fences(lines):
+    """Lines that are not inside a fenced block, so an example table is not evidence."""
+    result = []
+    delimiter = None
+    for line in lines:
+        if delimiter is None:
+            opening = fence_open.match(line)
+            if opening:
+                delimiter = opening.group(1)
+                continue
+            result.append(line)
+        elif closes_fence(line, delimiter):
+            delimiter = None
+    return result
+
+assert not complete_table(outside_fences(['```', '| expected |', '| --- |', '| 1 |', '```'])), \
+    'a table inside a fence is not an evidence table'
+assert complete_table(outside_fences(['| expected |', '| --- |', '| 1 |'])), \
+    'a table outside fences is evidence'
+assert complete_table(outside_fences(['```', 'x', '```', '| expected |', '| --- |', '| 1 |'])), \
+    'a table after a closed fence is evidence'
+
 missing = []
 for path in sorted(Path('docs/issues').glob('*.md')):
     text = path.read_text()
     match = re.search(r'^## 現象$\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     assert match, f'{path.name}: no 現象 section'
     lines = match.group(1).split('\n')
-    if not (complete_fence(lines) or complete_table(lines)):
+    if not (complete_fence(lines) or complete_table(outside_fences(lines))):
         missing.append(path.name)
 assert not missing, '現象 has no closed nonempty fence or complete table: ' + ', '.join(missing)
 PY
 }
 
-# --- 検査 10: issue のファイル名が slug で、見出しの slug と一致する（docs/issues.md の識別子） ---
+# --- 検査 10: issue のファイル名と文書の形（docs/issues.md の識別子とファイルの形） ---
 doc_issue_names() {
-    python3 - <<'PY'
+    python3 - <<'PYEOF'
 import re
 from pathlib import Path
 
 slug = re.compile(r'[a-z0-9][a-z0-9-]*')
 reserved = re.compile(r'r[0-9]+(-r[0-9]+)?')
+sections = ['## 現象', '## 原因', '## 案', '## 完了条件', '## 由来']
 
 def usable(name):
     return bool(slug.fullmatch(name)) and not reserved.fullmatch(name)
+
+def issue_problem(name, text):
+    lines = text.split('\n')
+    head = lines[0] if lines else ''
+    match = re.fullmatch(r'# (.+)（([^（）]+)）', head)
+    if not match:
+        return 'heading is not `# <題>（<slug>）`'
+    if match.group(2) != name:
+        return f'heading slug {match.group(2)} does not match the file name'
+    priority = lines[1] if len(lines) > 1 else ''
+    if not re.fullmatch(r'優先度: (高|中|低)。', priority):
+        return 'line 2 is not `優先度: 高|中|低。`'
+    heads = [line for line in lines if line in sections]
+    if heads != sections:
+        return f'sections must be {sections} in order, found {heads}'
+    return None
 
 assert usable('dogfood-text-tool')
 assert not usable('bad_name'), 'an underscore is not in the slug grammar'
@@ -691,15 +730,29 @@ assert not usable('-lead'), 'a leading hyphen is not in the slug grammar'
 assert not usable('r82'), 'r<digits> is reserved for the old round files'
 assert not usable('r50-r51'), 'r<digits>-r<digits> is reserved'
 
-for path in sorted(Path('docs/issues').glob('*.md')):
+full = ('# 題（good-slug）\n優先度: 高。\n## 現象\na\n## 原因\nb\n'
+        '## 案\nc\n## 完了条件\nd\n## 由来\ne\n')
+assert issue_problem('good-slug', full) is None
+assert 'heading' in issue_problem('good-slug', full.replace('# 題（good-slug）', '# 題'))
+assert 'does not match' in issue_problem('other-slug', full)
+assert '優先度' in issue_problem('good-slug', full.replace('優先度: 高。', '優先度: 最高。'))
+assert '## 案' in issue_problem('good-slug', full.replace('## 案\n', ''))
+assert '## 完了条件' in issue_problem(
+    'good-slug', full.replace('## 完了条件\nd\n', '## 完了条件\na\n## 由来\nb\n'))
+
+root = Path('docs/issues')
+assert root.is_dir(), 'docs/issues is not a directory'
+for entry in sorted(root.iterdir()):
+    assert not entry.is_symlink() and entry.is_file(), \
+        f'{entry}: docs/issues holds only regular files (no nested paths)'
+    assert entry.suffix == '.md', f'{entry.name}: issue files are .md'
+
+for path in sorted(root.glob('*.md')):
     name = path.stem
     assert usable(name), f'{path.name}: file name is not a usable slug'
-    head = path.read_text().split('\n', 1)[0]
-    match = re.fullmatch(r'# (.+)（([^（）]+)）', head)
-    assert match, f'{path.name}: heading is not `# <題>（<slug>）`'
-    assert match.group(2) == name, \
-        f'{path.name}: heading slug {match.group(2)} does not match the file name'
-PY
+    problem = issue_problem(name, path.read_text())
+    assert problem is None, f'{path.name}: {problem}'
+PYEOF
 }
 
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
@@ -711,7 +764,7 @@ check 'each gate with a round header has a round file with recorded results' doc
 check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 check 'each issue cause cites a file:line anchor' doc_issue_causes
 check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
-check 'each issue file name is a usable slug matching its heading' doc_issue_names
+check 'each issue document has the required name, priority and sections' doc_issue_names
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
