@@ -326,8 +326,8 @@ from pathlib import Path
 line_anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_.][A-Za-z0-9_./-]*):([0-9]+)(?:-([0-9]+))?(?!:?[0-9])')
 path_token = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`')
 location = re.compile(r'`((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)`[ \t]*の[ \t]*`([^`]+)`')
-section = re.compile(r'(§[0-9]+(?:\.[0-9]+)?|付録[A-Z])')
-error_code = re.compile(r'(?<![A-Za-z0-9_])E[0-9]{3}(?![0-9])')
+section = re.compile(r'(§[0-9]+(?:\.[0-9]+)?|付録[A-Z])(?![0-9A-Za-z_.])')
+error_code = re.compile(r'(?<![A-Za-z0-9_])E[0-9]{3}(?![0-9A-Za-z_])')
 
 bare_line = re.compile(r'(?<![0-9A-Za-z_.:]):([0-9]+)(?![0-9:])')
 
@@ -388,8 +388,12 @@ assert pairs('`crates/hado/src/lib.rs` の `check_ast` `diagnostic_order`。次'
 assert pairs('`crates/hado/src/lib.rs` の `check_ast` が') == \
     [('crates/hado/src/lib.rs', 'check_ast')], 'prose after the identifier ends the pair'
 assert section.findall('§26.1 と §55 と 付録C') == ['§26.1', '§55', '付録C']
+assert section.findall('§55x と 付録Cfoo と §55.1') == ['§55.1'], \
+    'a section that continues with a word character is not a section'
 assert error_code.findall('E602 と `E100` と E3xx と E1000') == ['E602', 'E100'], \
     'an error code is read with or without backticks, and E3xx and E1000 are not codes'
+assert error_code.findall('E100foo と E602') == ['E602'], \
+    'an error code that continues with a word character is not a code'
 assert mentions('fn make_isa() -> Isa {', 'make_isa'), 'a whole word matches'
 assert not mentions('fn make_isa() -> Isa {', 'make_is'), \
     'a prefix of an identifier does not match (make_is is not make_isa)'
