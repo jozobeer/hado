@@ -17,7 +17,7 @@ $ grep -n 'opt_level' crates/hado/src/emit.rs
 
 ## 原因
 
-`crates/hado/src/emit.rs:23` が Cranelift の `opt_level` を `"none"` に固定している。`"speed"` との差を測った記録が無く、既定を選ぶ根拠が無いまま残っている。
+`crates/hado/src/emit.rs` の `make_isa` が Cranelift の `opt_level` を `"none"` に固定している。`"speed"` との差を測った記録が無く、既定を選ぶ根拠が無いまま残っている。
 
 ## 案
 

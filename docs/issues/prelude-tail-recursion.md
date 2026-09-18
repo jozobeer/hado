@@ -21,7 +21,7 @@
 
 ## 原因
 
-`stdlib/list.hd:15-46` の `map`（15）`filter`（17）`append`（21）`length`（19）`sort` の `merge`（24）は素直な再帰で、末尾位置に無い。§53 は末尾呼び出しを保証するが、prelude 自身がその外で書かれている。`def rec` は stdlib 全体で 25 本（`grep -c 'def rec' stdlib/*.hd`）あり、`stdlib/string.hd:26-38` の `split_from` `join`、`stdlib/array.hd` `stdlib/bytes.hd` `stdlib/env.hd` `stdlib/io.hd` の `to_list` 系も同じ性質である。`docs/plan.md` 6 節は v0.1 で「素直な再帰で書く」と決めていた。
+`stdlib/list.hd` の `map` `filter` `append` `length` `sort` の `merge` は素直な再帰で、末尾位置に無い。§53 は末尾呼び出しを保証するが、prelude 自身がその外で書かれている。`def rec` は stdlib 全体で 25 本（`grep -c 'def rec' stdlib/*.hd`）あり、`stdlib/string.hd` の `split_from` `join`、`stdlib/array.hd` と `stdlib/bytes.hd` の `to_list` 系、`stdlib/env.hd` の `argv_elements`、`stdlib/io.hd` の `directory_elements` も同じ性質である。`docs/plan.md` 6 節は v0.1 で「素直な再帰で書く」と決めていた。
 
 ## 案
 
