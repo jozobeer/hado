@@ -561,3 +561,21 @@ static HadoString *quote_text(const HadoString *value, unsigned char quote) {
   result->length = length;
   return result;
 ```
+
+### 二十二次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は f() { ... } と function f { ... } の継続を数える
+
+# 検査 9 の自己検査: 関数定義の PS2 行だけのフェンスが赤（実行時に確認）
+$ f() { / > echo x / > } だけのフェンス
+AssertionError: function definition and PS2 lines must not count as output
+
+# §52 は main の無い .hd をライブラリとして検査し、宣言ディレクトリを独立の根にする
+sed -n '1797p;1799p' docs/spec.md
+`main` を持たず、他のプログラムから使われることを意図したプログラムをライブラリと呼ぶ。`hado check` に `main` の無い `.hd` を渡すとライブラリとして検査し（第10節、第50節）、`hado build` は受け付けない（E206）。ライブラリの未使用の判定は公開面を根にする（第39節）。
+ライブラリであることは `library` 宣言で示す。ディレクトリの 1 つのファイルの外（最初の見出しより前）に `library` を書くと、そのディレクトリがライブラリ根になる。ライブラリ根は独立した根で、パス（第51節）はそこから解く。これにより、ライブラリは利用側の根の下のどの位置に置かれても、内部の参照と外の `def` の規則が変わらない。
+```
