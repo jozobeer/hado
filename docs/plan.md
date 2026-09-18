@@ -1282,7 +1282,7 @@ slug `prelude-tail-recursion`、`highlight-treesitter`、`lsp-minimal` を次の
 
 | ID | 論点 | 決定 | 仕様の節 |
 |---|---|---|---|
-| P1 | prelude の再帰 | `stdlib/` の非末尾再帰を累積 + `reverse` の末尾形にする。言語意味は足さない。`map` と `filter` は先頭から順に適用すると書く（`filter` の適用順が変わる） | §55 |
+| P1 | prelude の再帰 | `stdlib/` の非末尾再帰を累積 + `reverse` の末尾形にする。新しい言語構成は足さない。`map` と `filter` は先頭から順に適用すると書く（`filter` の適用順が変わり、§55 に足す仕様変更になる） | §55 |
 | L1 | 診断の件数 | `--show-all` を opt-in で足す。同じ段階の全件をアンカー順に出す。E1xx と E3xx の致命は 1 件のまま。既定と拒否コーパスの判定は変えない | §56, §58.4 |
 | L2 | 止まった後の型 | 冗長・網羅性・契約の検査で止まっていても型を返す。`--print-type` と LSP の hover は同じ意味。字句・構文・名前解決・型の致命で止まったときは型が無い | §58.3 |
 | L3 | サーバの形 | `hado lsp` サブコマンド。JSON-RPC は `serde_json` で書く。機能は診断・hover（最上位の `def`）・正準形への code action の 3 つ。補完は入れない | §58 |

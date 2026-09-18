@@ -459,3 +459,31 @@ HadoString *hado_canonical_float(double value) {
   if (result == NULL) abort();
   result->length = length;
 ```
+
+### 十九次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9    # 検査 9 は引用符と括弧の継続状態をコマンドの行をまたいで持ち越す
+
+# 検査 9 の自己検査: 閉じない " ' ( のあとの PS2 行を出力に数えない（赤を確認）
+
+# §7 の比較は非結合
+$ cargo run --offline -q -- check target/pr5/cmp/cmp.hd
+cmp.hd:1:18: error[E100]: comparison operators are non-associative; found <
+$ echo exit=$?
+exit=1
+
+# §54 の NaN と無限大の印字
+0.0 / 0.0    -> nan
+1.0 / 0.0    -> inf
+-1.0 / 0.0   -> -inf
+
+# String を返す runtime の関数（length だけを設定するもの）
+grep -n '^HadoString \*hado_' runtime/hado_runtime.c | wc -l
+16
+grep -c 'HadoString' crates/hado/runtime_print.c
+8    # quote_text と hado_canonical_float を含む
+```
