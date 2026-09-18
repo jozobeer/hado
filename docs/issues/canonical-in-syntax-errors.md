@@ -31,7 +31,7 @@ E100 は parser の期待トークンをそのまま出す。E101 は禁止だ�
 - 上の 2 つの入力に `hado fmt` と `hado check --fix` をかけても本文は変わらない（`suggestion` は適用しない）。
 - 書き換え側の対照として、既存の局所書き換え（`tests/reject/E520/main.hd`）では `--format json` の `canonical` が §24 の Boolean branch の正準形を含み（`null` でない）、`suggestion` は `null` になり、`hado fmt` と `--fix` がその書き換えを適用する。`suggestion` だけを見て適用する実装や、両方を空にして適用を止めた実装では通らない。
 - E101 の他の部分形（`tests/reject/E101/main.hd` の `fn(| ... )`、腕の中の pattern branch、条件列の腕の中の分岐）では `suggestion` を `null` のままにし、当たらない書き換えを出さない。
-- §58.4 の 1 行のフィールドを 8 つにし、`suggestion` を足す（無ければ `null`）。`canonical` は局所的な書き換え、`suggestion` は形の提示。同じ診断で両方を非 null にしない。`--format json` でこの 2 つの表現を測る。
+- §58.4 の 1 行のフィールドに `suggestion` を足す（無ければ `null`）。`end_line`・`end_col` を足す lsp-minimal とは独立に、フィールドを名前で数える（両方が着地すると 10 個になる）。`canonical` は局所的な書き換え、`suggestion` は形の提示。同じ診断で両方を非 null にしない。`--format json` でこの 2 つの表現を測る。
 
 ## 由来
 

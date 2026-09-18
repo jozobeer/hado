@@ -253,3 +253,31 @@ type T Option = | None | Some(T)
 sed -n '10p' stdlib/list.hd
 def A head(values: A List): A Option Pure
 ```
+
+### 十次レビュー対応（2026-09-17）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# Int.parse は先頭の - だけを読み、先行 0 は飛ばす（Float.parse の文法を揃える根拠）
+sed -n '481,482p' runtime/hado_runtime.c
+static IntParseResult parse_int_digits(const HadoString *string, size_t index) {
+  while (index < string->length && string->bytes[index] == '0') ++index;
+sed -n '495,497p' runtime/hado_runtime.c
+  int negative = string->bytes[0] == '-';
+  size_t start = (size_t)negative;
+  if (start == string->length) return (IntParseResult){0, 0};
+
+# HadoString を手で組んで cast する runtime 門番（bytes の位置が動くと壊れる）
+grep -rn 'unsigned char bytes\[' crates/hado/tests/*.rs | head -3
+crates/hado/tests/r34_bytes.rs:217:print("typedef struct { size_t length; unsigned char bytes[%d]; } Utf8Probe;" %
+crates/hado/tests/r34_bytes.rs:262:    struct { size_t length; unsigned char bytes[3]; } valid = {3, {0xe3, 0x81, 0x82}};
+crates/hado/tests/r34_bytes.rs:263:    struct { size_t length; unsigned char bytes[2]; } two = {2, {72, 105}};
+
+# plan.md は L4 で --format json に終端を足す（suggestion と同時に 10 フィールド）
+sed -n '1289p' docs/plan.md
+| L4 | 診断の位置 | `--format json` に終端の位置を足す | §58.4 |
+```
