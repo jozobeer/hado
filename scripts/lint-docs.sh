@@ -597,9 +597,12 @@ def cells(line):
     return [part.replace('\\|', '|').strip() for part in parts]
 
 placeholders = {'', '?', '-', '--', '---', '...', '…', 'tbd', 'todo', 'xxx', 'n/a', 'na', '未定', '未計測'}
+alignment = re.compile(r':?-{3,}:?')
 
 def measured(row):
-    return all(cell and cell.lower() not in placeholders for cell in row)
+    # `:---:` in a data cell is an alignment marker, not a measurement.
+    return all(cell and cell.lower() not in placeholders
+               and not alignment.fullmatch(cell) for cell in row)
 
 def complete_table(lines):
     for i in range(len(lines) - 2):
@@ -748,6 +751,14 @@ assert not complete_table(['| metric |', '| --- |', '| TBD |']), \
     'placeholder-only data row is not evidence'
 assert not complete_table(['| metric |', '| --- |', '| - |']), \
     'dash-only data row is not evidence'
+assert not complete_table(['| metric |', '| --- |', '| :---: |']), \
+    'an aligned separator as a data row is not evidence'
+assert not complete_table(['| metric |', '| --- |', '| :--- |']), \
+    'a left-aligned separator as a data row is not evidence'
+assert not complete_table(['| metric |', '| --- |', '| ---: |']), \
+    'a right-aligned separator as a data row is not evidence'
+assert complete_table(['| metric |', '| --- |', '| 1.2 s |']), \
+    'a real data row with an alignment separator header is evidence'
 assert not complete_table(['| case | result |', '| --- | --- |', '| case-a | TBD |']), \
     'a placeholder in a result cell is not evidence'
 assert not complete_table(['| case | result | time |', '| --- | --- | --- |', '| case-a | ok | TBD |']), \
