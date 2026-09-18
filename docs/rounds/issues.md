@@ -919,3 +919,22 @@ grep -rn '^````' docs/ | wc -l
 cargo test --offline -> cargo-test12-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十七次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# L1 が免除しない段階（docs/plan.md:1286 は E1xx と E3xx の致命だけを 1 件とする）
+grep -n 'E204\|E403\|E505\|E602\|E703' docs/spec.md | head -5
+2051:| E401 | missing-cond-fallback | §25 | 網羅性 |
+2079:| E602 | contract-mismatch | §47 | 型 |
+2085:| E703 | eq-on-fn | §21 | 単相化 |
+
+# 最終の木での全走
+cargo test --offline -> cargo-test13-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
