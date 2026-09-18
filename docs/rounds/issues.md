@@ -865,3 +865,34 @@ crates/hado/src/runtime_abi.rs:19:    PrintFloat,      # 宣言のみ。呼び�
 cargo test --offline -> cargo-test10-exit=0（0 failed）
 bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
 ```
+
+### 三十五次レビュー対応（2026-09-18）
+
+Codex の Code Review は 2026-09-18T10:21:20Z に `⚠️ Failed` で終わり、指摘では
+なくレビュー自体が失敗していた。未解決スレッドは 0。ここまで十ラウンドの指摘は
+ほぼ全部 `scripts/lint-docs.sh` の検査 9 が bash の文法を模擬している箇所で、
+push のたびに次の構成（`f() {`・バッククォート・`<<A <<B`・`&& {`・`${...}`・
+`<<<`・`select`）が来る形だった。模擬をやめ、docs の実測の約束（`$ ` がコマンド、
+`> ` が PS2 の入力、heredoc は順序付きで追跡、それ以外が出力）だけで判定する
+`refactor:` を入れた。
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+
+# 置き換えの前後で docs の判定が変わらないこと
+bash scripts/lint-docs.sh 2>&1 | tail -1    # 置き換え前
+PASSED: 9/9
+bash scripts/lint-docs.sh 2>&1 | tail -1    # 置き換え後（Shell クラス削除）
+PASSED: 9/9
+
+# 削除量
+git show --stat --oneline HEAD | tail -1
+ scripts/lint-docs.sh | 139 +++---------   # 6 insertions, 133 deletions
+wc -l scripts/lint-docs.sh
+667 scripts/lint-docs.sh
+
+# 最終の木での全走
+cargo test --offline -> cargo-test11-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+```
