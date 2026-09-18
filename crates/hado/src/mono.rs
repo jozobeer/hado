@@ -338,6 +338,9 @@ struct Lowerer {
     context_answer: Option<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
+    /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
+    /// 腕は自分の handler の外で走るので、handler は自分の腕を捕まえない。
+    arm_handler: Option<usize>,
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
     operation_types: std::collections::HashMap<String, Signature>,
@@ -2334,9 +2337,12 @@ impl Lowerer {
             _ => None,
         }).ok_or_else(|| format!("missing handler arm for {name}"))?;
         self.with_params(&params, arguments, |this| {
+            let arm = this.handler_index(&handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
+            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
             let result = this.expression(&body);
             this.rewriting_return = saved;
+            this.arm_handler = saved_arm;
             result
         })
     }
@@ -2431,11 +2437,23 @@ impl Lowerer {
     }
 
     fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
-        self.handler_stack.iter().rev().find(|handler| {
-            handler.arms.iter().any(|arm| {
-                matches!(arm, crate::parser::HandlerArm::Operation { name, .. } if name == operation)
+        self.handler_stack
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, handler)| {
+                Some(*index) != self.arm_handler
+                    && handler.arms.iter().any(|arm| {
+                        matches!(arm, crate::parser::HandlerArm::Operation { name, .. } if name == operation)
+                    })
             })
-        })
+            .map(|(_, handler)| handler)
+    }
+
+    fn handler_index(&self, handler: &crate::parser::HandlerDecl) -> Option<usize> {
+        self.handler_stack
+            .iter()
+            .rposition(|candidate| candidate.name == handler.name && candidate.effect == handler.effect)
     }
 
     fn handler_for_node(&self, node: &crate::parser::Node) -> Option<&crate::parser::HandlerDecl> {
@@ -2709,7 +2727,9 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let incoming = value.ty();
         let (success, answer, payload) = outcome_parts(&incoming)?;
-        let forwarding = self.handler_stack.len() > 1;
+        // 腕の本体を単相化している間、その handler の枠は外にあるものとして数えない。
+        let forwarding = (0..self.handler_stack.len().saturating_sub(1))
+            .any(|index| Some(index) != self.arm_handler);
         let handler_answer = self.handler_answers.last().cloned().flatten();
         let outgoing = if forwarding {
             Type::Data(
@@ -2937,9 +2957,12 @@ impl Lowerer {
             _ => return Err("abort arm arity mismatch".into()),
         };
         self.with_params(&params, arguments, |this| {
+            let arm = this.handler_index(handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
-            let result = this.expression(&body).and_then(|value| this.finish_handler(value));
+            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
+            let result = this.expression(&body);
             this.rewriting_return = saved;
+            this.arm_handler = saved_arm;
             result
         })
     }
@@ -2966,9 +2989,12 @@ impl Lowerer {
         let resume_ty = resume.ty();
         let saved_resume = self.resume_binding.replace((id, resume_ty));
         let result = self.with_params(&params, vec![value], |this| {
+            let arm = this.handler_index(handler);
             let saved = std::mem::replace(&mut this.rewriting_return, true);
+            let saved_arm = std::mem::replace(&mut this.arm_handler, arm);
             let result = this.expression(&body);
             this.rewriting_return = saved;
+            this.arm_handler = saved_arm;
             result
         });
         self.resume_binding = saved_resume;
@@ -3026,9 +3052,12 @@ impl Lowerer {
         else {
             return Ok(value);
         };
+        let arm = self.handler_index(handler);
         let saved = std::mem::replace(&mut self.rewriting_return, true);
+        let saved_arm = std::mem::replace(&mut self.arm_handler, arm);
         let result = self.with_params(&[param], vec![value], |this| this.expression(&ret));
         self.rewriting_return = saved;
+        self.arm_handler = saved_arm;
         result
     }
 
