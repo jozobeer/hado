@@ -29,7 +29,11 @@
    （`target/debug/deps` が 2.9 GB）なので保存しない。
 6. action は一次の `actions/` だけ（`checkout@v7`・`cache@v6`・`upload-artifact@v7`）。
    第三者の action を使わない。
-7. 同じ ref の古い走行は PR のときだけ打ち切る。main の走行は打ち切らない。
+7. 古い走行は PR のときだけ打ち切る。push と workflow_dispatch は走行ごとに別の群にして、
+   pending の走行も次の push に置き換わらないようにする。同じ群では `cancel-in-progress` が
+   false でも pending は新しい走行に置き換わる（GitHub の仕様、下の「審査の指摘と対応」）。
+   群は `${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}`、
+   `cancel-in-progress` は PR のときだけ true。
 8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7 を機械で固定する。
 
 ### 期待値の根拠
@@ -66,6 +70,9 @@
   success で終わることも見る。
 - ci-f. 否定的対照（PR を quick に弱める、文書層を落とす、ワークフローが層を名指しする、
   取得を入口の後ろへ動かす、第三者の action を使う、main も打ち切る）で門番が赤になる。
+- ci-g. concurrency の群が PR のときは `github.ref` を共有し、push と workflow_dispatch では
+  `github.run_id` で走行ごとに分かれる（同じ群では pending の走行が置き換わるため）。門番の
+  検査と否定的対照（群を `github.ref` だけに戻す）で測る。
 
 ### 許容される赤
 
@@ -193,3 +200,23 @@ PASSED: 7/7
 
 `target/` のキャッシュと `m0` の短縮、`--jobs` の値の見直しは、この実測を見て別ラウンドで
 判断する。
+
+### 審査の指摘と対応（PR #6、Codex review）
+
+指摘は `.github/workflows/ci.yml:26` の concurrency に付いた P2「Give main pushes distinct
+concurrency groups」。`cancel-in-progress` が false でも、同じ群では pending の走行が新しい
+走行に置き換わるので、main の中間コミットが full 層の検証を飛ばし得る、というもの。
+
+根拠を一次情報で確かめた。github/docs の
+`data/reusables/actions/actions-group-concurrency.md` に「Any existing `pending` job or
+workflow in the same concurrency group, if it exists, will be canceled and the new queued job
+or workflow will take its place.」とある。**指摘は事実として正しく、決定 7 の意図（main の
+走行を打ち切らない）は満たされていなかった。** Fix として、群を PR のときだけ `github.ref` で
+共有し、push と workflow_dispatch は `github.run_id` で走行ごとに分けた（決定 7 を直した）。
+門番の `workflow_case` に群の検査を足した。
+
+```
+# 否定的対照（群を github.ref だけの共有に戻す）
+=== group-shared-for-all ===
+NG: the workflow parses and is wired for the decisions PASSED: 7/8
+```

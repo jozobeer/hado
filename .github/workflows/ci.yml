@@ -20,9 +20,11 @@ on:
 permissions:
   contents: read
 
-# 同じ ref の古い走行は PR のときだけ打ち切る。main の走行は打ち切らない。
+# 古い走行は PR のときだけ打ち切る。push と workflow_dispatch は走行ごとに別の群にして、
+# pending の走行が次の push に置き換わらないようにする（同じ群では cancel-in-progress が
+# false でも pending は新しい走行に置き換わる。docs/rounds/ci.md）。
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ローカルのコマンドは --offline が前提（AGENTS.md）。network を開けるのは

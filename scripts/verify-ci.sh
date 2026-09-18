@@ -238,6 +238,15 @@ if not isinstance(concurrency, dict):
     fail('no concurrency')
 if concurrency.get('cancel-in-progress') != "${{ github.event_name == 'pull_request' }}":
     fail('cancel-in-progress does not spare the main runs')
+# 同じ群では cancel-in-progress が false でも pending の走行が新しい走行に置き換わる。
+# PR は 1 つの群を共有し（github.ref）、push と workflow_dispatch は走行ごとに別の群に
+# する（github.run_id）。
+group = concurrency.get('group')
+if not isinstance(group, str):
+    fail('no concurrency group')
+for token in ('github.ref', 'github.run_id'):
+    if token not in group:
+        fail(f'the concurrency group must be shared for pull requests and unique per run: {group!r}')
 
 env = doc.get('env')
 if not isinstance(env, dict) or str(env.get('CARGO_NET_OFFLINE')).lower() != 'true':
