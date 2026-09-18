@@ -515,7 +515,14 @@ def complete_fence(lines):
                             resume = None
                         continue
                     if shell is not None:
-                        if not shell.feed(line):
+                        continuing = shell.feed(line)
+                        here = here_re.search(line)
+                        if here:
+                            heredoc = next(g for g in here.groups() if g)
+                            heredoc_tabs = here.group(0).startswith('<<-')
+                            resume = shell if continuing else None
+                            shell = None
+                        elif not continuing:
                             shell = None
                         continue
                     if line.startswith('$ '):
@@ -652,6 +659,10 @@ assert complete_fence(fence('$ cat <<-EOF', 'a', '\tEOF', 'b')), \
     'leading tabs end a <<- heredoc'
 assert not complete_fence(fence('$ cat <<-EOF', 'a', '  EOF', 'b')), \
     'spaces do not end a <<- heredoc'
+assert not complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF')), \
+    'a heredoc opened on a PS2 line must not count its body as output'
+assert complete_fence(fence('$ cat \\', '> <<EOF', 'body', 'EOF', 'body')), \
+    'a heredoc opened on a PS2 line plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
