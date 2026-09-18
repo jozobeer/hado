@@ -686,3 +686,25 @@ def rec odds values => if values | [] => [] | [_] => values | [head, _, ...tail]
 def rec evens | [] => [] | [_] => [] | [_, next, ...tail] => [next, ...evens tail]
 def rec sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => odds values |> sort comparator |> merge (evens values |> sort comparator) comparator
 ```
+
+### 二十七次レビュー対応（2026-09-18）
+
+```
+git diff --check; echo diff-check=$?
+diff-check=0
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 9/9
+
+# この回は docs/ だけの変更（scripts/lint-docs.sh は二十五次から変えていない）
+git diff --stat
+ docs/issues/lsp-minimal.md         | 4 ++--
+ docs/issues/string-split-linear.md | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+# 直近の全走（二十六次）は scripts/ を変えていないのでそのまま有効
+cargo test --offline -> cargo-test3-exit=0（0 failed）
+bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3742/3742 passed; red: none
+
+# quote_text のバイト数の再計算（"あ\n" の引用付き）
+1（開き引用符）+ 3（あ の UTF-8）+ 2（\ と n）+ 1（閉じ引用符）= 7 バイト、5 スカラ
+```
