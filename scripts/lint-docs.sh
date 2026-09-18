@@ -485,15 +485,20 @@ def complete_fence(lines):
                             i += 1
                         flush()
                         position = True
+                        previous = None
                         for token in words:
-                            if position:
-                                if token in self.OPEN:
-                                    self.expect.append(self.OPEN[token])
-                                elif token in self.CLOSE and self.expect and self.expect[-1] == token:
-                                    self.expect.pop()
+                            if token == '{':
+                                # `f() {` and `function f {` open a group outside command position.
+                                if previous == ')' or previous is None or words[0] == 'function':
+                                    self.expect.append('}')
+                            elif position and token in self.OPEN:
+                                self.expect.append(self.OPEN[token])
+                            elif token in self.CLOSE and self.expect and self.expect[-1] == token:
+                                self.expect.pop()
                             position = token in self.COMMAND_AFTER
+                            previous = token
                         trailing = bool(cont_re.search(text.rstrip()))
-                        if words and words[-1] in self.BREAK:
+                        if words and words[-1] in ('|', '&', '('):
                             trailing = True
                         return (self.single or self.double or self.depth > 0 or self.tail
                                 or bool(self.expect) or trailing)
@@ -615,6 +620,14 @@ assert complete_fence(fence('$ while read x; do echo $x; done', 'x')), \
     'a compound on one line must count as complete'
 assert complete_fence(fence('$ grep -w if file', 'if')), \
     'if as an argument must not open a compound'
+assert not complete_fence(fence('$ f() {', '> echo x', '> }')), \
+    'function definition and PS2 lines must not count as output'
+assert not complete_fence(fence('$ function f {', '> echo x', '> }')), \
+    'function keyword definition and PS2 lines must not count as output'
+assert complete_fence(fence('$ f() {', '> echo x', '> }', 'x')), \
+    'function definition plus output must count'
+assert complete_fence(fence('$ echo a{b', 'a{b')), \
+    'a brace inside a word must not open a group'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
