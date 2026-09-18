@@ -1070,3 +1070,27 @@ bash scripts/run-gates.sh --tier full --jobs 4 -> TALLY: 3743/3743 passed; red: 
 PR #5 のレビュー往復は四十二次まで来た。三十五〜四十二次の指摘はすべて `scripts/lint-docs.sh` の検査 8〜10 の綴りの近似に対するもので、形は無限に作れる（シェルの継続・heredoc の本文・Markdown のフェンスと表の綴り）。実ファイルは `PASSED: 10/10` を保っており、issue の本文と実測に対する指摘は三十四次で尽きている。
 
 そこで PR #5 はここで打ち切り、残る綴りの綴り分けを `docs/issues/lint-docs-hardening.md` に切り出す。既知の形（PS2 行に並ぶ複数の heredoc、情報文字列のバッククォート、`<<-`、here-string、閉じないフェンス、診断の位置）はこの PR の探針で固定済みで、残り（字下げしたフェンス、引用の中の表、URI と en ダッシュのアンカー、`\` による継続の判定）は切り出し先で扱う。
+
+### 判断の振り分け規約（2026-09-18）
+
+打ち切りの原因は、レビューの指摘を毎回その場で判断していたことだった。`AGENTS.md` に「レビューと判断の振り分け」を足し、機械で決まる整合は門番に任せ、規約は記録して二度聞かず、人が見るのは意味が変わる判断だけ（5 行の判断シート）にした。往復の予算は 3 往復で、残りは `docs/issues/<slug>.md` に切り出して打ち切る。
+
+```
+# AGENTS.md の中身を読む門番は無い（probe がサンプルのパスに使うだけ）
+grep -n "AGENTS" scripts/lint-docs.sh
+359:assert classify(root, 'AGENTS.md') == 'ok'
+360:assert classify(root, 'crates/../AGENTS.md') == 'ok'
+361:assert classify(root, 'crates/../../AGENTS.md') == 'escapes', \
+370:assert anchor.findall('crates/../../AGENTS.md:1') == [('crates/../../AGENTS.md', '1', '')]
+
+bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+
+# 実データ（この PR の全指摘 191 件の振り分け）
+gh api repos/jozobeer/hado/pulls/5/comments --paginate \
+  --jq '.[] | select(.in_reply_to_id == null) | .path' | sort | uniq -c | sort -rn | head -3
+     41 docs/issues/lsp-minimal.md
+     37 scripts/lint-docs.sh
+     20 docs/issues/string-split-linear.md
+# 人が見るべきは意味が変わる 15〜20 件。残りは門番が決められるか、規約 1 行で消える
+```
