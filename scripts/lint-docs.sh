@@ -324,7 +324,7 @@ import re
 import tempfile
 from pathlib import Path
 
-anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)')
+anchor = re.compile(r'((?:\.\./)*[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+):([0-9]+)(?:-([0-9]+))?')
 root = Path.cwd().resolve()
 
 def classify(root, target):
@@ -343,10 +343,12 @@ assert classify(root, '../local-notes.rs') == 'escapes', \
     'parent-relative path must not pass'
 assert classify(root, 'missing.rs') == 'missing'
 assert anchor.findall('../local-notes.rs:1 and crates/hado/src/emit.rs:23') == [
-    ('../local-notes.rs', '1'),
-    ('crates/hado/src/emit.rs', '23'),
+    ('../local-notes.rs', '1', ''),
+    ('crates/hado/src/emit.rs', '23', ''),
 ], 'leading ../ must be captured as an anchor'
-assert anchor.findall('crates/../../AGENTS.md:1') == [('crates/../../AGENTS.md', '1')]
+assert anchor.findall('crates/../../AGENTS.md:1') == [('crates/../../AGENTS.md', '1', '')]
+assert anchor.findall('crates/hado/src/project.rs:313-339') == [('crates/hado/src/project.rs', '313', '339')], \
+    'a ranged anchor must capture its end line'
 
 with tempfile.TemporaryDirectory() as td:
     td = Path(td).resolve()
@@ -370,7 +372,7 @@ for path in sorted(Path('docs/issues').glob('*.md')):
     assert match, f'{path.name}: no 原因 section'
     found = anchor.findall(match.group(1))
     assert found, f'{path.name}: 原因 has no file:line anchor'
-    for target, line in found:
+    for target, line, end in found:
         status = classify(root, target)
         assert status != 'escapes', \
             f'{path.name}: 原因 anchor escapes the repository: {target}:{line}'
@@ -380,6 +382,11 @@ for path in sorted(Path('docs/issues').glob('*.md')):
         count = len(fp.read_text().splitlines())
         assert 1 <= int(line) <= count, \
             f'{path.name}: 原因 anchor line is out of range: {target}:{line} (file has {count} lines)'
+        if end:
+            assert int(line) <= int(end), \
+                f'{path.name}: 原因 anchor range is reversed: {target}:{line}-{end}'
+            assert int(end) <= count, \
+                f'{path.name}: 原因 anchor range end is out of range: {target}:{line}-{end} (file has {count} lines)'
 PY
 }
 
@@ -406,13 +413,18 @@ def complete_fence(lines):
                 here_re = re.compile(
                     r"""<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))"""
                 )
+                cont_re = re.compile(r'(\||&&|\\)\s*$')
+
+                def continues(text):
+                    return bool(cont_re.search(text.rstrip()))
+
                 for line in block:
                     if heredoc is not None:
                         if line.strip() == heredoc:
                             heredoc = None
                         continue
                     if continuation:
-                        continuation = line.rstrip().endswith('\\')
+                        continuation = continues(line)
                         continue
                     if line.startswith('$ '):
                         commands += 1
@@ -420,7 +432,7 @@ def complete_fence(lines):
                         if here:
                             heredoc = next(g for g in here.groups() if g)
                         else:
-                            continuation = line.rstrip().endswith('\\')
+                            continuation = continues(line)
                         continue
                     if not line.strip() or line.lstrip().startswith('#'):
                         continue
@@ -490,6 +502,12 @@ assert not complete_fence(fence("$ printf '%s\\n' \\", '> foo \\', '> bar')), \
     'continued-only multiline command must not count as output'
 assert complete_fence(fence("$ printf '%s\\n' \\", '> input.txt', 'input.txt')), \
     'continued command plus transcript output must count'
+assert not complete_fence(fence('$ printf x |', '> tee result.txt')), \
+    'pipe continuation and PS2 line must not count as output'
+assert not complete_fence(fence('$ printf x &&', '> tee result.txt')), \
+    'and-and continuation and PS2 line must not count as output'
+assert complete_fence(fence('$ printf x |', '> tee result.txt', 'x')), \
+    'continued pipeline plus output must count'
 assert not complete_table(['| metric |', '| : |', '| TBD |']), \
     'colon-only separator is not a table'
 assert not complete_table(['| metric |', '| :-: |', '| TBD |']), \
