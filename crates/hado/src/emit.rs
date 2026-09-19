@@ -335,7 +335,6 @@ fn build_mono_expr(
     checked: &crate::Checked,
 ) -> Result<cranelift_codegen::ir::Value, String> {
     use crate::mono::{Constant, Expression};
-    use crate::parser::BinOp;
     Ok(match expression {
         Expression::CallRuntime {
             function,
@@ -348,25 +347,7 @@ fn build_mono_expr(
             function,
             arguments,
             ..
-        } => {
-            let pointer = builder.func.signature.params[0].value_type;
-            let callee = import_function(
-                builder,
-                1,
-                function.id(),
-                runtime_signature(*function, pointer),
-            );
-            let mut values = Vec::new();
-            for argument in arguments {
-                values.push(build_mono_expr(builder, argument, variables, checked)?);
-            }
-            let call = builder.ins().call(callee, &values);
-            if function.declaration().result.is_some() {
-                builder.inst_results(call)[0]
-            } else {
-                builder.ins().iconst(clif_types::I64, 0)
-            }
-        }
+        } => build_runtime_call(builder, *function, arguments, variables, checked)?,
         Expression::Unreachable { result } => {
             let pointer = builder.func.signature.params[0].value_type;
             let signature = mono_signature(
@@ -391,57 +372,7 @@ fn build_mono_expr(
             arms,
             fallback,
             result,
-        } => {
-            let ty = value.ty();
-            let value = build_mono_expr(builder, value, variables, checked)?;
-            let tag =
-                if crate::repr::machine_type(&ty, checked)? == crate::repr::MachineType::Pointer {
-                    builder.ins().load(
-                        clif_types::I64,
-                        cranelift_codegen::ir::MemFlagsData::new(),
-                        value,
-                        0,
-                    )
-                } else {
-                    value
-                };
-            let pointer = builder.func.signature.params[0].value_type;
-            let signature = mono_signature(
-                &crate::mono::Signature {
-                    parameters: vec![],
-                    result: result.clone(),
-                },
-                checked,
-                pointer,
-            )?;
-            let merge = builder.create_block();
-            builder.append_block_param(merge, signature.returns[0].value_type);
-            for (constructor, body) in arms {
-                let expected = crate::repr::constructor_tag(constructor, &ty, checked)?;
-                let matches = builder.ins().icmp_imm_u(
-                    cranelift_codegen::ir::condcodes::IntCC::Equal,
-                    tag,
-                    i64::from(expected),
-                );
-                let yes = builder.create_block();
-                let next = builder.create_block();
-                builder.ins().brif(matches, yes, &[], next, &[]);
-                builder.switch_to_block(yes);
-                let value = build_mono_expr(builder, body, variables, checked)?;
-                builder.ins().jump(merge, &[value.into()]);
-                builder.switch_to_block(next);
-            }
-            if let Some(fallback) = fallback {
-                let value = build_mono_expr(builder, fallback, variables, checked)?;
-                builder.ins().jump(merge, &[value.into()]);
-            } else {
-                builder
-                    .ins()
-                    .trap(cranelift_codegen::ir::TrapCode::user(1).unwrap());
-            }
-            builder.switch_to_block(merge);
-            builder.block_params(merge)[0]
-        }
+        } => build_switch(builder, value, arms, fallback, result, variables, checked)?,
         Expression::Constant(Constant::String(value)) => {
             let constant = builder
                 .func
@@ -491,42 +422,7 @@ fn build_mono_expr(
             constructor,
             fields,
             result,
-        } => {
-            let pointer = builder.func.signature.params[0].value_type;
-            let tag = crate::repr::constructor_tag(constructor, result, checked)?;
-            let layout =
-                crate::repr::constructor_layout(constructor, result, checked, pointer.bytes())?;
-            if let Some(layout) = layout {
-                if fields.len() != layout.offsets.len() {
-                    return Err("constructor field count mismatch".into());
-                }
-                let mut values = Vec::new();
-                for field in fields {
-                    values.push(build_mono_expr(builder, field, variables, checked)?);
-                }
-                let object = allocate(builder, layout.size)?;
-                let tag = builder.ins().iconst(clif_types::I64, i64::from(tag));
-                builder
-                    .ins()
-                    .store(cranelift_codegen::ir::MemFlagsData::new(), tag, object, 0);
-                for (value, offset) in values.into_iter().zip(layout.offsets) {
-                    let offset =
-                        i32::try_from(offset).map_err(|_| "constructor offset overflow")?;
-                    builder.ins().store(
-                        cranelift_codegen::ir::MemFlagsData::new(),
-                        value,
-                        object,
-                        offset,
-                    );
-                }
-                object
-            } else {
-                if !fields.is_empty() {
-                    return Err("immediate constructor has fields".into());
-                }
-                builder.ins().iconst(clif_types::I64, i64::from(tag))
-            }
-        }
+        } => build_construct(builder, constructor, fields, result, variables, checked)?,
         Expression::Project {
             value,
             constructor,
@@ -563,26 +459,7 @@ fn build_mono_expr(
             )
         }
         Expression::Record { fields, result } => {
-            let pointer = builder.func.signature.params[0].value_type;
-            let layout = crate::repr::record_layout(result, checked, pointer.bytes())?;
-            let mut values = Vec::new();
-            for (name, expression) in fields {
-                let index = record_field_index(result, name, checked)?;
-                let value = build_mono_expr(builder, expression, variables, checked)?;
-                values.push((index, value));
-            }
-            let record = allocate(builder, layout.size)?;
-            for (index, value) in values {
-                let offset =
-                    i32::try_from(layout.offsets[index]).map_err(|_| "record offset overflow")?;
-                builder.ins().store(
-                    cranelift_codegen::ir::MemFlagsData::new(),
-                    value,
-                    record,
-                    offset,
-                );
-            }
-            record
+            build_record(builder, fields, result, variables, checked)?
         }
         Expression::RecordGet {
             record,
@@ -614,39 +491,7 @@ fn build_mono_expr(
             captures,
             function,
             signature,
-        } => {
-            let pointer = builder.func.signature.params[0].value_type;
-            let types: Vec<_> = captures.iter().map(Expression::ty).collect();
-            let layout = crate::repr::closure_layout(&types, checked, pointer.bytes())?;
-            let mut values = Vec::new();
-            for capture in captures {
-                values.push(build_mono_expr(builder, capture, variables, checked)?);
-            }
-            let allocation = allocate(builder, layout.size)?;
-            let signature = mono_signature(signature, checked, pointer)?;
-            let callee = import_function(
-                builder,
-                0,
-                u32::try_from(function.0).map_err(|_| "function ID overflow")?,
-                signature,
-            );
-            let code = builder.ins().func_addr(pointer, callee);
-            builder.ins().store(
-                cranelift_codegen::ir::MemFlagsData::new(),
-                code,
-                allocation,
-                0,
-            );
-            for (value, offset) in values.into_iter().zip(layout.offsets.iter().skip(1)) {
-                builder.ins().store(
-                    cranelift_codegen::ir::MemFlagsData::new(),
-                    value,
-                    allocation,
-                    i32::try_from(*offset).map_err(|_| "capture offset overflow")?,
-                );
-            }
-            allocation
-        }
+        } => build_make_closure(builder, captures, *function, signature, variables, checked)?,
         Expression::CallClosure {
             closure,
             arguments,
@@ -667,19 +512,7 @@ fn build_mono_expr(
             let call = builder.ins().call(callee, &values);
             builder.inst_results(call)[0]
         }
-        Expression::Unary { op, value } => {
-            let float = value.ty() == crate::mono::Type::Float;
-            let value = build_mono_expr(builder, value, variables, checked)?;
-            match op {
-                crate::mono::UnaryOp::Not => builder.ins().icmp_imm_u(
-                    cranelift_codegen::ir::condcodes::IntCC::Equal,
-                    value,
-                    0,
-                ),
-                crate::mono::UnaryOp::Negate if float => builder.ins().fneg(value),
-                crate::mono::UnaryOp::Negate => builder.ins().ineg(value),
-            }
-        }
+        Expression::Unary { op, value } => build_unary(builder, *op, value, variables, checked)?,
         Expression::Branch {
             condition,
             then,
@@ -702,59 +535,287 @@ fn build_mono_expr(
             builder.block_params(merge)[0]
         }
         Expression::Binary { op, left, right } => {
-            let float = left.ty() == crate::mono::Type::Float;
-            let signed = left.ty() == crate::mono::Type::Int;
-            let string =
-                left.ty() == crate::mono::Type::String || left.ty() == crate::mono::Type::Bytes;
-            let left = build_mono_expr(builder, left, variables, checked)?;
-            let right = build_mono_expr(builder, right, variables, checked)?;
-            if string {
-                return emit_string_comparison(builder, *op, left, right);
-            }
-            match (op, float) {
-                (BinOp::Add, false) => builder.ins().iadd(left, right),
-                (BinOp::Sub, false) => builder.ins().isub(left, right),
-                (BinOp::Mul, false) => builder.ins().imul(left, right),
-                (BinOp::Add, true) => builder.ins().fadd(left, right),
-                (BinOp::Sub, true) => builder.ins().fsub(left, right),
-                (BinOp::Mul, true) => builder.ins().fmul(left, right),
-                (BinOp::Div, true) => builder.ins().fdiv(left, right),
-                (BinOp::Div | BinOp::Mod, false) => {
-                    emit_integer_division(builder, left, right, *op == BinOp::Mod, checked)?
-                }
-                (op, false) => {
-                    use cranelift_codegen::ir::condcodes::IntCC;
-                    let code = match op {
-                        BinOp::Eq => IntCC::Equal,
-                        BinOp::Ne => IntCC::NotEqual,
-                        BinOp::Lt if signed => IntCC::SignedLessThan,
-                        BinOp::Le if signed => IntCC::SignedLessThanOrEqual,
-                        BinOp::Gt if signed => IntCC::SignedGreaterThan,
-                        BinOp::Ge if signed => IntCC::SignedGreaterThanOrEqual,
-                        BinOp::Lt => IntCC::UnsignedLessThan,
-                        BinOp::Le => IntCC::UnsignedLessThanOrEqual,
-                        BinOp::Gt => IntCC::UnsignedGreaterThan,
-                        BinOp::Ge => IntCC::UnsignedGreaterThanOrEqual,
-                        _ => return Err("operator code generation is not implemented".into()),
-                    };
-                    builder.ins().icmp(code, left, right)
-                }
-                (op, true) => {
-                    use cranelift_codegen::ir::condcodes::FloatCC;
-                    let code = match op {
-                        BinOp::Eq => FloatCC::Equal,
-                        BinOp::Ne => FloatCC::NotEqual,
-                        BinOp::Lt => FloatCC::LessThan,
-                        BinOp::Le => FloatCC::LessThanOrEqual,
-                        BinOp::Gt => FloatCC::GreaterThan,
-                        BinOp::Ge => FloatCC::GreaterThanOrEqual,
-                        _ => return Err("operator code generation is not implemented".into()),
-                    };
-                    builder.ins().fcmp(code, left, right)
-                }
-            }
+            build_binary(builder, *op, left, right, variables, checked)?
         }
         _ => return Err("IR expression code generation is not implemented".into()),
+    })
+}
+
+fn build_runtime_call(
+    builder: &mut FunctionBuilder<'_>,
+    function: crate::runtime_abi::RuntimeFunction,
+    arguments: &[crate::mono::Expression],
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let pointer = builder.func.signature.params[0].value_type;
+    let callee = import_function(
+        builder,
+        1,
+        function.id(),
+        runtime_signature(function, pointer),
+    );
+    let mut values = Vec::new();
+    for argument in arguments {
+        values.push(build_mono_expr(builder, argument, variables, checked)?);
+    }
+    let call = builder.ins().call(callee, &values);
+    Ok(if function.declaration().result.is_some() {
+        builder.inst_results(call)[0]
+    } else {
+        builder.ins().iconst(clif_types::I64, 0)
+    })
+}
+
+fn build_switch(
+    builder: &mut FunctionBuilder<'_>,
+    value: &crate::mono::Expression,
+    arms: &[(String, crate::mono::Expression)],
+    fallback: &Option<Box<crate::mono::Expression>>,
+    result: &crate::mono::Type,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let ty = value.ty();
+    let value = build_mono_expr(builder, value, variables, checked)?;
+    let tag = if crate::repr::machine_type(&ty, checked)? == crate::repr::MachineType::Pointer {
+        builder.ins().load(
+            clif_types::I64,
+            cranelift_codegen::ir::MemFlagsData::new(),
+            value,
+            0,
+        )
+    } else {
+        value
+    };
+    let pointer = builder.func.signature.params[0].value_type;
+    let signature = mono_signature(
+        &crate::mono::Signature {
+            parameters: vec![],
+            result: result.clone(),
+        },
+        checked,
+        pointer,
+    )?;
+    let merge = builder.create_block();
+    builder.append_block_param(merge, signature.returns[0].value_type);
+    for (constructor, body) in arms {
+        let expected = crate::repr::constructor_tag(constructor, &ty, checked)?;
+        let matches = builder.ins().icmp_imm_u(
+            cranelift_codegen::ir::condcodes::IntCC::Equal,
+            tag,
+            i64::from(expected),
+        );
+        let yes = builder.create_block();
+        let next = builder.create_block();
+        builder.ins().brif(matches, yes, &[], next, &[]);
+        builder.switch_to_block(yes);
+        let value = build_mono_expr(builder, body, variables, checked)?;
+        builder.ins().jump(merge, &[value.into()]);
+        builder.switch_to_block(next);
+    }
+    if let Some(fallback) = fallback {
+        let value = build_mono_expr(builder, fallback, variables, checked)?;
+        builder.ins().jump(merge, &[value.into()]);
+    } else {
+        builder
+            .ins()
+            .trap(cranelift_codegen::ir::TrapCode::user(1).unwrap());
+    }
+    builder.switch_to_block(merge);
+    Ok(builder.block_params(merge)[0])
+}
+
+fn build_construct(
+    builder: &mut FunctionBuilder<'_>,
+    constructor: &str,
+    fields: &[crate::mono::Expression],
+    result: &crate::mono::Type,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let pointer = builder.func.signature.params[0].value_type;
+    let tag = crate::repr::constructor_tag(constructor, result, checked)?;
+    let layout = crate::repr::constructor_layout(constructor, result, checked, pointer.bytes())?;
+    if let Some(layout) = layout {
+        if fields.len() != layout.offsets.len() {
+            return Err("constructor field count mismatch".into());
+        }
+        let mut values = Vec::new();
+        for field in fields {
+            values.push(build_mono_expr(builder, field, variables, checked)?);
+        }
+        let object = allocate(builder, layout.size)?;
+        let tag = builder.ins().iconst(clif_types::I64, i64::from(tag));
+        builder
+            .ins()
+            .store(cranelift_codegen::ir::MemFlagsData::new(), tag, object, 0);
+        for (value, offset) in values.into_iter().zip(layout.offsets) {
+            let offset = i32::try_from(offset).map_err(|_| "constructor offset overflow")?;
+            builder.ins().store(
+                cranelift_codegen::ir::MemFlagsData::new(),
+                value,
+                object,
+                offset,
+            );
+        }
+        Ok(object)
+    } else {
+        if !fields.is_empty() {
+            return Err("immediate constructor has fields".into());
+        }
+        Ok(builder.ins().iconst(clif_types::I64, i64::from(tag)))
+    }
+}
+
+fn build_record(
+    builder: &mut FunctionBuilder<'_>,
+    fields: &[(String, crate::mono::Expression)],
+    result: &crate::mono::Type,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let pointer = builder.func.signature.params[0].value_type;
+    let layout = crate::repr::record_layout(result, checked, pointer.bytes())?;
+    let mut values = Vec::new();
+    for (name, expression) in fields {
+        let index = record_field_index(result, name, checked)?;
+        let value = build_mono_expr(builder, expression, variables, checked)?;
+        values.push((index, value));
+    }
+    let record = allocate(builder, layout.size)?;
+    for (index, value) in values {
+        let offset = i32::try_from(layout.offsets[index]).map_err(|_| "record offset overflow")?;
+        builder.ins().store(
+            cranelift_codegen::ir::MemFlagsData::new(),
+            value,
+            record,
+            offset,
+        );
+    }
+    Ok(record)
+}
+
+fn build_make_closure(
+    builder: &mut FunctionBuilder<'_>,
+    captures: &[crate::mono::Expression],
+    function: crate::mono::FunctionId,
+    signature: &crate::mono::Signature,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    use crate::mono::Expression;
+    let pointer = builder.func.signature.params[0].value_type;
+    let types: Vec<_> = captures.iter().map(Expression::ty).collect();
+    let layout = crate::repr::closure_layout(&types, checked, pointer.bytes())?;
+    let mut values = Vec::new();
+    for capture in captures {
+        values.push(build_mono_expr(builder, capture, variables, checked)?);
+    }
+    let allocation = allocate(builder, layout.size)?;
+    let signature = mono_signature(signature, checked, pointer)?;
+    let callee = import_function(
+        builder,
+        0,
+        u32::try_from(function.0).map_err(|_| "function ID overflow")?,
+        signature,
+    );
+    let code = builder.ins().func_addr(pointer, callee);
+    builder.ins().store(
+        cranelift_codegen::ir::MemFlagsData::new(),
+        code,
+        allocation,
+        0,
+    );
+    for (value, offset) in values.into_iter().zip(layout.offsets.iter().skip(1)) {
+        builder.ins().store(
+            cranelift_codegen::ir::MemFlagsData::new(),
+            value,
+            allocation,
+            i32::try_from(*offset).map_err(|_| "capture offset overflow")?,
+        );
+    }
+    Ok(allocation)
+}
+
+fn build_unary(
+    builder: &mut FunctionBuilder<'_>,
+    op: crate::mono::UnaryOp,
+    value: &crate::mono::Expression,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    let float = value.ty() == crate::mono::Type::Float;
+    let value = build_mono_expr(builder, value, variables, checked)?;
+    Ok(match op {
+        crate::mono::UnaryOp::Not => {
+            builder
+                .ins()
+                .icmp_imm_u(cranelift_codegen::ir::condcodes::IntCC::Equal, value, 0)
+        }
+        crate::mono::UnaryOp::Negate if float => builder.ins().fneg(value),
+        crate::mono::UnaryOp::Negate => builder.ins().ineg(value),
+    })
+}
+
+fn build_binary(
+    builder: &mut FunctionBuilder<'_>,
+    op: crate::parser::BinOp,
+    left: &crate::mono::Expression,
+    right: &crate::mono::Expression,
+    variables: &mut std::collections::HashMap<usize, cranelift_codegen::ir::Value>,
+    checked: &crate::Checked,
+) -> Result<cranelift_codegen::ir::Value, String> {
+    use crate::parser::BinOp;
+    let float = left.ty() == crate::mono::Type::Float;
+    let signed = left.ty() == crate::mono::Type::Int;
+    let string = left.ty() == crate::mono::Type::String || left.ty() == crate::mono::Type::Bytes;
+    let left = build_mono_expr(builder, left, variables, checked)?;
+    let right = build_mono_expr(builder, right, variables, checked)?;
+    if string {
+        return emit_string_comparison(builder, op, left, right);
+    }
+    Ok(match (op, float) {
+        (BinOp::Add, false) => builder.ins().iadd(left, right),
+        (BinOp::Sub, false) => builder.ins().isub(left, right),
+        (BinOp::Mul, false) => builder.ins().imul(left, right),
+        (BinOp::Add, true) => builder.ins().fadd(left, right),
+        (BinOp::Sub, true) => builder.ins().fsub(left, right),
+        (BinOp::Mul, true) => builder.ins().fmul(left, right),
+        (BinOp::Div, true) => builder.ins().fdiv(left, right),
+        (BinOp::Div | BinOp::Mod, false) => {
+            emit_integer_division(builder, left, right, op == BinOp::Mod, checked)?
+        }
+        (op, false) => {
+            use cranelift_codegen::ir::condcodes::IntCC;
+            let code = match op {
+                BinOp::Eq => IntCC::Equal,
+                BinOp::Ne => IntCC::NotEqual,
+                BinOp::Lt if signed => IntCC::SignedLessThan,
+                BinOp::Le if signed => IntCC::SignedLessThanOrEqual,
+                BinOp::Gt if signed => IntCC::SignedGreaterThan,
+                BinOp::Ge if signed => IntCC::SignedGreaterThanOrEqual,
+                BinOp::Lt => IntCC::UnsignedLessThan,
+                BinOp::Le => IntCC::UnsignedLessThanOrEqual,
+                BinOp::Gt => IntCC::UnsignedGreaterThan,
+                BinOp::Ge => IntCC::UnsignedGreaterThanOrEqual,
+                _ => return Err("operator code generation is not implemented".into()),
+            };
+            builder.ins().icmp(code, left, right)
+        }
+        (op, true) => {
+            use cranelift_codegen::ir::condcodes::FloatCC;
+            let code = match op {
+                BinOp::Eq => FloatCC::Equal,
+                BinOp::Ne => FloatCC::NotEqual,
+                BinOp::Lt => FloatCC::LessThan,
+                BinOp::Le => FloatCC::LessThanOrEqual,
+                BinOp::Gt => FloatCC::GreaterThan,
+                BinOp::Ge => FloatCC::GreaterThanOrEqual,
+                _ => return Err("operator code generation is not implemented".into()),
+            };
+            builder.ins().fcmp(code, left, right)
+        }
     })
 }
 
