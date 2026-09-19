@@ -1,7 +1,9 @@
 #[test]
 fn scalar_prelude_wrappers_check_and_execute() {
+    // string.hd の split は List.reverse を使うので list.hd も要る。
     let modules = [
         include_str!("../../../stdlib/error.hd"),
+        include_str!("../../../stdlib/list.hd"),
         include_str!("../../../stdlib/string.hd"),
         include_str!("../../../stdlib/int.hd"),
         include_str!("../../../stdlib/float.hd"),
@@ -13,8 +15,11 @@ fn scalar_prelude_wrappers_check_and_execute() {
         .collect::<Vec<_>>();
     assert_eq!(
         type_declarations,
-        ["type Exception = { message: String }"],
-        "only error.hd's built-in Exception declaration may be excluded"
+        [
+            "type Exception = { message: String }",
+            "type T List = | Nil | Cons(T, T List)",
+        ],
+        "the type declarations the language provides by name may be excluded"
     );
     let modules = modules
         .lines()
