@@ -54,6 +54,28 @@ pub(super) fn duplicate_applications(ast: &Ast, path: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
+/// 等式の右辺を解くときの文脈。再帰のあいだ不変で、`Fn` の腕でも局所型の展開でも
+/// 同じものを引き回す。展開のときだけ `parameters` と `visiting` を差し替える。
+struct SharedBody<'a> {
+    module: &'a str,
+    local: &'a HashMap<String, &'a crate::parser::TypeDef>,
+    parameters: &'a HashMap<String, Ty>,
+    functor_abstracts: &'a HashMap<String, (String, usize)>,
+    /// 展開中の局所型の名前。輪で止めるために積む。
+    visiting: &'a [String],
+}
+
+/// 契約の名前から署名への表。契約の抽象型の arity を引くのに使う。
+fn module_signatures(ast: &Ast) -> HashMap<&str, &ModuleSig> {
+    ast.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::ModuleSig(signature) => Some((signature.name.as_str(), signature)),
+            _ => None,
+        })
+        .collect()
+}
+
 fn owned<T: Clone>(entries: &HashMap<String, T>, module: &str) -> HashMap<String, T> {
     let prefix = format!("{module}.");
     entries
@@ -118,14 +140,7 @@ impl Checker<'_> {
     // 実装本体の推論は行わない。等式の収集を登録より後に置くと、record schema と
     // 効果の操作型が不透明のまま登録され、消費側で E305 になる。
     pub(super) fn collect_shared_realizations(&mut self, ast: &Ast) {
-        let signatures: HashMap<&str, &ModuleSig> = ast
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::ModuleSig(signature) => Some((signature.name.as_str(), signature)),
-                _ => None,
-            })
-            .collect();
+        let signatures = module_signatures(ast);
         let mut templates: HashMap<String, FunctorShared> = HashMap::new();
         let mut additions: HashMap<String, TypeRealization> = HashMap::new();
         for item in &ast.items {
@@ -137,32 +152,9 @@ impl Checker<'_> {
             }
             match &module.form {
                 ImplementationForm::Functor(parameters) => {
-                    let internal: HashMap<String, String> = parameters
-                        .iter()
-                        .map(|parameter| {
-                            (
-                                parameter.name.clone(),
-                                format!("{}${}", module.name, parameter.name),
-                            )
-                        })
-                        .collect();
-                    let contracts: HashMap<String, String> = parameters
-                        .iter()
-                        .map(|parameter| (parameter.name.clone(), parameter.contract.clone()))
-                        .collect();
-                    let shared = self.module_shared_map(module, &internal, &contracts, &signatures);
                     templates.insert(
                         module.name.clone(),
-                        FunctorShared {
-                            result_contract: module.sig.clone(),
-                            parameters: parameters
-                                .iter()
-                                .map(|parameter| {
-                                    (parameter.name.clone(), parameter.contract.clone())
-                                })
-                                .collect(),
-                            shared,
-                        },
+                        self.functor_template(module, parameters, &signatures),
                     );
                 }
                 ImplementationForm::Ordinary => additions.extend(self.module_shared_map(
@@ -178,54 +170,8 @@ impl Checker<'_> {
             let Item::ModuleImpl(module) = item else {
                 continue;
             };
-            let ImplementationForm::Application { functor, arguments } = &module.form else {
-                continue;
-            };
-            if self.ambiguous_modules.contains(&module.name) {
-                continue;
-            }
-            let Some(template) = templates.get(&functor.name) else {
-                continue;
-            };
-            // 等式を適用結果へ登録する前に契約名を照合する。食い違う適用の等式を登録すると、
-            // 適用結果と引数の実体化で抽象型の arity が食い違い `TypeRealization::apply` の
-            // assert に到達する。登録しなければ application() が E602 を出す。
-            if template.result_contract != module.sig {
-                continue;
-            }
-            if template.parameters.len() != arguments.len() {
-                continue;
-            }
-            let contracts_match =
-                template
-                    .parameters
-                    .iter()
-                    .zip(arguments)
-                    .all(|((_, contract), argument)| {
-                        self.source_modules
-                            .get(&argument.name)
-                            .filter(|actual| !matches!(actual.form, ImplementationForm::Functor(_)))
-                            .is_some_and(|actual| actual.sig == *contract)
-                    });
-            if !contracts_match {
-                continue;
-            }
-            let mut names = HashMap::from([(functor.name.clone(), module.name.clone())]);
-            for (parameter, argument) in template.parameters.iter().zip(arguments) {
-                names.insert(
-                    format!("{}${}", functor.name, parameter.0),
-                    argument.name.clone(),
-                );
-            }
-            for (name, realization) in &template.shared {
-                additions.insert(
-                    crate::functor_instances::rename(name, &names),
-                    TypeRealization {
-                        parameters: realization.parameters.clone(),
-                        body: realization.body.rename_modules(&names),
-                    },
-                );
-            }
+            let implementations = self.application_realizations(module, &templates);
+            additions.extend(implementations);
         }
         // 輪になる等式は入れない。reveal が停止しなくなるため。輪そのものは既存の
         // E602 の経路（実体化の別名解決と check_realization_cycles）が拒否する。
@@ -235,6 +181,115 @@ impl Checker<'_> {
                 self.shared_realizations.extend(addition);
             }
         }
+    }
+
+    /// functor の本文から、その functor が共有する等式の雛形を組む。
+    fn functor_template(
+        &mut self,
+        module: &ModuleImpl,
+        parameters: &[crate::parser::FunctorParam],
+        signatures: &HashMap<&str, &ModuleSig>,
+    ) -> FunctorShared {
+        let internal: HashMap<String, String> = parameters
+            .iter()
+            .map(|parameter| {
+                (
+                    parameter.name.clone(),
+                    format!("{}${}", module.name, parameter.name),
+                )
+            })
+            .collect();
+        let contracts: HashMap<String, String> = parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.contract.clone()))
+            .collect();
+        let shared = self.module_shared_map(module, &internal, &contracts, signatures);
+        FunctorShared {
+            result_contract: module.sig.clone(),
+            parameters: parameters
+                .iter()
+                .map(|parameter| (parameter.name.clone(), parameter.contract.clone()))
+                .collect(),
+            shared,
+        }
+    }
+
+    /// functor の適用が生む等式。雛形が無い・契約や引数の数が食い違う適用は
+    /// 等式を登録しない。登録しなければ `application()` が E602 を出す。
+    fn application_realizations(
+        &mut self,
+        module: &ModuleImpl,
+        templates: &HashMap<String, FunctorShared>,
+    ) -> HashMap<String, TypeRealization> {
+        let ImplementationForm::Application { functor, arguments } = &module.form else {
+            return HashMap::new();
+        };
+        if self.ambiguous_modules.contains(&module.name) {
+            return HashMap::new();
+        }
+        let Some(template) = templates.get(&functor.name) else {
+            return HashMap::new();
+        };
+        // 等式を適用結果へ登録する前に契約名を照合する。食い違う適用の等式を登録すると、
+        // 適用結果と引数の実体化で抽象型の arity が食い違い `TypeRealization::apply` の
+        // assert に到達する。
+        if template.result_contract != module.sig || template.parameters.len() != arguments.len() {
+            return HashMap::new();
+        }
+        if !self.contracts_match(template, arguments) {
+            return HashMap::new();
+        }
+        let names = self.instantiation_names(&functor.name, module, template, arguments);
+        template
+            .shared
+            .iter()
+            .map(|(name, realization)| {
+                (
+                    crate::functor_instances::rename(name, &names),
+                    TypeRealization {
+                        parameters: realization.parameters.clone(),
+                        body: realization.body.rename_modules(&names),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// 各実引数の module の契約が、雛形の対応する契約と一致するか。
+    /// functor 自身を実引数に取る適用は、契約が確定しないので一致と見なさない。
+    fn contracts_match(
+        &self,
+        template: &FunctorShared,
+        arguments: &[crate::parser::DeclaredName],
+    ) -> bool {
+        template
+            .parameters
+            .iter()
+            .zip(arguments)
+            .all(|((_, contract), argument)| {
+                self.source_modules
+                    .get(&argument.name)
+                    .filter(|actual| !matches!(actual.form, ImplementationForm::Functor(_)))
+                    .is_some_and(|actual| actual.sig == *contract)
+            })
+    }
+
+    /// 雛形の内側の名前（`F$P` の形）を、適用ごとの実体へ写す表。
+    fn instantiation_names(
+        &self,
+        functor_name: &str,
+        module: &ModuleImpl,
+        template: &FunctorShared,
+        arguments: &[crate::parser::DeclaredName],
+    ) -> HashMap<String, String> {
+        let mut names = HashMap::from([(functor_name.to_string(), module.name.clone())]);
+        for (parameter, argument) in template.parameters.iter().zip(arguments) {
+            names.insert(
+                format!("{}${}", functor_name, parameter.0),
+                argument.name.clone(),
+            );
+        }
+        names
     }
 
     fn module_shared_map(
@@ -320,15 +375,15 @@ impl Checker<'_> {
                 .iter()
                 .map(|parameter| (parameter.name.clone(), self.inference.fresh()))
                 .collect();
-            let mut visiting = Vec::new();
-            let Some(ty) = self.shared_body_type(
-                body,
-                &module.name,
-                &local,
-                &parameters,
-                &functor_abstracts,
-                &mut visiting,
-            ) else {
+            let visiting = Vec::new();
+            let context = SharedBody {
+                module: &module.name,
+                local: &local,
+                parameters: &parameters,
+                functor_abstracts: &functor_abstracts,
+                visiting: &visiting,
+            };
+            let Some(ty) = self.shared_body_type(body, &context) else {
                 continue;
             };
             let ids = definition
@@ -350,47 +405,27 @@ impl Checker<'_> {
         shared
     }
 
-    fn shared_body_type(
-        &mut self,
-        expr: &TypeExpr,
-        module: &str,
-        local: &HashMap<String, &crate::parser::TypeDef>,
-        parameters: &HashMap<String, Ty>,
-        functor_abstracts: &HashMap<String, (String, usize)>,
-        visiting: &mut Vec<String>,
-    ) -> Option<Ty> {
-        // `Fn(A, B => C {E})` は引数群（`Group`）・戻り型・効果行からなる。annotation_inner と
-        // 同じ形で解く。効果行は戻り型の `effects` にある。ここを落とすと record schema と
-        // 効果の操作型が登録される前に等式が確定せず、関数型の抽象型が不透明のまま残る。
+    /// `Fn(A, B => C {E})` の引数群・戻り型・効果行。`annotation_inner` と同じ形で解く。
+    /// 効果行は戻り型の `effects` にある。ここを落とすと record schema と効果の操作型が
+    /// 登録される前に等式が確定せず、関数型の抽象型が不透明のまま残る。
+    fn shared_fn_type(&mut self, arguments: &[TypeExpr], context: &SharedBody<'_>) -> Option<Ty> {
+        let inputs = match &arguments[0].kind {
+            TypeKind::Group(inputs) => inputs.as_slice(),
+            _ => &arguments[..1],
+        };
+        let inputs = inputs
+            .iter()
+            .map(|input| self.shared_body_type(input, context))
+            .collect::<Option<_>>()?;
+        let output = self.shared_body_type(&arguments[1], context)?;
+        let row = self.row_annotation(&arguments[1].effects).ok()?;
+        Some(Ty::fn_with(inputs, output, row))
+    }
+
+    fn shared_body_type(&mut self, expr: &TypeExpr, context: &SharedBody<'_>) -> Option<Ty> {
         if let TypeKind::Apply(name, arguments) = &expr.kind {
             if name == "Fn" && arguments.len() == 2 {
-                let inputs = match &arguments[0].kind {
-                    TypeKind::Group(inputs) => inputs.as_slice(),
-                    _ => &arguments[..1],
-                };
-                let inputs = inputs
-                    .iter()
-                    .map(|input| {
-                        self.shared_body_type(
-                            input,
-                            module,
-                            local,
-                            parameters,
-                            functor_abstracts,
-                            visiting,
-                        )
-                    })
-                    .collect::<Option<_>>()?;
-                let output = self.shared_body_type(
-                    &arguments[1],
-                    module,
-                    local,
-                    parameters,
-                    functor_abstracts,
-                    visiting,
-                )?;
-                let row = self.row_annotation(&arguments[1].effects).ok()?;
-                return Some(Ty::fn_with(inputs, output, row));
+                return self.shared_fn_type(arguments, context);
             }
         }
         let (name, arguments) = match &expr.kind {
@@ -400,53 +435,30 @@ impl Checker<'_> {
         };
         let args: Vec<Ty> = arguments
             .iter()
-            .map(|argument| {
-                self.shared_body_type(
-                    argument,
-                    module,
-                    local,
-                    parameters,
-                    functor_abstracts,
-                    visiting,
-                )
-            })
+            .map(|argument| self.shared_body_type(argument, context))
             .collect::<Option<_>>()?;
+        self.shared_named_type(name, args, context)
+    }
+
+    /// 型の名前と、実体化済みの型引数から等式の右辺を決める。局所型は本体を展開する。
+    fn shared_named_type(
+        &mut self,
+        name: &str,
+        args: Vec<Ty>,
+        context: &SharedBody<'_>,
+    ) -> Option<Ty> {
         // 実体化自身の型引数（`shared type A T = A List` の `A`）。
-        if let Some(ty) = parameters.get(name) {
+        if let Some(ty) = context.parameters.get(name) {
             return args.is_empty().then(|| ty.clone());
         }
         // functor 仮引数の抽象型（`shared type T = M.T` の `M.T`）。仮引数の契約の
         // 署名から取った arity と照合し、食い違えば等式を登録しない。
-        if let Some((qualified, arity)) = functor_abstracts.get(name) {
+        if let Some((qualified, arity)) = context.functor_abstracts.get(name) {
             return shared_abstract_type(qualified.clone(), Some(*arity), args);
         }
         // 実装内の局所型。ADT / record は実装名で修飾し、別名は本体を展開する。
-        if let Some(definition) = local.get(name) {
-            if definition.params.len() != args.len() {
-                return None;
-            }
-            let body = definition.ty.as_ref()?;
-            if matches!(body.kind, TypeKind::Record(_) | TypeKind::Adt(_)) {
-                return Some(Ty::Adt(format!("{module}.{name}"), args));
-            }
-            if visiting.iter().any(|seen| seen == name) {
-                return None;
-            }
-            let mut substituted = parameters.clone();
-            for (formal, argument) in definition.params.iter().zip(&args) {
-                substituted.insert(formal.name.clone(), argument.clone());
-            }
-            visiting.push(name.to_owned());
-            let result = self.shared_body_type(
-                body,
-                module,
-                local,
-                &substituted,
-                functor_abstracts,
-                visiting,
-            );
-            visiting.pop();
-            return result;
+        if let Some(definition) = context.local.get(name) {
+            return self.shared_local_type(name, args, definition, context);
         }
         if let Some((arity, qualified)) = self.abstract_types.get(name) {
             return shared_abstract_type(qualified.clone(), Some(*arity), args);
@@ -455,6 +467,41 @@ impl Checker<'_> {
             return Some(Ty::Adt(name.to_owned(), args));
         }
         crate::types::builtin_type(name)
+    }
+
+    /// 実装内の局所型。引数の数が合わなければ等式にしない。ADT / record は実装名で
+    /// 修飾し、別名は本体を仮引数で置き換えて展開する。展開は輪で止める。
+    fn shared_local_type(
+        &mut self,
+        name: &str,
+        args: Vec<Ty>,
+        definition: &crate::parser::TypeDef,
+        context: &SharedBody<'_>,
+    ) -> Option<Ty> {
+        if definition.params.len() != args.len() {
+            return None;
+        }
+        let body = definition.ty.as_ref()?;
+        if matches!(body.kind, TypeKind::Record(_) | TypeKind::Adt(_)) {
+            return Some(Ty::Adt(format!("{}.{name}", context.module), args));
+        }
+        if context.visiting.contains(&name.to_owned()) {
+            return None;
+        }
+        let mut parameters = context.parameters.clone();
+        for (formal, argument) in definition.params.iter().zip(&args) {
+            parameters.insert(formal.name.clone(), argument.clone());
+        }
+        let mut visiting = context.visiting.to_vec();
+        visiting.push(name.to_owned());
+        let nested = SharedBody {
+            module: context.module,
+            local: context.local,
+            parameters: &parameters,
+            functor_abstracts: context.functor_abstracts,
+            visiting: &visiting,
+        };
+        self.shared_body_type(body, &nested)
     }
 
     fn functor(
@@ -606,6 +653,23 @@ impl Checker<'_> {
         names: &HashMap<String, String>,
         module_names: &HashMap<String, String>,
     ) {
+        let offset = self.make_instance(template, application, module_names);
+        self.inherit_comparisons(template, names);
+        self.inherit_shared_realizations(template, names);
+        self.register_exports(template, application, names);
+        self.register_definitions(template, names);
+        self.register_records(template, names);
+        self.register_value_types(template, names, offset);
+    }
+
+    /// テンプレートを適用して module 実体を 1 つ作り、次の実体の行を進める。
+    /// 呼び出し側が型の行をずらすための offset を返す。
+    fn make_instance(
+        &mut self,
+        template: &Template,
+        application: &ModuleImpl,
+        module_names: &HashMap<String, String>,
+    ) -> usize {
         let offset = self.next_instance_line;
         let instance = crate::functor_instances::instantiate(
             &template.module,
@@ -628,6 +692,10 @@ impl Checker<'_> {
         };
         self.next_instance_line = crate::functor_instances::max_line(&ast) + 1;
         self.instantiated_modules.push(instance);
+        offset
+    }
+
+    fn inherit_comparisons(&mut self, template: &Template, names: &HashMap<String, String>) {
         self.comparison_constraints
             .extend(
                 template
@@ -639,8 +707,15 @@ impl Checker<'_> {
                         span: constraint.span,
                     }),
             );
-        // 本文の shared type T = M.T の等式を適用結果に引き継ぐ。改名した本体が
-        // 引数の実装名を指すので、引数の shared 実体化へ reveal が連鎖する。
+    }
+
+    /// 本文の shared type T = M.T の等式を適用結果に引き継ぐ。改名した本体が
+    /// 引数の実装名を指すので、引数の shared 実体化へ reveal が連鎖する。
+    fn inherit_shared_realizations(
+        &mut self,
+        template: &Template,
+        names: &HashMap<String, String>,
+    ) {
         let additions: HashMap<_, _> = template
             .shared
             .iter()
@@ -657,6 +732,15 @@ impl Checker<'_> {
         if !introduces_cycle(&self.shared_realizations, &additions) {
             self.shared_realizations.extend(additions);
         }
+    }
+
+    /// テンプレートの輸出と、その抽象型の実体化を適用結果の名前に写す。
+    fn register_exports(
+        &mut self,
+        template: &Template,
+        application: &ModuleImpl,
+        names: &HashMap<String, String>,
+    ) {
         let exports: HashMap<_, _> = template
             .exports
             .iter()
@@ -679,6 +763,9 @@ impl Checker<'_> {
                 },
             );
         }
+    }
+
+    fn register_definitions(&mut self, template: &Template, names: &HashMap<String, String>) {
         for (name, scheme) in &template.definitions {
             let revealed = scheme
                 .rename_modules(names)
@@ -686,6 +773,9 @@ impl Checker<'_> {
             self.module_definitions
                 .insert(crate::functor_instances::rename(name, names), revealed);
         }
+    }
+
+    fn register_records(&mut self, template: &Template, names: &HashMap<String, String>) {
         for (name, (fields, scheme)) in &template.records {
             let revealed = scheme
                 .rename_modules(names)
@@ -710,6 +800,14 @@ impl Checker<'_> {
                 (*tag, revealed),
             );
         }
+    }
+
+    fn register_value_types(
+        &mut self,
+        template: &Template,
+        names: &HashMap<String, String>,
+        offset: usize,
+    ) {
         for ((line, col), ty) in &template.values {
             let revealed = ty.rename_modules(names).reveal(&self.shared_realizations);
             self.value_types.insert((line + offset, *col), revealed);
