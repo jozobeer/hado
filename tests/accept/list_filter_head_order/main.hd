@@ -1,0 +1,12 @@
+// spec: §55
+// expect: [1, 2, 3]
+// needs: prelude
+effect A Yield
+again yield(value: A): Void
+handler A Yield as Collect
+again yield value =>
+  let rest = resume () ->
+  [value, ...rest]
+return _ => []
+def keep (x: Int): Bool {Int Yield} => do yield x -> x > 1
+def main = with Collect -> List.filter [1, 2, 3] keep
