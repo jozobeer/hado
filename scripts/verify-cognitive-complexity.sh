@@ -3,7 +3,9 @@
 # round: cognitive-complexity
 # 認知複雑度を 7 以下に保つ門番（docs/rounds/cognitive-complexity.md の判定 cc-a・cc-c）。
 # `clippy.toml` の cognitive-complexity-threshold = 7 を本番コードに掛け、警告を
-# 1 つも許さない。対象は library と binary（`--lib --bins`）で、`crates/hado/src/main.rs`
+# 1 つも許さない。その値が 7 のままであることも先に確かめる（書き換わると
+# Clippy の既定 25 に落ち、門番だけが green になる）。
+# 対象は library と binary（`--lib --bins`）で、`crates/hado/src/main.rs`
 # の `main` のような bin 側の本番コードも見る。テストコードは対象外なので
 # `--all-targets` にはしない（`tests/` の 14 件と `src` 内のテストの 3 件が引っかかる）。
 # レベルは `-F` にする。`-D` はコード中の内側属性 `#![allow(clippy::cognitive_complexity)]`
@@ -36,6 +38,13 @@ no_cognitive_allow() {
     ! grep -rnE '^[[:space:]]*#!?\[allow\([^]]*cognitive_complexity' crates/hado/src
 }
 
+# 閾値は `clippy.toml` が持つ。値そのものを固定しないと、書き換えや削除で
+# Clippy の既定（25）に落ち、門番だけが green のままになる。
+threshold_pinned() {
+    grep -qE '^[[:space:]]*cognitive-complexity-threshold[[:space:]]*=[[:space:]]*7[[:space:]]*(#.*)?$' clippy.toml
+}
+
+check 'clippy.toml pins cognitive-complexity-threshold = 7' threshold_pinned
 check 'cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean' complexity_clean
 check 'no #[allow] / #![allow] for cognitive_complexity under crates/hado/src' no_cognitive_allow
 
