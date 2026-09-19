@@ -206,4 +206,6 @@ $ hado check <効果付きの cmp を List.sort に渡す probe>
 main.hd:9:61: error[E305]: expected Fn(Int, Int => Int), found Fn(Int, Int => Int {Int Yield})
 ```
 
+`cargo test --offline --no-fail-fast` は 66 本すべて `test result: ok`、rc=0（5 分 44 秒）。`stdlib/string.hd` が `List.reverse` を使うようになったので、`crates/hado/tests/prelude.rs` の自己完結の対象に `stdlib/list.hd` を足した（型宣言は言語が名前で解決する `Exception` と `List` を除く）。
+
 書き直しの途中で E511 に当たった。`Array.replace` の内側の `if | index == 0 => ... | ...` は腕の条件列として読まれ、「全条件が同一変数 `==` リテラル」で拒否される。`replace_go` と `replace_keep` に分け、`index == 0` を関数本体の Boolean branch に置いた。
