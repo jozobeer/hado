@@ -94,7 +94,8 @@
 
 ```
 # 変更前: origin/main 6a797ad に clippy.toml を置いた一時 worktree。
-# `--lib` には `#[cfg(test)]` の内側は現れない。
+# `--lib` には `#[cfg(test)]` の内側は現れない。bin の `main`（26）は
+# この 64 件に入らない（レビュー対応で `--bins` を足して分けた）。
 $ cargo clippy --offline --lib --message-format short -- -W clippy::cognitive_complexity 2>&1 \
     | grep -c 'cognitive complexity of'
 64
@@ -124,13 +125,13 @@ $ cargo clippy --offline --lib --message-format short -- -W clippy::cognitive_co
 ```
 
 ```
-$ cargo clippy --offline --lib --message-format short -- -W clippy::cognitive_complexity 2>&1 \
+$ cargo clippy --offline --lib --bins --message-format short -- -W clippy::cognitive_complexity 2>&1 \
     | grep -c 'cognitive complexity of'
 0
 
 $ bash scripts/verify-cognitive-complexity.sh
-OK: cargo clippy --offline --lib -- -D clippy::cognitive_complexity is clean
-OK: no #[allow(clippy::cognitive_complexity)] under crates/hado/src
+OK: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean
+OK: no #[allow] / #![allow] for cognitive_complexity under crates/hado/src
 PASSED: 2/2
 ```
 
@@ -193,17 +194,33 @@ TALLY: 575/575 passed; red: none
 # 否定的対照 1: ambiguous_declarations.rs を origin/main の collect（複雑度 10）に戻す
 $ bash scripts/verify-cognitive-complexity.sh
 error: the function has a cognitive complexity of (10/7)
-NG: cargo clippy --offline --lib -- -D clippy::cognitive_complexity is clean
-OK: no #[allow(clippy::cognitive_complexity)] under crates/hado/src
+NG: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean
+OK: no #[allow] / #![allow] for cognitive_complexity under crates/hado/src
 PASSED: 1/2
 # exit 1
 
-# 否定的対照 2: contract_types.rs に #[allow(clippy::cognitive_complexity)] を注入する
+# 否定的対照 2: lib.rs に内側属性 #![allow(clippy::cognitive_complexity)] を注入する
 $ bash scripts/verify-cognitive-complexity.sh
-OK: cargo clippy --offline --lib -- -D clippy::cognitive_complexity is clean
-NG: no #[allow(clippy::cognitive_complexity)] under crates/hado/src
-PASSED: 1/2
+error[E0453]: allow(clippy::cognitive_complexity) incompatible with previous forbid
+NG: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean
+NG: no #[allow] / #![allow] for cognitive_complexity under crates/hado/src
+PASSED: 0/2
 # exit 1
+```
+
+### レビュー対応（門番の対象と逃げ道）
+
+PR #11 のレビューで 2 件の指摘を受け、どちらも再現して直した。`cargo test --offline` は分割後も 818 passed / 0 failed（上の実測）で、`main` の分割で振る舞いは変わっていない。
+
+- 対象: `--lib` は binary を外す。`crates/hado/src/main.rs` の `main` は複雑度 26 で、上の 64 件に入っていなかった。`--bins` を足し、`main` を `Cli` と引数解釈・命令実行の補助関数（`parse_args`・`next_token`・`take_option`・`run`・`run_project_command` ほか）へ分けた。分割の途中で `take_option` が 8/7、`parse_flags` が 11/7 になったので、`matches!` の判定を `prints_diagnostics` に出し、値付きの引数を `take_option` に集めた。
+- 逃げ道: 内側属性 `#![allow(clippy::cognitive_complexity)]` は `-D` を抜ける。閾値を 2 に下げて測ると、`-D` は 503 件で赤、同じ木に `#![allow]` を足すと 0 件・exit 0 で green になった。`-F` は `error[E0453]` で通さない。`-F` に変え、grep は外側 `#[allow(...)]` と内側 `#![allow(...)]` の両方を見る。
+
+```
+# 閾値 2、lib.rs に #![allow(clippy::cognitive_complexity)] を注入
+$ cargo clippy --offline --lib -- -D clippy::cognitive_complexity > /dev/null 2>&1; echo exit=$?
+exit=0
+$ cargo clippy --offline --lib -- -F clippy::cognitive_complexity 2>&1 | grep -m1 E0453
+error[E0453]: allow(clippy::cognitive_complexity) incompatible with previous forbid
 ```
 
 ### code-complete の一巡（事前分割ぶん 57 関数）
