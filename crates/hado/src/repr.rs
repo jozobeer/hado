@@ -17,31 +17,39 @@ pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String>
         Type::Char => MachineType::I32,
         Type::String | Type::Bytes | Type::Closure(..) => MachineType::Pointer,
         Type::Abstract(..) => return Err("abstract type needs its concrete representation".into()),
-        Type::Data(name, _) if name == crate::mono::OUTCOME => MachineType::Pointer,
-        Type::Data(name, _) if name == crate::mono::ARRAY => MachineType::Pointer,
-        Type::Data(name, _) if checked.records.contains_key(name) => MachineType::Pointer,
-        Type::Data(name, _) => {
-            let mut found = false;
-            let mut has_payload = false;
-            for scheme in checked.constructors.values() {
-                let (result, payload) = match scheme.body() {
-                    Ty::Fn(fields, result, _) => (result.as_ref(), !fields.is_empty()),
-                    result => (result, false),
-                };
-                if matches!(result, Ty::Adt(constructor_type, _) if constructor_type == name) {
-                    found = true;
-                    has_payload |= payload;
-                }
-            }
-            if !found {
-                return Err(format!("unknown data type {name}"));
-            }
-            if has_payload {
-                MachineType::Pointer
-            } else {
-                MachineType::I64
-            }
+        Type::Data(name, _) if is_boxed_data(name, checked) => MachineType::Pointer,
+        Type::Data(name, _) => data_type(name, checked)?,
+    })
+}
+
+/// 宣言した data 型が箱で表されるか。Outcome・Array は常に箱で、record も箱である。
+/// それ以外は構築子が payload を持つかで決まる（`data_type` が見る）。
+fn is_boxed_data(name: &str, checked: &Checked) -> bool {
+    name == crate::mono::OUTCOME || name == crate::mono::ARRAY || checked.records.contains_key(name)
+}
+
+/// 構築子を持つ data 型の表現。payload を持つ構築子が 1 つでもあれば箱、
+/// そうでなければ即値。構築子が 1 つも無ければ未知の型である。
+fn data_type(name: &str, checked: &Checked) -> Result<MachineType, String> {
+    let mut found = false;
+    let mut has_payload = false;
+    for scheme in checked.constructors.values() {
+        let (result, payload) = match scheme.body() {
+            Ty::Fn(fields, result, _) => (result.as_ref(), !fields.is_empty()),
+            result => (result, false),
+        };
+        if matches!(result, Ty::Adt(constructor_type, _) if constructor_type == name) {
+            found = true;
+            has_payload |= payload;
         }
+    }
+    if !found {
+        return Err(format!("unknown data type {name}"));
+    }
+    Ok(if has_payload {
+        MachineType::Pointer
+    } else {
+        MachineType::I64
     })
 }
 

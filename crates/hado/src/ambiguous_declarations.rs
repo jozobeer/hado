@@ -1,4 +1,4 @@
-use crate::parser::{Diagnostic, Item, Span, TypeKind};
+use crate::parser::{Diagnostic, Item, SigDef, Span, TypeDef, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
@@ -15,108 +15,139 @@ pub(crate) struct AmbiguousDeclarations {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// 走査のあいだに「その名前を最初に宣言した位置」を種別ごとに覚える。
+/// 名前空間は種別ごとに別なので map も種別ごとに分ける。
+#[derive(Default)]
+struct Seen {
+    values: HashMap<String, Span>,
+    types: HashMap<String, Span>,
+    constructors: HashMap<String, Span>,
+    modules: HashMap<String, Span>,
+    signatures: HashMap<String, Span>,
+}
+
 impl AmbiguousDeclarations {
     pub fn collect(items: &[Item], path: &str) -> Self {
         let mut result = Self::default();
-        let mut values = HashMap::new();
-        let mut types = HashMap::new();
-        let mut constructors = HashMap::new();
-        let mut modules = HashMap::new();
-        let mut signatures = HashMap::new();
+        let mut seen = Seen::default();
         for item in items {
-            match item {
-                Item::Def(def) => record(
+            result.declare(item, &mut seen, path);
+        }
+        result.collect_nested(items, path);
+        result.declared_modules = seen.modules.into_keys().collect();
+        result.declared_signatures = seen.signatures.into_keys().collect();
+        result.declared_types = seen.types.into_keys().collect();
+        result.declared_constructors = seen.constructors.into_keys().collect();
+        result
+    }
+
+    /// 宣言 1 つをその名前空間へ記録する。腕の本体は種別ごとの関数に置く。
+    fn declare(&mut self, item: &Item, seen: &mut Seen, path: &str) {
+        match item {
+            Item::Def(def) => record(
+                &def.name,
+                def.name_span,
+                &mut seen.values,
+                &mut self.values,
+                &mut self.diagnostics,
+                path,
+            ),
+            Item::SigDef(def) => {
+                record(
                     &def.name,
                     def.name_span,
-                    &mut values,
-                    &mut result.values,
-                    &mut result.diagnostics,
+                    &mut seen.values,
+                    &mut self.values,
+                    &mut self.diagnostics,
                     path,
-                ),
-                Item::SigDef(def) => {
-                    record(
-                        &def.name,
-                        def.name_span,
-                        &mut values,
-                        &mut result.values,
-                        &mut result.diagnostics,
-                        path,
-                    );
-                    let mut parameters = HashMap::new();
-                    let mut repeated = HashSet::new();
-                    for parameter in &def.type_params {
-                        record(
-                            &parameter.name,
-                            parameter.span,
-                            &mut parameters,
-                            &mut repeated,
-                            &mut result.diagnostics,
-                            path,
-                        );
-                    }
-                }
-                Item::ModuleImpl(module) => record(
-                    &module.name,
-                    module.name_span,
-                    &mut modules,
-                    &mut result.modules,
-                    &mut result.diagnostics,
-                    path,
-                ),
-                Item::ModuleSig(signature) => record(
-                    &signature.name,
-                    signature.name_span,
-                    &mut signatures,
-                    &mut result.signatures,
-                    &mut result.diagnostics,
-                    path,
-                ),
-                Item::TypeDef(def) => {
-                    record(
-                        &def.name,
-                        def.name_span,
-                        &mut types,
-                        &mut result.types,
-                        &mut result.diagnostics,
-                        path,
-                    );
-                    for (name, span) in constructor_names(def) {
-                        record(
-                            name,
-                            span,
-                            &mut constructors,
-                            &mut result.constructors,
-                            &mut result.diagnostics,
-                            path,
-                        );
-                    }
-                }
-                Item::Effect(_) | Item::Handler(_) => {}
+                );
+                self.declare_type_parameters(def, path);
             }
+            Item::ModuleImpl(module) => record(
+                &module.name,
+                module.name_span,
+                &mut seen.modules,
+                &mut self.modules,
+                &mut self.diagnostics,
+                path,
+            ),
+            Item::ModuleSig(signature) => record(
+                &signature.name,
+                signature.name_span,
+                &mut seen.signatures,
+                &mut self.signatures,
+                &mut self.diagnostics,
+                path,
+            ),
+            Item::TypeDef(def) => {
+                record(
+                    &def.name,
+                    def.name_span,
+                    &mut seen.types,
+                    &mut self.types,
+                    &mut self.diagnostics,
+                    path,
+                );
+                self.declare_constructors(def, seen, path);
+            }
+            Item::Effect(_) | Item::Handler(_) => {}
         }
+    }
+
+    /// `SigDef` の型パラメータは専用の名前空間で重複だけを見る。
+    fn declare_type_parameters(&mut self, def: &SigDef, path: &str) {
+        let mut seen = HashMap::new();
+        let mut repeated = HashSet::new();
+        for parameter in &def.type_params {
+            record(
+                &parameter.name,
+                parameter.span,
+                &mut seen,
+                &mut repeated,
+                &mut self.diagnostics,
+                path,
+            );
+        }
+    }
+
+    /// 型定義の構築子を、構築子の名前空間へ記録する。
+    fn declare_constructors(&mut self, def: &TypeDef, seen: &mut Seen, path: &str) {
+        for (name, span) in constructor_names(def) {
+            record(
+                name,
+                span,
+                &mut seen.constructors,
+                &mut self.constructors,
+                &mut self.diagnostics,
+                path,
+            );
+        }
+    }
+
+    /// 内側の `ModuleSig` と、型名が重複した `TypeDef` の構築子を拾う。
+    fn collect_nested(&mut self, items: &[Item], path: &str) {
         for item in items {
-            if let Item::ModuleSig(signature) = item {
-                let inner = Self::collect(&signature.items, path);
-                if !inner.diagnostics.is_empty() {
-                    result.signatures.insert(signature.name.clone());
-                }
-                result.diagnostics.extend(inner.diagnostics);
+            self.collect_nested_item(item, path);
+        }
+    }
+
+    fn collect_nested_item(&mut self, item: &Item, path: &str) {
+        if let Item::ModuleSig(signature) = item {
+            let inner = Self::collect(&signature.items, path);
+            if !inner.diagnostics.is_empty() {
+                self.signatures.insert(signature.name.clone());
             }
-            if let Item::TypeDef(def) = item {
-                if result.types.contains(&def.name) {
-                    result.constructors.extend(
-                        constructor_names(def)
-                            .into_iter()
-                            .map(|(name, _)| name.clone()),
-                    );
-                }
+            self.diagnostics.extend(inner.diagnostics);
+        }
+        if let Item::TypeDef(def) = item {
+            if self.types.contains(&def.name) {
+                self.constructors.extend(
+                    constructor_names(def)
+                        .into_iter()
+                        .map(|(name, _)| name.clone()),
+                );
             }
         }
-        result.declared_modules = modules.into_keys().collect();
-        result.declared_signatures = signatures.into_keys().collect();
-        result.declared_types = types.into_keys().collect();
-        result.declared_constructors = constructors.into_keys().collect();
-        result
     }
 }
 

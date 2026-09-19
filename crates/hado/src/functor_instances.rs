@@ -46,39 +46,58 @@ pub(crate) fn max_line(ast: &Ast) -> usize {
     for item in &mut ast.items {
         instance.item(item);
     }
-    for span in ast
-        .branches_after_fallback
-        .iter_mut()
-        .chain(&mut ast.written_list_patterns)
-        .chain(&mut ast.long_condition_functions)
-    {
+    offset_auxiliary_spans(ast, &instance);
+    instance.maximum.get()
+}
+
+/// 本体の item 以外に AST が持つ位置。位置をずらす対象はここに全部並べる。
+/// `Ast` に位置の集まりが増えたら、この 1 か所に足す。
+fn offset_auxiliary_spans(mut ast: Ast, instance: &Instance<'_>) {
+    // 位置を 1 つずつ持つ集まり。
+    for span in ast.branches_after_fallback.iter_mut() {
         instance.span(span);
     }
-    for (first, second) in &mut ast.branch_anchors {
+    for span in ast.written_list_patterns.iter_mut() {
+        instance.span(span);
+    }
+    for span in ast.long_condition_functions.iter_mut() {
+        instance.span(span);
+    }
+    // 位置を組で持つ集まり。
+    offset_branch_spans(&mut ast, instance);
+    offset_named_sites(&mut ast, instance);
+}
+
+/// 分岐にまつわる錨。`if` の 2 分岐・`|>` の 3 点・等値の 3 点。
+fn offset_branch_spans(ast: &mut Ast, instance: &Instance<'_>) {
+    for (first, second) in ast.branch_anchors.iter_mut() {
         instance.span(first);
         instance.span(second);
     }
-    for (start, pipe, after) in &mut ast.branch_spans {
+    for (start, pipe, after) in ast.branch_spans.iter_mut() {
         instance.span(start);
         instance.span(pipe);
         instance.span(after);
     }
-    for (first, second, operator) in &mut ast.equality_anchors {
+    for (first, second, operator) in ast.equality_anchors.iter_mut() {
         instance.span(first);
         instance.span(second);
         instance.span(operator);
     }
-    for (name, member) in &mut ast.qualified_type_anchors {
+}
+
+/// 名前の部位。修飾した型の名前と、`M.member` の綴りの各部位。
+fn offset_named_sites(ast: &mut Ast, instance: &Instance<'_>) {
+    for (name, member) in ast.qualified_type_anchors.iter_mut() {
         instance.declared(name);
         instance.span(member);
     }
-    for site in &mut ast.name_sites {
+    for site in ast.name_sites.iter_mut() {
         instance.span(&mut site.start);
         for part in &mut site.parts {
             instance.declared(part);
         }
     }
-    instance.maximum.get()
 }
 
 struct Instance<'a> {
@@ -117,29 +136,8 @@ impl Instance<'_> {
                 self.span(&mut definition.name_span);
                 self.definition(&mut definition.kind);
             }
-            Item::TypeDef(definition) => {
-                self.span(&mut definition.span);
-                self.span(&mut definition.name_span);
-                for parameter in &mut definition.params {
-                    self.declared(parameter);
-                }
-                if let Some(ty) = &mut definition.ty {
-                    self.ty(ty);
-                }
-            }
-            Item::SigDef(definition) => {
-                self.span(&mut definition.span);
-                self.span(&mut definition.name_span);
-                for parameter in &mut definition.type_params {
-                    self.declared(parameter);
-                }
-                for parameter in &mut definition.params {
-                    self.parameter(parameter);
-                }
-                if let Some(ty) = &mut definition.ret {
-                    self.ty(ty);
-                }
-            }
+            Item::TypeDef(definition) => self.type_definition(definition),
+            Item::SigDef(definition) => self.signature_definition(definition),
             Item::ModuleSig(module) => {
                 self.span(&mut module.span);
                 self.span(&mut module.name_span);
@@ -149,6 +147,33 @@ impl Instance<'_> {
             }
             Item::ModuleImpl(module) => self.module(module),
             Item::Effect(_) | Item::Handler(_) => {}
+        }
+    }
+
+    /// `type` の宣言。型パラメータと本体の型。
+    fn type_definition(&self, definition: &mut crate::parser::TypeDef) {
+        self.span(&mut definition.span);
+        self.span(&mut definition.name_span);
+        for parameter in &mut definition.params {
+            self.declared(parameter);
+        }
+        if let Some(ty) = &mut definition.ty {
+            self.ty(ty);
+        }
+    }
+
+    /// 契約の `def` の宣言。型パラメータと引数・戻り値の型。
+    fn signature_definition(&self, definition: &mut crate::parser::SigDef) {
+        self.span(&mut definition.span);
+        self.span(&mut definition.name_span);
+        for parameter in &mut definition.type_params {
+            self.declared(parameter);
+        }
+        for parameter in &mut definition.params {
+            self.parameter(parameter);
+        }
+        if let Some(ty) = &mut definition.ret {
+            self.ty(ty);
         }
     }
 
@@ -193,6 +218,21 @@ impl Instance<'_> {
         }
     }
 
+    /// data 型の宣言。constructor と、その named payload の field 名も書き換える。
+    fn adt(&self, constructors: &mut [crate::parser::ConstructorDecl]) {
+        for constructor in constructors {
+            self.declared(&mut constructor.name);
+            if let crate::parser::ConstructorPayload::Named(fields) = &mut constructor.payload {
+                for field in fields {
+                    self.declared(&mut field.name);
+                }
+            }
+            for ty in constructor.payload.types_mut() {
+                self.ty(ty);
+            }
+        }
+    }
+
     fn ty(&self, ty: &mut TypeExpr) {
         self.span(&mut ty.span);
         self.span(&mut ty.name_span);
@@ -204,19 +244,7 @@ impl Instance<'_> {
                     self.ty(argument);
                 }
             }
-            TypeKind::Adt(variants) => {
-                for variant in variants {
-                    self.declared(&mut variant.name);
-                    if let crate::parser::ConstructorPayload::Named(fields) = &mut variant.payload {
-                        for field in fields {
-                            self.declared(&mut field.name);
-                        }
-                    }
-                    for ty in variant.payload.types_mut() {
-                        self.ty(ty);
-                    }
-                }
-            }
+            TypeKind::Adt(variants) => self.adt(variants),
             TypeKind::Group(types) => {
                 for ty in types {
                     self.ty(ty);

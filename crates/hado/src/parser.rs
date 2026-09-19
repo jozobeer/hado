@@ -746,14 +746,7 @@ impl Parser<'_> {
     }
 
     fn section_boundary(&self) -> bool {
-        matches!(
-            self.kind(),
-            TokKind::KwModule
-                | TokKind::KwImplement
-                | TokKind::KwEffect
-                | TokKind::KwHandler
-                | TokKind::Eof
-        )
+        matches!(self.kind(), TokKind::Eof) || section_keyword(self.kind())
     }
 
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
@@ -764,71 +757,61 @@ impl Parser<'_> {
             if context != TypeContext::TopLevel && self.section_boundary() {
                 break;
             }
-            if outer
-                && matches!(
-                    self.kind(),
-                    TokKind::KwModule
-                        | TokKind::KwImplement
-                        | TokKind::KwEffect
-                        | TokKind::KwHandler
-                )
-            {
+            if outer && section_keyword(self.kind()) {
                 outer = false;
             }
             let start = self.pos;
-            let item = match self.kind() {
-                TokKind::Def if context == TypeContext::Signature => self.parse_sig_def(),
-                TokKind::Def => self.parse_definition(),
-                TokKind::KwShared if context == TypeContext::Implementation => {
-                    self.bump();
-                    if self.kind() != &TokKind::KwType {
-                        Err(self.error(None, "expected type after shared"))
-                    } else {
-                        self.parse_type_def(context, true)
-                    }
-                }
-                TokKind::KwType => self.parse_type_def(context, false),
-                TokKind::KwModule => self.parse_module(),
-                TokKind::KwImplement => self.parse_implementation(),
-                TokKind::KwEffect => self.parse_effect(),
-                TokKind::KwHandler => self.parse_handler(),
-                TokKind::KwLibrary if outer => {
-                    if self.library.is_none() {
-                        self.library = Some(self.span());
-                    }
-                    self.bump();
-                    continue;
-                }
-                other => Err(self.error(None, format!("expected a declaration, found {other}"))),
-            };
-            match item {
-                Ok(item) => items.push(item),
-                Err(error) => {
+            match self.parse_item(context, outer) {
+                Some(Ok(item)) => items.push(item),
+                Some(Err(error)) => {
                     self.diagnostics.push(error);
                     self.recover_declaration(start);
                 }
+                // library 見出しは宣言を積まない。
+                None => {}
             }
         }
         items
+    }
+
+    /// 1 つの宣言を読む。`None` は library 見出しで、積む宣言を持たない。
+    fn parse_item(
+        &mut self,
+        context: TypeContext,
+        outer: bool,
+    ) -> Option<Result<Item, Diagnostic>> {
+        Some(match self.kind() {
+            TokKind::Def if context == TypeContext::Signature => self.parse_sig_def(),
+            TokKind::Def => self.parse_definition(),
+            TokKind::KwShared if context == TypeContext::Implementation => {
+                self.bump();
+                if self.kind() != &TokKind::KwType {
+                    Err(self.error(None, "expected type after shared"))
+                } else {
+                    self.parse_type_def(context, true)
+                }
+            }
+            TokKind::KwType => self.parse_type_def(context, false),
+            TokKind::KwModule => self.parse_module(),
+            TokKind::KwImplement => self.parse_implementation(),
+            TokKind::KwEffect => self.parse_effect(),
+            TokKind::KwHandler => self.parse_handler(),
+            TokKind::KwLibrary if outer => {
+                if self.library.is_none() {
+                    self.library = Some(self.span());
+                }
+                self.bump();
+                return None;
+            }
+            other => Err(self.error(None, format!("expected a declaration, found {other}"))),
+        })
     }
 
     fn recover_declaration(&mut self, start: usize) {
         let failed_at = self.pos;
         self.pos = start;
         while self.kind() != &TokKind::Eof {
-            if self.pos > start
-                && self.pos >= failed_at
-                && matches!(
-                    self.kind(),
-                    TokKind::Def
-                        | TokKind::KwType
-                        | TokKind::KwShared
-                        | TokKind::KwModule
-                        | TokKind::KwImplement
-                        | TokKind::KwEffect
-                        | TokKind::KwHandler
-                )
-            {
+            if self.pos > start && self.pos >= failed_at && declaration_keyword(self.kind()) {
                 break;
             }
             self.bump();
@@ -1398,14 +1381,7 @@ impl Parser<'_> {
         }
         match self.kind() {
             TokKind::LBrace => self.parse_record_type(),
-            TokKind::Pipe => {
-                let mut constructors = Vec::new();
-                while self.kind() == &TokKind::Pipe {
-                    self.bump();
-                    constructors.push(self.parse_constructor_type()?);
-                }
-                Ok(TypeExpr::of(TypeKind::Adt(constructors), span))
-            }
+            TokKind::Pipe => self.parse_adt_type(span),
             TokKind::Name(name)
                 if name.starts_with(char::is_uppercase)
                     && self
@@ -1434,6 +1410,16 @@ impl Parser<'_> {
                 Err(self.error(Some(code), "expected a record or a leading | for an ADT"))
             }
         }
+    }
+
+    /// `| C1 | C2 ...` の ADT 本体を読む。
+    fn parse_adt_type(&mut self, span: Span) -> Result<TypeExpr, Diagnostic> {
+        let mut constructors = Vec::new();
+        while self.kind() == &TokKind::Pipe {
+            self.bump();
+            constructors.push(self.parse_constructor_type()?);
+        }
+        Ok(TypeExpr::of(TypeKind::Adt(constructors), span))
     }
 
     fn shared_body_anchor(&self) -> Option<Span> {
@@ -1966,23 +1952,7 @@ impl Parser<'_> {
                 NodeKind::Resume
             }
             TokKind::Name(_) => return self.parse_name_or_call(),
-            TokKind::LParen => {
-                let lp = self.span();
-                self.bump();
-                let inner = self.parse_expr()?;
-                // E105: no tuples.
-                if self.kind() == &TokKind::Comma {
-                    return Err(self.error_at(
-                        lp,
-                        Some("E105"),
-                        "tuples are not supported; `(a, b)` is not an expression",
-                    ));
-                }
-                self.expect(&TokKind::RParen)?;
-                // Parenthesized grouping is not a node; redundant
-                // parentheses are erased here.
-                return Ok(inner);
-            }
+            TokKind::LParen => return self.parse_group(),
             TokKind::LBrace => {
                 self.bump();
                 let fields = self.parse_record_fields()?;
@@ -1995,6 +1965,23 @@ impl Parser<'_> {
             other => return Err(self.error(None, format!("expected an expression, found {other}"))),
         };
         Ok(Node { kind, span })
+    }
+
+    /// 括弧はノードを作らない。冗長な括弧はここで消す。
+    fn parse_group(&mut self) -> Result<Node, Diagnostic> {
+        let lp = self.span();
+        self.bump();
+        let inner = self.parse_expr()?;
+        // E105: no tuples.
+        if self.kind() == &TokKind::Comma {
+            return Err(self.error_at(
+                lp,
+                Some("E105"),
+                "tuples are not supported; `(a, b)` is not an expression",
+            ));
+        }
+        self.expect(&TokKind::RParen)?;
+        Ok(inner)
     }
 
     fn parse_name_or_call(&mut self) -> Result<Node, Diagnostic> {
@@ -2643,6 +2630,19 @@ fn constructor_head(node: &Node) -> bool {
     }
 }
 
+/// 見出し（モジュール・実装・効果・ハンドラ）を始めるキーワード。
+fn section_keyword(kind: &TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler
+    )
+}
+
+/// 宣言（または見出し）を始めるキーワード。回復時に次の宣言の目印になる。
+fn declaration_keyword(kind: &TokKind) -> bool {
+    matches!(kind, TokKind::Def | TokKind::KwType | TokKind::KwShared) || section_keyword(kind)
+}
+
 fn bin_node(op: BinOp, left: Node, right: Node) -> Node {
     let span = left.span;
     Node {
@@ -2787,14 +2787,7 @@ fn format_condition_column(
 pub fn canonical(node: &Node) -> String {
     match &node.kind {
         NodeKind::Int(n) => n.to_string(),
-        NodeKind::Float(x) => {
-            let text = x.to_string();
-            if text.contains('.') {
-                text
-            } else {
-                format!("{text}.0")
-            }
-        }
+        NodeKind::Float(x) => canonical_float(*x),
         NodeKind::Char(c) => source_print::literal(&c.to_string(), '\''),
         NodeKind::Str(s) => source_print::literal(s, '"'),
         NodeKind::Bool(b) => b.to_string(),
@@ -2806,62 +2799,14 @@ pub fn canonical(node: &Node) -> String {
             format!("({} {} {})", canonical(l), op.as_str(), canonical(r))
         }
         NodeKind::Pipe(l, r) => format!("({} |> {})", canonical(l), canonical(r)),
-        NodeKind::Apply(f, args) => {
-            let mut s = canonical(f);
-            for a in args {
-                s.push(' ');
-                if matches!(a.kind, NodeKind::Apply(..))
-                    || matches!(&a.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
-                {
-                    s.push_str(&format!("({})", canonical(a)));
-                } else {
-                    s.push_str(&canonical(a));
-                }
-            }
-            s
-        }
-        NodeKind::Call(f, args) => {
-            let mut s = canonical(f);
-            s.push('(');
-            for (i, a) in args.iter().enumerate() {
-                if i > 0 {
-                    s.push_str(", ");
-                }
-                s.push_str(&canonical(a));
-            }
-            s.push(')');
-            s
-        }
-        NodeKind::Field(l, r) => {
-            if matches!(l.kind, NodeKind::Apply(..) | NodeKind::Int(_)) {
-                format!("({}).{}", canonical(l), r.name)
-            } else {
-                format!("{}.{}", canonical(l), r.name)
-            }
-        }
+        NodeKind::Apply(f, args) => canonical_apply(f, args),
+        NodeKind::Call(f, args) => canonical_call(f, args),
+        NodeKind::Field(l, r) => canonical_field(l, r),
         NodeKind::NamedConstructor(name, fields) => {
-            let inner = fields
-                .iter()
-                .map(|(field, value)| format!("{} = {}", field.name, canonical(value)))
-                .collect::<Vec<_>>()
-                .join("; ");
-            format!("{} {{ {inner} }}", name.name)
+            format!("{} {{ {} }}", name.name, canonical_fields(fields))
         }
-        NodeKind::Record(fields) => {
-            let inner = fields
-                .iter()
-                .map(|(n, v)| format!("{} = {}", n.name, canonical(v)))
-                .collect::<Vec<_>>()
-                .join("; ");
-            format!("{{ {inner} }}")
-        }
-        NodeKind::List(items, tail) => {
-            let mut inner = items.iter().map(canonical).collect::<Vec<_>>();
-            if let Some(tail) = tail {
-                inner.push(format!("...{}", canonical(tail)));
-            }
-            format!("[{}]", inner.join(", "))
-        }
+        NodeKind::Record(fields) => format!("{{ {} }}", canonical_fields(fields)),
+        NodeKind::List(items, tail) => canonical_list(items, tail.as_deref()),
         NodeKind::Let { pat, value, body } => {
             format!("(let {pat} = {} -> {})", canonical(value), canonical(body))
         }
@@ -2885,38 +2830,109 @@ pub fn canonical(node: &Node) -> String {
             scrutinees,
             arms,
             fallback,
-        } => {
-            let mut s = format!("(if {}", comma_nodes(scrutinees));
-            for (patterns, body) in arms {
-                s.push_str(&format!(
-                    " | {} => {}",
-                    comma_patterns(patterns),
-                    pattern_arm_body(body)
-                ));
-            }
-            if let Some(fb) = fallback {
-                s.push_str(&format!(" | {}", canonical(fb)));
-            }
-            s.push(')');
-            s
-        }
+        } => canonical_pattern_branch(scrutinees, arms, fallback),
         NodeKind::With {
             handler,
             args,
             body,
-        } => {
-            let args = if args.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "({})",
-                    args.iter().map(canonical).collect::<Vec<_>>().join(", ")
-                )
-            };
-            format!("(with {}{} -> {})", handler.name, args, canonical(body))
-        }
+        } => canonical_with(handler, args, body),
         NodeKind::Resume => "resume".into(),
     }
+}
+
+/// 整数値でも `1.0` のように浮動小数の見た目を保つ。
+fn canonical_float(x: f64) -> String {
+    let text = x.to_string();
+    if text.contains('.') {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
+fn canonical_apply(f: &Node, args: &[Node]) -> String {
+    let mut s = canonical(f);
+    for a in args {
+        s.push(' ');
+        if matches!(a.kind, NodeKind::Apply(..))
+            || matches!(&a.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
+        {
+            s.push_str(&format!("({})", canonical(a)));
+        } else {
+            s.push_str(&canonical(a));
+        }
+    }
+    s
+}
+
+fn canonical_call(f: &Node, args: &[Node]) -> String {
+    let mut s = canonical(f);
+    s.push('(');
+    for (i, a) in args.iter().enumerate() {
+        if i > 0 {
+            s.push_str(", ");
+        }
+        s.push_str(&canonical(a));
+    }
+    s.push(')');
+    s
+}
+
+fn canonical_field(l: &Node, r: &FieldName) -> String {
+    if matches!(l.kind, NodeKind::Apply(..) | NodeKind::Int(_)) {
+        format!("({}).{}", canonical(l), r.name)
+    } else {
+        format!("{}.{}", canonical(l), r.name)
+    }
+}
+
+/// レコードと名前付きコンストラクタで共通の `field = value; ...` 表記。
+fn canonical_fields(fields: &[(DeclaredName, Node)]) -> String {
+    fields
+        .iter()
+        .map(|(field, value)| format!("{} = {}", field.name, canonical(value)))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn canonical_list(items: &[Node], tail: Option<&Node>) -> String {
+    let mut inner = items.iter().map(canonical).collect::<Vec<_>>();
+    if let Some(tail) = tail {
+        inner.push(format!("...{}", canonical(tail)));
+    }
+    format!("[{}]", inner.join(", "))
+}
+
+fn canonical_pattern_branch(
+    scrutinees: &[Node],
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: &Option<Box<Node>>,
+) -> String {
+    let mut s = format!("(if {}", comma_nodes(scrutinees));
+    for (patterns, body) in arms {
+        s.push_str(&format!(
+            " | {} => {}",
+            comma_patterns(patterns),
+            pattern_arm_body(body)
+        ));
+    }
+    if let Some(fb) = fallback {
+        s.push_str(&format!(" | {}", canonical(fb)));
+    }
+    s.push(')');
+    s
+}
+
+fn canonical_with(handler: &DeclaredName, args: &[Node], body: &Node) -> String {
+    let args = if args.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "({})",
+            args.iter().map(canonical).collect::<Vec<_>>().join(", ")
+        )
+    };
+    format!("(with {}{} -> {})", handler.name, args, canonical(body))
 }
 
 impl PartialEq for Node {
