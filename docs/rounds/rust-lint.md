@@ -165,3 +165,38 @@ PASSED: 0/1        exit=1
 差分 86 ファイル（挿入 14259・削除 3713）で振る舞いを変えない。lint の修正後の
 `cargo test`（core 層の m0）は 571/571 で、直す前と同じ緑である。
 
+```
+# 二次レビュー（Codex）の指摘 2 件。crates/hado/float_format.rs は build.rs が
+# RUSTC を直接呼んでコンパイルする standalone のソースで、Cargo のターゲットではない
+$ cargo fmt --all --check
+（差分なし、exit 0）… 通ってしまう
+$ rustfmt --edition 2021 --check crates/hado/float_format.rs
+Diff in crates/hado/float_format.rs:10: … 差分あり
+$ clippy-driver --crate-type staticlib --edition=2021 -C panic=abort --emit=metadata -D warnings crates/hado/float_format.rs
+error: unsafe function's docs are missing a `# Safety` section（missing_safety_doc）
+error: this `if` statement can be collapsed（collapsible_if）
+
+# 直した後
+$ bash scripts/verify-rustfmt.sh
+OK: cargo fmt --all --check reports no diff
+OK: rustfmt --check crates/hado/float_format.rs reports no diff
+PASSED: 2/2
+$ bash scripts/verify-clippy.sh
+OK: cargo clippy --offline --all-targets -- -D warnings is clean
+OK: clippy-driver --crate-type staticlib -D warnings on crates/hado/float_format.rs is clean
+PASSED: 2/2
+
+# 否定的対照
+=== float_format.rs の整形を崩す ===
+NG: rustfmt --check crates/hado/float_format.rs reports no diff
+PASSED: 1/2        exit=1
+=== float_format.rs の Safety の doc を消す ===
+error: unsafe function's docs are missing a `# Safety` section
+NG: clippy-driver --crate-type staticlib -D warnings on crates/hado/float_format.rs is clean
+PASSED: 1/2        exit=1
+```
+
+門番は `cargo fmt --all` と `cargo clippy --all-targets` が見ない standalone のソースを
+明示的に見る（`rustfmt --check` と `clippy-driver` を build.rs と同じ
+`--crate-type staticlib -C panic=abort` でかける）。
+
