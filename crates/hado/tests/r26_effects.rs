@@ -927,6 +927,59 @@ fn effectful_callback_runs_under_the_handler() {
 }
 
 #[test]
+fn list_filter_applies_the_predicate_from_the_head() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        &format!(
+            "{}def main =\n  with Collect ->\n  List.filter [1, 2, 3] fn(x => do yield x -> x != 2)\n",
+            collect_handler(),
+        ),
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[1, 2, 3]\n");
+    assert!(output.stderr.is_empty());
+
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        &format!(
+            "{}handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Collect ->\n  with Catch ->\n  List.filter [0, 1] fn(x => do yield x -> 8 / x > 0)\n",
+            collect_handler(),
+        ),
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[0]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn do_binds_a_local_closure_callee_with_the_caller_continuation() {
     let case = Case::new();
     case.write("main.hd", &format!(
