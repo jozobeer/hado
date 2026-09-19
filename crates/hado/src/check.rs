@@ -313,39 +313,39 @@ fn check_effect_rows(ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic
     if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
         let mut seen = std::collections::BTreeSet::new();
         for effect in effects {
-            let key = effect_key(effect);
-            if !seen.insert(key) {
-                diagnostics.push(Diagnostic {
-                    related: None,
-                    path: path.into(),
-                    line: effect.name_span.line,
-                    col: effect.name_span.col,
-                    code: Some("E522".into()),
-                    message: "duplicate effect in row".into(),
-                });
+            if !seen.insert(effect_key(effect)) {
+                diagnostics.push(duplicate_effect(effect, path));
             }
             check_effect_rows(effect, path, diagnostics);
         }
     }
+    for child in type_children(ty) {
+        check_effect_rows(child, path, diagnostics);
+    }
+}
+
+/// E522: 同じ効果が 1 つの row に 2 度書かれている。
+fn duplicate_effect(effect: &TypeExpr, path: &str) -> Diagnostic {
+    Diagnostic {
+        related: None,
+        path: path.into(),
+        line: effect.name_span.line,
+        col: effect.name_span.col,
+        code: Some("E522".into()),
+        message: "duplicate effect in row".into(),
+    }
+}
+
+/// 効果の row をさらに見るために降りる先。型の形ごとの子を返す。
+fn type_children(ty: &TypeExpr) -> Vec<&TypeExpr> {
     match &ty.kind {
-        TypeKind::Apply(_, args) | TypeKind::Group(args) => {
-            for ty in args {
-                check_effect_rows(ty, path, diagnostics);
-            }
-        }
-        TypeKind::Record(fields) => {
-            for field in fields {
-                check_effect_rows(&field.ty, path, diagnostics);
-            }
-        }
-        TypeKind::Adt(variants) => {
-            for variant in variants {
-                for payload in variant.payload.types() {
-                    check_effect_rows(payload, path, diagnostics);
-                }
-            }
-        }
-        TypeKind::Name(_) => {}
+        TypeKind::Apply(_, args) | TypeKind::Group(args) => args.iter().collect(),
+        TypeKind::Record(fields) => fields.iter().map(|field| &field.ty).collect(),
+        TypeKind::Adt(variants) => variants
+            .iter()
+            .flat_map(|variant| variant.payload.types())
+            .collect(),
+        TypeKind::Name(_) => Vec::new(),
     }
 }
 
@@ -578,20 +578,53 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
     if let Err(error) = check_boolean_form(node, path, direct_condition) {
         diagnostics.push(error);
     }
-    if let NodeKind::Fn { params, body } = &node.kind {
-        check_unused(
-            params.iter().map(|param| (param.name.as_str(), param.span)),
-            body,
-            path,
-            diagnostics,
-        );
-        if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
+    check_fn_node(node, path, diagnostics);
+    check_bindings(node, path, diagnostics);
+    for check in NODE_CHECKS {
+        if let Err(error) = check(node, path) {
             diagnostics.push(error);
         }
-        for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
-            check_effect_rows(ty, path, diagnostics);
-        }
     }
+    for child in children(node) {
+        check_node(child, path, diagnostics, condition_is_direct(node, child));
+    }
+}
+
+/// ノード 1 つを見る検査。
+type NodeCheck = fn(&Node, &str) -> Result<(), Diagnostic>;
+
+/// ノードごとの検査。順序は診断の出る順に効くので、並びを変えない。
+const NODE_CHECKS: [NodeCheck; 7] = [
+    check_cons_tail,
+    check_duplicate_patterns,
+    check_conditions,
+    check_literal_fallback,
+    check_local_redundancy,
+    check_rewrap,
+    check_repropagation,
+];
+
+/// `fn` の引数についての検査。使われない束縛・腕の形・型に載る効果を見る。
+fn check_fn_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let NodeKind::Fn { params, body } = &node.kind else {
+        return;
+    };
+    check_unused(
+        params.iter().map(|param| (param.name.as_str(), param.span)),
+        body,
+        path,
+        diagnostics,
+    );
+    if let Err(error) = check_sole_parameter_branch(params, None, body, node.span, path) {
+        diagnostics.push(error);
+    }
+    for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
+        check_effect_rows(ty, path, diagnostics);
+    }
+}
+
+/// 束縛を導入するノードで、その束縛が本文で使われているかを見る。
+fn check_bindings(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
     match &node.kind {
         NodeKind::Let { pat, body, .. } | NodeKind::LetQ { pat, body, .. } => {
             check_unused(crate::names::bindings(pat), body, path, diagnostics);
@@ -605,92 +638,110 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
         }
         _ => {}
     }
-    for check in [
-        check_cons_tail,
-        check_duplicate_patterns,
-        check_conditions,
-        check_literal_fallback,
-        check_local_redundancy,
-        check_rewrap,
-        check_repropagation,
-    ] {
-        if let Err(error) = check(node, path) {
-            diagnostics.push(error);
-        }
-    }
-    for child in children(node) {
-        let arm_conditions = matches!(node.kind, NodeKind::PatternBranch { .. })
-            && matches!(child.kind, NodeKind::CondBranch { .. });
-        check_node(
-            child,
-            path,
-            diagnostics,
-            (matches!(node.kind, NodeKind::Fn { .. }) && child.span == node.span) || arm_conditions,
-        );
-    }
+}
+
+/// 子を条件の直接の位置として見るか。`fn` の本体と、`case` の腕の `if` が
+/// 直接の位置にあたる。
+fn condition_is_direct(node: &Node, child: &Node) -> bool {
+    let arm_condition = matches!(node.kind, NodeKind::PatternBranch { .. })
+        && matches!(child.kind, NodeKind::CondBranch { .. });
+    arm_condition || (matches!(node.kind, NodeKind::Fn { .. }) && child.span == node.span)
 }
 
 fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    if let NodeKind::BoolBranch { then, els, .. } = &node.kind {
-        if crate::normalize::same_expression(then, els) {
-            return Err(Diagnostic {
-                related: None,
-                path: path.into(),
-                line: node.span.line,
-                col: node.span.col,
-                code: Some("E502".into()),
-                message: format!(
-                    "identical branch results at {}:{} and {}:{}",
-                    then.span.line, then.span.col, els.span.line, els.span.col
-                ),
-            });
-        }
-    }
-    if let NodeKind::PatternBranch { arms, .. } = &node.kind {
-        for (patterns, _) in arms {
-            catch_all_row(patterns, path)?;
-        }
-    }
-    if let NodeKind::LetQ { pat, .. } = &node.kind {
-        if matches!(pat.kind, PatternKind::Underscore) {
-            return Err(Diagnostic {
-                related: None,
-                path: path.into(),
-                line: pat.span.line,
-                col: pat.span.col,
-                code: Some("E504".into()),
-                message: "use do to discard a success value".into(),
-            });
-        }
-    }
-    if let NodeKind::Let { pat, body, .. } = &node.kind {
-        if matches!(pat.kind, PatternKind::Underscore) {
-            return Err(Diagnostic {
-                related: None,
-                path: path.into(),
-                line: pat.span.line,
-                col: pat.span.col,
-                code: Some("E506".into()),
-                message: "a plain let binding cannot discard its value".into(),
-            });
-        }
-        if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
-            if bound == returned {
-                return Err(Diagnostic {
-                    related: None,
-                    path: path.into(),
-                    line: node.span.line,
-                    col: node.span.col,
-                    code: Some("E501".into()),
-                    message: format!(
-                        "binding {bound} is returned unchanged at {}:{}",
-                        body.span.line, body.span.col
-                    ),
-                });
-            }
-        }
+    for check in [
+        identical_branches,
+        catch_all_rows,
+        discarded_binding,
+        returned_binding,
+    ] {
+        check(node, path)?;
     }
     Ok(())
+}
+
+/// E502: `if` の 2 つの腕が同じ式。
+fn identical_branches(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let NodeKind::BoolBranch { then, els, .. } = &node.kind else {
+        return Ok(());
+    };
+    if !crate::normalize::same_expression(then, els) {
+        return Ok(());
+    }
+    Err(Diagnostic {
+        related: None,
+        path: path.into(),
+        line: node.span.line,
+        col: node.span.col,
+        code: Some("E502".into()),
+        message: format!(
+            "identical branch results at {}:{} and {}:{}",
+            then.span.line, then.span.col, els.span.line, els.span.col
+        ),
+    })
+}
+
+/// `case` の腕の pattern の並びについての検査。
+fn catch_all_rows(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let NodeKind::PatternBranch { arms, .. } = &node.kind else {
+        return Ok(());
+    };
+    for (patterns, _) in arms {
+        catch_all_row(patterns, path)?;
+    }
+    Ok(())
+}
+
+/// E504: `let _? =` は `do` を使うべき位置。
+fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let NodeKind::LetQ { pat, .. } = &node.kind else {
+        return Ok(());
+    };
+    if !matches!(pat.kind, PatternKind::Underscore) {
+        return Ok(());
+    }
+    Err(Diagnostic {
+        related: None,
+        path: path.into(),
+        line: pat.span.line,
+        col: pat.span.col,
+        code: Some("E504".into()),
+        message: "use do to discard a success value".into(),
+    })
+}
+
+/// E506: `let _ =` は値を捨てられない。E501: `let x = ... x` は束縛が素通し。
+fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let NodeKind::Let { pat, body, .. } = &node.kind else {
+        return Ok(());
+    };
+    if matches!(pat.kind, PatternKind::Underscore) {
+        return Err(Diagnostic {
+            related: None,
+            path: path.into(),
+            line: pat.span.line,
+            col: pat.span.col,
+            code: Some("E506".into()),
+            message: "a plain let binding cannot discard its value".into(),
+        });
+    }
+    let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) else {
+        return Ok(());
+    };
+    if bound != returned {
+        return Ok(());
+    }
+    Err(Diagnostic {
+        related: None,
+        path: path.into(),
+        line: node.span.line,
+        col: node.span.col,
+        code: Some("E501".into()),
+        message: format!(
+            "binding {bound} is returned unchanged at {}:{}",
+            body.span.line, body.span.col
+        ),
+    })
 }
 
 fn is_wildcard_pattern(pattern: &Pattern) -> bool {
