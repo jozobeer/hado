@@ -170,83 +170,9 @@ pub(crate) fn resolve(
             error_anchors: Vec::new(),
         },
     };
-    resolver
-        .symbols
-        .entry((Vec::new(), Space::Type))
-        .or_default()
-        .extend(
-            crate::names::BUILTIN_TYPES
-                .iter()
-                .map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })),
-        );
-    resolver.prelude.entry(Space::Type).or_default().extend(
-        crate::names::BUILTIN_TYPES
-            .iter()
-            .map(|name| (*name).to_owned()),
-    );
-    for (index, (item, directory)) in ast.items.iter().zip(&locations).enumerate() {
-        for (space, name, span) in declarations(item) {
-            // §56: only the user's declarations carry a position; the prelude is
-            // synthesized outside the user's source.
-            let span = if index < prelude_items {
-                Span { line: 0, col: 0 }
-            } else {
-                span
-            };
-            resolver
-                .symbols
-                .entry((directory.clone(), space))
-                .or_default()
-                .entry(name.into())
-                .or_insert(span);
-            if index < prelude_items {
-                resolver
-                    .prelude
-                    .entry(space)
-                    .or_default()
-                    .insert(name.into());
-            }
-        }
-        if let Item::Effect(effect) = item {
-            resolver
-                .operations
-                .entry(directory.clone())
-                .or_default()
-                .extend(effect.ops.iter().map(|op| op.name.clone()));
-            if index < prelude_items {
-                resolver
-                    .prelude_operations
-                    .extend(effect.ops.iter().map(|op| op.name.clone()));
-            }
-        }
-    }
-    for (index, ((item, directory), root)) in
-        ast.items.iter_mut().zip(&locations).zip(&roots).enumerate()
-    {
-        resolver.root = root.clone();
-        // §51, §52: a declaration conflicts with the names visible unqualified
-        // from its directory. The prelude is visible even at a library root, so
-        // its names are checked everywhere. The root's own names are compared
-        // only from a subdirectory: at the root the declaration is the root.
-        if index >= prelude_items {
-            resolver.check_prelude_operation_declarations(item, directory);
-            for (space, name, span) in declarations(item) {
-                let conflicts_with_root =
-                    directory != root && resolver.has(&resolver.root, space, name);
-                if conflicts_with_root || resolver.has_prelude(space, name) {
-                    // §56: the root's declaration is the related position. A name
-                    // that only the prelude has (a builtin type) has none.
-                    let first = if conflicts_with_root {
-                        resolver.site(&resolver.root, space, name)
-                    } else {
-                        None
-                    };
-                    resolver.error_at(span, "E205", "declaration conflicts with root name", first);
-                }
-            }
-        }
-        resolver.item(item, directory, &Local::default(), true);
-    }
+    resolver.register_builtin_types();
+    resolver.register_symbols(&ast.items, &locations, prelude_items);
+    resolver.resolve_items(&mut ast.items, &locations, &roots, prelude_items);
     for (prefix, _) in &mut ast.qualified_type_anchors {
         if let Some(name) = resolver.renamed.get(&(prefix.span.line, prefix.span.col)) {
             prefix.name = name.clone();
@@ -256,6 +182,113 @@ pub(crate) fn resolve(
 }
 
 impl Resolver<'_> {
+    fn register_builtin_types(&mut self) {
+        self.symbols
+            .entry((Vec::new(), Space::Type))
+            .or_default()
+            .extend(
+                crate::names::BUILTIN_TYPES
+                    .iter()
+                    .map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })),
+            );
+        self.prelude.entry(Space::Type).or_default().extend(
+            crate::names::BUILTIN_TYPES
+                .iter()
+                .map(|name| (*name).to_owned()),
+        );
+    }
+
+    fn register_symbols(&mut self, items: &[Item], locations: &[Directory], prelude_items: usize) {
+        for (index, (item, directory)) in items.iter().zip(locations).enumerate() {
+            let in_prelude = index < prelude_items;
+            self.register_item_declarations(item, directory, in_prelude);
+            self.register_item_effects(item, directory, in_prelude);
+        }
+    }
+
+    fn register_item_declarations(&mut self, item: &Item, directory: &[String], in_prelude: bool) {
+        for (space, name, span) in declarations(item) {
+            // §56: only the user's declarations carry a position; the prelude is
+            // synthesized outside the user's source.
+            let span = if in_prelude {
+                Span { line: 0, col: 0 }
+            } else {
+                span
+            };
+            self.symbols
+                .entry((directory.to_vec(), space))
+                .or_default()
+                .entry(name.into())
+                .or_insert(span);
+            if in_prelude {
+                self.prelude.entry(space).or_default().insert(name.into());
+            }
+        }
+    }
+
+    fn register_item_effects(&mut self, item: &Item, directory: &[String], in_prelude: bool) {
+        if let Item::Effect(effect) = item {
+            self.operations
+                .entry(directory.to_vec())
+                .or_default()
+                .extend(effect.ops.iter().map(|op| op.name.clone()));
+            if in_prelude {
+                self.prelude_operations
+                    .extend(effect.ops.iter().map(|op| op.name.clone()));
+            }
+        }
+    }
+
+    fn resolve_items(
+        &mut self,
+        items: &mut [Item],
+        locations: &[Directory],
+        roots: &[Directory],
+        prelude_items: usize,
+    ) {
+        for (index, ((item, directory), root)) in
+            items.iter_mut().zip(locations).zip(roots).enumerate()
+        {
+            self.root = root.clone();
+            if index >= prelude_items {
+                self.check_declaration_conflicts(item, directory);
+            }
+            self.item(item, directory, &Local::default(), true);
+        }
+    }
+
+    /// §51, §52: a declaration conflicts with the names visible unqualified from
+    /// its directory. The prelude is visible even at a library root, so its names
+    /// are checked everywhere. The root's own names are compared only from a
+    /// subdirectory: at the root the declaration is the root.
+    fn check_declaration_conflicts(&mut self, item: &Item, directory: &[String]) {
+        self.check_prelude_operation_declarations(item, directory);
+        for (space, name, span) in declarations(item) {
+            self.check_declaration_conflict(directory, space, name, span);
+        }
+    }
+
+    fn check_declaration_conflict(
+        &mut self,
+        directory: &[String],
+        space: Space,
+        name: &str,
+        span: Span,
+    ) {
+        let conflicts_with_root = directory != self.root && self.has(&self.root, space, name);
+        if !conflicts_with_root && !self.has_prelude(space, name) {
+            return;
+        }
+        // §56: the root's declaration is the related position. A name that only
+        // the prelude has (a builtin type) has none.
+        let first = if conflicts_with_root {
+            self.site(&self.root, space, name)
+        } else {
+            None
+        };
+        self.error_at(span, "E205", "declaration conflicts with root name", first);
+    }
+
     fn check_prelude_operation_declarations(&mut self, item: &Item, directory: &[String]) {
         match item {
             Item::Def(def) => {
@@ -455,160 +488,217 @@ impl Resolver<'_> {
 
     fn item(&mut self, item: &mut Item, directory: &[String], local: &Local, outer: bool) {
         match item {
-            Item::TypeDef(def) => {
-                let mut scope = local.clone();
-                scope
-                    .types
-                    .extend(def.params.iter().map(|param| param.name.clone()));
-                if let Some(ty) = &mut def.ty {
-                    self.ty(ty, directory, &scope);
-                    if outer {
-                        if let TypeKind::Adt(constructors) = &mut ty.kind {
-                            for ctor in constructors {
-                                ctor.name.name = qualify(directory, &ctor.name.name);
-                            }
-                        }
+            Item::TypeDef(def) => self.item_type_def(def, directory, local, outer),
+            Item::ModuleSig(module) => self.item_module_sig(module, directory, local, outer),
+            Item::ModuleImpl(module) => self.item_module_impl(module, directory, local, outer),
+            Item::SigDef(def) => self.item_sig_def(def, directory, local),
+            Item::Def(def) => self.item_def(def, directory, local),
+            Item::Effect(effect) => self.item_effect(effect, directory, local, outer),
+            Item::Handler(handler) => self.item_handler(handler, directory, local, outer),
+        }
+    }
+
+    fn item_type_def(
+        &mut self,
+        def: &mut TypeDef,
+        directory: &[String],
+        local: &Local,
+        outer: bool,
+    ) {
+        let mut scope = local.clone();
+        scope
+            .types
+            .extend(def.params.iter().map(|param| param.name.clone()));
+        if let Some(ty) = &mut def.ty {
+            self.ty(ty, directory, &scope);
+            if outer {
+                if let TypeKind::Adt(constructors) = &mut ty.kind {
+                    for ctor in constructors {
+                        ctor.name.name = qualify(directory, &ctor.name.name);
                     }
                 }
-                if outer {
-                    def.name = qualify(directory, &def.name);
+            }
+        }
+        if outer {
+            def.name = qualify(directory, &def.name);
+        }
+    }
+
+    fn item_module_sig(
+        &mut self,
+        module: &mut ModuleSig,
+        directory: &[String],
+        local: &Local,
+        outer: bool,
+    ) {
+        let mut scope = self.nested(&module.items, directory, local, false);
+        scope.contract_types = true;
+        for item in &mut module.items {
+            self.item(item, directory, &scope, false);
+        }
+        if outer {
+            module.name = qualify(directory, &module.name);
+        }
+    }
+
+    fn item_module_impl(
+        &mut self,
+        module: &mut ModuleImpl,
+        directory: &[String],
+        local: &Local,
+        outer: bool,
+    ) {
+        self.reference(
+            &mut module.sig,
+            module.sig_span,
+            Space::Contract,
+            directory,
+            local,
+        );
+        let mut scope = self.nested(&module.items, directory, local, true);
+        scope.contract_types = false;
+        match &mut module.form {
+            ImplementationForm::Ordinary => {}
+            ImplementationForm::Functor(params) => {
+                for param in params {
+                    self.reference(
+                        &mut param.contract,
+                        param.contract_span,
+                        Space::Contract,
+                        directory,
+                        local,
+                    );
+                    scope.implementations.insert(param.name.clone());
                 }
             }
-            Item::ModuleSig(module) => {
-                let mut scope = self.nested(&module.items, directory, local, false);
-                scope.contract_types = true;
-                for item in &mut module.items {
-                    self.item(item, directory, &scope, false);
-                }
-                if outer {
-                    module.name = qualify(directory, &module.name);
-                }
-            }
-            Item::ModuleImpl(module) => {
+            ImplementationForm::Application { functor, arguments } => {
                 self.reference(
-                    &mut module.sig,
-                    module.sig_span,
-                    Space::Contract,
+                    &mut functor.name,
+                    functor.span,
+                    Space::Implementation,
                     directory,
                     local,
                 );
-                let mut scope = self.nested(&module.items, directory, local, true);
-                scope.contract_types = false;
-                match &mut module.form {
-                    ImplementationForm::Ordinary => {}
-                    ImplementationForm::Functor(params) => {
-                        for param in params {
-                            self.reference(
-                                &mut param.contract,
-                                param.contract_span,
-                                Space::Contract,
-                                directory,
-                                local,
-                            );
-                            scope.implementations.insert(param.name.clone());
-                        }
-                    }
-                    ImplementationForm::Application { functor, arguments } => {
-                        self.reference(
-                            &mut functor.name,
-                            functor.span,
-                            Space::Implementation,
-                            directory,
-                            local,
-                        );
-                        for argument in arguments {
-                            self.reference(
-                                &mut argument.name,
-                                argument.span,
-                                Space::Implementation,
-                                directory,
-                                local,
-                            );
-                        }
-                    }
-                }
-                for item in &mut module.items {
-                    self.item(item, directory, &scope, false);
-                }
-                if outer {
-                    module.name = qualify(directory, &module.name);
+                for argument in arguments {
+                    self.reference(
+                        &mut argument.name,
+                        argument.span,
+                        Space::Implementation,
+                        directory,
+                        local,
+                    );
                 }
             }
-            Item::SigDef(def) => {
-                let mut scope = local.clone();
-                scope
-                    .types
-                    .extend(def.type_params.iter().map(|param| param.name.clone()));
-                self.annotations(&mut def.params, &mut def.ret, directory, &scope);
+        }
+        for item in &mut module.items {
+            self.item(item, directory, &scope, false);
+        }
+        if outer {
+            module.name = qualify(directory, &module.name);
+        }
+    }
+
+    fn item_sig_def(&mut self, def: &mut SigDef, directory: &[String], local: &Local) {
+        let mut scope = local.clone();
+        scope
+            .types
+            .extend(def.type_params.iter().map(|param| param.name.clone()));
+        self.annotations(&mut def.params, &mut def.ret, directory, &scope);
+    }
+
+    fn item_def(&mut self, def: &mut Def, directory: &[String], local: &Local) {
+        match &mut def.kind {
+            DefKind::Value(body) => self.node(body, directory, local),
+            DefKind::Function { params, ret, body } => {
+                self.annotations(params, ret, directory, local);
+                self.node(body, directory, local);
             }
-            Item::Def(def) => match &mut def.kind {
-                DefKind::Value(body) => self.node(body, directory, local),
-                DefKind::Function { params, ret, body } => {
-                    self.annotations(params, ret, directory, local);
-                    self.node(body, directory, local);
-                }
-            },
-            Item::Effect(effect) => {
-                let mut scope = local.clone();
-                scope
-                    .types
-                    .extend(effect.type_params.iter().map(|param| param.name.clone()));
-                for op in &mut effect.ops {
-                    for ty in op
-                        .params
-                        .iter_mut()
-                        .filter_map(|param| param.ty.as_mut())
-                        .chain(op.ret.iter_mut())
-                    {
-                        self.ty(ty, directory, &scope);
-                    }
-                    op.name = operation_key(directory, &op.name);
-                }
-                if outer {
-                    effect.name = qualify(directory, &effect.name);
-                }
+        }
+    }
+
+    fn item_effect(
+        &mut self,
+        effect: &mut EffectDecl,
+        directory: &[String],
+        local: &Local,
+        outer: bool,
+    ) {
+        let mut scope = local.clone();
+        scope
+            .types
+            .extend(effect.type_params.iter().map(|param| param.name.clone()));
+        for op in &mut effect.ops {
+            for ty in op
+                .params
+                .iter_mut()
+                .filter_map(|param| param.ty.as_mut())
+                .chain(op.ret.iter_mut())
+            {
+                self.ty(ty, directory, &scope);
             }
-            Item::Handler(handler) => {
-                let mut scope = local.clone();
-                scope
-                    .types
-                    .extend(handler.type_params.iter().map(|param| param.name.clone()));
-                self.reference(
-                    &mut handler.effect,
-                    handler.effect_span,
-                    Space::Contract,
-                    directory,
-                    local,
-                );
-                let prelude_effect = self.has_prelude(Space::Contract, &handler.effect);
-                if !prelude_effect && declared_directory(&handler.effect) != directory {
-                    self.unknown(handler.effect_span, handler.effect_span);
+            op.name = operation_key(directory, &op.name);
+        }
+        if outer {
+            effect.name = qualify(directory, &effect.name);
+        }
+    }
+
+    fn item_handler(
+        &mut self,
+        handler: &mut HandlerDecl,
+        directory: &[String],
+        local: &Local,
+        outer: bool,
+    ) {
+        let mut scope = local.clone();
+        scope
+            .types
+            .extend(handler.type_params.iter().map(|param| param.name.clone()));
+        self.reference(
+            &mut handler.effect,
+            handler.effect_span,
+            Space::Contract,
+            directory,
+            local,
+        );
+        let prelude_effect = self.has_prelude(Space::Contract, &handler.effect);
+        if !prelude_effect && declared_directory(&handler.effect) != directory {
+            self.unknown(handler.effect_span, handler.effect_span);
+        }
+        self.annotations(&mut handler.params, &mut None, directory, &scope);
+        for arm in &mut handler.arms {
+            self.bind_handler_arm(arm, directory, local, &scope, prelude_effect);
+        }
+        if outer {
+            handler.name = qualify(directory, &handler.name);
+        }
+    }
+
+    fn bind_handler_arm(
+        &mut self,
+        arm: &mut HandlerArm,
+        directory: &[String],
+        local: &Local,
+        scope: &Local,
+        prelude_effect: bool,
+    ) {
+        match arm {
+            HandlerArm::Operation {
+                name, params, body, ..
+            } => {
+                if !prelude_effect {
+                    *name = operation_key(directory, name);
                 }
-                self.annotations(&mut handler.params, &mut None, directory, &scope);
-                for arm in &mut handler.arms {
-                    match arm {
-                        HandlerArm::Operation {
-                            name, params, body, ..
-                        } => {
-                            if !prelude_effect {
-                                *name = operation_key(directory, name);
-                            }
-                            for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
-                                self.ty(ty, directory, &scope);
-                            }
-                            self.node(body, directory, local);
-                        }
-                        HandlerArm::Return { param, body, .. } => {
-                            if let Some(ty) = &mut param.ty {
-                                self.ty(ty, directory, &scope);
-                            }
-                            self.node(body, directory, local);
-                        }
-                    }
+                for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
+                    self.ty(ty, directory, scope);
                 }
-                if outer {
-                    handler.name = qualify(directory, &handler.name);
+                self.node(body, directory, local);
+            }
+            HandlerArm::Return { param, body, .. } => {
+                if let Some(ty) = &mut param.ty {
+                    self.ty(ty, directory, scope);
                 }
+                self.node(body, directory, local);
             }
         }
     }
@@ -630,6 +720,16 @@ impl Resolver<'_> {
     }
 
     fn ty(&mut self, ty: &mut TypeExpr, directory: &[String], local: &Local) {
+        self.resolve_type_name(ty, directory, local);
+        self.visit_type_children(ty, directory, local);
+        if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
+            for ty in effects {
+                self.effect_label(ty, directory, local);
+            }
+        }
+    }
+
+    fn resolve_type_name(&mut self, ty: &mut TypeExpr, directory: &[String], local: &Local) {
         match &mut ty.kind {
             TypeKind::Name(name) | TypeKind::Apply(name, _) => {
                 if let Some((prefix, member)) = name.split_once('.') {
@@ -650,6 +750,9 @@ impl Resolver<'_> {
             }
             _ => {}
         }
+    }
+
+    fn visit_type_children(&mut self, ty: &mut TypeExpr, directory: &[String], local: &Local) {
         match &mut ty.kind {
             TypeKind::Apply(_, arguments) | TypeKind::Group(arguments) => {
                 for ty in arguments {
@@ -669,11 +772,6 @@ impl Resolver<'_> {
                 }
             }
             TypeKind::Name(_) => {}
-        }
-        if let Some(crate::parser::EffectRow::Row(effects)) = &mut ty.effects {
-            for ty in effects {
-                self.effect_label(ty, directory, local);
-            }
         }
     }
 
@@ -713,21 +811,24 @@ impl Resolver<'_> {
                     directory,
                     local,
                 );
-                for (_, pattern) in fields {
-                    if let Some(pattern) = pattern {
-                        self.pattern(pattern, directory, local);
-                    }
-                }
+                self.bind_field_patterns(fields, directory, local);
             }
-            PatternKind::Record(fields) => {
-                for (_, pattern) in fields {
-                    if let Some(pattern) = pattern {
-                        self.pattern(pattern, directory, local);
-                    }
-                }
-            }
+            PatternKind::Record(fields) => self.bind_field_patterns(fields, directory, local),
             PatternKind::Literal(node) => self.node(node, directory, local),
             _ => {}
+        }
+    }
+
+    fn bind_field_patterns(
+        &mut self,
+        fields: &mut [(DeclaredName, Option<Pattern>)],
+        directory: &[String],
+        local: &Local,
+    ) {
+        for (_, pattern) in fields {
+            if let Some(pattern) = pattern {
+                self.pattern(pattern, directory, local);
+            }
         }
     }
 
@@ -750,15 +851,7 @@ impl Resolver<'_> {
                 self.reference(name, node.span, Space::Constructor, directory, local)
             }
             NodeKind::Name(name) => self.operation(name, directory),
-            NodeKind::Field(base, _) => {
-                if let NodeKind::Name(name) = &mut base.kind {
-                    if crate::names::is_upper_reference(name) {
-                        self.reference(name, base.span, Space::Implementation, directory, local);
-                        return;
-                    }
-                }
-                self.node(base, directory, local);
-            }
+            NodeKind::Field(base, _) => self.node_field(base, directory, local),
             NodeKind::NamedConstructor(name, fields) => {
                 self.reference(
                     &mut name.name,
@@ -767,15 +860,9 @@ impl Resolver<'_> {
                     directory,
                     local,
                 );
-                for (_, value) in fields {
-                    self.node(value, directory, local);
-                }
+                self.node_fields(fields, directory, local);
             }
-            NodeKind::Record(fields) => {
-                for (_, value) in fields {
-                    self.node(value, directory, local);
-                }
-            }
+            NodeKind::Record(fields) => self.node_fields(fields, directory, local),
             NodeKind::Neg(value) | NodeKind::Not(value) => self.node(value, directory, local),
             NodeKind::Bin(_, left, right) | NodeKind::Pipe(left, right) => {
                 self.node(left, directory, local);
@@ -783,18 +870,9 @@ impl Resolver<'_> {
             }
             NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) => {
                 self.node(callee, directory, local);
-                for arg in args {
-                    self.node(arg, directory, local);
-                }
+                self.node_arguments(args, directory, local);
             }
-            NodeKind::List(values, tail) => {
-                for value in values {
-                    self.node(value, directory, local);
-                }
-                if let Some(tail) = tail {
-                    self.node(tail, directory, local);
-                }
-            }
+            NodeKind::List(values, tail) => self.node_list(values, tail, directory, local),
             NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
                 self.pattern(pat, directory, local);
                 self.node(value, directory, local);
@@ -804,62 +882,140 @@ impl Resolver<'_> {
                 self.node(value, directory, local);
                 self.node(body, directory, local);
             }
-            NodeKind::Fn { params, body } => {
-                for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
-                    self.ty(ty, directory, local);
-                }
-                self.node(body, directory, local);
-            }
+            NodeKind::Fn { params, body } => self.node_fn(params, body, directory, local),
             NodeKind::BoolBranch { cond, then, els } => {
                 self.node(cond, directory, local);
                 self.node(then, directory, local);
                 self.node(els, directory, local);
             }
             NodeKind::CondBranch { arms, fallback } => {
-                for (condition, body) in arms {
-                    self.node(condition, directory, local);
-                    self.node(body, directory, local);
-                }
-                if let Some(body) = fallback {
-                    self.node(body, directory, local);
-                }
+                self.node_cond_branch(arms, fallback, directory, local);
             }
             NodeKind::PatternBranch {
                 scrutinees,
                 arms,
                 fallback,
-            } => {
-                for scrutinee in scrutinees {
-                    self.node(scrutinee, directory, local);
-                }
-                for (patterns, body) in arms {
-                    for pattern in patterns {
-                        self.pattern(pattern, directory, local);
-                    }
-                    self.node(body, directory, local);
-                }
-                if let Some(body) = fallback {
-                    self.node(body, directory, local);
-                }
-            }
+            } => self.node_pattern_branch(scrutinees, arms, fallback, directory, local),
             NodeKind::With {
                 handler,
                 args,
                 body,
-            } => {
-                self.reference(
-                    &mut handler.name,
-                    handler.span,
-                    Space::Implementation,
-                    directory,
-                    local,
-                );
-                for arg in args {
-                    self.node(arg, directory, local);
-                }
-                self.node(body, directory, local);
-            }
+            } => self.node_with(handler, args, body, directory, local),
             _ => {}
         }
+    }
+
+    fn node_field(&mut self, base: &mut Node, directory: &[String], local: &Local) {
+        if let NodeKind::Name(name) = &mut base.kind {
+            if crate::names::is_upper_reference(name) {
+                self.reference(name, base.span, Space::Implementation, directory, local);
+                return;
+            }
+        }
+        self.node(base, directory, local);
+    }
+
+    fn node_fields(
+        &mut self,
+        fields: &mut [(DeclaredName, Node)],
+        directory: &[String],
+        local: &Local,
+    ) {
+        for (_, value) in fields {
+            self.node(value, directory, local);
+        }
+    }
+
+    fn node_arguments(&mut self, args: &mut [Node], directory: &[String], local: &Local) {
+        for arg in args {
+            self.node(arg, directory, local);
+        }
+    }
+
+    fn node_list(
+        &mut self,
+        values: &mut [Node],
+        tail: &mut Option<Box<Node>>,
+        directory: &[String],
+        local: &Local,
+    ) {
+        for value in values {
+            self.node(value, directory, local);
+        }
+        if let Some(tail) = tail {
+            self.node(tail, directory, local);
+        }
+    }
+
+    fn node_fn(
+        &mut self,
+        params: &mut [Param],
+        body: &mut Node,
+        directory: &[String],
+        local: &Local,
+    ) {
+        for ty in params.iter_mut().filter_map(|param| param.ty.as_mut()) {
+            self.ty(ty, directory, local);
+        }
+        self.node(body, directory, local);
+    }
+
+    fn node_cond_branch(
+        &mut self,
+        arms: &mut [(Node, Node)],
+        fallback: &mut Option<Box<Node>>,
+        directory: &[String],
+        local: &Local,
+    ) {
+        for (condition, body) in arms {
+            self.node(condition, directory, local);
+            self.node(body, directory, local);
+        }
+        if let Some(body) = fallback {
+            self.node(body, directory, local);
+        }
+    }
+
+    fn node_pattern_branch(
+        &mut self,
+        scrutinees: &mut [Node],
+        arms: &mut [(Vec<Pattern>, Node)],
+        fallback: &mut Option<Box<Node>>,
+        directory: &[String],
+        local: &Local,
+    ) {
+        for scrutinee in scrutinees {
+            self.node(scrutinee, directory, local);
+        }
+        for (patterns, body) in arms {
+            for pattern in patterns {
+                self.pattern(pattern, directory, local);
+            }
+            self.node(body, directory, local);
+        }
+        if let Some(body) = fallback {
+            self.node(body, directory, local);
+        }
+    }
+
+    fn node_with(
+        &mut self,
+        handler: &mut DeclaredName,
+        args: &mut [Node],
+        body: &mut Node,
+        directory: &[String],
+        local: &Local,
+    ) {
+        self.reference(
+            &mut handler.name,
+            handler.span,
+            Space::Implementation,
+            directory,
+            local,
+        );
+        for arg in args {
+            self.node(arg, directory, local);
+        }
+        self.node(body, directory, local);
     }
 }
