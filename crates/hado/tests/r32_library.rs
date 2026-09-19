@@ -11,20 +11,34 @@ struct Case(PathBuf);
 impl Case {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!("hado-r32-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "hado-r32-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir(&dir).unwrap();
         Self(dir)
     }
     fn write(&self, file: &str, source: &str) {
         let path = self.0.join(file);
-        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).unwrap(); }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(path, source).unwrap();
     }
     fn command(&self, command: &str, entry: &str) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_hado")).arg(command).arg(self.0.join(entry)).output().unwrap()
+        Command::new(env!("CARGO_BIN_EXE_hado"))
+            .arg(command)
+            .arg(self.0.join(entry))
+            .output()
+            .unwrap()
     }
 }
-impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+impl Drop for Case {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 const LIBRARY: &str = "def helper value => value + 1\n\nmodule Store\ndef read(value: Int): Int\n\nimplement Store as Memory\ndef read value => helper value";
 
@@ -50,14 +64,22 @@ fn check_accepts_library_while_build_reports_entry_error() {
     let case = Case::new();
     case.write("lib.hd", LIBRARY);
     let check = case.command("check", "lib.hd");
-    assert_eq!(check.status.code(), Some(0), "{}", String::from_utf8_lossy(&check.stderr));
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
     assert!(check.stderr.is_empty());
     for command in ["build", "dump-mono"] {
         let output = case.command(command, "lib.hd");
         assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.starts_with("lib.hd:1:1: error[E206]: "), "{stderr}");
-        assert!(stderr.contains("check") && stderr.contains("library"), "{stderr}");
+        assert!(
+            stderr.contains("check") && stderr.contains("library"),
+            "{stderr}"
+        );
         assert!(!case.0.join("lib").exists());
     }
 }
@@ -95,14 +117,20 @@ fn repeated_library_is_left_to_the_assembler() {
 #[test]
 fn def_main_is_still_an_item_next_to_library() {
     let ast = parse("library\ndef main = 1");
-    assert!(ast.items.iter().any(|item| matches!(item, Item::Def(def) if def.name == "main")));
+    assert!(ast
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Def(def) if def.name == "main")));
 }
 
 #[test]
 fn library_after_the_first_heading_is_a_syntax_error() {
     // 付録C: outer_item は最初の見出しより前にだけ現れる。
-    let error = parse_source("def main = 1\neffect E\nabort stop\nlibrary\n", "generated.hd")
-        .expect_err("library after a section heading must be rejected");
+    let error = parse_source(
+        "def main = 1\neffect E\nabort stop\nlibrary\n",
+        "generated.hd",
+    )
+    .expect_err("library after a section heading must be rejected");
     assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
     assert_eq!((error.line, error.col), (4, 1), "{error}");
 }
@@ -135,12 +163,18 @@ fn argument_main_reports_the_declaration_position_for_every_command() {
     let case = Case::new();
     let source = "\n\ndef main x => x";
     case.write("main.hd", source);
-    let line = source[..source.find("def main").unwrap()].matches('\n').count() + 1;
+    let line = source[..source.find("def main").unwrap()]
+        .matches('\n')
+        .count()
+        + 1;
     for command in ["check", "build", "dump-mono"] {
         let output = case.command(command, "main.hd");
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert_eq!(output.status.code(), Some(1), "{command}: {stderr}");
-        assert!(stderr.starts_with(&format!("main.hd:{line}:1: error[E206]: ")), "{command}: {stderr}");
+        assert!(
+            stderr.starts_with(&format!("main.hd:{line}:1: error[E206]: ")),
+            "{command}: {stderr}"
+        );
     }
     assert!(!case.0.join("main").exists());
 }
@@ -154,8 +188,14 @@ fn paths_resolve_from_the_innermost_library_root() {
     case.write("app/lib/lib.hd", "library");
     case.write("app/lib/inner/inner.hd", "library");
     case.write("app/lib/inner/leaf/l.hdi", "module L\ndef go(x: Int): Int");
-    case.write("app/lib/inner/leaf/lm.hd", "implement L as LM\ndef go x => x + 3");
-    case.write("app/lib/inner/m.hd", "implement leaf::L as M\ndef go x => leaf::LM.go x");
+    case.write(
+        "app/lib/inner/leaf/lm.hd",
+        "implement L as LM\ndef go x => x + 3",
+    );
+    case.write(
+        "app/lib/inner/m.hd",
+        "implement leaf::L as M\ndef go x => leaf::LM.go x",
+    );
     let project = hado::project::Project::load(&case.0.join("app/main.hd")).unwrap();
     project.check().unwrap();
 }
@@ -167,7 +207,10 @@ fn library_directory_rejects_an_argument_main_in_a_separate_file() {
     case.write("lib.hd", "library");
     let source = "\n\ndef main x => x\n\nmodule S\ndef read(value: Int): Int\n\nimplement S as Memory\ndef read value => main value";
     case.write("main.hd", source);
-    let line = source[..source.find("def main").unwrap()].matches('\n').count() + 1;
+    let line = source[..source.find("def main").unwrap()]
+        .matches('\n')
+        .count()
+        + 1;
     let error = match hado::project::Project::load(&case.0.join("lib.hd")) {
         Ok(_) => panic!("expected E206"),
         Err(hado::project::LoadError::Diagnostic(error)) => error,
@@ -216,8 +259,14 @@ fn a_library_root_conflicts_with_its_subdirectories() {
 
     let contracts = Case::new();
     contracts.write("app/main.hd", "def main = 1");
-    contracts.write("app/lib/lib.hd", "library\n\nmodule Store\ndef read(x: Int): Int");
-    contracts.write("app/lib/store/store.hd", "module Store\ndef read(x: Int): Int");
+    contracts.write(
+        "app/lib/lib.hd",
+        "library\n\nmodule Store\ndef read(x: Int): Int",
+    );
+    contracts.write(
+        "app/lib/store/store.hd",
+        "module Store\ndef read(x: Int): Int",
+    );
     let project = hado::project::Project::load(&contracts.0.join("app/main.hd")).unwrap();
     let error = match project.check() {
         Ok(_) => panic!("expected E205 for the contract conflict"),

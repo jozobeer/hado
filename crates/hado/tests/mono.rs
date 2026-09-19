@@ -13,10 +13,7 @@ fn mono_types_reject_variables_at_any_depth() {
 
 #[test]
 fn mono_types_preserve_concrete_data_and_closure_signatures() {
-    let ty = Ty::fn_of(
-        vec![Ty::Adt("List".into(), vec![Ty::Bool])],
-        Ty::Int,
-    );
+    let ty = Ty::fn_of(vec![Ty::Adt("List".into(), vec![Ty::Bool])], Ty::Int);
     assert_eq!(
         Type::try_from(&ty).unwrap(),
         Type::Closure(
@@ -220,8 +217,14 @@ fn top_level_values_lower_in_dependency_order() {
     let checked = hado::check_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
     assert_eq!(program.functions.len(), 2);
-    assert!(program.functions.iter().all(|function| function.signature.parameters.is_empty()));
-    assert!(matches!(program.entry, hado::mono::Expression::Binary { .. }));
+    assert!(program
+        .functions
+        .iter()
+        .all(|function| function.signature.parameters.is_empty()));
+    assert!(matches!(
+        program.entry,
+        hado::mono::Expression::Binary { .. }
+    ));
 }
 
 #[test]
@@ -526,9 +529,12 @@ fn records_keep_field_names_and_nominal_type() {
 
 #[test]
 fn pipeline_keeps_the_left_composite_type_separate_from_its_result() {
-    let source = "type Box = { value: Int }\ndef unbox box => box.value\ndef main = { value = 42 } |> unbox";
+    let source =
+        "type Box = { value: Int }\ndef unbox box => box.value\ndef main = { value = 42 } |> unbox";
     let output = hado::dump_mono(source, "t").unwrap();
-    assert!(output.contains("Record { fields: [(\"value\", Constant(Int(42)))], result: Data(\"Box\", []) }"));
+    assert!(output.contains(
+        "Record { fields: [(\"value\", Constant(Int(42)))], result: Data(\"Box\", []) }"
+    ));
     assert!(output.contains("result: Int"));
 }
 
@@ -585,7 +591,8 @@ fn boolean_branches_keep_true_and_false_results() {
 
 #[test]
 fn record_pattern_branches_bind_fields_in_the_arm() {
-    let source = "type User = { age: Int }\ndef age | { age = n } => n + 1\ndef main = age { age = 3 }";
+    let source =
+        "type User = { age: Int }\ndef age | { age = n } => n + 1\ndef main = age { age = 3 }";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("RecordGet {"));
     assert!(output.contains("field: \"age\", result: Int"));
@@ -602,8 +609,7 @@ fn constructor_let_patterns_project_typed_payloads() {
 
 #[test]
 fn nullary_constructor_patterns_lower_to_switch() {
-    let source =
-        "type Flag = | On | Off\ndef code | On => 1 | Off => 2\ndef main = code On";
+    let source = "type Flag = | On | Off\ndef code | On => 1 | Off => 2\ndef main = code On";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("Switch {"));
     assert!(output.contains("arms: [(\"On\", Constant(Int(1))), (\"Off\", Constant(Int(2)))]"));
@@ -622,8 +628,7 @@ fn constructor_switch_binds_payload_only_inside_matching_arm() {
 
 #[test]
 fn nested_nullary_patterns_check_both_tags() {
-    let source =
-        "def classify | Some(None) => 1 | 0\ndef main = classify (Some(Some(3)))";
+    let source = "def classify | Some(None) => 1 | 0\ndef main = classify (Some(Some(3)))";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("Switch {").count(), 2);
     assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
@@ -635,7 +640,8 @@ fn nested_nullary_patterns_check_both_tags() {
 
 #[test]
 fn repeated_constructor_arms_fall_through_in_source_order() {
-    let source = "def classify | Some(None) => 1 | Some(_) => 2 | 0\ndef main = classify (Some(Some(3)))";
+    let source =
+        "def classify | Some(None) => 1 | Some(_) => 2 | 0\ndef main = classify (Some(Some(3)))";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("arms: [(\"Some\",").count(), 1);
     assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
@@ -655,7 +661,8 @@ fn constructor_payload_literals_test_before_falling_through() {
 
 #[test]
 fn deep_constructor_patterns_guard_payload_bindings() {
-    let source = "def extract | Some(Some(Some(x))) => x + 1 | 0\ndef main = extract (Some(Some(Some(3))))";
+    let source =
+        "def extract | Some(Some(Some(x))) => x + 1 | 0\ndef main = extract (Some(Some(Some(3))))";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("Switch {").count(), 3);
     assert_eq!(
@@ -715,12 +722,16 @@ fn effect_do_evaluates_the_rhs_then_the_continuation() {
     let Expression::Let { body, .. } = program.entry else {
         panic!("discarded effect")
     };
-    assert!(matches!(*body, Expression::Constant(hado::mono::Constant::Bool(true))));
+    assert!(matches!(
+        *body,
+        Expression::Constant(hado::mono::Constant::Bool(true))
+    ));
 }
 
 #[test]
 fn recursive_list_fold_connects_construction_projection_and_calls() {
-    let source = "def rec sum | [] => 0 | [head, ...tail] => head + sum tail\ndef main = sum [2, 3, 5]";
+    let source =
+        "def rec sum | [] => 0 | [head, ...tail] => head + sum tail\ndef main = sum [2, 3, 5]";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -788,7 +799,8 @@ fn specialization_cache_distinguishes_result_types() {
 
 #[test]
 fn qualified_module_calls_resolve_to_the_exported_function() {
-    let source = "def main = M.inc 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
+    let source =
+        "def main = M.inc 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.inc\""));
     assert!(output.contains(
@@ -902,7 +914,13 @@ fn integer_printer_is_an_ordinary_function_with_external_body() {
     assert_eq!(function.name, "print_Int");
     assert_eq!(function.signature.parameters, vec![Type::Int]);
     assert_eq!(function.signature.result, Type::Void);
-    assert!(matches!(function.body, hado::mono::Expression::CallRuntime { function: hado::runtime_abi::RuntimeFunction::PrintInt, .. }));
+    assert!(matches!(
+        function.body,
+        hado::mono::Expression::CallRuntime {
+            function: hado::runtime_abi::RuntimeFunction::PrintInt,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -914,10 +932,21 @@ fn dump_mono_includes_the_generated_main_printer() {
 
 #[test]
 fn scalar_equality_has_one_derived_function_per_type() {
-    for (expression, name) in [("1 == 1 && 2 != 3", "Int"), ("true == false", "Bool"), ("1.0 == 1.0", "Float"), ("'a' == 'b'", "Char"), ("\"a\" == \"b\"", "String"), ("() == ()", "Void")] {
+    for (expression, name) in [
+        ("1 == 1 && 2 != 3", "Int"),
+        ("true == false", "Bool"),
+        ("1.0 == 1.0", "Float"),
+        ("'a' == 'b'", "Char"),
+        ("\"a\" == \"b\"", "String"),
+        ("() == ()", "Void"),
+    ] {
         let source = format!("def main = {expression}");
         let output = hado::dump_mono(&source, "t").unwrap();
-        assert_eq!(output.matches(&format!("name: \"eq_{name}\"")).count(), 1, "{output}");
+        assert_eq!(
+            output.matches(&format!("name: \"eq_{name}\"")).count(),
+            1,
+            "{output}"
+        );
     }
 }
 
@@ -935,5 +964,8 @@ fn aggregate_equality_reuses_scalar_derivations() {
 fn parenthesized_constructor_calls_lower_with_payload_types() {
     let source = "def main = Some(42)";
     let output = hado::dump_mono(source, "t").unwrap();
-    assert!(output.contains("constructor: \"Some\", fields: [Constant(Int(42))]"), "{output}");
+    assert!(
+        output.contains("constructor: \"Some\", fields: [Constant(Int(42))]"),
+        "{output}"
+    );
 }

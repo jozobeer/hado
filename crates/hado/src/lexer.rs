@@ -165,7 +165,11 @@ pub struct LexError {
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.code {
-            Some(code) => write!(f, "{}:{}: error[{code}]: {}", self.line, self.col, self.message),
+            Some(code) => write!(
+                f,
+                "{}:{}: error[{code}]: {}",
+                self.line, self.col, self.message
+            ),
             None => write!(f, "{}:{}: error: {}", self.line, self.col, self.message),
         }
     }
@@ -323,10 +327,7 @@ impl Lexer<'_> {
             '.' => {
                 self.bump();
                 if matches!(self.peek(), Some(d) if d.is_ascii_digit()) {
-                    Err(self.err(
-                        Some("E103"),
-                        "float must have digits before the '.'",
-                    ))
+                    Err(self.err(Some("E103"), "float must have digits before the '.'"))
                 } else {
                     Ok(TokKind::Dot)
                 }
@@ -347,10 +348,7 @@ impl Lexer<'_> {
                 self.bump();
                 Ok(TokKind::Percent)
             }
-            '#' => Err(self.err(
-                Some("E104"),
-                "# is not a comment marker; use //",
-            )),
+            '#' => Err(self.err(Some("E104"), "# is not a comment marker; use //")),
             '=' => {
                 self.bump();
                 if self.peek() == Some('=') {
@@ -411,10 +409,9 @@ impl Lexer<'_> {
                     Ok(TokKind::Pipe)
                 }
             }
-            '-' if self.rest().starts_with("--") => Err(self.err(
-                Some("E104"),
-                "-- is not a comment marker; use //",
-            )),
+            '-' if self.rest().starts_with("--") => {
+                Err(self.err(Some("E104"), "-- is not a comment marker; use //"))
+            }
             '-' => {
                 self.bump();
                 if self.peek() == Some('>') {
@@ -449,10 +446,7 @@ impl Lexer<'_> {
                     .map_err(|_| self.err(None, format!("bad float literal: {text}")))?;
                 Ok(TokKind::Float(value))
             } else {
-                Err(self.err(
-                    Some("E103"),
-                    "float must have digits after the '.'",
-                ))
+                Err(self.err(Some("E103"), "float must have digits after the '.'"))
             }
         } else {
             let text = &self.src[start..self.i];
@@ -518,12 +512,14 @@ impl Lexer<'_> {
                             self.bump();
                             out.push('"');
                         }
-                        _ => return Err(LexError {
-                            line: escape.line,
-                            col: escape.col,
-                            code: Some("E110"),
-                            message: "unsupported escape in string literal".into(),
-                        }),
+                        _ => {
+                            return Err(LexError {
+                                line: escape.line,
+                                col: escape.col,
+                                code: Some("E110"),
+                                message: "unsupported escape in string literal".into(),
+                            })
+                        }
                     }
                 }
                 Some(c) => {
@@ -599,7 +595,12 @@ mod tests {
     fn lex_comments_and_newlines() {
         assert_eq!(
             kinds("1 // hi\n  + 2"),
-            vec![TokKind::Int(1), TokKind::Plus, TokKind::Int(2), TokKind::Eof]
+            vec![
+                TokKind::Int(1),
+                TokKind::Plus,
+                TokKind::Int(2),
+                TokKind::Eof
+            ]
         );
     }
 
@@ -630,7 +631,12 @@ mod tests {
     fn lex_unary_and_neg() {
         assert_eq!(
             kinds("- - 2"),
-            vec![TokKind::Minus, TokKind::Minus, TokKind::Int(2), TokKind::Eof]
+            vec![
+                TokKind::Minus,
+                TokKind::Minus,
+                TokKind::Int(2),
+                TokKind::Eof
+            ]
         );
     }
 

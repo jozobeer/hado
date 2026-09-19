@@ -1,6 +1,6 @@
+use hado::check_source;
 use hado::parser::{self, parse_source, Diagnostic, Item, TypeDef};
 use hado::types::Ty;
-use hado::check_source;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +10,10 @@ fn parse(source: &str) -> parser::Ast {
 
 fn location(source: &str, offset: usize) -> (usize, usize) {
     let before = &source[..offset];
-    (before.matches('\n').count() + 1, before.rsplit('\n').next().unwrap().chars().count() + 1)
+    (
+        before.matches('\n').count() + 1,
+        before.rsplit('\n').next().unwrap().chars().count() + 1,
+    )
 }
 
 // 診断の行:列は探針の行頭の空白と先頭の空行から計算する（定数で書かない）。
@@ -22,10 +25,16 @@ fn reject(source: &str, code: &str, needle: &str) {
                 shifted.push_str(&" ".repeat(pad));
                 shifted.push_str(line);
             }
-            let offset = shifted.find(needle).unwrap_or_else(|| panic!("needle {needle}\n{shifted}"));
+            let offset = shifted
+                .find(needle)
+                .unwrap_or_else(|| panic!("needle {needle}\n{shifted}"));
             let error = parse_source(&shifted, "generated.hd").expect_err(&shifted);
             assert_eq!(error.code.as_deref(), Some(code), "{error}\n{shifted}");
-            assert_eq!((error.line, error.col), location(&shifted, offset), "{error}\n{shifted}");
+            assert_eq!(
+                (error.line, error.col),
+                location(&shifted, offset),
+                "{error}\n{shifted}"
+            );
         }
     }
 }
@@ -53,7 +62,11 @@ struct Case(PathBuf);
 impl Case {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!("hado-r33-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "hado-r33-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
@@ -61,7 +74,10 @@ impl Case {
         std::fs::write(self.0.join(file), source).unwrap();
     }
     fn check(&self, entry: &str) -> Result<(), Diagnostic> {
-        hado::project::Project::load(&self.0.join(entry)).unwrap().check().map(|_| ())
+        hado::project::Project::load(&self.0.join(entry))
+            .unwrap()
+            .check()
+            .map(|_| ())
     }
 }
 impl Drop for Case {
@@ -70,7 +86,8 @@ impl Drop for Case {
     }
 }
 
-const MONOID: &str = "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure";
+const MONOID: &str =
+    "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure";
 const IMPLEMENTATION: &str = "implement Monoid as StringMonoid\nshared type T = String\ndef combine left _ => left\ndef of value => value";
 
 #[test]
@@ -104,14 +121,24 @@ fn shared_prefixes_a_parameterized_realization() {
     let ast = parse(source);
     let def = type_def(&ast.items, "T");
     assert!(def.shared);
-    assert_eq!(def.params.iter().map(|name| name.name.as_str()).collect::<Vec<_>>(), vec!["A"]);
+    assert_eq!(
+        def.params
+            .iter()
+            .map(|name| name.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["A"]
+    );
     parser::canonical_program(&ast);
 }
 
 #[test]
 fn shared_outside_an_implementation_is_a_syntax_error() {
     reject("shared type T = Int\n\ndef main = 1\n", "E100", "shared");
-    reject("module Monoid\nshared type T\ndef of(value: String): T Pure\n", "E100", "shared");
+    reject(
+        "module Monoid\nshared type T\ndef of(value: String): T Pure\n",
+        "E100",
+        "shared",
+    );
 }
 
 #[test]
@@ -133,9 +160,14 @@ fn shared_to_a_type_absent_from_the_contract_is_unbound() {
     let case = Case::new();
     let source = format!("def main = StringMonoid.of \"a\"\n\n{MONOID}\n\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value");
     case.write("main.hd", &source);
-    let error = case.check("main.hd").expect_err("shared to an unknown type must be E204");
+    let error = case
+        .check("main.hd")
+        .expect_err("shared to an unknown type must be E204");
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-    let (line, col) = location(&source, source.find("shared type U").unwrap() + "shared type ".len());
+    let (line, col) = location(
+        &source,
+        source.find("shared type U").unwrap() + "shared type ".len(),
+    );
     assert_eq!((error.line, error.col), (line, col), "{error}");
 }
 
@@ -144,7 +176,10 @@ fn shared_to_a_known_type_is_accepted() {
     let case = Case::new();
     let source = format!("def main = StringMonoid.of \"a\"\n\n{MONOID}\n\n{IMPLEMENTATION}");
     case.write("main.hd", &source);
-    assert!(case.check("main.hd").is_ok(), "a shared realization must let main be typed");
+    assert!(
+        case.check("main.hd").is_ok(),
+        "a shared realization must let main be typed"
+    );
 }
 
 const UNSHARED: &str = "implement Monoid as StringMonoid\ntype T = String\ndef combine left _ => left\ndef of value => value";
@@ -160,22 +195,37 @@ fn shared_equation_reaches_the_public_interface() {
 
 #[test]
 fn unshared_implementation_keeps_the_abstract_type() {
-    let source = format!("def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{UNSHARED}");
-    let error = check_source(&source, "t").err().expect("an unmarked realization stays opaque");
+    let source = format!(
+        "def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{UNSHARED}"
+    );
+    let error = check_source(&source, "t")
+        .err()
+        .expect("an unmarked realization stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(error.message.contains("StringMonoid.T"), "{}", error.message);
+    assert!(
+        error.message.contains("StringMonoid.T"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
 fn shared_equation_relaxes_e705() {
     let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\nshared type T = Int\ndef find _ => 1";
-    assert_eq!(check_source(source, "t").unwrap_or_else(|error| panic!("{error}")).main, Ty::Int);
+    assert_eq!(
+        check_source(source, "t")
+            .unwrap_or_else(|error| panic!("{error}"))
+            .main,
+        Ty::Int
+    );
 }
 
 #[test]
 fn unshared_realization_keeps_e705() {
     let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\ntype T = Int\ndef find _ => 1";
-    let error = check_source(source, "t").err().expect("an unmarked realization keeps E705");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked realization keeps E705");
     assert_eq!(error.code.as_deref(), Some("E705"), "{error}");
 }
 
@@ -189,7 +239,9 @@ fn shared_record_realization_allows_field_access() {
 #[test]
 fn unshared_record_realization_rejects_field_access() {
     let source = "def main = describe (UserStore.make \"n\")\ndef describe (t: UserStore.T) => t.name\ntype User = { name: String }\n\nmodule UserStore\ntype T\ndef make(name: String): T Pure\n\nimplement UserStore as UserStore\ntype T = User\ndef make name => { name = name }";
-    let error = check_source(source, "t").err().expect("an unmarked realization keeps E601");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked realization keeps E601");
     assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
 }
 
@@ -203,9 +255,15 @@ fn shared_parameterized_equation_transforms_arguments() {
 #[test]
 fn shared_realization_cycles_are_rejected() {
     let direct = format!("def main = StringMonoid.of \"a\"\n{MONOID}\n\nimplement Monoid as StringMonoid\nshared type T = T\ndef combine left _ => left\ndef of value => value");
-    assert_eq!(check_source(&direct, "t").err().unwrap().code.as_deref(), Some("E602"));
+    assert_eq!(
+        check_source(&direct, "t").err().unwrap().code.as_deref(),
+        Some("E602")
+    );
     let mutual = "def main = StringMonoid.of \"a\"\nmodule Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\nimplement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left _ => left\ndef of value => value";
-    assert_eq!(check_source(mutual, "t").err().unwrap().code.as_deref(), Some("E602"));
+    assert_eq!(
+        check_source(mutual, "t").err().unwrap().code.as_deref(),
+        Some("E602")
+    );
 }
 
 // --- 工程 2: functor の shared type T = M.T が適用結果に引き継がれる ---
@@ -222,14 +280,20 @@ fn string_fold(shared: &str) -> String {
 
 #[test]
 fn shared_functor_equation_reaches_the_application_result() {
-    let source = format!("def main = StringFold.fold [\"a\", \"b\"]\n{}", string_fold("shared "));
+    let source = format!(
+        "def main = StringFold.fold [\"a\", \"b\"]\n{}",
+        string_fold("shared ")
+    );
     let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(checked.main, Ty::String);
 }
 
 #[test]
 fn shared_functor_equation_follows_the_arguments_members() {
-    let source = format!("def main = StringFold.fold [StringMonoid.of \"a\", StringMonoid.of \"b\"]\n{}", string_fold("shared "));
+    let source = format!(
+        "def main = StringFold.fold [StringMonoid.of \"a\", StringMonoid.of \"b\"]\n{}",
+        string_fold("shared ")
+    );
     let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(checked.main, Ty::String);
 }
@@ -256,7 +320,9 @@ fn a_shared_functor_application_type_is_known_before_its_owner_is_processed() {
 #[test]
 fn unmarked_functor_equation_keeps_the_application_type_distinct() {
     let source = format!("def main = StringFold.fold [\"a\"]\n{}", string_fold(""));
-    let error = check_source(&source, "t").err().expect("an unmarked functor equation stays opaque");
+    let error = check_source(&source, "t")
+        .err()
+        .expect("an unmarked functor equation stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
@@ -268,10 +334,14 @@ fn a_shared_functor_follows_an_unmarked_argument() {
     // 印なしの引数の T は不透明なので main からは返せない（E705）。fold が
     // OpaqueMonoid.T を受け取れていることは、E305 が出ないことで測る。
     let positive = format!("def main = OpaqueFold.fold [OpaqueMonoid.of \"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
-    let error = check_source(&positive, "t").err().expect("returning the opaque argument type must be E705");
+    let error = check_source(&positive, "t")
+        .err()
+        .expect("returning the opaque argument type must be E705");
     assert_eq!(error.code.as_deref(), Some("E705"), "{error}");
     let negative = format!("def main = OpaqueFold.fold [\"a\"]\n{contracts}\n\n{opaque}\n\n{functor}\nimplement Fold as OpaqueFold = MakeFold(OpaqueMonoid)");
-    let error = check_source(&negative, "t").err().expect("the argument's own type must still reject a String");
+    let error = check_source(&negative, "t")
+        .err()
+        .expect("the argument's own type must still reject a String");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
@@ -289,21 +359,27 @@ fn an_opaque_functor_result_matches_the_arguments_type() {
 #[test]
 fn two_unmarked_applications_of_the_same_functor_are_distinct() {
     let source = "def main = A.read (B.make 7)\nmodule Id\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\nmodule Box\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\nimplement Id as I\ntype T = Int\ndef make x => x\ndef read x => x\n\nimplement Id as J\ntype T = Int\ndef make x => x\ndef read x => x\n\nimplement Box as Make(Arg: Id)\ntype T = Arg.T\ndef make x => Arg.make x\ndef read x => Arg.read x\n\nimplement Box as A = Make(I)\nimplement Box as B = Make(J)";
-    let error = check_source(source, "t").err().expect("unmarked applications must keep distinct types");
+    let error = check_source(source, "t")
+        .err()
+        .expect("unmarked applications must keep distinct types");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
 #[test]
 fn a_parameter_type_stays_opaque_inside_the_functor_body() {
     let source = "module Input\ntype T\ndef make(x: Int): T Pure\n\nmodule Output\ntype T\ndef run(x: Int): Int Pure\n\nimplement Input as Concrete\nshared type T = Int\ndef make x => x\n\nimplement Output as Make(Arg: Input)\nshared type T = Arg.T\ndef run x => Arg.make x + 1\n\nimplement Output as Applied = Make(Concrete)";
-    let error = check_source(source, "t").err().expect("the parameter type must stay opaque in the body");
+    let error = check_source(source, "t")
+        .err()
+        .expect("the parameter type must stay opaque in the body");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
 #[test]
 fn cyclic_shared_functor_applications_are_rejected() {
     let source = "def main = A.read (A.make 7)\nmodule Id\ntype T\ndef make(n: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Id as I\nshared type T = Int\ndef make n => n\ndef read value => value\n\nimplement Id as Make(Arg: Id)\nshared type T = Arg.T\ndef make n => Arg.make n\ndef read value => Arg.read value\n\nimplement Id as A = Make(B)\nimplement Id as B = Make(A)";
-    let error = check_source(source, "t").err().expect("a shared application cycle must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("a shared application cycle must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
@@ -319,7 +395,9 @@ fn shared_equation_reaches_a_constructor_payload() {
 #[test]
 fn unshared_constructor_payload_stays_abstract() {
     let source = "def main = Box(\"hi\")\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t").err().expect("an unmarked payload stays opaque");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked payload stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
@@ -327,7 +405,9 @@ fn unshared_constructor_payload_stays_abstract() {
 #[test]
 fn local_types_of_two_implementations_stay_distinct() {
     let source = "def main = A.read (B.make 7)\nmodule Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n\nimplement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id";
-    let error = check_source(source, "t").err().expect("two implementations must keep distinct local types");
+    let error = check_source(source, "t")
+        .err()
+        .expect("two implementations must keep distinct local types");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("A.Hidden"), "{}", error.message);
     assert!(error.message.contains("B.Hidden"), "{}", error.message);
@@ -350,7 +430,9 @@ fn shared_local_record_allows_field_access() {
 #[test]
 fn unshared_local_record_rejects_field_access() {
     let source = "def main = name (Store.make \"hi\")\ndef name (t: Store.T) => t.name\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }";
-    let error = check_source(source, "t").err().expect("an unmarked local record keeps E601");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked local record keeps E601");
     assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
 }
 
@@ -366,7 +448,9 @@ fn shared_equation_reaches_a_pattern_payload() {
 #[test]
 fn unshared_pattern_payload_stays_abstract() {
     let source = "def main = read (Box(Store.make \"hi\"))\ndef read | Box(value) => String.concat value \"!\"\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t").err().expect("an unmarked pattern payload stays opaque");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked pattern payload stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
@@ -381,7 +465,9 @@ fn shared_equation_reaches_a_field_projection() {
 #[test]
 fn unshared_field_projection_stays_abstract() {
     let source = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t").err().expect("an unmarked field projection stays opaque");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked field projection stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
@@ -400,7 +486,9 @@ fn shared_equation_reaches_a_named_constructor_payload() {
 #[test]
 fn unshared_named_constructor_payload_stays_abstract() {
     let source = format!("{NAMED}\ntype T = String\ndef make name => name");
-    let error = check_source(&source, "t").err().expect("an unmarked named payload stays opaque");
+    let error = check_source(&source, "t")
+        .err()
+        .expect("an unmarked named payload stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert!(error.message.contains("Store.T"), "{}", error.message);
 }
@@ -419,7 +507,9 @@ fn shared_function_realization_reaches_a_record_schema() {
 #[test]
 fn unshared_function_realization_stays_abstract() {
     let source = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
-    let error = check_source(source, "t").err().expect("an unmarked function realization stays opaque");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an unmarked function realization stays opaque");
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
@@ -437,7 +527,9 @@ fn a_shared_realization_with_more_type_arguments_than_the_contract_is_rejected()
     // 契約 type T（型引数 0）に shared type A T = A List（型引数 1）。前処理が等式を
     // 登録すると reveal の apply の assert で panic する。E602 で拒否すること。
     let source = "def main = Store.make \"hi\"\nmodule Store\ntype T\ndef make(x: String): T Pure\n\nimplement Store as Store\nshared type A T = A List\ndef make x => [x]";
-    let error = check_source(source, "t").err().expect("a wider realization must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("a wider realization must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
@@ -445,7 +537,9 @@ fn a_shared_realization_with_more_type_arguments_than_the_contract_is_rejected()
 fn a_shared_realization_with_fewer_type_arguments_than_the_contract_is_rejected() {
     // 契約 type A T（型引数 1）に shared type T = Int（型引数 0）。実体化の方が少ない形。
     let source = "module Stack\ntype A T\ndef A empty: A T Pure\n\nimplement Stack as Stack\nshared type T = Int\ndef empty = 1";
-    let error = check_source(source, "t").err().expect("a narrower realization must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("a narrower realization must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
@@ -457,7 +551,9 @@ fn a_shared_realization_whose_rhs_under_applies_an_abstract_type_is_rejected() {
     // 登録すると、`Ty::reveal` から `TypeRealization::apply` の個数 assert で panic する。
     // 登録せず、既存の経路（annotation_inner の arity 照合）が E204 で拒否すること。
     let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()";
-    let error = check_source(source, "t").err().expect("an under-applied rhs must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an under-applied rhs must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
 }
 
@@ -466,7 +562,9 @@ fn a_shared_realization_whose_rhs_over_applies_an_abstract_type_is_rejected() {
     // 右辺 (Int, String) Stack.T は型引数 2。Stack.T の arity 1 と食い違う。同じく
     // 登録せず、annotation_inner が型注釈として拒否すること（コード無しの型注釈エラー）。
     let source = "type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()";
-    let error = check_source(source, "t").err().expect("an over-applied rhs must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an over-applied rhs must be rejected, not crash");
     assert!(error.code.is_none(), "{error}");
 }
 
@@ -476,7 +574,9 @@ fn a_functor_shared_realization_whose_rhs_under_applies_a_parameter_is_rejected(
     // 型引数 0 で参照している。仮引数の契約の署名から arity を取り、食い違う等式を
     // 登録しないこと（登録すると apply の assert で panic する）。
     let source = "type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)";
-    let error = check_source(source, "t").err().expect("a parameter-dropping rhs must be rejected, not crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("a parameter-dropping rhs must be rejected, not crash");
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
 }
 
@@ -486,7 +586,9 @@ fn a_functor_application_with_a_mismatched_result_contract_is_rejected() {
     // 結果契約を照合しないと、Out.T の arity が契約間で食い違い、apply の assert で
     // panic する。登録せず application() が E602 を出すこと。
     let source = "type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Source as Base\nshared type T = String\ndef make x => x\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Target as Out = Make(Base)";
-    let error = check_source(source, "t").err().expect("a result contract mismatch must be E602, not a crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("a result contract mismatch must be E602, not a crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
 
@@ -495,7 +597,8 @@ fn a_functor_application_with_a_mismatched_argument_contract_is_rejected() {
     // 仮引数 M の契約は Source。引数 Base の契約は Target。等式を登録する前に
     // 各引数の契約を照合しないと、Out.T と Base.T の arity が食い違い panic する。
     let source = "type Box = { value: Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Target as Base\nshared type A T = A List\ndef empty = []\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Source as Out = Make(Base)";
-    let error = check_source(source, "t").err().expect("an argument contract mismatch must be E602, not a crash");
+    let error = check_source(source, "t")
+        .err()
+        .expect("an argument contract mismatch must be E602, not a crash");
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
 }
-

@@ -20,16 +20,38 @@ fn program(outer: &str, sections: &[&str], body: &str) -> String {
 fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
     for padding in 0..20 {
         let signature = "module S type T type U def id(x: Int): Int";
-        for body in ["type T = T type U = Int", "type T = U type U = T", "type T = T List type U = Int"] {
-            let implementation = format!("{}implement S as M {body} def id x => x", " ".repeat(padding));
+        for body in [
+            "type T = T type U = Int",
+            "type T = U type U = T",
+            "type T = T List type U = Int",
+        ] {
+            let implementation = format!(
+                "{}implement S as M {body} def id x => x",
+                " ".repeat(padding)
+            );
             let source = program("", &[signature, &implementation], "M.id 1");
             let error = check_source(&source, "cyclic-alias.hd").err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
             assert_eq!((error.line, error.col), (4, padding + 1), "{error}");
         }
-        for body in ["type T = U type U = Int", "type Data = | Done | Next(Data) type T = Data type U = Int"] {
+        for body in [
+            "type T = U type U = Int",
+            "type Data = | Done | Next(Data) type T = Data type U = Int",
+        ] {
             let implementation = format!("implement S as M {body} def id x => x");
-            assert_eq!(check_source(&program("", &[signature, &implementation], &format!("M.id {padding}")), "resolved-alias.hd").unwrap().main, Ty::Int);
+            assert_eq!(
+                check_source(
+                    &program(
+                        "",
+                        &[signature, &implementation],
+                        &format!("M.id {padding}")
+                    ),
+                    "resolved-alias.hd"
+                )
+                .unwrap()
+                .main,
+                Ty::Int
+            );
         }
     }
 }
@@ -38,18 +60,50 @@ fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
 fn abstract_types_can_be_instantiated_with_existing_types() {
     for (prefix, representation, make, get) in [
         ("", "Int", "x", "value + 1"),
-        ("type Data = | Wrap(Int)", "Data", "Wrap(x)", "if value | Wrap(x) => x"),
-        ("type Data = { number: Int }", "Data", "{ number = x }", "value.number"),
+        (
+            "type Data = | Wrap(Int)",
+            "Data",
+            "Wrap(x)",
+            "if value | Wrap(x) => x",
+        ),
+        (
+            "type Data = { number: Int }",
+            "Data",
+            "{ number = x }",
+            "value.number",
+        ),
     ] {
-        let source = program(prefix, &[SIGNATURE, &module("M", representation, make, get)], "M.get (M.make 7)");
-        assert_eq!(check_source(&source, "module-types.hd").unwrap().main, Ty::Int);
+        let source = program(
+            prefix,
+            &[SIGNATURE, &module("M", representation, make, get)],
+            "M.get (M.make 7)",
+        );
+        assert_eq!(
+            check_source(&source, "module-types.hd").unwrap().main,
+            Ty::Int
+        );
     }
 }
 
 #[test]
 fn abstract_instantiations_preserve_module_identity() {
-    let source = program("", &[SIGNATURE, &module("M", "Int", "x", "value + 1"), &module("N", "Int", "x", "value + 1")], "N.get (M.make 7)");
-    assert_eq!(check_source(&source, "module-types.hd").err().unwrap().code.as_deref(), Some("E305"));
+    let source = program(
+        "",
+        &[
+            SIGNATURE,
+            &module("M", "Int", "x", "value + 1"),
+            &module("N", "Int", "x", "value + 1"),
+        ],
+        "N.get (M.make 7)",
+    );
+    assert_eq!(
+        check_source(&source, "module-types.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E305")
+    );
 }
 
 #[test]
@@ -58,17 +112,42 @@ fn native_execution_uses_the_concrete_representation() {
     std::fs::create_dir_all(&dir).unwrap();
     for (case, (prefix, representation, make, get)) in [
         ("", "Int", "x", "value + 1"),
-        ("type Data = | Wrap(Int)", "Data", "Wrap(x)", "if value | Wrap(x) => x + 1"),
-        ("type Data = { number: Int }", "Data", "{ number = x }", "value.number + 1"),
-    ].into_iter().enumerate() {
+        (
+            "type Data = | Wrap(Int)",
+            "Data",
+            "Wrap(x)",
+            "if value | Wrap(x) => x + 1",
+        ),
+        (
+            "type Data = { number: Int }",
+            "Data",
+            "{ number = x }",
+            "value.number + 1",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for index in 1..6 {
             let case_dir = dir.join(format!("case{case}_{index}"));
             std::fs::create_dir_all(&case_dir).unwrap();
             let path = case_dir.join("main.hd");
-            let source = program(prefix, &[SIGNATURE, &module("M", representation, make, get)], &format!("M.get (M.make {index})"));
+            let source = program(
+                prefix,
+                &[SIGNATURE, &module("M", representation, make, get)],
+                &format!("M.get (M.make {index})"),
+            );
             std::fs::write(&path, source).unwrap();
-            let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
-            assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+            let built = Command::new(env!("CARGO_BIN_EXE_hado"))
+                .arg("build")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                built.status.success(),
+                "{}",
+                String::from_utf8_lossy(&built.stderr)
+            );
             let output = Command::new(path.with_extension("")).output().unwrap();
             assert!(output.status.success());
             assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
@@ -80,19 +159,48 @@ fn native_execution_uses_the_concrete_representation() {
 
 #[test]
 fn opaque_values_cannot_hide_function_payloads_from_monomorphization() {
-    for (representation, make) in [("Fn(Int => Int)", "fn(y => x + y)"), ("{ callback: Fn(Int => Int) }", "{ callback = fn(y => x + y) }")] {
+    for (representation, make) in [
+        ("Fn(Int => Int)", "fn(y => x + y)"),
+        (
+            "{ callback: Fn(Int => Int) }",
+            "{ callback = fn(y => x + y) }",
+        ),
+    ] {
         let implementation = if representation.starts_with('{') {
             format!("implement S as M type Representation = {representation} type T = Representation def make x => {make}")
-        } else { format!("implement S as M type T = {representation} def make x => {make}") };
-        let source = program("", &["module S type T def make(x: Int): T", &implementation], "M.make 1");
-        assert_eq!(check_source(&source, "module-types.hd").err().unwrap().code.as_deref(), Some("E702"));
+        } else {
+            format!("implement S as M type T = {representation} def make x => {make}")
+        };
+        let source = program(
+            "",
+            &["module S type T def make(x: Int): T", &implementation],
+            "M.make 1",
+        );
+        assert_eq!(
+            check_source(&source, "module-types.hd")
+                .err()
+                .unwrap()
+                .code
+                .as_deref(),
+            Some("E702")
+        );
     }
 }
 
 #[test]
 fn signature_type_variables_shadow_abstract_type_names() {
-    let source = program("", &["module S type T def make(x: Int): T def T identity(x: T): T", "implement S as M type T = Int def make x => x def identity x => x"], "M.identity true");
-    assert_eq!(check_source(&source, "module-types.hd").unwrap().main, Ty::Bool);
+    let source = program(
+        "",
+        &[
+            "module S type T def make(x: Int): T def T identity(x: T): T",
+            "implement S as M type T = Int def make x => x def identity x => x",
+        ],
+        "M.identity true",
+    );
+    assert_eq!(
+        check_source(&source, "module-types.hd").unwrap().main,
+        Ty::Bool
+    );
 }
 
 #[test]
@@ -111,11 +219,22 @@ fn outer_data_can_reference_later_implementations_in_any_section_order() {
     for index in 1..12 {
         for data in ["type Box = | Wrap(M.T)", "type Box = { value: M.T }"] {
             let implementation = module("M", "Int", "x", "value + 1");
-            for sections in [[SIGNATURE, implementation.as_str()], [implementation.as_str(), SIGNATURE]] {
-                let body = if data.contains("Wrap") { format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value") }
-                    else { format!("let box = {{ value = M.make {index} }} -> M.get box.value") };
+            for sections in [
+                [SIGNATURE, implementation.as_str()],
+                [implementation.as_str(), SIGNATURE],
+            ] {
+                let body = if data.contains("Wrap") {
+                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                } else {
+                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                };
                 let source = program(data, &sections, &body);
-                assert_eq!(check_source(&source, "module-types.hd").unwrap_or_else(|error| panic!("{error}: {source}")).main, Ty::Int);
+                assert_eq!(
+                    check_source(&source, "module-types.hd")
+                        .unwrap_or_else(|error| panic!("{error}: {source}"))
+                        .main,
+                    Ty::Int
+                );
             }
         }
     }
@@ -123,32 +242,79 @@ fn outer_data_can_reference_later_implementations_in_any_section_order() {
 
 #[test]
 fn abstract_types_in_data_preserve_identity_and_opacity() {
-    for (body, code) in [("let box = { value = N.make 1 } -> M.get box.value", "E305"), ("let box = { value = M.make 1 } -> box.value.number", "E601")] {
-        let source = program("type Box = { value: M.T }", &[SIGNATURE, &module("M", "{ number: Int }", "{ number = x }", "value.number + 1"), &module("N", "{ number: Int }", "{ number = x }", "value.number + 1")], body);
+    for (body, code) in [
+        ("let box = { value = N.make 1 } -> M.get box.value", "E305"),
+        ("let box = { value = M.make 1 } -> box.value.number", "E601"),
+    ] {
+        let source = program(
+            "type Box = { value: M.T }",
+            &[
+                SIGNATURE,
+                &module("M", "{ number: Int }", "{ number = x }", "value.number + 1"),
+                &module("N", "{ number: Int }", "{ number = x }", "value.number + 1"),
+            ],
+            body,
+        );
         let error = check_source(&source, "module-types.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
     }
-    let source = program("type Box = | Wrap(M.Private)", &["module S", "implement S as M type Private = | Hidden"], "1");
-    assert_eq!(check_source(&source, "module-types.hd").err().unwrap().code.as_deref(), Some("E204"));
+    let source = program(
+        "type Box = | Wrap(M.Private)",
+        &["module S", "implement S as M type Private = | Hidden"],
+        "1",
+    );
+    assert_eq!(
+        check_source(&source, "module-types.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E204")
+    );
 }
 
 #[test]
 fn native_data_payloads_use_module_abstract_representations() {
     let dir = std::env::temp_dir().join(format!("hado-abstract-payload-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (case, (representation, make, get)) in [("Int", "x", "value + 1"), ("{ number: Int }", "{ number = x }", "value.number + 1")].into_iter().enumerate() {
+    for (case, (representation, make, get)) in [
+        ("Int", "x", "value + 1"),
+        ("{ number: Int }", "{ number = x }", "value.number + 1"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for record in [false, true] {
             for index in 1..4 {
-                let data = if record { "type Box = { value: M.T }" } else { "type Box = | Wrap(M.T)" };
-                let body = if record { format!("let box = {{ value = M.make {index} }} -> M.get box.value") }
-                    else { format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value") };
+                let data = if record {
+                    "type Box = { value: M.T }"
+                } else {
+                    "type Box = | Wrap(M.T)"
+                };
+                let body = if record {
+                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                } else {
+                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                };
                 let case_dir = dir.join(format!("case{case}_{record}_{index}"));
                 std::fs::create_dir_all(&case_dir).unwrap();
                 let path = case_dir.join("main.hd");
-                let source = program(data, &[&module("M", representation, make, get), SIGNATURE], &body);
+                let source = program(
+                    data,
+                    &[&module("M", representation, make, get), SIGNATURE],
+                    &body,
+                );
                 std::fs::write(&path, source).unwrap();
-                let built = Command::new(env!("CARGO_BIN_EXE_hado")).arg("build").arg(&path).output().unwrap();
-                assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+                let built = Command::new(env!("CARGO_BIN_EXE_hado"))
+                    .arg("build")
+                    .arg(&path)
+                    .output()
+                    .unwrap();
+                assert!(
+                    built.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&built.stderr)
+                );
                 let output = Command::new(path.with_extension("")).output().unwrap();
                 assert!(output.status.success());
                 assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());

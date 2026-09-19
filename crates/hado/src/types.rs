@@ -58,7 +58,13 @@ impl Row {
     }
 
     pub fn without_effect(&self, effect: &str) -> Self {
-        let drop = |labels: &[Ty]| labels.iter().filter(|ty| !label_matches_effect(&ty.to_string(), effect)).cloned().collect();
+        let drop = |labels: &[Ty]| {
+            labels
+                .iter()
+                .filter(|ty| !label_matches_effect(&ty.to_string(), effect))
+                .cloned()
+                .collect()
+        };
         match self {
             Self::Closed(labels) => Self::Closed(drop(labels)),
             Self::Open(id, labels) => Self::Open(*id, drop(labels)),
@@ -74,7 +80,9 @@ impl Row {
     }
 
     pub fn has_user_effect(&self, prelude_effects: &std::collections::HashSet<String>) -> bool {
-        self.labels().iter().any(|ty| !prelude_effects.contains(&effect_ctor(ty)))
+        self.labels()
+            .iter()
+            .any(|ty| !prelude_effects.contains(&effect_ctor(ty)))
     }
 
     fn labels(&self) -> &[Ty] {
@@ -173,7 +181,11 @@ pub struct RowConstraint {
 
 impl ComparisonConstraint {
     fn with_type(&self, ty: Ty) -> Self {
-        Self { ty, code: self.code, span: self.span }
+        Self {
+            ty,
+            code: self.code,
+            span: self.span,
+        }
     }
 }
 
@@ -271,8 +283,14 @@ impl Inference {
                 Box::new(self.freshen_errors(result)),
                 Box::new(row.as_ref().clone()),
             ),
-            Ty::Adt(name, args) => Ty::Adt(name.clone(), args.iter().map(|arg| self.freshen_errors(arg)).collect()),
-            Ty::Abstract(name, args) => Ty::Abstract(name.clone(), args.iter().map(|arg| self.freshen_errors(arg)).collect()),
+            Ty::Adt(name, args) => Ty::Adt(
+                name.clone(),
+                args.iter().map(|arg| self.freshen_errors(arg)).collect(),
+            ),
+            Ty::Abstract(name, args) => Ty::Abstract(
+                name.clone(),
+                args.iter().map(|arg| self.freshen_errors(arg)).collect(),
+            ),
             ty => ty.clone(),
         }
     }
@@ -288,8 +306,14 @@ impl Inference {
                 Box::new(self.resolve(ret)),
                 Box::new(self.resolve_row(row)),
             ),
-            Ty::Adt(name, args) => Ty::Adt(name.clone(), args.iter().map(|ty| self.resolve(ty)).collect()),
-            Ty::Abstract(name, args) => Ty::Abstract(name.clone(), args.iter().map(|ty| self.resolve(ty)).collect()),
+            Ty::Adt(name, args) => Ty::Adt(
+                name.clone(),
+                args.iter().map(|ty| self.resolve(ty)).collect(),
+            ),
+            Ty::Abstract(name, args) => Ty::Abstract(
+                name.clone(),
+                args.iter().map(|ty| self.resolve(ty)).collect(),
+            ),
             ty => ty.clone(),
         }
     }
@@ -357,10 +381,16 @@ impl Inference {
         let inner = self.resolve_row(inner);
         let outer = self.resolve_row(outer);
         match (&inner, &outer) {
-            (Row::Closed(a), Row::Closed(b)) if self.label_names(a).is_subset(&self.label_names(b)) => {
+            (Row::Closed(a), Row::Closed(b))
+                if self.label_names(a).is_subset(&self.label_names(b)) =>
+            {
                 self.unify_matching_labels(a, b)
             }
-            (Row::Open(_, required), Row::Closed(actual)) if self.label_names(required).is_subset(&self.label_names(actual)) => {
+            (Row::Open(_, required), Row::Closed(actual))
+                if self
+                    .label_names(required)
+                    .is_subset(&self.label_names(actual)) =>
+            {
                 self.unify_matching_labels(required, actual)
             }
             _ => self.unify_row(&inner, &outer),
@@ -376,7 +406,8 @@ impl Inference {
         match (&left, &right) {
             (Row::Var(id), row) | (row, Row::Var(id)) => self.bind_row(*id, row),
             (Row::Closed(a), Row::Closed(b)) => self.unify_closed_labels(a, b),
-            (Row::Open(id, required), Row::Closed(actual)) | (Row::Closed(actual), Row::Open(id, required)) => {
+            (Row::Open(id, required), Row::Closed(actual))
+            | (Row::Closed(actual), Row::Open(id, required)) => {
                 self.unify_open_closed(*id, required, actual)
             }
             (Row::Open(a, left_labels), Row::Open(b, right_labels)) => {
@@ -407,13 +438,16 @@ impl Inference {
         let right = self.resolve_row(right);
         match (&left, &right) {
             (Row::Closed(a), Row::Closed(b)) => Row::Closed(self.merge_labels(a, b)),
-            (Row::Var(id), Row::Closed(labels)) | (Row::Closed(labels), Row::Var(id)) if labels.is_empty() => {
+            (Row::Var(id), Row::Closed(labels)) | (Row::Closed(labels), Row::Var(id))
+                if labels.is_empty() =>
+            {
                 Row::Var(*id)
             }
             (Row::Var(id), Row::Closed(labels)) | (Row::Closed(labels), Row::Var(id)) => {
                 Row::Open(*id, labels.clone())
             }
-            (Row::Open(id, labels), Row::Closed(more)) | (Row::Closed(more), Row::Open(id, labels)) => {
+            (Row::Open(id, labels), Row::Closed(more))
+            | (Row::Closed(more), Row::Open(id, labels)) => {
                 Row::Open(*id, self.merge_labels(labels, more))
             }
             (Row::Var(id), Row::Open(tail, labels)) | (Row::Open(tail, labels), Row::Var(id)) => {
@@ -453,7 +487,10 @@ impl Inference {
     }
 
     fn label_names(&self, labels: &[Ty]) -> BTreeSet<String> {
-        labels.iter().map(|ty| effect_ctor(&self.resolve(ty))).collect()
+        labels
+            .iter()
+            .map(|ty| effect_ctor(&self.resolve(ty)))
+            .collect()
     }
 
     fn unify_closed_labels(&mut self, left: &[Ty], right: &[Ty]) -> Result<(), TypeError> {
@@ -474,15 +511,31 @@ impl Inference {
         Ok(())
     }
 
-    fn unify_open_closed(&mut self, tail: u32, required: &[Ty], actual: &[Ty]) -> Result<(), TypeError> {
+    fn unify_open_closed(
+        &mut self,
+        tail: u32,
+        required: &[Ty],
+        actual: &[Ty],
+    ) -> Result<(), TypeError> {
         let required_names = self.label_names(required);
         let actual_names = self.label_names(actual);
         if !required_names.is_subset(&actual_names) {
             return Err(TypeError::Mismatch);
         }
         self.unify_matching_labels(required, actual)?;
-        let rest: Vec<_> = actual.iter().cloned().filter(|ty| !required_names.contains(&effect_ctor(&self.resolve(ty)))).collect();
-        self.bind_row(tail, &if rest.is_empty() { Row::pure() } else { Row::Closed(rest) })
+        let rest: Vec<_> = actual
+            .iter()
+            .filter(|&ty| !required_names.contains(&effect_ctor(&self.resolve(ty))))
+            .cloned()
+            .collect();
+        self.bind_row(
+            tail,
+            &if rest.is_empty() {
+                Row::pure()
+            } else {
+                Row::Closed(rest)
+            },
+        )
     }
 
     pub fn row_within(&self, inner: &Row, outer: &Row) -> bool {
@@ -491,11 +544,16 @@ impl Inference {
         if matches!(inner, Row::Var(_)) || matches!(outer, Row::Var(_)) {
             return true;
         }
-        if !self.label_names(inner.labels()).is_subset(&self.label_names(outer.labels())) {
+        if !self
+            .label_names(inner.labels())
+            .is_subset(&self.label_names(outer.labels()))
+        {
             return false;
         }
         let mut probe = self.clone();
-        probe.unify_matching_labels(inner.labels(), outer.labels()).is_ok()
+        probe
+            .unify_matching_labels(inner.labels(), outer.labels())
+            .is_ok()
     }
 
     fn labels_by_ctor(&self, labels: &[Ty]) -> HashMap<String, Ty> {
@@ -590,7 +648,12 @@ impl Inference {
                 let bound = self.resolve_row(&constraint.bound);
                 let mut variables = BTreeSet::new();
                 row.free_variables(&mut variables);
-                (!variables.is_disjoint(&scheme.variables)).then_some(RowConstraint { row, bound, code: constraint.code, span: constraint.span })
+                (!variables.is_disjoint(&scheme.variables)).then_some(RowConstraint {
+                    row,
+                    bound,
+                    code: constraint.code,
+                    span: constraint.span,
+                })
             })
             .collect();
         scheme
@@ -600,7 +663,10 @@ impl Inference {
         self.instantiate_constrained(scheme).0
     }
 
-    pub fn instantiate_constrained(&mut self, scheme: &Scheme) -> (Ty, Vec<ComparisonConstraint>, Vec<RowConstraint>) {
+    pub fn instantiate_constrained(
+        &mut self,
+        scheme: &Scheme,
+    ) -> (Ty, Vec<ComparisonConstraint>, Vec<RowConstraint>) {
         let replacements: HashMap<_, _> = scheme
             .variables
             .iter()
@@ -627,7 +693,12 @@ impl std::fmt::Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Ty::Var(id) => write!(f, "t{id}"),
-            Ty::Fn(args, ret, row) => write!(f, "Fn({} => {ret}{})", display_arguments(args), row.suffix()),
+            Ty::Fn(args, ret, row) => write!(
+                f,
+                "Fn({} => {ret}{})",
+                display_arguments(args),
+                row.suffix()
+            ),
             Ty::Int => write!(f, "Int"),
             Ty::Float => write!(f, "Float"),
             Ty::Bool => write!(f, "Bool"),
@@ -637,7 +708,9 @@ impl std::fmt::Display for Ty {
             Ty::Void => write!(f, "Void"),
             Ty::Error => write!(f, "Error"),
             Ty::Adt(name, args) | Ty::Abstract(name, args) => {
-                let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
+                let name = name
+                    .rsplit_once('$')
+                    .map_or(name.as_str(), |(_, source)| source);
                 match args.as_slice() {
                     [] => write!(f, "{name}"),
                     [argument] => write!(f, "{argument} {name}"),
@@ -649,7 +722,11 @@ impl std::fmt::Display for Ty {
 }
 
 fn display_arguments(types: &[Ty]) -> String {
-    types.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+    types
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 // --- 定義の型の印字（§58.3） ---
@@ -682,7 +759,12 @@ impl Printer {
                 format!("{}{}", self.ty(ret), self.row(row))
             }
             Ty::Fn(args, ret, row) => {
-                format!("Fn({} => {}{})", self.arguments(args), self.ty(ret), self.row(row))
+                format!(
+                    "Fn({} => {}{})",
+                    self.arguments(args),
+                    self.ty(ret),
+                    self.row(row)
+                )
             }
             Ty::Int => "Int".into(),
             Ty::Float => "Float".into(),
@@ -693,7 +775,9 @@ impl Printer {
             Ty::Void => "Void".into(),
             Ty::Error => "Error".into(),
             Ty::Adt(name, args) | Ty::Abstract(name, args) => {
-                let name = name.rsplit_once('$').map_or(name.as_str(), |(_, source)| source);
+                let name = name
+                    .rsplit_once('$')
+                    .map_or(name.as_str(), |(_, source)| source);
                 match args.as_slice() {
                     [] => name.to_string(),
                     [argument] => format!("{} {name}", self.ty(argument)),
@@ -704,7 +788,11 @@ impl Printer {
     }
 
     fn arguments(&mut self, types: &[Ty]) -> String {
-        types.iter().map(|ty| self.ty(ty)).collect::<Vec<_>>().join(", ")
+        types
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// §20: the result's row. The known labels print in alphabetical order; an
@@ -713,13 +801,21 @@ impl Printer {
         match row {
             Row::Closed(labels) => {
                 let labels = self.labels(labels);
-                if labels.is_empty() { String::new() } else { format!(" {{{labels}}}") }
+                if labels.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {{{labels}}}")
+                }
             }
             Row::Var(id) => format!(" {{{}}}", self.variable(*id)),
             Row::Open(id, labels) => {
                 let variable = self.variable(*id);
                 let labels = self.labels(labels);
-                if labels.is_empty() { format!(" {{{variable}}}") } else { format!(" {{{labels} | {variable}}}") }
+                if labels.is_empty() {
+                    format!(" {{{variable}}}")
+                } else {
+                    format!(" {{{labels} | {variable}}}")
+                }
             }
         }
     }
@@ -753,12 +849,17 @@ fn variable_name(index: usize) -> String {
 }
 
 fn label_matches_effect(label: &str, effect: &str) -> bool {
-    label == effect || label.ends_with(&format!(" {effect}")) || label.ends_with(&format!(") {effect}"))
+    label == effect
+        || label.ends_with(&format!(" {effect}"))
+        || label.ends_with(&format!(") {effect}"))
 }
 
 fn effect_ctor(ty: &Ty) -> String {
     match ty {
-        Ty::Adt(name, _) => name.rsplit_once('$').map_or(name.as_str(), |(_, name)| name).into(),
+        Ty::Adt(name, _) => name
+            .rsplit_once('$')
+            .map_or(name.as_str(), |(_, name)| name)
+            .into(),
         ty => ty.to_string(),
     }
 }
@@ -766,12 +867,16 @@ fn effect_ctor(ty: &Ty) -> String {
 fn collect_row_vars(ty: &Ty, result: &mut BTreeSet<u32>) {
     match ty {
         Ty::Fn(args, ret, row) => {
-            for arg in args { collect_row_vars(arg, result); }
+            for arg in args {
+                collect_row_vars(arg, result);
+            }
             collect_row_vars(ret, result);
             row.free_variables(result);
         }
         Ty::Adt(_, args) | Ty::Abstract(_, args) => {
-            for arg in args { collect_row_vars(arg, result); }
+            for arg in args {
+                collect_row_vars(arg, result);
+            }
         }
         _ => {}
     }
@@ -779,20 +884,41 @@ fn collect_row_vars(ty: &Ty, result: &mut BTreeSet<u32>) {
 
 impl Scheme {
     pub(crate) fn resolved(&self, inference: &Inference) -> Self {
-        let resolve = |id| if self.variables.contains(&id) { Ty::Var(id) } else { inference.resolve(&Ty::Var(id)) };
+        let resolve = |id| {
+            if self.variables.contains(&id) {
+                Ty::Var(id)
+            } else {
+                inference.resolve(&Ty::Var(id))
+            }
+        };
         Self {
             variables: self.variables.clone(),
             ty: self.ty.map_variables(&resolve),
-            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.map_variables(&resolve))).collect(),
-            row_constraints: self.row_constraints.iter().map(|constraint| constraint.map_variables(&resolve)).collect(),
+            constraints: self
+                .constraints
+                .iter()
+                .map(|constraint| constraint.with_type(constraint.ty.map_variables(&resolve)))
+                .collect(),
+            row_constraints: self
+                .row_constraints
+                .iter()
+                .map(|constraint| constraint.map_variables(&resolve))
+                .collect(),
         }
     }
 
     pub(crate) fn as_thunk(&self) -> Self {
-        Self { variables: self.variables.clone(), ty: Ty::fn_of(vec![], self.ty.clone()), constraints: self.constraints.clone(), row_constraints: self.row_constraints.clone() }
+        Self {
+            variables: self.variables.clone(),
+            ty: Ty::fn_of(vec![], self.ty.clone()),
+            constraints: self.constraints.clone(),
+            row_constraints: self.row_constraints.clone(),
+        }
     }
 
-    pub(crate) fn body(&self) -> &Ty { &self.ty }
+    pub(crate) fn body(&self) -> &Ty {
+        &self.ty
+    }
 
     /// §58.3: the canonical print of the scheme's type. The variables are
     /// renamed `A`, `B`, …, `A1`, … in order of first appearance, so the same
@@ -821,9 +947,22 @@ pub struct TypeRealization {
 
 impl TypeRealization {
     pub(crate) fn apply(&self, arguments: &[Ty]) -> Ty {
-        assert_eq!(self.parameters.len(), arguments.len(), "checked abstract type arity");
-        let substitutions: HashMap<_, _> = self.parameters.iter().copied().zip(arguments.iter()).collect();
-        self.body.map_variables(&|id| substitutions.get(&id).map_or(Ty::Var(id), |ty| (*ty).clone()))
+        assert_eq!(
+            self.parameters.len(),
+            arguments.len(),
+            "checked abstract type arity"
+        );
+        let substitutions: HashMap<_, _> = self
+            .parameters
+            .iter()
+            .copied()
+            .zip(arguments.iter())
+            .collect();
+        self.body.map_variables(&|id| {
+            substitutions
+                .get(&id)
+                .map_or(Ty::Var(id), |ty| (*ty).clone())
+        })
     }
 }
 
@@ -832,11 +971,19 @@ impl Ty {
         match self {
             Ty::Abstract(name, args) => {
                 names.insert(name.clone());
-                for arg in args { arg.abstract_names(names); }
+                for arg in args {
+                    arg.abstract_names(names);
+                }
             }
-            Ty::Adt(_, args) => { for arg in args { arg.abstract_names(names); } }
+            Ty::Adt(_, args) => {
+                for arg in args {
+                    arg.abstract_names(names);
+                }
+            }
             Ty::Fn(args, result, _) => {
-                for arg in args { arg.abstract_names(names); }
+                for arg in args {
+                    arg.abstract_names(names);
+                }
                 result.abstract_names(names);
             }
             _ => {}
@@ -845,28 +992,69 @@ impl Ty {
 
     pub(crate) fn reveal(&self, names: &HashMap<String, TypeRealization>) -> Self {
         match self {
-            Self::Abstract(name, args) if names.contains_key(name) => names[name].apply(args).reveal(names),
-            Self::Abstract(name, args) => Self::Abstract(name.clone(), args.iter().map(|ty| ty.reveal(names)).collect()),
-            Self::Adt(name, args) => Self::Adt(name.clone(), args.iter().map(|ty| ty.reveal(names)).collect()),
-            Self::Fn(args, result, row) => Self::Fn(args.iter().map(|ty| ty.reveal(names)).collect(), Box::new(result.reveal(names)), row.clone()),
+            Self::Abstract(name, args) if names.contains_key(name) => {
+                names[name].apply(args).reveal(names)
+            }
+            Self::Abstract(name, args) => Self::Abstract(
+                name.clone(),
+                args.iter().map(|ty| ty.reveal(names)).collect(),
+            ),
+            Self::Adt(name, args) => Self::Adt(
+                name.clone(),
+                args.iter().map(|ty| ty.reveal(names)).collect(),
+            ),
+            Self::Fn(args, result, row) => Self::Fn(
+                args.iter().map(|ty| ty.reveal(names)).collect(),
+                Box::new(result.reveal(names)),
+                row.clone(),
+            ),
             ty => ty.clone(),
         }
     }
 
     pub(crate) fn rename_modules(&self, names: &HashMap<String, String>) -> Self {
         match self {
-            Self::Adt(name, args) => Self::Adt(crate::functor_instances::rename(name, names), args.iter().map(|ty| ty.rename_modules(names)).collect()),
-            Self::Abstract(name, args) => Self::Abstract(crate::functor_instances::rename(name, names), args.iter().map(|ty| ty.rename_modules(names)).collect()),
-            Self::Fn(args, result, row) => Self::Fn(args.iter().map(|ty| ty.rename_modules(names)).collect(), Box::new(result.rename_modules(names)), row.clone()),
+            Self::Adt(name, args) => Self::Adt(
+                crate::functor_instances::rename(name, names),
+                args.iter().map(|ty| ty.rename_modules(names)).collect(),
+            ),
+            Self::Abstract(name, args) => Self::Abstract(
+                crate::functor_instances::rename(name, names),
+                args.iter().map(|ty| ty.rename_modules(names)).collect(),
+            ),
+            Self::Fn(args, result, row) => Self::Fn(
+                args.iter().map(|ty| ty.rename_modules(names)).collect(),
+                Box::new(result.rename_modules(names)),
+                row.clone(),
+            ),
             ty => ty.clone(),
         }
     }
 
     pub(crate) fn qualify_data_types(&self, names: &HashMap<String, String>) -> Self {
         match self {
-            Self::Adt(name, arguments) => Self::Adt(names.get(name).unwrap_or(name).clone(), arguments.iter().map(|ty| ty.qualify_data_types(names)).collect()),
-            Self::Abstract(name, arguments) => Self::Abstract(name.clone(), arguments.iter().map(|ty| ty.qualify_data_types(names)).collect()),
-            Self::Fn(parameters, result, row) => Self::Fn(parameters.iter().map(|ty| ty.qualify_data_types(names)).collect(), Box::new(result.qualify_data_types(names)), row.clone()),
+            Self::Adt(name, arguments) => Self::Adt(
+                names.get(name).unwrap_or(name).clone(),
+                arguments
+                    .iter()
+                    .map(|ty| ty.qualify_data_types(names))
+                    .collect(),
+            ),
+            Self::Abstract(name, arguments) => Self::Abstract(
+                name.clone(),
+                arguments
+                    .iter()
+                    .map(|ty| ty.qualify_data_types(names))
+                    .collect(),
+            ),
+            Self::Fn(parameters, result, row) => Self::Fn(
+                parameters
+                    .iter()
+                    .map(|ty| ty.qualify_data_types(names))
+                    .collect(),
+                Box::new(result.qualify_data_types(names)),
+                row.clone(),
+            ),
             ty => ty.clone(),
         }
     }
@@ -877,22 +1065,37 @@ impl Scheme {
         Self {
             variables: self.variables.clone(),
             ty: self.ty.reveal(names),
-            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.reveal(names))).collect(),
+            constraints: self
+                .constraints
+                .iter()
+                .map(|constraint| constraint.with_type(constraint.ty.reveal(names)))
+                .collect(),
             row_constraints: self.row_constraints.clone(),
         }
     }
 
     pub(crate) fn rename_modules(&self, names: &HashMap<String, String>) -> Self {
-        Self { variables: self.variables.clone(), ty: self.ty.rename_modules(names),
-            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.rename_modules(names))).collect(),
-            row_constraints: self.row_constraints.clone() }
+        Self {
+            variables: self.variables.clone(),
+            ty: self.ty.rename_modules(names),
+            constraints: self
+                .constraints
+                .iter()
+                .map(|constraint| constraint.with_type(constraint.ty.rename_modules(names)))
+                .collect(),
+            row_constraints: self.row_constraints.clone(),
+        }
     }
 
     pub(crate) fn qualify_data_types(&self, names: &HashMap<String, String>) -> Self {
         Self {
             variables: self.variables.clone(),
             ty: self.ty.qualify_data_types(names),
-            constraints: self.constraints.iter().map(|constraint| constraint.with_type(constraint.ty.qualify_data_types(names))).collect(),
+            constraints: self
+                .constraints
+                .iter()
+                .map(|constraint| constraint.with_type(constraint.ty.qualify_data_types(names)))
+                .collect(),
             row_constraints: self.row_constraints.clone(),
         }
     }

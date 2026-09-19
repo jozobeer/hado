@@ -2,7 +2,8 @@ use hado::{check_source, types::Ty};
 
 #[test]
 fn signature_matching_exports_only_declared_values() {
-    let prefix = "module S def inc(x: Int): Int\nimplement S as M def hidden = 2 def inc x => x + hidden";
+    let prefix =
+        "module S def inc(x: Int): Int\nimplement S as M def hidden = 2 def inc x => x + hidden";
     assert_eq!(
         check_source(&format!("def main = M.inc 1\n{prefix}"), "t")
             .unwrap()
@@ -22,7 +23,8 @@ fn signature_matching_exports_only_declared_values() {
 #[test]
 fn signature_matching_rejects_missing_and_mismatched_values() {
     for body in ["def other = 1", "def inc x => true"] {
-        let source = format!("def main = 1\nmodule S def inc(x: Int): Int\nimplement S as M {body}");
+        let source =
+            format!("def main = 1\nmodule S def inc(x: Int): Int\nimplement S as M {body}");
         assert!(check_source(&source, "t").is_err());
     }
 }
@@ -30,7 +32,14 @@ fn signature_matching_rejects_missing_and_mismatched_values() {
 #[test]
 fn abstract_types_hide_record_representation() {
     let prefix = "module S type T def make(x: Int): T\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }";
-    assert_eq!(check_source(&format!("def main = M.make 1\n{prefix}"), "t").err().unwrap().code.as_deref(), Some("E705"));
+    assert_eq!(
+        check_source(&format!("def main = M.make 1\n{prefix}"), "t")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E705")
+    );
     let source = format!("def main = let item = M.make 1 -> item.value\n{prefix}");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
@@ -54,7 +63,9 @@ fn duplicate_module_members_are_not_silently_overwritten() {
         "def value x => x def value x => x + 1",
         "type T = { x: Int } type T = { y: Int } def value x => x",
     ] {
-        let source = format!("def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M {body}");
+        let source = format!(
+            "def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M {body}"
+        );
         assert!(check_source(&source, "t").is_err(), "{source}");
     }
 }
@@ -64,7 +75,8 @@ fn qualified_abstract_annotations_preserve_module_identity() {
     let prefix = "module S type T def make(x: Int): T\nimplement S as M type Representation = { x: Int } type T = Representation def make x => { x = x }\nimplement S as N type Representation = { x: Int } type T = Representation def make x => { x = x }";
     let source = format!("def accept (x: M.T) => x == M.make 1 def main = accept (M.make 1) && N.make 1 == N.make 1\n{prefix}");
     assert_eq!(check_source(&source, "t").unwrap().main, Ty::Bool);
-    let source = format!("def accept (x: M.T) => x == M.make 1 def main = accept (N.make 1)\n{prefix}");
+    let source =
+        format!("def accept (x: M.T) => x == M.make 1 def main = accept (N.make 1)\n{prefix}");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
         Some("E305")
@@ -73,8 +85,16 @@ fn qualified_abstract_annotations_preserve_module_identity() {
 
 #[test]
 fn nested_modules_are_rejected_before_name_resolution() {
-    let source = "def main = (implement S as Inner def run x => x + 1)\nmodule S def run(x: Int): Int";
-    assert_eq!(check_source(source, "nested.hd").err().unwrap().code.as_deref(), Some("E100"));
+    let source =
+        "def main = (implement S as Inner def run x => x + 1)\nmodule S def run(x: Int): Int";
+    assert_eq!(
+        check_source(source, "nested.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E100")
+    );
 }
 
 #[test]
@@ -120,14 +140,20 @@ fn internal_record_schemas_use_qualified_result_types() {
     let checked = check_source(source, "t").unwrap();
     let mut inference = hado::types::Inference::default();
     let ty = inference.instantiate(&checked.module_records["A.Representation"].1);
-    assert_eq!(ty, Ty::fn_of(vec![Ty::Int], Ty::Adt("A.Representation".into(), vec![])));
+    assert_eq!(
+        ty,
+        Ty::fn_of(vec![Ty::Int], Ty::Adt("A.Representation".into(), vec![]))
+    );
     let make = inference.instantiate(&checked.module_definitions["A.make"]);
     let Ty::Fn(args, result, _) = make else {
         panic!("make is a function");
     };
     assert_eq!(args, vec![Ty::Int]);
     assert_eq!(*result, Ty::Adt("A.Representation".into(), vec![]));
-    assert!(checked.composite_types.values().any(|ty| ty == &Ty::Adt("A.Representation".into(), vec![])));
+    assert!(checked
+        .composite_types
+        .values()
+        .any(|ty| ty == &Ty::Adt("A.Representation".into(), vec![])));
 }
 
 #[test]

@@ -5,17 +5,44 @@ fn application_type_errors_point_to_the_failing_argument() {
     for padding in 0..20 {
         for (prefix, argument, suffix, code) in [
             ("def add x => x + 1\ndef main = add ", "true", "", "E305"),
-            ("def add (x: Int, y: Int) => x + y\ndef main = add 1 ", "true", "", "E305"),
+            (
+                "def add (x: Int, y: Int) => x + y\ndef main = add 1 ",
+                "true",
+                "",
+                "E305",
+            ),
             ("def add x => x + 1\ndef main = ", "true", " |> add", "E305"),
-            ("def add (x: Int, y: Int) => x + y\ndef main = 1 |> add ", "true", "", "E305"),
-            ("type Box = | Pack(Int)\ndef main = Pack(", "true", ")", "E305"),
-            ("def self_apply x => x ", "x", "\ndef main = self_apply 1", "E306"),
+            (
+                "def add (x: Int, y: Int) => x + y\ndef main = 1 |> add ",
+                "true",
+                "",
+                "E305",
+            ),
+            (
+                "type Box = | Pack(Int)\ndef main = Pack(",
+                "true",
+                ")",
+                "E305",
+            ),
+            (
+                "def self_apply x => x ",
+                "x",
+                "\ndef main = self_apply 1",
+                "E306",
+            ),
         ] {
             let prefix = format!("{prefix}\n{}", " ".repeat(padding));
             let source = format!("{prefix}{argument}{suffix}");
             let error = check_source(&source, "argument-anchor.hd").err().unwrap();
             assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
-            assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, padding + 1), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (
+                    prefix.bytes().filter(|b| *b == b'\n').count() + 1,
+                    padding + 1
+                ),
+                "{source}: {error}"
+            );
         }
     }
 }
@@ -23,13 +50,24 @@ fn application_type_errors_point_to_the_failing_argument() {
 #[test]
 fn application_arity_and_non_function_errors_keep_their_own_anchors() {
     for (source, code, anchor) in [
-        ("type Holder = | Hold(Fn(Int => Int))\ndef main = Hold(fn(a, b => a + b))", "E301", "Hold(fn"),
+        (
+            "type Holder = | Hold(Fn(Int => Int))\ndef main = Hold(fn(a, b => a + b))",
+            "E301",
+            "Hold(fn",
+        ),
         ("def main = 1 |> true", "E305", "true"),
     ] {
         let error = check_source(source, "application-anchor.hd").err().unwrap();
         let prefix = &source[..source.find(anchor).unwrap()];
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
-        assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (
+                prefix.bytes().filter(|b| *b == b'\n').count() + 1,
+                prefix.rsplit('\n').next().unwrap().len() + 1
+            ),
+            "{error}"
+        );
     }
 }
 
@@ -37,7 +75,10 @@ const SOURCE_PATH: &str = "generated-order.hd";
 
 fn code(source: &str) -> String {
     match check_source(source, SOURCE_PATH) {
-        Err(error) => error.code.clone().unwrap_or_else(|| panic!("uncoded diagnostic: {error:?}")),
+        Err(error) => error
+            .code
+            .clone()
+            .unwrap_or_else(|| panic!("uncoded diagnostic: {error:?}")),
         Ok(_) => panic!("expected a diagnostic for {source}"),
     }
 }
@@ -114,7 +155,11 @@ fn arm_diagnostics_point_to_pipe_with_arbitrary_spacing() {
             ("def main = if true | true => 1 | false => 2 ", "0", "E403"),
             ("def main = if 1 | 1 => 10 ", "1 => 20 | 0", "E405"),
             ("def main = if | 1 > 0 => 1 ", "1 > 0 => 2 | 0", "E406"),
-            ("def f | Some(x) => Some(x + 1) ", "None => None\ndef main = f (Some(1))", "E508"),
+            (
+                "def f | Some(x) => Some(x + 1) ",
+                "None => None\ndef main = f (Some(1))",
+                "E508",
+            ),
         ] {
             let prefix = format!("{prefix}{}", " ".repeat(padding));
             let source = format!("{prefix}| {}{suffix}", " ".repeat(padding + 2));
@@ -138,7 +183,10 @@ fn all_type_references_resolve_before_expression_type_errors() {
             let source = format!("def broken = 1 + true\n{declaration}\ndef main = broken");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E204"), "{source}");
-            assert_eq!((error.line, error.col), (2, declaration.find(&format!("Missing{index}")).unwrap() + 1));
+            assert_eq!(
+                (error.line, error.col),
+                (2, declaration.find(&format!("Missing{index}")).unwrap() + 1)
+            );
         }
     }
 }
@@ -169,7 +217,10 @@ fn recursive_type_errors_use_source_order_across_declarations() {
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E302"));
             let changed = if left == first { "T List" } else { "T Option" };
-            assert_eq!((error.line, error.col), (1, padding + left.find(changed).unwrap() + 1));
+            assert_eq!(
+                (error.line, error.col),
+                (1, padding + left.find(changed).unwrap() + 1)
+            );
         }
     }
 }
@@ -194,8 +245,13 @@ fn unresolved_values_and_intrinsics_precede_type_errors() {
 fn recursion_and_unbound_names_share_source_order() {
     let cycle = "def a x => b x\ndef b x => a x";
     let unknown = "def unknown = missing";
-    for (prefix, expected) in [(format!("{cycle}\n{unknown}"), "E208"), (format!("{unknown}\n{cycle}"), "E204")] {
-        let error = check_source(&format!("{prefix}\ndef main = a unknown"), SOURCE_PATH).err().unwrap();
+    for (prefix, expected) in [
+        (format!("{cycle}\n{unknown}"), "E208"),
+        (format!("{unknown}\n{cycle}"), "E204"),
+    ] {
+        let error = check_source(&format!("{prefix}\ndef main = a unknown"), SOURCE_PATH)
+            .err()
+            .unwrap();
         assert_eq!(error.code.as_deref(), Some(expected));
         assert_eq!(error.line, 1);
     }
@@ -207,7 +263,9 @@ fn mixed_recursion_errors_use_the_first_declaration() {
         ("def ping x => seed\ndef seed = ping 0", "E208"),
         ("def seed = ping 0\ndef ping x => seed", "E207"),
     ] {
-        let error = check_source(&format!("{prefix}\ndef main = seed"), SOURCE_PATH).err().unwrap();
+        let error = check_source(&format!("{prefix}\ndef main = seed"), SOURCE_PATH)
+            .err()
+            .unwrap();
         assert_eq!(error.code.as_deref(), Some(expected));
         assert_eq!((error.line, error.col), (1, 1));
     }
@@ -216,7 +274,10 @@ fn mixed_recursion_errors_use_the_first_declaration() {
 #[test]
 fn type_errors_are_ordered_independently_of_definition_dependencies() {
     for padding in 0..20 {
-        let source = format!("def first = {}true + later\ndef later = 1 + \"bad\"\ndef main = first", " ".repeat(padding));
+        let source = format!(
+            "def first = {}true + later\ndef later = 1 + \"bad\"\ndef main = first",
+            " ".repeat(padding)
+        );
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E305"));
         assert_eq!((error.line, error.col), (1, 13 + padding));
@@ -225,7 +286,12 @@ fn type_errors_are_ordered_independently_of_definition_dependencies() {
 
 #[test]
 fn broken_dependencies_do_not_create_earlier_type_errors() {
-    for use_site in ["later + 1", "later 1", "later.value", "let x? = later -> Some(x + 1)"] {
+    for use_site in [
+        "later + 1",
+        "later 1",
+        "later.value",
+        "let x? = later -> Some(x + 1)",
+    ] {
         let source = format!("def first = {use_site}\ndef later = 1 + \"bad\"\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
@@ -255,21 +321,26 @@ fn definition_type_errors_do_not_stop_source_order_checks() {
             "def rec later x => later [x]",
             "def later x: String => x + 1",
         ] {
-            let source = format!("def first = {}true + later 1\n{definition}\ndef main = first", " ".repeat(padding));
+            let source = format!(
+                "def first = {}true + later 1\n{definition}\ndef main = first",
+                " ".repeat(padding)
+            );
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
-            assert_eq!((error.line, error.col), (1, 13 + padding), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (1, 13 + padding),
+                "{source}: {error}"
+            );
         }
     }
 }
 
 #[test]
 fn recursive_type_failures_keep_call_arity_without_cascades() {
-    for (use_site, expected, line) in [
-        ("later 1", "E307", 2),
-        ("later 1 2", "E301", 1),
-    ] {
-        let source = format!("def first = {use_site}\ndef rec later x => later [x]\ndef main = first");
+    for (use_site, expected, line) in [("later 1", "E307", 2), ("later 1 2", "E301", 1)] {
+        let source =
+            format!("def first = {use_site}\ndef rec later x => later [x]\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
         assert_eq!(error.line, line, "{source}: {error}");
@@ -283,7 +354,8 @@ fn invalid_module_bodies_do_not_fake_polymorphism_errors() {
         ("def f x => if x => fn(y => y + y) x | false", "E305"),
         ("def rec f x => f [x]", "E307"),
     ] {
-        let source = format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
+        let source =
+            format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
     }
@@ -296,7 +368,8 @@ fn invalid_module_bodies_retain_explicit_signature_mismatches() {
         "def f x y => x + y + true",
         "def f = fn(x, y => x + y + true)",
     ] {
-        let source = format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
+        let source =
+            format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
         assert_eq!((error.line, error.col), (3, 1));
@@ -322,7 +395,10 @@ fn invalid_recursive_groups_do_not_leave_unresolved_projections() {
 
 #[test]
 fn non_record_projection_is_a_positioned_type_error() {
-    for prefix in ["def later x: String => x + 1", "def later (x: Int): Int => x + 1"] {
+    for prefix in [
+        "def later x: String => x + 1",
+        "def later (x: Int): Int => x + 1",
+    ] {
         let source = format!("def first = later.value\n{prefix}\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
@@ -333,7 +409,9 @@ fn non_record_projection_is_a_positioned_type_error() {
 #[test]
 fn deferred_non_record_projection_keeps_the_receiver_position() {
     let prefix = "def get x => ";
-    let source = format!("type A = {{ value: Int }}\ntype B = {{ value: Bool }}\n{prefix}x.value\ndef main = get 1");
+    let source = format!(
+        "type A = {{ value: Int }}\ntype B = {{ value: Bool }}\n{prefix}x.value\ndef main = get 1"
+    );
     let error = check_source(&source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
     assert_eq!((error.line, error.col), (3, prefix.len() + 1));
@@ -389,7 +467,8 @@ fn module_errors_follow_source_order_even_with_outer_dependencies() {
 #[test]
 fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
     for index in 0..20 {
-        let declaration = format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})");
+        let declaration =
+            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})");
         let first = "def first = true + 1";
         let source = format!("{first}\n{declaration}\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -399,7 +478,10 @@ fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
         let source = format!("{declaration}\n{first}\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E302"), "{error}");
-        assert_eq!((error.line, error.col), (1, declaration.find("T List").unwrap() + 1));
+        assert_eq!(
+            (error.line, error.col),
+            (1, declaration.find("T List").unwrap() + 1)
+        );
     }
 }
 
@@ -431,7 +513,14 @@ fn polymorphic_recursion_points_to_the_recursive_application() {
             let source = format!("{prefix}{call}\ndef main = poly 1");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
-            assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.lines().last().unwrap().len() + 1), "{error}");
+            assert_eq!(
+                (error.line, error.col),
+                (
+                    prefix.lines().count(),
+                    prefix.lines().last().unwrap().len() + 1
+                ),
+                "{error}"
+            );
         }
     }
 }
@@ -448,10 +537,26 @@ fn later_type_changing_recursive_calls_are_not_general_occurs_checks() {
 #[test]
 fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
     for (prefix, call, suffix) in [
-        ("def rec poly x => let invoke = poly -> ", "invoke [x]", "\ndef main = poly 1"),
-        ("def rec f x => ", "g [x]", "\ndef rec g y => f y\ndef main = f 1"),
-        ("def rec poly x => if true => fn(poly => poly 1) fn(n => n) | ", "poly [x]", "\ndef main = poly 1"),
-        ("def rec poly x y => ", "poly y [x]", "\ndef main = poly 1 1"),
+        (
+            "def rec poly x => let invoke = poly -> ",
+            "invoke [x]",
+            "\ndef main = poly 1",
+        ),
+        (
+            "def rec f x => ",
+            "g [x]",
+            "\ndef rec g y => f y\ndef main = f 1",
+        ),
+        (
+            "def rec poly x => if true => fn(poly => poly 1) fn(n => n) | ",
+            "poly [x]",
+            "\ndef main = poly 1",
+        ),
+        (
+            "def rec poly x y => ",
+            "poly y [x]",
+            "\ndef main = poly 1 1",
+        ),
     ] {
         let source = format!("{prefix}{call}{suffix}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -466,7 +571,10 @@ fn indirect_polymorphic_recursion_points_to_its_definition() {
         let name = format!("poly{index}");
         for (helper, body) in [
             ("", format!("fn(invoke => invoke [x]) {name}")),
-            ("", format!("let call = fn(invoke => invoke [x]) -> call {name}")),
+            (
+                "",
+                format!("let call = fn(invoke => invoke [x]) -> call {name}"),
+            ),
             ("def apply f x => f x\n", format!("apply {name} [x]")),
             ("def identity x => x\n", format!("(identity {name}) [x]")),
         ] {
@@ -474,25 +582,40 @@ fn indirect_polymorphic_recursion_points_to_its_definition() {
             let source = format!("{prefix}def rec {name} x => {body}\ndef main = {name} 1");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E307"), "{source}: {error}");
-            assert_eq!((error.line, error.col), (index + helper.lines().count() + 1, index + 1), "{source}: {error}");
+            assert_eq!(
+                (error.line, error.col),
+                (index + helper.lines().count() + 1, index + 1),
+                "{source}: {error}"
+            );
         }
     }
-    assert_eq!(code("def main = fn(invoke => invoke invoke) fn(x => x)"), "E306");
+    assert_eq!(
+        code("def main = fn(invoke => invoke invoke) fn(x => x)"),
+        "E306"
+    );
     check_source(
         "def rec poly x => fn(poly => poly [x]) fn(values => values)\ndef main = poly 1",
         SOURCE_PATH,
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 #[test]
 fn function_equality_points_to_the_operator() {
     for padding in 0..20 {
         for operator in ["==", "!="] {
-            let prefix = format!("def identity x => x\ndef main = identity{}", " ".repeat(padding));
+            let prefix = format!(
+                "def identity x => x\ndef main = identity{}",
+                " ".repeat(padding)
+            );
             let source = format!("{prefix}{operator} identity");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E703"), "{error}");
-            assert_eq!((error.line, error.col), (2, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+            assert_eq!(
+                (error.line, error.col),
+                (2, prefix.rsplit('\n').next().unwrap().len() + 1),
+                "{error}"
+            );
         }
     }
 }
@@ -525,24 +648,40 @@ fn field_name_errors_are_ordered_with_unresolved_value_names() {
         for field_first in [false, true] {
             let field = format!("def field{index} (x: R) => x.missing{index}");
             let value = format!("def value{index} = absent{index}");
-            let (first, second, anchor) = if field_first { (&field, &value, format!("missing{index}")) }
-                else { (&value, &field, format!("absent{index}")) };
+            let (first, second, anchor) = if field_first {
+                (&field, &value, format!("missing{index}"))
+            } else {
+                (&value, &field, format!("absent{index}"))
+            };
             let source = format!("type R = {{ known: Int }}\n{first}\n{second}\ndef main = field{index} {{ known = 1 }}");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-            assert_eq!((error.line, error.col), (2, first.find(&anchor).unwrap() + 1), "{error}: {source}");
+            assert_eq!(
+                (error.line, error.col),
+                (2, first.find(&anchor).unwrap() + 1),
+                "{error}: {source}"
+            );
         }
     }
 }
 
 #[test]
 fn independent_fields_survive_unresolved_payload_type_names() {
-    for broken in ["type Broken = { value: Missing }", "type Broken = | Bad(Missing)"] {
+    for broken in [
+        "type Broken = { value: Missing }",
+        "type Broken = | Bad(Missing)",
+    ] {
         let field = "def field (x: R) => x.missing";
-        let source = format!("type R = {{ known: Int }}\n{field}\n{broken}\ndef main = field {{ known = 1 }}");
+        let source = format!(
+            "type R = {{ known: Int }}\n{field}\n{broken}\ndef main = field {{ known = 1 }}"
+        );
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-        assert_eq!((error.line, error.col), (2, field.find("missing").unwrap() + 1), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (2, field.find("missing").unwrap() + 1),
+            "{error}"
+        );
     }
 }
 
@@ -558,7 +697,11 @@ fn independent_fields_precede_later_duplicate_declarations() {
             let source = format!("type R = {{ known: Int }}\n{field}\n{duplicates}\ndef main = field{index} {{ known = 1 }}");
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-            assert_eq!((error.line, error.col), (2, field.find("missing").unwrap() + 1), "{error}");
+            assert_eq!(
+                (error.line, error.col),
+                (2, field.find("missing").unwrap() + 1),
+                "{error}"
+            );
         }
     }
 }
@@ -586,7 +729,14 @@ fn duplicate_recovery_respects_module_scopes() {
         let before = &source[..source.find("missing").unwrap()];
         let error = check_source(source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-        assert_eq!((error.line, error.col), (before.lines().count(), before.rsplit('\n').next().unwrap().len() + 1), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (
+                before.lines().count(),
+                before.rsplit('\n').next().unwrap().len() + 1
+            ),
+            "{error}"
+        );
     }
 }
 
@@ -603,10 +753,18 @@ fn duplicate_bodies_still_report_independent_field_errors() {
     for first in [true, false] {
         let broken = "def dup (x: R) => x.missing";
         let other = "def dup x => x";
-        let (a, b) = if first { (broken, other) } else { (other, broken) };
+        let (a, b) = if first {
+            (broken, other)
+        } else {
+            (other, broken)
+        };
         let source = format!("type R = {{ known: Int }}\n{a}\n{b}\ndef main = dup {{ known = 1 }}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
-        let (code, line, col) = if first { ("E204", 2, broken.find("missing").unwrap() + 1) } else { ("E205", 3, broken.find("dup").unwrap() + 1) };
+        let (code, line, col) = if first {
+            ("E204", 2, broken.find("missing").unwrap() + 1)
+        } else {
+            ("E205", 3, broken.find("dup").unwrap() + 1)
+        };
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
         assert_eq!((error.line, error.col), (line, col), "{error}");
     }
@@ -638,22 +796,34 @@ fn ambiguous_interfaces_keep_possible_member_and_type_names() {
 
 #[test]
 fn ambiguous_module_bodies_retain_independent_diagnostics() {
-    for suffix in [
-        "module S\nmodule S",
-        "module S\nimplement S as M",
-    ] {
-        let prefix = "def main = 1\nimplement S as M\n type R = { known: Int }\n def bad (x: R) => x.";
+    for suffix in ["module S\nmodule S", "module S\nimplement S as M"] {
+        let prefix =
+            "def main = 1\nimplement S as M\n type R = { known: Int }\n def bad (x: R) => x.";
         let source = format!("{prefix}missing\n{suffix}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-        assert_eq!((error.line, error.col), (prefix.lines().count(), prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (
+                prefix.lines().count(),
+                prefix.rsplit('\n').next().unwrap().len() + 1
+            ),
+            "{error}"
+        );
     }
 }
 
 #[test]
 fn duplicate_signature_members_do_not_choose_a_public_type() {
     let source = "type A = { ok: Int }\ntype B = { bad: Int }\ndef early = (M.make 1).ok\n\n\ndef main = early\nmodule S def make(x: Int): A def make(x: Int): B\nimplement S as M def make x => { ok = x }";
-    assert_eq!(check_source(source, SOURCE_PATH).err().unwrap().code.as_deref(), Some("E205"));
+    assert_eq!(
+        check_source(source, SOURCE_PATH)
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E205")
+    );
 }
 
 #[test]
@@ -661,5 +831,8 @@ fn ambiguous_interfaces_still_reject_names_absent_from_every_candidate() {
     let source = "def main = M.missing 1\nmodule SA def first(x: Int): Int\nmodule SB def second(x: Int): Int\nimplement SA as M def first x => x\nimplement SB as M def second x => x";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-    assert_eq!((error.line, error.col), (1, source.find("missing").unwrap() + 1));
+    assert_eq!(
+        (error.line, error.col),
+        (1, source.find("missing").unwrap() + 1)
+    );
 }

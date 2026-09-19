@@ -13,7 +13,11 @@ impl Contracts {
         for item in items {
             if let Item::ModuleImpl(module) = item {
                 if !matches!(&module.form, ImplementationForm::Functor(_)) {
-                    result.implementations.entry(module.sig.clone()).or_default().push(module.name.clone());
+                    result
+                        .implementations
+                        .entry(module.sig.clone())
+                        .or_default()
+                        .push(module.name.clone());
                 }
             }
         }
@@ -21,9 +25,12 @@ impl Contracts {
             if let Item::ModuleSig(signature) = item {
                 for item in &signature.items {
                     if let Item::TypeDef(definition) = item {
-                        let implementation = result.implementation(&signature.name).map(str::to_owned);
-                        result.types.insert(format!("{}.{}", signature.name, definition.name),
-                            implementation.map(|name| format!("{name}.{}", definition.name)));
+                        let implementation =
+                            result.implementation(&signature.name).map(str::to_owned);
+                        result.types.insert(
+                            format!("{}.{}", signature.name, definition.name),
+                            implementation.map(|name| format!("{name}.{}", definition.name)),
+                        );
                     }
                 }
             }
@@ -44,7 +51,12 @@ impl Contracts {
             if let Item::ModuleSig(signature) = item {
                 for item in &signature.items {
                     if let Item::SigDef(member) = item {
-                        for ty in member.params.iter().filter_map(|param| param.ty.as_ref()).chain(member.ret.iter()) {
+                        for ty in member
+                            .params
+                            .iter()
+                            .filter_map(|param| param.ty.as_ref())
+                            .chain(member.ret.iter())
+                        {
                             self.check_type(ty, path, &mut diagnostics);
                         }
                     }
@@ -56,15 +68,25 @@ impl Contracts {
 
     fn check_type(&self, ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic>) {
         match &ty.kind {
-            TypeKind::Name(name) | TypeKind::Apply(name, _) if self.types.get(name) == Some(&None) => {
-                diagnostics.push(Diagnostic { related: None, path: path.into(), line: ty.span.line, col: ty.span.col,
-                    code: Some("E603".into()), message: "contract type requires exactly one implementation".into() });
+            TypeKind::Name(name) | TypeKind::Apply(name, _)
+                if self.types.get(name) == Some(&None) =>
+            {
+                diagnostics.push(Diagnostic {
+                    related: None,
+                    path: path.into(),
+                    line: ty.span.line,
+                    col: ty.span.col,
+                    code: Some("E603".into()),
+                    message: "contract type requires exactly one implementation".into(),
+                });
             }
             _ => {}
         }
         match &ty.kind {
             TypeKind::Apply(_, args) | TypeKind::Group(args) => {
-                for arg in args { self.check_type(arg, path, diagnostics); }
+                for arg in args {
+                    self.check_type(arg, path, diagnostics);
+                }
             }
             _ => {}
         }

@@ -18,7 +18,10 @@ fn source_files(root: &Path) -> Vec<PathBuf> {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 pending.push(path);
-            } else if matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            } else if matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("hd" | "hdi")
+            ) {
                 files.push(path);
             }
         }
@@ -89,9 +92,7 @@ fn collect_node(
             collect_node(value, path, true, pipelines);
             collect_node(target, path, false, pipelines);
         }
-        NodeKind::Neg(value) | NodeKind::Not(value) => {
-            collect_node(value, path, false, pipelines)
-        }
+        NodeKind::Neg(value) | NodeKind::Not(value) => collect_node(value, path, false, pipelines),
         NodeKind::Bin(_, left, right) => {
             collect_node(left, path, false, pipelines);
             collect_node(right, path, false, pipelines);

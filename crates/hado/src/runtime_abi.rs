@@ -106,22 +106,41 @@ impl RuntimeFunction {
             Self::BytesToStringUnchecked => Some("__bytes_to_string_unchecked"),
             Self::BytesAlloc => Some("__bytes_alloc"),
             Self::BytesFillUnchecked => Some("__bytes_fill_unchecked"),
-            Self::CanonicalFloat | Self::QuoteString | Self::QuoteChar | Self::Alloc | Self::PrintInt | Self::PrintString | Self::PrintErrorString | Self::AbortError | Self::PrintChar | Self::PrintFloat => None,
+            Self::CanonicalFloat
+            | Self::QuoteString
+            | Self::QuoteChar
+            | Self::Alloc
+            | Self::PrintInt
+            | Self::PrintString
+            | Self::PrintErrorString
+            | Self::AbortError
+            | Self::PrintChar
+            | Self::PrintFloat => None,
         }
     }
 
     pub fn from_intrinsic(name: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|function| function.intrinsic_name() == Some(name))
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|function| function.intrinsic_name() == Some(name))
     }
 
     pub fn is_polymorphic(self) -> bool {
-        matches!(self, Self::ArrayLength | Self::ArrayGet | Self::ArrayAlloc | Self::ArrayFillUnchecked)
+        matches!(
+            self,
+            Self::ArrayLength | Self::ArrayGet | Self::ArrayAlloc | Self::ArrayFillUnchecked
+        )
     }
 
     pub fn value_signature(self) -> Option<crate::mono::Signature> {
         use crate::mono::{Signature, Type};
         let (parameters, result) = match self {
-            Self::Alloc | Self::ArrayLength | Self::ArrayGet | Self::ArrayAlloc | Self::ArrayFillUnchecked => return None,
+            Self::Alloc
+            | Self::ArrayLength
+            | Self::ArrayGet
+            | Self::ArrayAlloc
+            | Self::ArrayFillUnchecked => return None,
             Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
             Self::QuoteString => (vec![Type::String], Type::String),
             Self::FloatToString | Self::CanonicalFloat => (vec![Type::Float], Type::String),
@@ -129,7 +148,9 @@ impl RuntimeFunction {
             Self::IntParseIsValid => (vec![Type::String], Type::Bool),
             Self::IntParseUnchecked => (vec![Type::String], Type::Int),
             Self::PrintInt => (vec![Type::Int], Type::Void),
-            Self::PrintString | Self::PrintErrorString | Self::AbortError => (vec![Type::String], Type::Void),
+            Self::PrintString | Self::PrintErrorString | Self::AbortError => {
+                (vec![Type::String], Type::Void)
+            }
             Self::PrintChar => (vec![Type::Char], Type::Void),
             Self::PrintFloat => (vec![Type::Float], Type::Void),
             Self::ArgvCount => (vec![Type::Int], Type::Int),
@@ -164,10 +185,61 @@ impl RuntimeFunction {
         Some(Signature { parameters, result })
     }
 
-    pub const ALL: &'static [Self] = &[Self::IoReadFile, Self::IoWriteFile, Self::IoReadDir, Self::IoReadStdin, Self::IoTakeBytes, Self::IoDirCount, Self::IoDirGet, Self::ArgvCount, Self::ArgvGet, Self::EnvHas, Self::EnvGet, Self::Cwd, Self::Alloc, Self::PrintInt, Self::StringLength, Self::StringConcat, Self::StringCompare, Self::PrintString, Self::PrintChar, Self::PrintFloat, Self::IntToString, Self::IntParseIsValid, Self::IntParseUnchecked, Self::FloatToString, Self::CharToString, Self::PrintErrorString, Self::AbortError, Self::QuoteString, Self::QuoteChar, Self::CanonicalFloat, Self::BytesLength, Self::BytesGet, Self::BytesIsUtf8, Self::BytesDisplay, Self::BytesOfString, Self::BytesToStringUnchecked, Self::BytesAlloc, Self::BytesFillUnchecked, Self::StringSlice, Self::StringGet, Self::StringFind, Self::ArrayLength, Self::ArrayGet, Self::ArrayAlloc, Self::ArrayFillUnchecked, Self::IoLog, Self::StringTrim];
+    pub const ALL: &'static [Self] = &[
+        Self::IoReadFile,
+        Self::IoWriteFile,
+        Self::IoReadDir,
+        Self::IoReadStdin,
+        Self::IoTakeBytes,
+        Self::IoDirCount,
+        Self::IoDirGet,
+        Self::ArgvCount,
+        Self::ArgvGet,
+        Self::EnvHas,
+        Self::EnvGet,
+        Self::Cwd,
+        Self::Alloc,
+        Self::PrintInt,
+        Self::StringLength,
+        Self::StringConcat,
+        Self::StringCompare,
+        Self::PrintString,
+        Self::PrintChar,
+        Self::PrintFloat,
+        Self::IntToString,
+        Self::IntParseIsValid,
+        Self::IntParseUnchecked,
+        Self::FloatToString,
+        Self::CharToString,
+        Self::PrintErrorString,
+        Self::AbortError,
+        Self::QuoteString,
+        Self::QuoteChar,
+        Self::CanonicalFloat,
+        Self::BytesLength,
+        Self::BytesGet,
+        Self::BytesIsUtf8,
+        Self::BytesDisplay,
+        Self::BytesOfString,
+        Self::BytesToStringUnchecked,
+        Self::BytesAlloc,
+        Self::BytesFillUnchecked,
+        Self::StringSlice,
+        Self::StringGet,
+        Self::StringFind,
+        Self::ArrayLength,
+        Self::ArrayGet,
+        Self::ArrayAlloc,
+        Self::ArrayFillUnchecked,
+        Self::IoLog,
+        Self::StringTrim,
+    ];
 
     pub fn id(self) -> u32 {
-        Self::ALL.iter().position(|function| *function == self).unwrap() as u32
+        Self::ALL
+            .iter()
+            .position(|function| *function == self)
+            .unwrap() as u32
     }
 
     pub fn from_id(id: u32) -> Option<Self> {
@@ -176,19 +248,81 @@ impl RuntimeFunction {
 
     pub fn declaration(self) -> &'static Declaration {
         match self {
-            Self::ArgvCount => &Declaration { symbol: "hado_argv_count", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: false },
-            Self::ArgvGet => &Declaration { symbol: "hado_argv_get", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::EnvHas => &Declaration { symbol: "hado_env_has", parameters: &[AbiType::Pointer], result: Some(AbiType::I8), may_allocate: true },
-            Self::EnvGet => &Declaration { symbol: "hado_env_get", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::Cwd => &Declaration { symbol: "hado_cwd", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::IoReadFile => &Declaration { symbol: "hado_io_read_file", parameters: &[AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
-            Self::IoWriteFile => &Declaration { symbol: "hado_io_write_file", parameters: &[AbiType::Pointer, AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
-            Self::IoReadDir => &Declaration { symbol: "hado_io_read_dir", parameters: &[AbiType::Pointer], result: Some(AbiType::I64), may_allocate: true },
-            Self::IoReadStdin => &Declaration { symbol: "hado_io_read_stdin", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: true },
-            Self::IoTakeBytes => &Declaration { symbol: "hado_io_take_bytes", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::IoDirCount => &Declaration { symbol: "hado_io_dir_count", parameters: &[AbiType::I64], result: Some(AbiType::I64), may_allocate: false },
-            Self::IoDirGet => &Declaration { symbol: "hado_io_dir_get", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::ArrayGet | Self::ArrayFillUnchecked => unreachable!("array slot operations are emitted inline"),
+            Self::ArgvCount => &Declaration {
+                symbol: "hado_argv_count",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::ArgvGet => &Declaration {
+                symbol: "hado_argv_get",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::EnvHas => &Declaration {
+                symbol: "hado_env_has",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I8),
+                may_allocate: true,
+            },
+            Self::EnvGet => &Declaration {
+                symbol: "hado_env_get",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::Cwd => &Declaration {
+                symbol: "hado_cwd",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::IoReadFile => &Declaration {
+                symbol: "hado_io_read_file",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: true,
+            },
+            Self::IoWriteFile => &Declaration {
+                symbol: "hado_io_write_file",
+                parameters: &[AbiType::Pointer, AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: true,
+            },
+            Self::IoReadDir => &Declaration {
+                symbol: "hado_io_read_dir",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: true,
+            },
+            Self::IoReadStdin => &Declaration {
+                symbol: "hado_io_read_stdin",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::I64),
+                may_allocate: true,
+            },
+            Self::IoTakeBytes => &Declaration {
+                symbol: "hado_io_take_bytes",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::IoDirCount => &Declaration {
+                symbol: "hado_io_dir_count",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::IoDirGet => &Declaration {
+                symbol: "hado_io_dir_get",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::ArrayGet | Self::ArrayFillUnchecked => {
+                unreachable!("array slot operations are emitted inline")
+            }
             Self::ArrayLength => &Declaration {
                 symbol: "hado_array_length",
                 parameters: &[AbiType::Pointer],
@@ -201,12 +335,42 @@ impl RuntimeFunction {
                 result: Some(AbiType::Pointer),
                 may_allocate: true,
             },
-            Self::CanonicalFloat => &Declaration { symbol: "hado_canonical_float", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::QuoteString => &Declaration { symbol: "hado_quote_string", parameters: &[AbiType::Pointer], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::QuoteChar => &Declaration { symbol: "hado_quote_char", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::CharToString => &Declaration { symbol: "hado_char_to_string", parameters: &[AbiType::I32], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::FloatToString => &Declaration { symbol: "hado_float_to_string", parameters: &[AbiType::F64], result: Some(AbiType::Pointer), may_allocate: true },
-            Self::IntToString => &Declaration { symbol: "hado_int_to_string", parameters: &[AbiType::I64], result: Some(AbiType::Pointer), may_allocate: true },
+            Self::CanonicalFloat => &Declaration {
+                symbol: "hado_canonical_float",
+                parameters: &[AbiType::F64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::QuoteString => &Declaration {
+                symbol: "hado_quote_string",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::QuoteChar => &Declaration {
+                symbol: "hado_quote_char",
+                parameters: &[AbiType::I32],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::CharToString => &Declaration {
+                symbol: "hado_char_to_string",
+                parameters: &[AbiType::I32],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::FloatToString => &Declaration {
+                symbol: "hado_float_to_string",
+                parameters: &[AbiType::F64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::IntToString => &Declaration {
+                symbol: "hado_int_to_string",
+                parameters: &[AbiType::I64],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
             Self::IntParseIsValid => &Declaration {
                 symbol: "hado_int_parse_is_valid",
                 parameters: &[AbiType::Pointer],
@@ -219,8 +383,18 @@ impl RuntimeFunction {
                 result: Some(AbiType::I64),
                 may_allocate: false,
             },
-            Self::PrintFloat => &Declaration { symbol: "hado_print_float", parameters: &[AbiType::F64], result: None, may_allocate: false },
-            Self::PrintChar => &Declaration { symbol: "hado_print_char", parameters: &[AbiType::I32], result: None, may_allocate: false },
+            Self::PrintFloat => &Declaration {
+                symbol: "hado_print_float",
+                parameters: &[AbiType::F64],
+                result: None,
+                may_allocate: false,
+            },
+            Self::PrintChar => &Declaration {
+                symbol: "hado_print_char",
+                parameters: &[AbiType::I32],
+                result: None,
+                may_allocate: false,
+            },
             Self::StringLength => &Declaration {
                 symbol: "hado_string_length",
                 parameters: &[AbiType::Pointer],
@@ -257,9 +431,24 @@ impl RuntimeFunction {
                 result: Some(AbiType::I64),
                 may_allocate: false,
             },
-            Self::PrintErrorString => &Declaration { symbol: "hado_print_error_string", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
-            Self::AbortError => &Declaration { symbol: "hado_abort_error", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
-            Self::PrintString => &Declaration { symbol: "hado_print_string", parameters: &[AbiType::Pointer], result: None, may_allocate: false },
+            Self::PrintErrorString => &Declaration {
+                symbol: "hado_print_error_string",
+                parameters: &[AbiType::Pointer],
+                result: None,
+                may_allocate: false,
+            },
+            Self::AbortError => &Declaration {
+                symbol: "hado_abort_error",
+                parameters: &[AbiType::Pointer],
+                result: None,
+                may_allocate: false,
+            },
+            Self::PrintString => &Declaration {
+                symbol: "hado_print_string",
+                parameters: &[AbiType::Pointer],
+                result: None,
+                may_allocate: false,
+            },
             Self::Alloc => &Declaration {
                 symbol: "hado_alloc",
                 parameters: &[AbiType::Size],

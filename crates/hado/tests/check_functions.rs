@@ -59,10 +59,7 @@ fn pipe_supplies_the_first_argument() {
 #[test]
 fn numeric_functions_respect_constraints_before_defaulting() {
     for (source, expected) in [
-        (
-            "def twice x => x + x\ndef main = twice 2",
-            Ty::Int,
-        ),
+        ("def twice x => x + x\ndef main = twice 2", Ty::Int),
         (
             "def twice (x: Float) => x + x\ndef main = twice 1.5",
             Ty::Float,
@@ -100,7 +97,8 @@ fn division_result_follows_resolved_operand_type() {
 
 #[test]
 fn function_annotations_check_arguments_and_results() {
-    let source = "def apply (f: Fn(Int => Bool), x: Int) => f x\ndef main = apply fn(n => n == 1) 2";
+    let source =
+        "def apply (f: Fn(Int => Bool), x: Int) => f x\ndef main = apply fn(n => n == 1) 2";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Bool);
     let source = "def apply (f: Fn(Int, Bool => Int)) => f 1 true\ndef main = apply fn(a, b => if b => a | a + 1)";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
