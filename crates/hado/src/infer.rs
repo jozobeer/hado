@@ -168,189 +168,7 @@ pub(crate) fn infer_with_diagnostics(
         .deferred
         .extend(functors::duplicate_applications(ast, path));
     let mut definitions = HashMap::new();
-    let inferred = (|| -> Result<Ty, Diagnostic> {
-        let comparable = checker.inference.fresh();
-        let compare = Ty::fn_of(vec![comparable.clone(), comparable.clone()], Ty::Int);
-        checker.values.insert(
-            "compare".into(),
-            checker.inference.generalize_constrained(
-                &compare,
-                &[],
-                &[ComparisonConstraint {
-                    ty: comparable,
-                    code: "E704",
-                    span: None,
-                }],
-                &[],
-            ),
-        );
-        let ambiguous_values = checker.prepare_ambiguous_declarations(&ast.items);
-        for item in &ast.items {
-            if let Item::TypeDef(def) = item {
-                if !checker.ambiguous_types.contains(&def.name) {
-                    checker
-                        .type_arities
-                        .insert(def.name.clone(), def.params.len());
-                }
-            }
-        }
-        let signatures: HashMap<_, _> = ast
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
-                _ => None,
-            })
-            .collect();
-        for item in &ast.items {
-            if let Item::ModuleImpl(module) = item {
-                if !matches!(module.form, crate::parser::ImplementationForm::Functor(_)) {
-                    if let Some(signature) = signatures.get(&module.sig) {
-                        checker.module_abstract_parameters(module, signature);
-                    }
-                }
-            }
-        }
-        // 等式は型と効果の登録より前に集める。登録時に record schema と効果の操作型を
-        // 解けた型で作るため（26 節「等式の収集は型と効果の登録より前に置く」）。
-        checker.collect_shared_realizations(ast);
-        let violations = crate::type_cycles::violations(ast, path);
-        for item in &ast.items {
-            if let Item::TypeDef(def) = item {
-                let rejected: Vec<_> = violations
-                    .iter()
-                    .filter(|violation| violation.definition == def.name)
-                    .map(|violation| violation.reference)
-                    .collect();
-                checker.register_type(def, &rejected)?;
-            }
-        }
-        checker
-            .deferred
-            .extend(violations.into_iter().map(|violation| violation.diagnostic));
-        for item in &ast.items {
-            match item {
-                Item::Def(def) => {
-                    definitions.entry(def.name.clone()).or_insert(def);
-                }
-                Item::TypeDef(_)
-                | Item::ModuleSig(_)
-                | Item::ModuleImpl(_)
-                | Item::Effect(_)
-                | Item::Handler(_) => {}
-                _ => {
-                    return Err(checker.error(ast.span, None, "item inference is not implemented"))
-                }
-            }
-        }
-        checker.register_effects(&ast.items, prelude_items)?;
-        for group in crate::dependencies::inference_groups(ast) {
-            let mut functions = Vec::new();
-            for item in group {
-                match item {
-                    Item::ModuleImpl(module) => checker.module(module, &signatures)?,
-                    Item::Def(def) if !ambiguous_values.contains(&def.name) => {
-                        functions.push(def.name.clone())
-                    }
-                    _ => {}
-                }
-            }
-            if !functions.is_empty() {
-                checker.definition_group(&functions, &definitions)?;
-            }
-        }
-        checker.check_operation_defaults(&ast.items[..prelude_items])?;
-        checker.check_ambiguous_definitions(&ast.items, &ambiguous_values);
-        checker.check_ambiguous_modules(&ast.items, &signatures);
-        checker.resolve_projections(true)?;
-        checker.check_realization_cycles(&ast.items);
-        for constraint in &checker.comparison_constraints {
-            if checker
-                .contains_function(&checker.inference.resolve(&constraint.ty), &mut Vec::new())
-            {
-                checker.deferred.push(checker.error(
-                    constraint.span.expect("comparison use has an origin"),
-                    Some(constraint.code),
-                    "values containing functions cannot be compared",
-                ));
-            }
-        }
-        for constraint in &checker.row_constraints {
-            let violated = if constraint.code == "E303" {
-                !checker
-                    .inference
-                    .resolve_row(&constraint.row)
-                    .has_known_effects()
-            } else {
-                !checker
-                    .inference
-                    .row_within(&constraint.row, &constraint.bound)
-            };
-            if !violated {
-                continue;
-            }
-            let message = match constraint.code {
-                "E308" => "effects are not allowed in branch conditions",
-                "E303" => "do requires an effect or Option",
-                _ => "effect row mismatch",
-            };
-            checker.deferred.push(checker.error(
-                constraint.span.expect("row constraint has an origin"),
-                Some(constraint.code),
-                message,
-            ));
-        }
-        // A library has no entry: skip the `main` type rules (E206 stays in
-        // `entry_form`, and E701/E702/E705/E706 need a `main` to apply).
-        if inspection == crate::Inspection::Library {
-            return Ok(Ty::Void);
-        }
-        let scheme = checker
-            .values
-            .get("main")
-            .cloned()
-            .ok_or_else(|| checker.error(ast.span, Some("E206"), "main is not defined"))?;
-        let main = checker.inference.instantiate(&scheme);
-        if let Ty::Var(_) = checker.inference.resolve(&main) {
-            // raise's result is polymorphic; leaving it open makes main E701.
-            let _ = checker.inference.unify(&main, &Ty::Void);
-        }
-        checker.inference.close_rows(&main);
-        checker.main_effects = checker.inference.close_row(&checker.main_effects);
-        let main = checker.reveal_shared(&checker.inference.resolve(&main));
-        if !main.is_monomorphic() {
-            checker.deferred.push(checker.error(
-                definitions["main"].span,
-                Some("E701"),
-                "main must have a monomorphic type",
-            ));
-        }
-        if checker.contains_function(&main, &mut Vec::new()) {
-            checker.deferred.push(checker.error(
-                definitions["main"].span,
-                Some("E702"),
-                "main cannot return a value containing a function",
-            ));
-        }
-        if checker.contains_abstract(&main, &mut Vec::new()) {
-            checker.deferred.push(checker.error(
-                definitions["main"].span,
-                Some("E705"),
-                "main cannot return a value containing an abstract type",
-            ));
-        }
-        if checker
-            .main_effects
-            .has_user_effect(&checker.prelude_effects)
-        {
-            checker.deferred.push(checker.error(
-                definitions["main"].span,
-                Some("E706"),
-                "main cannot have a user-defined effect",
-            ));
-        }
-        Ok(main)
-    })();
+    let inferred = checker.infer_program(ast, &mut definitions, inspection, prelude_items);
     let main = match inferred {
         Ok(main) => main,
         Err(error) => {
@@ -398,7 +216,268 @@ pub(crate) fn infer_with_diagnostics(
     ))
 }
 
+/// モジュールシグネチャを名前で引ける表に集める。
+fn collect_signatures(items: &[Item]) -> HashMap<String, &crate::parser::ModuleSig> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::ModuleSig(sig) => Some((sig.name.clone(), sig)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// シグネチャの型定義に対応する実装側の定義を、名前と引数の個数で引く。
+fn find_actual_type<'a>(
+    items: &'a [Item],
+    def: &crate::parser::TypeDef,
+) -> Option<&'a crate::parser::TypeDef> {
+    items.iter().find_map(|item| match item {
+        Item::TypeDef(actual)
+            if actual.name == def.name && actual.params.len() == def.params.len() =>
+        {
+            Some(actual)
+        }
+        _ => None,
+    })
+}
+
 impl Checker<'_> {
+    fn install_compare(&mut self) {
+        let comparable = self.inference.fresh();
+        let compare = Ty::fn_of(vec![comparable.clone(), comparable.clone()], Ty::Int);
+        self.values.insert(
+            "compare".into(),
+            self.inference.generalize_constrained(
+                &compare,
+                &[],
+                &[ComparisonConstraint {
+                    ty: comparable,
+                    code: "E704",
+                    span: None,
+                }],
+                &[],
+            ),
+        );
+    }
+
+    fn register_type_arities(&mut self, items: &[Item]) {
+        for item in items {
+            if let Item::TypeDef(def) = item {
+                if !self.ambiguous_types.contains(&def.name) {
+                    self.type_arities.insert(def.name.clone(), def.params.len());
+                }
+            }
+        }
+    }
+
+    fn register_signature_abstract_parameters(
+        &mut self,
+        items: &[Item],
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) {
+        for item in items {
+            if let Item::ModuleImpl(module) = item {
+                if !matches!(module.form, crate::parser::ImplementationForm::Functor(_)) {
+                    if let Some(signature) = signatures.get(&module.sig) {
+                        self.module_abstract_parameters(module, signature);
+                    }
+                }
+            }
+        }
+    }
+
+    fn register_types(&mut self, ast: &Ast) -> Result<(), Diagnostic> {
+        let violations = crate::type_cycles::violations(ast, self.path);
+        for item in &ast.items {
+            if let Item::TypeDef(def) = item {
+                let rejected: Vec<_> = violations
+                    .iter()
+                    .filter(|violation| violation.definition == def.name)
+                    .map(|violation| violation.reference)
+                    .collect();
+                self.register_type(def, &rejected)?;
+            }
+        }
+        self.deferred
+            .extend(violations.into_iter().map(|violation| violation.diagnostic));
+        Ok(())
+    }
+
+    fn collect_definitions<'a>(
+        &self,
+        ast: &'a Ast,
+        definitions: &mut HashMap<String, &'a crate::parser::Def>,
+    ) -> Result<(), Diagnostic> {
+        for item in &ast.items {
+            match item {
+                Item::Def(def) => {
+                    definitions.entry(def.name.clone()).or_insert(def);
+                }
+                Item::TypeDef(_)
+                | Item::ModuleSig(_)
+                | Item::ModuleImpl(_)
+                | Item::Effect(_)
+                | Item::Handler(_) => {}
+                _ => return Err(self.error(ast.span, None, "item inference is not implemented")),
+            }
+        }
+        Ok(())
+    }
+
+    fn infer_definition_groups(
+        &mut self,
+        ast: &Ast,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+        ambiguous_values: &HashSet<String>,
+    ) -> Result<(), Diagnostic> {
+        for group in crate::dependencies::inference_groups(ast) {
+            let mut functions = Vec::new();
+            for item in group {
+                match item {
+                    Item::ModuleImpl(module) => self.module(module, signatures)?,
+                    Item::Def(def) if !ambiguous_values.contains(&def.name) => {
+                        functions.push(def.name.clone())
+                    }
+                    _ => {}
+                }
+            }
+            if !functions.is_empty() {
+                self.definition_group(&functions, definitions)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_comparison_constraints(&mut self) {
+        for constraint in &self.comparison_constraints {
+            if self.contains_function(&self.inference.resolve(&constraint.ty), &mut Vec::new()) {
+                self.deferred.push(self.error(
+                    constraint.span.expect("comparison use has an origin"),
+                    Some(constraint.code),
+                    "values containing functions cannot be compared",
+                ));
+            }
+        }
+    }
+
+    fn check_row_constraints(&mut self) {
+        for constraint in &self.row_constraints {
+            let violated = if constraint.code == "E303" {
+                !self
+                    .inference
+                    .resolve_row(&constraint.row)
+                    .has_known_effects()
+            } else {
+                !self
+                    .inference
+                    .row_within(&constraint.row, &constraint.bound)
+            };
+            if !violated {
+                continue;
+            }
+            let message = match constraint.code {
+                "E308" => "effects are not allowed in branch conditions",
+                "E303" => "do requires an effect or Option",
+                _ => "effect row mismatch",
+            };
+            self.deferred.push(self.error(
+                constraint.span.expect("row constraint has an origin"),
+                Some(constraint.code),
+                message,
+            ));
+        }
+    }
+
+    fn finish_main(
+        &mut self,
+        ast: &Ast,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        inspection: crate::Inspection,
+    ) -> Result<Ty, Diagnostic> {
+        // A library has no entry: skip the `main` type rules (E206 stays in
+        // `entry_form`, and E701/E702/E705/E706 need a `main` to apply).
+        if inspection == crate::Inspection::Library {
+            return Ok(Ty::Void);
+        }
+        let scheme = self
+            .values
+            .get("main")
+            .cloned()
+            .ok_or_else(|| self.error(ast.span, Some("E206"), "main is not defined"))?;
+        let main = self.inference.instantiate(&scheme);
+        if let Ty::Var(_) = self.inference.resolve(&main) {
+            // raise's result is polymorphic; leaving it open makes main E701.
+            let _ = self.inference.unify(&main, &Ty::Void);
+        }
+        self.inference.close_rows(&main);
+        self.main_effects = self.inference.close_row(&self.main_effects);
+        let main = self.reveal_shared(&self.inference.resolve(&main));
+        self.check_main_type(definitions, &main);
+        Ok(main)
+    }
+
+    fn check_main_type(&mut self, definitions: &HashMap<String, &crate::parser::Def>, main: &Ty) {
+        if !main.is_monomorphic() {
+            self.deferred.push(self.error(
+                definitions["main"].span,
+                Some("E701"),
+                "main must have a monomorphic type",
+            ));
+        }
+        if self.contains_function(main, &mut Vec::new()) {
+            self.deferred.push(self.error(
+                definitions["main"].span,
+                Some("E702"),
+                "main cannot return a value containing a function",
+            ));
+        }
+        if self.contains_abstract(main, &mut Vec::new()) {
+            self.deferred.push(self.error(
+                definitions["main"].span,
+                Some("E705"),
+                "main cannot return a value containing an abstract type",
+            ));
+        }
+        if self.main_effects.has_user_effect(&self.prelude_effects) {
+            self.deferred.push(self.error(
+                definitions["main"].span,
+                Some("E706"),
+                "main cannot have a user-defined effect",
+            ));
+        }
+    }
+
+    fn infer_program<'a>(
+        &mut self,
+        ast: &'a Ast,
+        definitions: &mut HashMap<String, &'a crate::parser::Def>,
+        inspection: crate::Inspection,
+        prelude_items: usize,
+    ) -> Result<Ty, Diagnostic> {
+        self.install_compare();
+        let ambiguous_values = self.prepare_ambiguous_declarations(&ast.items);
+        self.register_type_arities(&ast.items);
+        let signatures = collect_signatures(&ast.items);
+        self.register_signature_abstract_parameters(&ast.items, &signatures);
+        // 等式は型と効果の登録より前に集める。登録時に record schema と効果の操作型を
+        // 解けた型で作るため（26 節「等式の収集は型と効果の登録より前に置く」）。
+        self.collect_shared_realizations(ast);
+        self.register_types(ast)?;
+        self.collect_definitions(ast, &mut *definitions)?;
+        self.register_effects(&ast.items, prelude_items)?;
+        self.infer_definition_groups(ast, definitions, &signatures, &ambiguous_values)?;
+        self.check_operation_defaults(&ast.items[..prelude_items])?;
+        self.check_ambiguous_definitions(&ast.items, &ambiguous_values);
+        self.check_ambiguous_modules(&ast.items, &signatures);
+        self.resolve_projections(true)?;
+        self.check_realization_cycles(&ast.items);
+        self.check_comparison_constraints();
+        self.check_row_constraints();
+        self.finish_main(ast, definitions, inspection)
+    }
+
     fn prepare_ambiguous_declarations(&mut self, items: &[Item]) -> HashSet<String> {
         self.prepare_module_ambiguities(items);
         let ambiguous =
@@ -409,19 +488,7 @@ impl Checker<'_> {
             self.aliases.remove(name);
             self.records.remove(name);
         }
-        for name in &ambiguous.declared_constructors {
-            self.ambiguous_constructors.remove(name);
-            let hidden = format!("{}$outer${name}", self.module_path.join("."));
-            if let Some(scheme) = self.constructors.remove(name) {
-                self.constructors.insert(hidden.clone(), scheme);
-            }
-            if let Some(tag) = self.constructor_tags.remove(name) {
-                self.constructor_tags.insert(hidden.clone(), tag);
-            }
-            if let Some(fields) = self.named_constructors.remove(name) {
-                self.named_constructors.insert(hidden, fields);
-            }
-        }
+        self.hide_declared_constructors(&ambiguous.declared_constructors);
         self.ambiguous_types.extend(ambiguous.types);
         self.ambiguous_constructors.extend(ambiguous.constructors);
         for name in &ambiguous.values {
@@ -434,6 +501,23 @@ impl Checker<'_> {
         }
         self.deferred.extend(ambiguous.diagnostics);
         ambiguous.values
+    }
+
+    /// 曖昧な宣言で隠す側のコンストラクタを `$outer$` 名へ退避する。
+    fn hide_declared_constructors(&mut self, names: &HashSet<String>) {
+        for name in names {
+            self.ambiguous_constructors.remove(name);
+            let hidden = format!("{}$outer${name}", self.module_path.join("."));
+            if let Some(scheme) = self.constructors.remove(name) {
+                self.constructors.insert(hidden.clone(), scheme);
+            }
+            if let Some(tag) = self.constructor_tags.remove(name) {
+                self.constructor_tags.insert(hidden.clone(), tag);
+            }
+            if let Some(fields) = self.named_constructors.remove(name) {
+                self.named_constructors.insert(hidden, fields);
+            }
+        }
     }
 
     fn prepare_module_ambiguities(&mut self, items: &[Item]) {
@@ -539,94 +623,12 @@ impl Checker<'_> {
                 return Ok(());
             }
         };
-        {
-            let type_names: HashMap<_, _> = module
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    Item::TypeDef(definition) => Some((
-                        definition.name.clone(),
-                        format!("{}.{}", self.module_path.join("."), definition.name),
-                    )),
-                    _ => None,
-                })
-                .collect();
-            let prefix = format!("{}.", self.module_path.join("."));
-            for (name, representation) in &mut self.abstract_representations {
-                if name.starts_with(&prefix) {
-                    representation.body = representation.body.qualify_data_types(&type_names);
-                }
-            }
-            // shared の本体も abstract_representations と同じく局所型名を実装名で
-            // 修飾する。これを落とすと別実装の同名局所型が同じ型に混同される。
-            for (name, representation) in &mut self.shared_realizations {
-                if name.starts_with(&prefix) {
-                    representation.body = representation.body.qualify_data_types(&type_names);
-                }
-            }
-            // 公開面にも同じ修飾を通す。shared の本体と公開面が食い違うと、
-            // 実装の member 呼び出しで型が一致しなくなる。
-            for scheme in exports.values_mut() {
-                *scheme = scheme
-                    .resolved(&self.inference)
-                    .qualify_data_types(&type_names);
-            }
-            for (name, scheme) in &mut self.module_definitions {
-                if name.starts_with(&prefix) {
-                    *scheme = scheme
-                        .resolved(&self.inference)
-                        .qualify_data_types(&type_names);
-                }
-            }
-            for (span, ty) in &mut self.value_types {
-                if !saved_value_spans.contains(span) {
-                    *ty = self.inference.resolve(ty).qualify_data_types(&type_names);
-                }
-            }
-            for (span, ty) in &mut self.composite_types {
-                if !saved_composite_spans.contains(span) {
-                    *ty = self.inference.resolve(ty).qualify_data_types(&type_names);
-                }
-            }
-            for item in &module.items {
-                if let Item::TypeDef(definition) = item {
-                    if matches!(
-                        definition.ty.as_ref().map(|ty| &ty.kind),
-                        Some(TypeKind::Record(_))
-                    ) {
-                        if let Some(record) = self.records.get(&definition.name) {
-                            self.module_records.insert(
-                                format!("{}.{}", self.module_path.join("."), definition.name),
-                                (record.0.clone(), record.1.qualify_data_types(&type_names)),
-                            );
-                        }
-                    } else {
-                        for (name, scheme) in &self.constructors {
-                            let result = match scheme.body() {
-                                Ty::Fn(_, result, _) => result.as_ref(),
-                                ty => ty,
-                            };
-                            if matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name)
-                            {
-                                if let Some(fields) = self.named_constructors.get(name) {
-                                    self.module_named_constructors.insert(
-                                        format!("{}.{}", self.module_path.join("."), name),
-                                        fields.clone(),
-                                    );
-                                }
-                                self.module_constructors.insert(
-                                    format!("{}.{}", self.module_path.join("."), name),
-                                    (
-                                        self.constructor_tags[name],
-                                        scheme.qualify_data_types(&type_names),
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.qualify_module_exports(
+            module,
+            &mut exports,
+            &saved_value_spans,
+            &saved_composite_spans,
+        );
         self.module_path.pop();
         self.modules = saved.modules;
         self.abstract_types = saved.abstract_types;
@@ -644,6 +646,147 @@ impl Checker<'_> {
         self.modules.insert(module.name.clone(), exports);
         self.module_abstract_parameters(module, signature);
         Ok(())
+    }
+
+    fn qualify_module_exports(
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        exports: &mut HashMap<String, Scheme>,
+        saved_value_spans: &HashSet<(usize, usize)>,
+        saved_composite_spans: &HashSet<(usize, usize)>,
+    ) {
+        let type_names: HashMap<_, _> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::TypeDef(definition) => Some((
+                    definition.name.clone(),
+                    format!("{}.{}", self.module_path.join("."), definition.name),
+                )),
+                _ => None,
+            })
+            .collect();
+        self.qualify_module_representations(&type_names);
+        self.qualify_module_public_types(exports, &type_names);
+        self.qualify_module_value_types(&type_names, saved_value_spans, saved_composite_spans);
+        self.qualify_module_type_definitions(module, &type_names);
+    }
+
+    fn qualify_module_representations(&mut self, type_names: &HashMap<String, String>) {
+        let prefix = format!("{}.", self.module_path.join("."));
+        for (name, representation) in &mut self.abstract_representations {
+            if name.starts_with(&prefix) {
+                representation.body = representation.body.qualify_data_types(type_names);
+            }
+        }
+        // shared の本体も abstract_representations と同じく局所型名を実装名で
+        // 修飾する。これを落とすと別実装の同名局所型が同じ型に混同される。
+        for (name, representation) in &mut self.shared_realizations {
+            if name.starts_with(&prefix) {
+                representation.body = representation.body.qualify_data_types(type_names);
+            }
+        }
+    }
+
+    fn qualify_module_public_types(
+        &mut self,
+        exports: &mut HashMap<String, Scheme>,
+        type_names: &HashMap<String, String>,
+    ) {
+        let prefix = format!("{}.", self.module_path.join("."));
+        // 公開面にも同じ修飾を通す。shared の本体と公開面が食い違うと、
+        // 実装の member 呼び出しで型が一致しなくなる。
+        for scheme in exports.values_mut() {
+            *scheme = scheme
+                .resolved(&self.inference)
+                .qualify_data_types(type_names);
+        }
+        for (name, scheme) in &mut self.module_definitions {
+            if name.starts_with(&prefix) {
+                *scheme = scheme
+                    .resolved(&self.inference)
+                    .qualify_data_types(type_names);
+            }
+        }
+    }
+
+    fn qualify_module_value_types(
+        &mut self,
+        type_names: &HashMap<String, String>,
+        saved_value_spans: &HashSet<(usize, usize)>,
+        saved_composite_spans: &HashSet<(usize, usize)>,
+    ) {
+        for (span, ty) in &mut self.value_types {
+            if !saved_value_spans.contains(span) {
+                *ty = self.inference.resolve(ty).qualify_data_types(type_names);
+            }
+        }
+        for (span, ty) in &mut self.composite_types {
+            if !saved_composite_spans.contains(span) {
+                *ty = self.inference.resolve(ty).qualify_data_types(type_names);
+            }
+        }
+    }
+
+    fn qualify_module_type_definitions(
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        type_names: &HashMap<String, String>,
+    ) {
+        for item in &module.items {
+            if let Item::TypeDef(definition) = item {
+                self.qualify_module_definition(definition, type_names);
+            }
+        }
+    }
+
+    fn qualify_module_definition(
+        &mut self,
+        definition: &crate::parser::TypeDef,
+        type_names: &HashMap<String, String>,
+    ) {
+        if matches!(
+            definition.ty.as_ref().map(|ty| &ty.kind),
+            Some(TypeKind::Record(_))
+        ) {
+            if let Some(record) = self.records.get(&definition.name) {
+                self.module_records.insert(
+                    format!("{}.{}", self.module_path.join("."), definition.name),
+                    (record.0.clone(), record.1.qualify_data_types(type_names)),
+                );
+            }
+            return;
+        }
+        self.qualify_module_constructors(definition, type_names);
+    }
+
+    fn qualify_module_constructors(
+        &mut self,
+        definition: &crate::parser::TypeDef,
+        type_names: &HashMap<String, String>,
+    ) {
+        for (name, scheme) in &self.constructors {
+            let result = match scheme.body() {
+                Ty::Fn(_, result, _) => result.as_ref(),
+                ty => ty,
+            };
+            if !matches!(result, Ty::Adt(type_name, _) if type_name == &definition.name) {
+                continue;
+            }
+            if let Some(fields) = self.named_constructors.get(name) {
+                self.module_named_constructors.insert(
+                    format!("{}.{}", self.module_path.join("."), name),
+                    fields.clone(),
+                );
+            }
+            self.module_constructors.insert(
+                format!("{}.{}", self.module_path.join("."), name),
+                (
+                    self.constructor_tags[name],
+                    scheme.qualify_data_types(type_names),
+                ),
+            );
+        }
     }
 
     fn module_abstract_parameters(
@@ -704,28 +847,60 @@ impl Checker<'_> {
                 signatures.insert(signature.name.clone(), signature);
             }
         }
-        for item in &ast.items {
-            if let Item::ModuleImpl(inner) = item {
-                self.module(inner, &signatures)?;
-            }
-        }
+        self.infer_nested_modules(&ast.items, &signatures)?;
         let ambiguous_values = self.prepare_ambiguous_declarations(&ast.items);
+        self.register_local_type_names(ast);
         let mut definitions = HashMap::new();
-        for item in &ast.items {
-            if let Item::TypeDef(def) = item {
-                if self.ambiguous_types.contains(&def.name) {
-                    continue;
-                }
-                self.type_arities.insert(def.name.clone(), def.params.len());
-                self.aliases.remove(&def.name);
-                if let Some(ty) = &def.ty {
-                    if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
-                        self.aliases
-                            .insert(def.name.clone(), (def.params.clone(), ty.clone(), ast.span));
-                    }
-                }
+        self.register_module_items(ast, &mut definitions)?;
+        self.infer_module_definition_groups(ast, &definitions, &ambiguous_values)?;
+        self.check_ambiguous_definitions(&ast.items, &ambiguous_values);
+        for name in definitions.keys() {
+            self.module_definitions.insert(
+                format!("{}.{}", self.module_path.join("."), name),
+                self.values[name].clone(),
+            );
+        }
+        self.check_ambiguous_modules(&ast.items, &signatures);
+        Ok((definitions, ambiguous_values))
+    }
+
+    fn infer_nested_modules(
+        &mut self,
+        items: &[Item],
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) -> Result<(), Diagnostic> {
+        for item in items {
+            if let Item::ModuleImpl(inner) = item {
+                self.module(inner, signatures)?;
             }
         }
+        Ok(())
+    }
+
+    fn register_local_type_names(&mut self, ast: &Ast) {
+        for item in &ast.items {
+            let Item::TypeDef(def) = item else { continue };
+            if !self.ambiguous_types.contains(&def.name) {
+                self.register_local_type_name(def, ast.span);
+            }
+        }
+    }
+
+    fn register_local_type_name(&mut self, def: &crate::parser::TypeDef, span: Span) {
+        self.type_arities.insert(def.name.clone(), def.params.len());
+        self.aliases.remove(&def.name);
+        let Some(ty) = &def.ty else { return };
+        if matches!(ty.kind, TypeKind::Name(_) | TypeKind::Apply(_, _)) {
+            self.aliases
+                .insert(def.name.clone(), (def.params.clone(), ty.clone(), span));
+        }
+    }
+
+    fn register_module_items<'a>(
+        &mut self,
+        ast: &'a Ast,
+        definitions: &mut HashMap<String, &'a crate::parser::Def>,
+    ) -> Result<(), Diagnostic> {
         for item in &ast.items {
             match item {
                 Item::TypeDef(def) => self.register_type(def, &[])?,
@@ -738,24 +913,25 @@ impl Checker<'_> {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn infer_module_definition_groups(
+        &mut self,
+        ast: &Ast,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        ambiguous_values: &HashSet<String>,
+    ) -> Result<(), Diagnostic> {
         for group in crate::names::definition_groups(ast) {
             let group: Vec<_> = group
                 .into_iter()
                 .filter(|name| !ambiguous_values.contains(name))
                 .collect();
             if !group.is_empty() {
-                self.definition_group(&group, &definitions)?;
+                self.definition_group(&group, definitions)?;
             }
         }
-        self.check_ambiguous_definitions(&ast.items, &ambiguous_values);
-        for name in definitions.keys() {
-            self.module_definitions.insert(
-                format!("{}.{}", self.module_path.join("."), name),
-                self.values[name].clone(),
-            );
-        }
-        self.check_ambiguous_modules(&ast.items, &signatures);
-        Ok((definitions, ambiguous_values))
+        Ok(())
     }
 
     fn module_body(
@@ -778,78 +954,116 @@ impl Checker<'_> {
             name_sites: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
+        let abstract_names = self.register_module_realizations(&ast, module, signature)?;
+        let exports = self.collect_module_exports(
+            module,
+            signature,
+            &definitions,
+            &ambiguous_values,
+            &abstract_names,
+        )?;
+        self.resolve_projections(false)?;
+        let roots = exports.keys().cloned().collect::<Vec<_>>();
+        if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
+            self.deferred.push(self.error(
+                definitions[name].span,
+                Some("E514"),
+                &format!("unused module definition {name}"),
+            ));
+        }
+        Ok(exports)
+    }
+
+    fn register_module_realizations(
+        &mut self,
+        ast: &Ast,
+        module: &crate::parser::ModuleImpl,
+        signature: &crate::parser::ModuleSig,
+    ) -> Result<HashMap<String, String>, Diagnostic> {
         let mut abstract_names = HashMap::new();
         for item in &signature.items {
-            if let Item::TypeDef(def) = item {
-                let actual = ast.items.iter().find_map(|item| match item {
-                    Item::TypeDef(actual)
-                        if actual.name == def.name && actual.params.len() == def.params.len() =>
-                    {
-                        Some(actual)
-                    }
-                    _ => None,
-                });
-                let Some(actual) = actual else {
-                    return Err(self.error_related(
-                        module.span,
-                        Some("E602"),
-                        "missing signature type",
-                        Some(def.name_span),
-                    ));
-                };
-                if def.ty.is_some() {
-                    return Err(self.error(
-                        def.span,
-                        None,
-                        "manifest signature types are not implemented",
-                    ));
-                }
-                let qualified = format!("{}.{}", self.module_path.join("."), def.name);
-                let parameters: HashMap<_, _> = def
-                    .params
-                    .iter()
-                    .map(|p| (p.name.clone(), self.inference.fresh()))
-                    .collect();
-                let arguments: Vec<_> = def
-                    .params
-                    .iter()
-                    .map(|p| TypeExpr {
-                        kind: TypeKind::Name(p.name.clone()),
-                        span: p.span,
-                        name_span: p.span,
-                        effects: None,
-                    })
-                    .collect();
-                let kind = if arguments.is_empty() {
-                    TypeKind::Name(def.name.clone())
-                } else {
-                    TypeKind::Apply(def.name.clone(), arguments)
-                };
-                let reference = TypeExpr {
-                    kind,
-                    span: def.name_span,
-                    name_span: def.name_span,
-                    effects: None,
-                };
-                let body = self.payload_type(&reference, &parameters, def.name_span)?;
-                let parameters = def
-                    .params
-                    .iter()
-                    .map(|p| match parameters[&p.name] {
-                        Ty::Var(id) => id,
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                let realization = TypeRealization { parameters, body };
-                if actual.shared {
-                    self.shared_realizations
-                        .insert(qualified.clone(), realization.clone());
-                }
-                self.abstract_representations
-                    .insert(qualified.clone(), realization);
-                abstract_names.insert(def.name.clone(), qualified);
+            let Item::TypeDef(def) = item else { continue };
+            let actual = find_actual_type(&ast.items, def);
+            let Some(actual) = actual else {
+                return Err(self.error_related(
+                    module.span,
+                    Some("E602"),
+                    "missing signature type",
+                    Some(def.name_span),
+                ));
+            };
+            if def.ty.is_some() {
+                return Err(self.error(
+                    def.span,
+                    None,
+                    "manifest signature types are not implemented",
+                ));
             }
+            let qualified = self.register_module_realization(def, actual)?;
+            abstract_names.insert(def.name.clone(), qualified);
         }
+        Ok(abstract_names)
+    }
+
+    fn register_module_realization(
+        &mut self,
+        def: &crate::parser::TypeDef,
+        actual: &crate::parser::TypeDef,
+    ) -> Result<String, Diagnostic> {
+        let qualified = format!("{}.{}", self.module_path.join("."), def.name);
+        let parameters: HashMap<_, _> = def
+            .params
+            .iter()
+            .map(|p| (p.name.clone(), self.inference.fresh()))
+            .collect();
+        let arguments: Vec<_> = def
+            .params
+            .iter()
+            .map(|p| TypeExpr {
+                kind: TypeKind::Name(p.name.clone()),
+                span: p.span,
+                name_span: p.span,
+                effects: None,
+            })
+            .collect();
+        let kind = if arguments.is_empty() {
+            TypeKind::Name(def.name.clone())
+        } else {
+            TypeKind::Apply(def.name.clone(), arguments)
+        };
+        let reference = TypeExpr {
+            kind,
+            span: def.name_span,
+            name_span: def.name_span,
+            effects: None,
+        };
+        let body = self.payload_type(&reference, &parameters, def.name_span)?;
+        let parameters = def
+            .params
+            .iter()
+            .map(|p| match parameters[&p.name] {
+                Ty::Var(id) => id,
+                _ => unreachable!(),
+            })
+            .collect();
+        let realization = TypeRealization { parameters, body };
+        if actual.shared {
+            self.shared_realizations
+                .insert(qualified.clone(), realization.clone());
+        }
+        self.abstract_representations
+            .insert(qualified.clone(), realization);
+        Ok(qualified)
+    }
+
+    fn collect_module_exports(
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        signature: &crate::parser::ModuleSig,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        ambiguous_values: &HashSet<String>,
+        abstract_names: &HashMap<String, String>,
+    ) -> Result<HashMap<String, Scheme>, Diagnostic> {
         let mut exports = HashMap::new();
         for item in &signature.items {
             if matches!(item, Item::TypeDef(_)) {
@@ -862,89 +1076,106 @@ impl Checker<'_> {
                     "signature type members are not implemented",
                 ));
             };
-            if !definitions.contains_key(&declaration.name) {
-                return Err(self.error_related(
-                    module.span,
-                    Some("E602"),
-                    "missing signature member",
-                    Some(declaration.name_span),
-                ));
-            }
-            if matches!(definitions[&declaration.name].kind, DefKind::Value(_))
-                != declaration.params.is_empty()
-            {
-                return Err(self.error_related(
-                    module.span,
-                    Some("E602"),
-                    "signature member requires the declared definition form",
-                    Some(declaration.name_span),
-                ));
-            }
-            let scheme = self.values[&declaration.name].clone();
-            let (mut actual, constraints, rows) = self.inference.instantiate_constrained(&scheme);
-            if !ambiguous_values.contains(&declaration.name)
-                && self.inference.resolve(&actual).has_error()
-            {
-                let known = self.invalid_definition_type(definitions[&declaration.name]);
-                actual = self.inference.freshen_errors(&known);
-            }
-            self.record_comparisons(constraints, declaration.span);
-            self.record_row_constraints(rows, declaration.span);
-            let parameters: HashMap<_, _> = declaration
-                .type_params
-                .iter()
-                .map(|name| (name.name.clone(), self.inference.fresh()))
-                .collect();
-            let expected = self.signature_type(declaration, &parameters, false)?;
-            self.inference.unify(&actual, &expected).map_err(|_| {
-                self.error_related(
-                    module.span,
-                    Some("E602"),
-                    "signature type mismatch",
-                    Some(declaration.name_span),
-                )
-            })?;
-            let mut resolved_parameters = Vec::new();
-            for parameter in parameters.values() {
-                let resolved = self.inference.resolve(parameter);
-                if !matches!(resolved, Ty::Var(_)) || resolved_parameters.contains(&resolved) {
-                    return Err(self.error_related(
-                        module.span,
-                        Some("E602"),
-                        "signature implementation is not sufficiently polymorphic",
-                        Some(declaration.name_span),
-                    ));
-                }
-                resolved_parameters.push(resolved);
-            }
-            let mut public_parameters: HashMap<_, _> = abstract_names
-                .iter()
-                .map(|(name, public)| (name.clone(), Ty::Abstract(public.clone(), vec![])))
-                .collect();
-            public_parameters.extend(parameters);
-            let public_type = self.signature_type(declaration, &public_parameters, true)?;
-            let resolved = self.inference.resolve(&expected);
-            let _ = self.inference.unify(&public_type, &resolved);
-            exports.insert(
-                declaration.name.clone(),
-                self.inference.generalize_constrained(
-                    &public_type,
-                    &[],
-                    &self.comparison_constraints,
-                    &self.row_constraints,
-                ),
-            );
-        }
-        self.resolve_projections(false)?;
-        let roots = exports.keys().cloned().collect::<Vec<_>>();
-        if let Some(name) = crate::names::unused_definitions(&ast, &roots).first() {
-            self.deferred.push(self.error(
-                definitions[name].span,
-                Some("E514"),
-                &format!("unused module definition {name}"),
-            ));
+            let (name, scheme) = self.module_export(
+                module,
+                declaration,
+                definitions,
+                ambiguous_values,
+                abstract_names,
+            )?;
+            exports.insert(name, scheme);
         }
         Ok(exports)
+    }
+
+    fn module_export(
+        &mut self,
+        module: &crate::parser::ModuleImpl,
+        declaration: &crate::parser::SigDef,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        ambiguous_values: &HashSet<String>,
+        abstract_names: &HashMap<String, String>,
+    ) -> Result<(String, Scheme), Diagnostic> {
+        if !definitions.contains_key(&declaration.name) {
+            return Err(self.error_related(
+                module.span,
+                Some("E602"),
+                "missing signature member",
+                Some(declaration.name_span),
+            ));
+        }
+        if matches!(definitions[&declaration.name].kind, DefKind::Value(_))
+            != declaration.params.is_empty()
+        {
+            return Err(self.error_related(
+                module.span,
+                Some("E602"),
+                "signature member requires the declared definition form",
+                Some(declaration.name_span),
+            ));
+        }
+        let scheme = self.values[&declaration.name].clone();
+        let (mut actual, constraints, rows) = self.inference.instantiate_constrained(&scheme);
+        if !ambiguous_values.contains(&declaration.name)
+            && self.inference.resolve(&actual).has_error()
+        {
+            let known = self.invalid_definition_type(definitions[&declaration.name]);
+            actual = self.inference.freshen_errors(&known);
+        }
+        self.record_comparisons(constraints, declaration.span);
+        self.record_row_constraints(rows, declaration.span);
+        let parameters: HashMap<_, _> = declaration
+            .type_params
+            .iter()
+            .map(|name| (name.name.clone(), self.inference.fresh()))
+            .collect();
+        let expected = self.signature_type(declaration, &parameters, false)?;
+        self.inference.unify(&actual, &expected).map_err(|_| {
+            self.error_related(
+                module.span,
+                Some("E602"),
+                "signature type mismatch",
+                Some(declaration.name_span),
+            )
+        })?;
+        self.check_signature_polymorphism(&parameters, module, declaration)?;
+        let mut public_parameters: HashMap<_, _> = abstract_names
+            .iter()
+            .map(|(name, public)| (name.clone(), Ty::Abstract(public.clone(), vec![])))
+            .collect();
+        public_parameters.extend(parameters);
+        let public_type = self.signature_type(declaration, &public_parameters, true)?;
+        let resolved = self.inference.resolve(&expected);
+        let _ = self.inference.unify(&public_type, &resolved);
+        let scheme = self.inference.generalize_constrained(
+            &public_type,
+            &[],
+            &self.comparison_constraints,
+            &self.row_constraints,
+        );
+        Ok((declaration.name.clone(), scheme))
+    }
+
+    fn check_signature_polymorphism(
+        &self,
+        parameters: &HashMap<String, Ty>,
+        module: &crate::parser::ModuleImpl,
+        declaration: &crate::parser::SigDef,
+    ) -> Result<(), Diagnostic> {
+        let mut resolved_parameters = Vec::new();
+        for parameter in parameters.values() {
+            let resolved = self.inference.resolve(parameter);
+            if !matches!(resolved, Ty::Var(_)) || resolved_parameters.contains(&resolved) {
+                return Err(self.error_related(
+                    module.span,
+                    Some("E602"),
+                    "signature implementation is not sufficiently polymorphic",
+                    Some(declaration.name_span),
+                ));
+            }
+            resolved_parameters.push(resolved);
+        }
+        Ok(())
     }
 
     fn signature_type(
@@ -1010,37 +1241,8 @@ impl Checker<'_> {
             .iter()
             .map(|name| (name.clone(), self.inference.fresh()))
             .collect();
-        for (name, ty) in &placeholders {
-            if definitions[name].rec {
-                let Ty::Var(id) = ty else {
-                    unreachable!("fresh recursive placeholder")
-                };
-                self.recursive_calls.insert(*id, Vec::new());
-            }
-            self.values
-                .insert(name.clone(), Scheme::monomorphic(ty.clone()));
-        }
-        let mut invalid_group = false;
-        for name in group {
-            let def = definitions[name];
-            self.current_definition = Some(name.clone());
-            let removed = if !def.rec {
-                self.values.remove(name)
-            } else {
-                None
-            };
-            let result = self.check_definition(def, &placeholders[name]);
-            if let Some(scheme) = removed {
-                self.values.insert(name.clone(), scheme);
-            }
-            let invalid = self.recover_inference_error(result.map(|()| false), true)?;
-            invalid_group |= invalid;
-            if invalid {
-                let ty = self.invalid_definition_type(def);
-                self.values.insert(name.clone(), Scheme::monomorphic(ty));
-            }
-        }
-        self.current_definition = None;
+        self.install_group_placeholders(definitions, &placeholders);
+        let mut invalid_group = self.check_group_definitions(group, definitions, &placeholders)?;
         let deferred_start = self.deferred.len();
         let result = self.default_numbers();
         invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
@@ -1050,15 +1252,87 @@ impl Checker<'_> {
             .iter()
             .any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
-            self.projections.retain(|(_, field, _, _)| {
-                inherited_projections.contains(&(field.dot.line, field.dot.col))
-            });
-            for name in group {
-                let ty = self.invalid_definition_type(definitions[name]);
-                self.values.insert(name.clone(), Scheme::monomorphic(ty));
-            }
+            self.invalidate_group(group, definitions, &inherited_projections);
             return Ok(());
         }
+        self.generalize_group(placeholders);
+        Ok(())
+    }
+
+    fn install_group_placeholders(
+        &mut self,
+        definitions: &HashMap<String, &crate::parser::Def>,
+        placeholders: &HashMap<String, Ty>,
+    ) {
+        for (name, ty) in placeholders {
+            if definitions[name].rec {
+                let Ty::Var(id) = ty else {
+                    unreachable!("fresh recursive placeholder")
+                };
+                self.recursive_calls.insert(*id, Vec::new());
+            }
+            self.values
+                .insert(name.clone(), Scheme::monomorphic(ty.clone()));
+        }
+    }
+
+    fn check_group_definitions(
+        &mut self,
+        group: &[String],
+        definitions: &HashMap<String, &crate::parser::Def>,
+        placeholders: &HashMap<String, Ty>,
+    ) -> Result<bool, Diagnostic> {
+        let mut invalid_group = false;
+        for name in group {
+            invalid_group |=
+                self.check_group_definition(name, definitions[name], &placeholders[name])?;
+        }
+        // 定義の走査が終わったら、どの定義を推論中かという印を落とす。
+        self.current_definition = None;
+        Ok(invalid_group)
+    }
+
+    fn check_group_definition(
+        &mut self,
+        name: &str,
+        def: &crate::parser::Def,
+        placeholder: &Ty,
+    ) -> Result<bool, Diagnostic> {
+        self.current_definition = Some(name.to_string());
+        let removed = if !def.rec {
+            self.values.remove(name)
+        } else {
+            None
+        };
+        let result = self.check_definition(def, placeholder);
+        if let Some(scheme) = removed {
+            self.values.insert(name.to_string(), scheme);
+        }
+        let invalid = self.recover_inference_error(result.map(|()| false), true)?;
+        if invalid {
+            let ty = self.invalid_definition_type(def);
+            self.values
+                .insert(name.to_string(), Scheme::monomorphic(ty));
+        }
+        Ok(invalid)
+    }
+
+    fn invalidate_group(
+        &mut self,
+        group: &[String],
+        definitions: &HashMap<String, &crate::parser::Def>,
+        inherited_projections: &std::collections::HashSet<(usize, usize)>,
+    ) {
+        self.projections.retain(|(_, field, _, _)| {
+            inherited_projections.contains(&(field.dot.line, field.dot.col))
+        });
+        for name in group {
+            let ty = self.invalid_definition_type(definitions[name]);
+            self.values.insert(name.clone(), Scheme::monomorphic(ty));
+        }
+    }
+
+    fn generalize_group(&mut self, placeholders: HashMap<String, Ty>) {
         let environment: Vec<_> = self
             .projections
             .iter()
@@ -1075,7 +1349,6 @@ impl Checker<'_> {
                 ),
             );
         }
-        Ok(())
     }
 
     fn check_definition(
@@ -2695,111 +2968,152 @@ impl Checker<'_> {
     fn register_effects(&mut self, items: &[Item], prelude_items: usize) -> Result<(), Diagnostic> {
         for item in items {
             let Item::Effect(effect) = item else { continue };
-            let parameters: HashMap<_, _> = effect
+            self.register_effect(effect)?;
+        }
+        self.register_prelude_defaults(items, prelude_items)?;
+        self.register_handlers(items);
+        Ok(())
+    }
+
+    fn register_effect(&mut self, effect: &crate::parser::EffectDecl) -> Result<(), Diagnostic> {
+        let parameters: HashMap<_, _> = effect
+            .type_params
+            .iter()
+            .map(|name| (name.name.clone(), self.inference.fresh()))
+            .collect();
+        let template = Ty::Adt(
+            effect.name.clone(),
+            effect
                 .type_params
                 .iter()
-                .map(|name| (name.name.clone(), self.inference.fresh()))
-                .collect();
-            let template = Ty::Adt(
-                effect.name.clone(),
-                effect
-                    .type_params
-                    .iter()
-                    .map(|name| parameters[&name.name].clone())
-                    .collect(),
-            );
-            let mut ops = Vec::new();
-            for op in &effect.ops {
-                let mut args = Vec::new();
-                for param in &op.params {
-                    let annotation = param.ty.as_ref().ok_or_else(|| {
-                        self.error(param.span, None, "operation parameter requires a type")
-                    })?;
-                    args.push(self.payload_type(annotation, &parameters, param.span)?);
-                }
-                let result = match &op.ret {
-                    Some(ty) => self.payload_type(ty, &parameters, op.span)?,
-                    None if op.kind == OpKind::Abort => self.inference.fresh(),
-                    None => Ty::Void,
-                };
-                let result_row = match &op.ret {
-                    Some(ty) if ty.effects.is_some() => self.row_annotation(&ty.effects)?,
-                    _ => Row::pure(),
-                };
-                self.operation_result_rows
-                    .insert(op.name.clone(), result_row);
-                let op_ty = if args.is_empty() {
-                    result
-                } else {
-                    Ty::fn_of(args, result)
-                };
-                let scheme = self
-                    .inference
-                    .generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
-                self.values.insert(op.name.clone(), scheme);
-                self.operations.insert(op.name.clone(), op.kind);
-                ops.push((op.kind, op.name.clone()));
-            }
-            self.effects.insert(effect.name.clone(), ops);
+                .map(|name| parameters[&name.name].clone())
+                .collect(),
+        );
+        let mut ops = Vec::new();
+        for op in &effect.ops {
+            ops.push(self.register_effect_operation(&parameters, &template, op)?);
         }
+        self.effects.insert(effect.name.clone(), ops);
+        Ok(())
+    }
+
+    fn register_effect_operation(
+        &mut self,
+        parameters: &HashMap<String, Ty>,
+        template: &Ty,
+        op: &crate::parser::EffectOp,
+    ) -> Result<(OpKind, String), Diagnostic> {
+        let mut args = Vec::new();
+        for param in &op.params {
+            let annotation = param.ty.as_ref().ok_or_else(|| {
+                self.error(param.span, None, "operation parameter requires a type")
+            })?;
+            args.push(self.payload_type(annotation, parameters, param.span)?);
+        }
+        let result = match &op.ret {
+            Some(ty) => self.payload_type(ty, parameters, op.span)?,
+            None if op.kind == OpKind::Abort => self.inference.fresh(),
+            None => Ty::Void,
+        };
+        let result_row = match &op.ret {
+            Some(ty) if ty.effects.is_some() => self.row_annotation(&ty.effects)?,
+            _ => Row::pure(),
+        };
+        self.operation_result_rows
+            .insert(op.name.clone(), result_row);
+        let op_ty = if args.is_empty() {
+            result
+        } else {
+            Ty::fn_of(args, result)
+        };
+        let scheme = self
+            .inference
+            .generalize(&Ty::fn_of(vec![op_ty], template.clone()), &[]);
+        self.values.insert(op.name.clone(), scheme);
+        self.operations.insert(op.name.clone(), op.kind);
+        Ok((op.kind, op.name.clone()))
+    }
+
+    fn register_prelude_defaults(
+        &mut self,
+        items: &[Item],
+        prelude_items: usize,
+    ) -> Result<(), Diagnostic> {
         for item in &items[..prelude_items] {
             let Item::Effect(effect) = item else { continue };
-            for op in &effect.ops {
-                if op.kind != OpKind::Once {
-                    continue;
-                }
-                let module_name = format!("{}Default", effect.name);
-                let module = items[..prelude_items].iter().find_map(|item| match item {
-                    Item::ModuleImpl(module) if module.name == module_name => Some(module),
-                    _ => None,
-                });
-                let definition = module
-                    .and_then(|module| {
-                        module.items.iter().find_map(|item| match item {
-                            Item::Def(def) if def.name == op.name => {
-                                Some(format!("{}.{}", module.name, def.name))
-                            }
-                            _ => None,
-                        })
-                    })
-                    .ok_or_else(|| {
-                        self.error(
-                            op.name_span,
-                            Some("E204"),
-                            "prelude once has no default definition",
-                        )
-                    })?;
-                self.default_operations.insert(op.name.clone(), definition);
+            for op in effect.ops.iter().filter(|op| op.kind == OpKind::Once) {
+                self.register_prelude_default(items, prelude_items, &effect.name, op)?;
             }
         }
+        Ok(())
+    }
+
+    fn register_prelude_default(
+        &mut self,
+        items: &[Item],
+        prelude_items: usize,
+        effect_name: &str,
+        op: &crate::parser::EffectOp,
+    ) -> Result<(), Diagnostic> {
+        let module_name = format!("{}Default", effect_name);
+        let module = items[..prelude_items].iter().find_map(|item| match item {
+            Item::ModuleImpl(module) if module.name == module_name => Some(module),
+            _ => None,
+        });
+        let definition = module
+            .and_then(|module| {
+                module.items.iter().find_map(|item| match item {
+                    Item::Def(def) if def.name == op.name => {
+                        Some(format!("{}.{}", module.name, def.name))
+                    }
+                    _ => None,
+                })
+            })
+            .ok_or_else(|| {
+                self.error(
+                    op.name_span,
+                    Some("E204"),
+                    "prelude once has no default definition",
+                )
+            })?;
+        self.default_operations.insert(op.name.clone(), definition);
+        Ok(())
+    }
+
+    fn register_handlers(&mut self, items: &[Item]) {
         for item in items {
             let Item::Handler(handler) = item else {
                 continue;
             };
-            let expected = self
-                .effects
-                .get(&handler.effect)
-                .cloned()
-                .unwrap_or_default();
-            let mut written = Vec::new();
-            for arm in &handler.arms {
-                if let HandlerArm::Operation { kind, name, .. } = arm {
-                    written.push((*kind, name.clone()));
-                }
-            }
-            if written.len() != expected.len() || written.iter().any(|op| !expected.contains(op)) {
-                self.deferred.push(self.error(
-                    handler.span,
-                    Some("E605"),
-                    "handler operations do not match the effect",
-                ));
-            }
-            self.handlers
-                .insert(handler.name.clone(), effect_print_name(&handler.effect));
-            self.handler_decls
-                .insert(handler.name.clone(), handler.clone());
+            self.register_handler(handler);
         }
-        Ok(())
+    }
+
+    fn register_handler(&mut self, handler: &crate::parser::HandlerDecl) {
+        let expected = self
+            .effects
+            .get(&handler.effect)
+            .cloned()
+            .unwrap_or_default();
+        let written: Vec<_> = handler
+            .arms
+            .iter()
+            .filter_map(|arm| match arm {
+                HandlerArm::Operation { kind, name, .. } => Some((*kind, name.clone())),
+                _ => None,
+            })
+            .collect();
+        if written.len() != expected.len() || written.iter().any(|op| !expected.contains(op)) {
+            self.deferred.push(self.error(
+                handler.span,
+                Some("E605"),
+                "handler operations do not match the effect",
+            ));
+        }
+        self.handlers
+            .insert(handler.name.clone(), effect_print_name(&handler.effect));
+        self.handler_decls
+            .insert(handler.name.clone(), handler.clone());
     }
 
     fn isolate_effects<T>(
