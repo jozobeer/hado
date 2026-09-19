@@ -302,6 +302,60 @@ fn catch_all_variable_fix(
     index: &TokenIndex,
     branches: &[(Span, Span, Span)],
 ) -> Option<Fix> {
+    let (pattern, body) = catch_all_arm(arms, fallback)?;
+    let scrutinee = catch_all_scrutinee(node)?;
+    let start = lines.offset(source, pattern.span);
+    let end = catch_all_range(start, node, source, lines, tokens, index, branches)?;
+    let (binding, value) =
+        catch_all_binding_value(pattern, scrutinee, start, source, lines, tokens, index)?;
+    let replacement =
+        substitute_binding(body, end, &binding, &value, source, lines, tokens, index)?;
+    let scrutinee_text = parser::canonical(scrutinee);
+    // The substituted form is still redundant when every arm rebuilds the
+    // scrutinee (§41). The checker refuses to fold a fallback because it may
+    // re-evaluate the scrutinee, but this scrutinee is a plain variable, so the
+    // fold cannot change how often an effect runs. Each arm is checked here: a
+    // constructor arm must return its own pattern, a variable arm the scrutinee.
+    if arms_reconstruct(
+        arms,
+        &scrutinee_text,
+        &replacement,
+        source,
+        lines,
+        tokens,
+        index,
+    ) {
+        // 畳めない事情（分岐の範囲が取れない・範囲にコメントがある）があれば、
+        // 素の `| replacement` の修正へ落とす。
+        if let Some(fix) = catch_all_folded_fix(
+            node,
+            pattern,
+            scrutinee_text,
+            source,
+            lines,
+            tokens,
+            index,
+            branches,
+        ) {
+            return Some(fix);
+        }
+    }
+    Some(Fix {
+        code: "E512",
+        line: pattern.span.line,
+        col: pattern.span.col,
+        start,
+        end,
+        canonical: format!("| {}", replacement.trim()),
+        replacement,
+    })
+}
+
+/// `_` でない 1 つの名前を束ねる、既定の無い最後の腕。
+fn catch_all_arm<'a>(
+    arms: &'a [(Vec<Pattern>, Node)],
+    fallback: Option<&Node>,
+) -> Option<(&'a Pattern, &'a Node)> {
     let last = arms.last()?;
     if fallback.is_some() || last.0.len() != 1 {
         return None;
@@ -311,6 +365,11 @@ fn catch_all_variable_fix(
     {
         return None;
     }
+    Some((pattern, &last.1))
+}
+
+/// 分岐の scrutinee が 1 つの名前のとき。
+fn catch_all_scrutinee(node: &Node) -> Option<&Node> {
     let NodeKind::PatternBranch { scrutinees, .. } = &node.kind else {
         return None;
     };
@@ -320,22 +379,66 @@ fn catch_all_variable_fix(
     let NodeKind::Name(_) = &scrutinee.kind else {
         return None;
     };
-    let body = &last.1;
-    let start = lines.offset(source, pattern.span);
+    Some(scrutinee)
+}
+
+/// 腕を書き換える範囲の終わり。既定の位置とコメントを確かめる。
+fn catch_all_range(
+    start: usize,
+    node: &Node,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<usize> {
     let (_, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
     // A comment would be lost, and a `let` could bind the same name again.
     if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
         return None;
     }
-    let pattern_at = index.position(pattern.span)?;
-    let binding = source[start..lines.offset(source, tokens.get(pattern_at + 1)?.span)].trim();
-    let scrutinee_at = index.position(scrutinee.span)?;
+    Some(end)
+}
+
+/// 腕の `x =>` と scrutinee の綴りを取り出す（どちらも空白を落とす）。
+fn catch_all_binding_value(
+    pattern: &Pattern,
+    scrutinee: &Node,
+    start: usize,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<(String, String)> {
+    let binding = source
+        [start..lines.offset(source, tokens.get(index.position(pattern.span)? + 1)?.span)]
+        .trim();
     let scrutinee_start = lines.offset(source, scrutinee.span);
-    let value =
-        source[scrutinee_start..lines.offset(source, tokens.get(scrutinee_at + 1)?.span)].trim();
+    let value = source[scrutinee_start
+        ..lines.offset(
+            source,
+            tokens.get(index.position(scrutinee.span)? + 1)?.span,
+        )]
+        .trim();
     if binding.is_empty() || value.is_empty() {
         return None;
     }
+    Some((binding.to_string(), value.to_string()))
+}
+
+/// 腕の本体を書き写し、束縛と同じ綴りのトークンを scrutinee の値で置き換える。
+/// 何も書かれていない本体は書き換えを出さない。
+#[allow(clippy::too_many_arguments)]
+fn substitute_binding(
+    body: &Node,
+    end: usize,
+    binding: &str,
+    value: &str,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<String> {
     let mut replacement = String::new();
     let mut at = index.position(body.span)?;
     while let Some(token) = tokens.get(at) {
@@ -358,63 +461,94 @@ fn catch_all_variable_fix(
     if replacement.trim().is_empty() {
         return None;
     }
-    // The substituted form is still redundant when every arm rebuilds the
-    // scrutinee (§41). The checker refuses to fold a fallback because it may
-    // re-evaluate the scrutinee, but this scrutinee is a plain variable, so the
-    // fold cannot change how often an effect runs. Each arm is checked here: a
-    // constructor arm must return its own pattern, a variable arm the scrutinee.
-    let scrutinee_text = parser::canonical(scrutinee);
-    let mut reconstructs = replacement.trim() == scrutinee_text.trim();
-    for (arm_patterns, arm_body) in &arms[..arms.len() - 1] {
-        reconstructs = reconstructs && arm_patterns.len() == 1;
-        if !reconstructs {
-            break;
-        }
-        let arm_pattern = &arm_patterns[0];
-        let Some(at) = index.position(arm_pattern.span) else {
-            reconstructs = false;
-            break;
-        };
-        let Some(next) = tokens.get(at + 1) else {
-            reconstructs = false;
-            break;
-        };
-        let pattern_text =
-            source[lines.offset(source, arm_pattern.span)..lines.offset(source, next.span)].trim();
-        let body_text = parser::canonical(arm_body);
-        reconstructs = match &arm_pattern.kind {
-            PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
-                body_text.trim() == pattern_text
-            }
-            PatternKind::Name(_) | PatternKind::Underscore => {
-                body_text.trim() == scrutinee_text.trim()
-            }
-            _ => body_text.trim() == pattern_text,
-        };
-    }
-    if reconstructs {
-        let (whole_start, whole_end) =
-            branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
-        if whole_start < whole_end && !source[whole_start..whole_end].contains("//") {
-            return Some(Fix {
-                code: "E512",
-                line: pattern.span.line,
-                col: pattern.span.col,
-                start: whole_start,
-                end: whole_end,
-                replacement: scrutinee_text.clone(),
-                canonical: scrutinee_text,
-            });
-        }
+    Some(replacement)
+}
+
+/// §41: 分岐全体を scrutinee ちょうどに置き換える。腕ごとの判定は
+/// `arms_reconstruct` が済ませている。
+#[allow(clippy::too_many_arguments)]
+fn catch_all_folded_fix(
+    node: &Node,
+    pattern: &Pattern,
+    scrutinee_text: String,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<Fix> {
+    let (whole_start, whole_end) =
+        branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    if whole_start >= whole_end || source[whole_start..whole_end].contains("//") {
+        return None;
     }
     Some(Fix {
         code: "E512",
         line: pattern.span.line,
         col: pattern.span.col,
-        start,
-        end,
-        canonical: format!("| {}", replacement.trim()),
-        replacement,
+        start: whole_start,
+        end: whole_end,
+        replacement: scrutinee_text.clone(),
+        canonical: scrutinee_text,
+    })
+}
+
+/// すべての腕が自分の pattern を組み直しているか（§41 の畳み込みの条件）。
+fn arms_reconstruct(
+    arms: &[(Vec<Pattern>, Node)],
+    scrutinee_text: &str,
+    replacement: &str,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> bool {
+    if replacement.trim() != scrutinee_text.trim() {
+        return false;
+    }
+    for (arm_patterns, arm_body) in &arms[..arms.len() - 1] {
+        let [arm_pattern] = arm_patterns.as_slice() else {
+            return false;
+        };
+        let Some(reconstructs) = arm_reconstructs(
+            arm_pattern,
+            arm_body,
+            scrutinee_text,
+            source,
+            lines,
+            tokens,
+            index,
+        ) else {
+            return false;
+        };
+        if !reconstructs {
+            return false;
+        }
+    }
+    true
+}
+
+/// 1 つの腕が自分の pattern を組み直しているか。位置が引けなければ `None`。
+fn arm_reconstructs(
+    arm_pattern: &Pattern,
+    arm_body: &Node,
+    scrutinee_text: &str,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+) -> Option<bool> {
+    let at = index.position(arm_pattern.span)?;
+    let next = tokens.get(at + 1)?;
+    let pattern_text =
+        source[lines.offset(source, arm_pattern.span)..lines.offset(source, next.span)].trim();
+    let body_text = parser::canonical(arm_body);
+    Some(match &arm_pattern.kind {
+        PatternKind::Name(name) if crate::names::is_upper_reference(name) => {
+            body_text.trim() == pattern_text
+        }
+        PatternKind::Name(_) | PatternKind::Underscore => body_text.trim() == scrutinee_text.trim(),
+        _ => body_text.trim() == pattern_text,
     })
 }
 
@@ -601,6 +735,37 @@ fn literal_pattern_fix(
     if start >= end || end > source.len() || source[start..end].contains("//") {
         return None;
     }
+    let (name, cuts) = literal_arms(arms, start, end, source, lines)?;
+    let first = cuts[0].0;
+    let head = source[start..first].trim_end();
+    let head = head.strip_suffix('|').map(|h| h.trim_end()).unwrap_or(head);
+    if !head.starts_with("def ") {
+        return None;
+    }
+    let prefix = literal_prefix(head, &name)?;
+    if prefix.len() + 1 >= head.len() {
+        return None;
+    }
+    let replacement = literal_replacement(&cuts, prefix, source, end, first)?;
+    Some(Fix {
+        code: "E511",
+        line: node.span.line,
+        col: node.span.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
+}
+
+/// 腕ごとの `x ==` の共通の左辺と、その演算子までの切り取り位置。
+fn literal_arms(
+    arms: &[(Node, Node)],
+    start: usize,
+    end: usize,
+    source: &str,
+    lines: &LineMap,
+) -> Option<(String, Vec<(usize, usize)>)> {
     let mut name: Option<String> = None;
     let mut cuts: Vec<(usize, usize)> = Vec::new();
     for (cond, body) in arms {
@@ -610,12 +775,7 @@ fn literal_pattern_fix(
             return None;
         }
         let segment = &source[cond_start..body_start];
-        let eq = match segment.find("==") {
-            Some(eq) => eq,
-            None => {
-                return None;
-            }
-        };
+        let eq = segment.find("==")?;
         let lhs = segment[..eq].trim();
         if lhs.is_empty() || !lhs.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return None;
@@ -632,22 +792,25 @@ fn literal_pattern_fix(
         let spaces = after.len() - after.trim_start().len();
         cuts.push((cond_start, cond_start + eq + 2 + spaces));
     }
-    let name = name?;
-    let first = cuts[0].0;
-    let head = source[start..first].trim_end();
-    let head = head.strip_suffix('|').map(|h| h.trim_end()).unwrap_or(head);
-    if !head.starts_with("def ") {
-        return None;
+    Some((name?, cuts))
+}
+
+/// 分岐の頭から共通の名前を落とした前置き。`def` の引数まで。
+fn literal_prefix<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    match head.strip_suffix(name) {
+        Some(prefix) if prefix.ends_with(|c: char| c.is_whitespace()) => Some(prefix.trim_end()),
+        _ => None,
     }
-    let prefix = match head.strip_suffix(name.as_str()) {
-        Some(prefix) if prefix.ends_with(|c: char| c.is_whitespace()) => prefix.trim_end(),
-        _ => {
-            return None;
-        }
-    };
-    if prefix.len() + 1 >= head.len() {
-        return None;
-    }
+}
+
+/// 各腕の `x ==` を落とし、`def` の頭を最初の腕の行頭へ改めて置く。
+fn literal_replacement(
+    cuts: &[(usize, usize)],
+    prefix: &str,
+    source: &str,
+    end: usize,
+    first: usize,
+) -> Option<String> {
     let line_start = source[..first].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let mut replacement = String::new();
     replacement.push_str(prefix);
@@ -655,22 +818,14 @@ fn literal_pattern_fix(
     replacement.push_str(&source[line_start..first]);
     let mut cursor = first;
     for (cut_start, cut_end) in cuts {
-        if cut_start < cursor || cut_end > end {
+        if *cut_start < cursor || *cut_end > end {
             return None;
         }
-        replacement.push_str(&source[cursor..cut_start]);
-        cursor = cut_end;
+        replacement.push_str(&source[cursor..*cut_start]);
+        cursor = *cut_end;
     }
     replacement.push_str(&source[cursor..end]);
-    Some(Fix {
-        code: "E511",
-        line: node.span.line,
-        col: node.span.col,
-        start,
-        end,
-        canonical: flatten(&replacement),
-        replacement,
-    })
+    Some(replacement)
 }
 
 fn catch_all_fallback_fix(
@@ -695,27 +850,10 @@ fn catch_all_fallback_fix(
     let start = lines.offset(source, pattern.span);
     // The `_` pattern cannot contain an arrow, so the first one at the top level
     // after it ends the arm.
-    let mut at = index.position(pattern.span)?;
-    let mut depth = 0i32;
-    let mut end = None;
-    while let Some(token) = tokens.get(at) {
-        match token.kind {
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth -= 1,
-            TokKind::Arrow if depth == 0 => {
-                end = Some(lines.offset(source, token.span) + 2);
-                break;
-            }
-            TokKind::Eof => break,
-            _ => {}
-        }
-        at += 1;
-    }
-    let mut end = end?;
+    let arrow = top_level_arrow(tokens, index.position(pattern.span)?)?;
+    let mut end = lines.offset(source, tokens[arrow].span) + 2;
     // Leave the blank before `_` as the one space after `|`.
-    while end < source.len() && matches!(source.as_bytes()[end], b' ' | b'\t') {
-        end += 1;
-    }
+    end = skip_blanks(source, end);
     if end > source.len() || source[start..end].contains("//") {
         return None;
     }
@@ -730,6 +868,41 @@ fn catch_all_fallback_fix(
     })
 }
 
+/// 入れ子の外側にある最初の `=>` のトークン位置。
+fn top_level_arrow(tokens: &[Tok], at: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut at = at;
+    while let Some(token) = tokens.get(at) {
+        match token.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth -= 1,
+            TokKind::Arrow if depth == 0 => return Some(at),
+            TokKind::Eof => return None,
+            _ => {}
+        }
+        at += 1;
+    }
+    None
+}
+
+/// 位置 `at` から続く空白（スペースとタブ）を飛ばした位置。
+fn skip_blanks(source: &str, at: usize) -> usize {
+    let mut at = at;
+    while at < source.len() && matches!(source.as_bytes()[at], b' ' | b'\t') {
+        at += 1;
+    }
+    at
+}
+
+/// 位置 `at` より前の空白（スペースとタブ）を落とした位置。
+fn trim_blanks_back(source: &str, at: usize) -> usize {
+    let mut at = at;
+    while at > 0 && matches!(source.as_bytes()[at - 1], b' ' | b'\t') {
+        at -= 1;
+    }
+    at
+}
+
 // --- E517: `def f x => if | ...` を `def f x | ...` へ ---
 
 fn condition_arm_fix(
@@ -740,35 +913,14 @@ fn condition_arm_fix(
     ast: &Ast,
     span: Span,
 ) -> Option<Fix> {
-    let mut at = index.position(span)?;
-    let mut depth = 0i32;
-    while at < tokens.len() {
-        match tokens[at].kind {
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth -= 1,
-            TokKind::Arrow if depth == 0 => break,
-            TokKind::Eof => return None,
-            _ => {}
-        }
-        at += 1;
-    }
-    let arrow = tokens.get(at)?;
-    if !matches!(arrow.kind, TokKind::Arrow) {
-        return None;
-    }
+    let at = top_level_arrow(tokens, index.position(span)?)?;
     let if_token = tokens.get(at + 1)?;
     if !matches!(if_token.kind, TokKind::KwIf) {
         return None;
     }
-    let mut start = lines.offset(source, arrow.span);
-    let mut end = lines.offset(source, if_token.span) + 2;
     // Take the surrounding blanks too, so the rewrite leaves no trailing space.
-    while start > 0 && matches!(source.as_bytes()[start - 1], b' ' | b'\t') {
-        start -= 1;
-    }
-    while end < source.len() && matches!(source.as_bytes()[end], b' ' | b'\t') {
-        end += 1;
-    }
+    let start = trim_blanks_back(source, lines.offset(source, tokens[at].span));
+    let end = skip_blanks(source, lines.offset(source, if_token.span) + 2);
     let def = def_at(&ast.items, span)?;
     Some(Fix {
         code: "E517",
@@ -808,11 +960,28 @@ fn walk_item(
     branches: &[(Span, Span, Span)],
     found: &mut Vec<Fix>,
 ) {
+    let walk = Walk {
+        source,
+        lines,
+        tokens,
+        index,
+        branches,
+    };
+    let mut found = Found { fixes: found };
+    walk_item_in(item, &walk, &mut found);
+}
+
+/// `Walk` を組んだ後の本体。`Item` の種類ごとに、定義の腕と本体の再帰を分ける。
+fn walk_item_in(item: &Item, walk: &Walk<'_>, found: &mut Found<'_>) {
     match item {
         Item::Def(def) => {
-            if let Some(fix) = sole_parameter_fix(def, source, lines, tokens, index) {
-                found.push(fix);
-            }
+            found.push(sole_parameter_fix(
+                def,
+                walk.source,
+                walk.lines,
+                walk.tokens,
+                walk.index,
+            ));
             let arms = match &def.kind {
                 DefKind::Function { params, .. } => arm_form(params),
                 _ => false,
@@ -820,64 +989,69 @@ fn walk_item(
             match &def.kind {
                 DefKind::Value(body) => {
                     // 値の定義の本体は末尾なので、`let p? =` の伝播先はこの定義。
-                    if let Some(fix) = repropagate_fix(
+                    found.push(repropagate_fix(
                         body,
                         Tail::If,
                         None,
-                        source,
-                        lines,
-                        tokens,
-                        index,
-                        branches,
-                    ) {
-                        found.push(fix);
-                    }
-                    walk_node(body, source, lines, tokens, index, branches, found);
+                        walk.source,
+                        walk.lines,
+                        walk.tokens,
+                        walk.index,
+                        walk.branches,
+                    ));
+                    walk_node(body, walk, found);
                 }
                 DefKind::Function { body, .. } => {
-                    if arms {
-                        let identity = format!(
-                            "def {}{} value => value",
-                            if def.rec { "rec " } else { "" },
-                            def.name
-                        );
-                        if let Some(fix) = rewrap_arm_fix(
-                            body,
-                            &identity,
-                            Tail::Def,
-                            source,
-                            lines,
-                            tokens,
-                            index,
-                            branches,
-                        ) {
-                            found.push(fix);
-                        }
-                    }
-                    let tail = if arms { Tail::Def } else { Tail::If };
-                    if let Some(fix) = repropagate_fix(
-                        body,
-                        tail,
-                        Some(def),
-                        source,
-                        lines,
-                        tokens,
-                        index,
-                        branches,
-                    ) {
-                        found.push(fix);
-                    }
-                    walk_node(body, source, lines, tokens, index, branches, found);
+                    walk_def_function(def, body, arms, walk, found);
+                    walk_node(body, walk, found);
                 }
             }
         }
         Item::ModuleImpl(module) => {
             for item in &module.items {
-                walk_item(item, source, lines, tokens, index, branches, found);
+                walk_item_in(item, walk, found);
             }
         }
         _ => {}
     }
+}
+
+/// `def` の関数の腕。腕の形なら恒等の書き換えを試し、末尾の伝播先を決める。
+fn walk_def_function(
+    def: &parser::Def,
+    body: &Node,
+    arms: bool,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
+    if arms {
+        let identity = format!(
+            "def {}{} value => value",
+            if def.rec { "rec " } else { "" },
+            def.name
+        );
+        found.push(rewrap_arm_fix(
+            body,
+            &identity,
+            Tail::Def,
+            walk.source,
+            walk.lines,
+            walk.tokens,
+            walk.index,
+            walk.branches,
+        ));
+    }
+    let tail = if arms { Tail::Def } else { Tail::If };
+    found.push(repropagate_fix(
+        body,
+        tail,
+        Some(def),
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
 }
 
 /// The §31 / §32 arm forms (`def f | ...`, `fn(| ...)`) lower to one parameter
@@ -919,9 +1093,7 @@ fn sole_parameter_fix(
     let mut start = lines.offset(source, after_name.span);
     let end = lines.offset(source, scrutinee.span) + parameter.name.len();
     // 空白も範囲に入れ、行末に空白を残さない。
-    while start > 0 && matches!(source.as_bytes()[start - 1], b' ' | b'\t') {
-        start -= 1;
-    }
+    start = trim_blanks_back(source, start);
     if end > source.len() || source[start..end].contains("//") {
         return None;
     }
@@ -948,31 +1120,14 @@ fn let_identity_fix(
     index: &TokenIndex,
 ) -> Option<Fix> {
     let at = index.position(anchor)?;
-    if !matches!(tokens.get(at)?.kind, TokKind::KwLet) {
-        return None;
-    }
-    // 綴りが constructor のパターン（`Nil` は `[]` と同じ AST になる）は値の
-    // 束縛ではないので、小文字で始まる名前だけを対象にする。値の綴りも
-    // トークンで確かめる（`[]` を `Nil` と見て 1 文字余分に食わないため）。
-    if !bound.starts_with(char::is_lowercase) {
-        return None;
-    }
-    if !matches!(&tokens.get(at + 1)?.kind, TokKind::Name(name) if name == bound) {
-        return None;
-    }
-    let equals = tokens.get(at + 2)?;
-    if !matches!(equals.kind, TokKind::Eq) {
-        return None;
-    }
+    let equals = let_identity_equals(tokens, at, bound)?;
     // 値の式は入れ子の `let` で `->` を持ち得るので、分離点は本体の直前の
     // `->` で決める（字句の走査では決まらない）。
     let body_at = index.position(body)?;
-    if !matches!(tokens.get(body_at - 1)?.kind, TokKind::DashArrow) {
-        return None;
-    }
+    let arrow = body_dash_arrow(tokens, body_at)?;
     let start = lines.offset(source, anchor);
-    let value_start = lines.offset(source, equals.span) + 1;
-    let value_end = lines.offset(source, tokens[body_at - 1].span);
+    let value_start = lines.offset(source, tokens[equals].span) + 1;
+    let value_end = lines.offset(source, tokens[arrow].span);
     let end = lines.offset(source, body) + bound.len();
     if value_start > value_end || end > source.len() || source[start..end].contains("//") {
         return None;
@@ -990,6 +1145,41 @@ fn let_identity_fix(
         canonical: replacement.clone(),
         replacement,
     })
+}
+
+/// `let <bound> =` の綴りをトークンで確かめ、`=` の位置を返す。
+/// 綴りが constructor のパターン（`Nil` は `[]` と同じ AST になる）は値の
+/// 束縛ではないので、小文字で始まる名前だけを対象にする。値の綴りもトークンで
+/// 確かめる（`[]` を `Nil` と見て 1 文字余分に食わないため）。
+fn let_identity_equals(tokens: &[Tok], at: usize, bound: &str) -> Option<usize> {
+    let_identity_head(tokens, at, bound)?;
+    if !matches!(&tokens.get(at + 1)?.kind, TokKind::Name(name) if name == bound) {
+        return None;
+    }
+    let equals = tokens.get(at + 2)?;
+    if !matches!(equals.kind, TokKind::Eq) {
+        return None;
+    }
+    Some(at + 2)
+}
+
+/// `let` と、値の束縛として書ける綴り（小文字で始まる名前）であること。
+fn let_identity_head(tokens: &[Tok], at: usize, bound: &str) -> Option<()> {
+    if !matches!(tokens.get(at)?.kind, TokKind::KwLet) {
+        return None;
+    }
+    if !bound.starts_with(char::is_lowercase) {
+        return None;
+    }
+    Some(())
+}
+
+/// 本体の直前の `->` のトークン位置。
+fn body_dash_arrow(tokens: &[Tok], body_at: usize) -> Option<usize> {
+    if !matches!(tokens.get(body_at - 1)?.kind, TokKind::DashArrow) {
+        return None;
+    }
+    Some(body_at - 1)
 }
 
 // --- E507 / E508: Option の再包装と再伝播 ---
@@ -1096,6 +1286,61 @@ fn repropagate_fix(
     index: &TokenIndex,
     branches: &[(Span, Span, Span)],
 ) -> Option<Fix> {
+    let Repropagate {
+        scrutinee,
+        body,
+        pattern,
+        absence,
+    } = repropagate_parts(node)?;
+    // The rewritten definition names its argument `value`; a free `value` in
+    // the body would be captured by that name.
+    if tail != Tail::If && crate::names::references(body, "value") {
+        return None;
+    }
+    // With every arm rebuilding, E507 is reported and its rewrite is shorter.
+    if crate::check::rewrap_branch(node).is_some() {
+        return None;
+    }
+    let (pipe, start, end, first_pipe) =
+        repropagate_range(node, absence, tail, source, lines, tokens, index, branches)?;
+    // The scrutinee ends where the first arm's `|` begins; the first arm's body
+    // ends where the `None` arm's `|` begins.
+    let value_end = trim_back(source, lines.offset(source, first_pipe));
+    let body_end = trim_back(source, lines.offset(source, pipe));
+    let value = if tail == Tail::If {
+        source[lines.offset(source, scrutinee.span)..value_end].trim()
+    } else {
+        "value"
+    };
+    let body_text = &source[lines.offset(source, body.span)..body_end];
+    let let_form = format!(
+        "let {}? = {} -> {}",
+        pattern_text(pattern),
+        value,
+        body_text
+    );
+    let replacement = repropagate_replacement(tail, def, let_form)?;
+    Some(Fix {
+        code: "E508",
+        line: pipe.line,
+        col: pipe.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
+}
+
+/// 再伝播の形（§36）から取り出した部品。
+struct Repropagate<'a> {
+    scrutinee: &'a Node,
+    body: &'a Node,
+    pattern: &'a Pattern,
+    absence: &'a Pattern,
+}
+
+/// §36: `Some(p)` と `None` の 2 腕だけの分岐から、書き換えに要る部品を取り出す。
+fn repropagate_parts(node: &Node) -> Option<Repropagate<'_>> {
     let NodeKind::PatternBranch {
         scrutinees,
         arms,
@@ -1138,15 +1383,26 @@ fn repropagate_fix(
     {
         return None;
     }
-    // The rewritten definition names its argument `value`; a free `value` in
-    // the body would be captured by that name.
-    if tail != Tail::If && crate::names::references(body, "value") {
-        return None;
-    }
-    // With every arm rebuilding, E507 is reported and its rewrite is shorter.
-    if crate::check::rewrap_branch(node).is_some() {
-        return None;
-    }
+    Some(Repropagate {
+        scrutinee,
+        body,
+        pattern: inner,
+        absence,
+    })
+}
+
+/// 書き換える範囲と `None` 腕の `|`。既定の位置とコメントを確かめる。
+#[allow(clippy::too_many_arguments)]
+fn repropagate_range(
+    node: &Node,
+    absence: &Pattern,
+    tail: Tail,
+    source: &str,
+    lines: &LineMap,
+    tokens: &[Tok],
+    index: &TokenIndex,
+    branches: &[(Span, Span, Span)],
+) -> Option<(Span, usize, usize, Span)> {
     // The anchor is the `None` arm's `|`, the position the checker reports
     // (check::arm_diagnostic moves the code there through branch_anchors).
     let pipe = tokens.get(index.position(absence.span)?.checked_sub(1)?)?;
@@ -1158,17 +1414,16 @@ fn repropagate_fix(
     if source[start..end].contains("//") {
         return None;
     }
-    // The scrutinee ends where the first arm's `|` begins; the first arm's body
-    // ends where the `None` arm's `|` begins.
-    let value_end = trim_back(source, lines.offset(source, first_pipe));
-    let body_end = trim_back(source, lines.offset(source, pipe.span));
-    let value = match tail {
-        Tail::If => source[lines.offset(source, scrutinee.span)..value_end].trim(),
-        Tail::Def | Tail::Fn => "value",
-    };
-    let body_text = &source[lines.offset(source, body.span)..body_end];
-    let let_form = format!("let {}? = {} -> {}", pattern_text(inner), value, body_text);
-    let replacement = match tail {
+    Some((pipe.span, start, end, first_pipe))
+}
+
+/// 末尾の形ごとの書き換えテキスト。`let` 形を内側に置く。
+fn repropagate_replacement(
+    tail: Tail,
+    def: Option<&parser::Def>,
+    let_form: String,
+) -> Option<String> {
+    Some(match tail {
         Tail::If => let_form,
         Tail::Def => {
             let def = def?;
@@ -1179,15 +1434,6 @@ fn repropagate_fix(
             )
         }
         Tail::Fn => format!("fn(value => {let_form})"),
-    };
-    Some(Fix {
-        code: "E508",
-        line: pipe.span.line,
-        col: pipe.span.col,
-        start,
-        end,
-        canonical: flatten(&replacement),
-        replacement,
     })
 }
 
@@ -1256,212 +1502,354 @@ fn pattern_text(pattern: &Pattern) -> String {
     parser::list_pattern_source(pattern).unwrap_or_else(|| pattern.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn walk_node(
-    node: &Node,
-    source: &str,
-    lines: &LineMap,
-    tokens: &[Tok],
-    index: &TokenIndex,
-    branches: &[(Span, Span, Span)],
-    found: &mut Vec<Fix>,
-) {
-    match &node.kind {
-        NodeKind::Name(name) if name == "Nil" => {
-            if spelled(source, lines, node.span, "Nil") {
-                push_edit(found, "E510", node.span, "[]", source, lines, 3);
-            }
+/// 走査のあいだ変わらない文脈。`walk_node` の入れ子の呼び出しはこの 5 つを
+/// そのまま渡し続けるので、1 つにまとめて引数の数を固定する。
+struct Walk<'a> {
+    source: &'a str,
+    lines: &'a LineMap,
+    tokens: &'a [Tok],
+    index: &'a TokenIndex,
+    branches: &'a [(Span, Span, Span)],
+}
+
+/// 見つかった修正の集積先。`Walk` は不変だが、こちらは走査のあいだ書き換わる。
+struct Found<'a> {
+    fixes: &'a mut Vec<Fix>,
+}
+
+impl Found<'_> {
+    /// 修正が 1 つ得られたときだけ積む。`if let Some(fix) = ... { found.push(fix) }`
+    /// の繰り返しを 1 か所に畳む。
+    fn push(&mut self, fix: Option<Fix>) {
+        if let Some(fix) = fix {
+            self.fixes.push(fix);
         }
+    }
+}
+
+/// `let` の腕。束縛の削除・恒等の検出と、`let x = ... x` の書き換えをまとめる。
+fn walk_let(
+    node: &Node,
+    pat: &Pattern,
+    value: &Node,
+    body: &Node,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
+    found.push(discard_plain_let_fix(
+        node,
+        pat,
+        value,
+        body,
+        "（束縛を削除）",
+        walk.source,
+        walk.lines,
+    ));
+    found.push(identity_let_fix(
+        node,
+        pat,
+        value,
+        body,
+        walk.source,
+        walk.lines,
+    ));
+    walk_pattern(pat, walk, found);
+    if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
+        if bound == returned {
+            found.push(let_identity_fix(
+                node.span,
+                bound,
+                body.span,
+                walk.source,
+                walk.lines,
+                walk.tokens,
+                walk.index,
+            ));
+        }
+    }
+}
+
+fn walk_node(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+    match &node.kind {
+        NodeKind::Name(name) if name == "Nil" => walk_written_nil(node, walk, found),
         NodeKind::Call(callee, _) | NodeKind::Apply(callee, _) => {
-            if matches!(&callee.kind, NodeKind::Name(name) if name == "Cons") {
-                if let Some(text) = list_expression(node) {
-                    push_cons_edit(
-                        found, "E510", node.span, &text, source, lines, tokens, index,
-                    );
-                }
-            }
+            walk_written_cons(callee, node, walk, found)
         }
         NodeKind::Let {
             pat, value, body, ..
-        } => {
-            if let Some(fix) =
-                discard_plain_let_fix(node, pat, value, body, "（束縛を削除）", source, lines)
-            {
-                found.push(fix);
-            }
-            if let Some(fix) = identity_let_fix(node, pat, value, body, source, lines) {
-                found.push(fix);
-            }
-            walk_pattern(pat, source, lines, tokens, index, found);
-            if let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) {
-                if bound == returned {
-                    if let Some(fix) =
-                        let_identity_fix(node.span, bound, body.span, source, lines, tokens, index)
-                    {
-                        found.push(fix);
-                    }
-                }
-            }
-        }
-        NodeKind::LetQ { pat, value, .. } => {
-            if let Some(fix) = discard_let_fix(node, pat, value, "E504", "do", source, lines) {
-                found.push(fix);
-            }
-            walk_pattern(pat, source, lines, tokens, index, found);
-        }
+        } => walk_let(node, pat, value, body, walk, found),
+        NodeKind::LetQ { pat, value, .. } => walk_let_q(node, pat, value, walk, found),
         NodeKind::BoolBranch { cond, then, els } => {
-            if let Some(fix) =
-                identical_bool_fix(node, then, els, source, lines, tokens, index, branches)
-            {
-                found.push(fix);
-            }
-            walk_node(cond, source, lines, tokens, index, branches, found);
-            walk_node(then, source, lines, tokens, index, branches, found);
-            walk_node(els, source, lines, tokens, index, branches, found);
+            walk_bool_branch(node, cond, then, els, walk, found)
         }
         NodeKind::CondBranch { arms, fallback, .. } => {
-            if let Some(fix) = literal_pattern_fix(
-                node,
-                arms,
-                fallback.as_deref(),
-                source,
-                lines,
-                tokens,
-                index,
-                branches,
-            ) {
-                found.push(fix);
-            }
-            for (cond, body) in arms {
-                walk_node(cond, source, lines, tokens, index, branches, found);
-                walk_node(body, source, lines, tokens, index, branches, found);
-            }
-            if let Some(fallback) = fallback {
-                walk_node(fallback, source, lines, tokens, index, branches, found);
-            }
+            walk_cond_branch(node, arms, fallback, walk, found)
         }
         NodeKind::PatternBranch { arms, fallback, .. } => {
-            if let Some(fix) =
-                catch_all_fallback_fix(arms, fallback.as_deref(), source, lines, tokens, index)
-            {
-                found.push(fix);
-            }
-            if let Some(fix) = catch_all_variable_fix(
-                node,
-                arms,
-                fallback.as_deref(),
-                source,
-                lines,
-                tokens,
-                index,
-                branches,
-            ) {
-                found.push(fix);
-            }
-            if let Some(fix) = boolean_branch_fix(
-                node,
-                arms,
-                fallback.as_deref(),
-                source,
-                lines,
-                tokens,
-                index,
-                branches,
-            ) {
-                found.push(fix);
-            }
-            // §57: 腕がすべて自分の pattern を組み直す分岐は scrutinee ちょうど。
-            // この書き換えは位置を選ばない（式の値が変わらない）。
-            if let Some(fix) = rewrap_if_fix(node, source, lines, tokens, index, branches) {
-                found.push(fix);
-            }
-            for (patterns, body) in arms {
-                for pattern in patterns {
-                    if let Some(fix) = unused_binding_fix(pattern, body, source, lines) {
-                        found.push(fix);
-                    }
-                    walk_pattern(pattern, source, lines, tokens, index, found);
-                }
-            }
+            walk_pattern_branch(node, arms, fallback.as_deref(), walk, found)
         }
-        NodeKind::Fn { params, body } => {
-            let arms = arm_form(params);
-            if arms {
-                if let Some(fix) = rewrap_arm_fix(
-                    body,
-                    "fn(value => value)",
-                    Tail::Fn,
-                    source,
-                    lines,
-                    tokens,
-                    index,
-                    branches,
-                ) {
-                    found.push(fix);
-                }
-            }
-            // `fn` の本体もその `fn` の末尾なので、伝播先はこの `fn`（§36）。
-            let tail = if arms { Tail::Fn } else { Tail::If };
-            if let Some(fix) =
-                repropagate_fix(body, tail, None, source, lines, tokens, index, branches)
-            {
-                found.push(fix);
-            }
-        }
+        NodeKind::Fn { params, body } => walk_fn(params, body, walk, found),
         _ => {}
     }
-    // 書かれた `Cons(...)` の綴り自体は呼び出し側で報告するので、被演算子は飛ばす。
+    walk_children(node, walk, found);
+}
+
+/// 綴りが `Nil` の名前。canonical な `[]` と同じ AST なので綴りを確かめる。
+fn walk_written_nil(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+    if spelled(walk.source, walk.lines, node.span, "Nil") {
+        push_edit(
+            found.fixes,
+            "E510",
+            node.span,
+            "[]",
+            walk.source,
+            walk.lines,
+            3,
+        );
+    }
+}
+
+/// 呼び出しの綴りが `Cons` なら `[a, ...b]` へ。
+fn walk_written_cons(callee: &Node, node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+    if !matches!(&callee.kind, NodeKind::Name(name) if name == "Cons") {
+        return;
+    }
+    if let Some(text) = list_expression(node) {
+        push_cons_edit(
+            found.fixes,
+            "E510",
+            node.span,
+            &text,
+            walk.source,
+            walk.lines,
+            walk.tokens,
+            walk.index,
+        );
+    }
+}
+
+/// `let?` の腕。束縛の削除と、pattern の再帰。
+fn walk_let_q(node: &Node, pat: &Pattern, value: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+    found.push(discard_let_fix(
+        node,
+        pat,
+        value,
+        "E504",
+        "do",
+        walk.source,
+        walk.lines,
+    ));
+    walk_pattern(pat, walk, found);
+}
+
+/// `if` の腕。同じ値の分岐の検出と、条件・両腕の再帰。
+fn walk_bool_branch(
+    node: &Node,
+    cond: &Node,
+    then: &Node,
+    els: &Node,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
+    found.push(identical_bool_fix(
+        node,
+        then,
+        els,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+    walk_node(cond, walk, found);
+    walk_node(then, walk, found);
+    walk_node(els, walk, found);
+}
+
+/// 子を順に辿る。書かれた `Cons(...)` の被演算子は呼び出し側で報告するので飛ばす。
+fn walk_children(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
     let cons_call = matches!(&node.kind, NodeKind::Call(callee, _) | NodeKind::Apply(callee, _)
         if matches!(&callee.kind, NodeKind::Name(name) if name == "Cons"));
     for (position, child) in crate::check::children(node).into_iter().enumerate() {
         if cons_call && position == 0 {
             continue;
         }
-        walk_node(child, source, lines, tokens, index, branches, found);
+        walk_node(child, walk, found);
     }
 }
 
-fn walk_pattern(
-    pattern: &Pattern,
-    source: &str,
-    lines: &LineMap,
-    tokens: &[Tok],
-    index: &TokenIndex,
-    found: &mut Vec<Fix>,
+/// `if` の腕。条件式の書き換えと、各腕・既定の再帰。
+fn walk_cond_branch(
+    node: &Node,
+    arms: &[(Node, Node)],
+    fallback: &Option<Box<Node>>,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
 ) {
+    found.push(literal_pattern_fix(
+        node,
+        arms,
+        fallback.as_deref(),
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+    for (cond, body) in arms {
+        walk_node(cond, walk, found);
+        walk_node(body, walk, found);
+    }
+    if let Some(fallback) = fallback {
+        walk_node(fallback, walk, found);
+    }
+}
+
+/// `case` の腕。§57 の組み直しと、使われない束縛の検出をまとめる。
+fn walk_pattern_branch(
+    node: &Node,
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: Option<&Node>,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
+    found.push(catch_all_fallback_fix(
+        arms,
+        fallback,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+    ));
+    found.push(catch_all_variable_fix(
+        node,
+        arms,
+        fallback,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+    found.push(boolean_branch_fix(
+        node,
+        arms,
+        fallback,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+    // §57: 腕がすべて自分の pattern を組み直す分岐は scrutinee ちょうど。
+    // この書き換えは位置を選ばない（式の値が変わらない）。
+    found.push(rewrap_if_fix(
+        node,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+    for (patterns, body) in arms {
+        for pattern in patterns {
+            found.push(unused_binding_fix(pattern, body, walk.source, walk.lines));
+            walk_pattern(pattern, walk, found);
+        }
+    }
+}
+
+/// `fn` の腕。腕の形なら恒等の書き換えを試し、末尾の伝播先を決める。
+fn walk_fn(params: &[parser::Param], body: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+    let arms = arm_form(params);
+    if arms {
+        found.push(rewrap_arm_fix(
+            body,
+            "fn(value => value)",
+            Tail::Fn,
+            walk.source,
+            walk.lines,
+            walk.tokens,
+            walk.index,
+            walk.branches,
+        ));
+    }
+    // `fn` の本体もその `fn` の末尾なので、伝播先はこの `fn`（§36）。
+    let tail = if arms { Tail::Fn } else { Tail::If };
+    found.push(repropagate_fix(
+        body,
+        tail,
+        None,
+        walk.source,
+        walk.lines,
+        walk.tokens,
+        walk.index,
+        walk.branches,
+    ));
+}
+
+fn walk_pattern(pattern: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
     match &pattern.kind {
-        PatternKind::Name(name) if name == "Nil" => {
-            if spelled(source, lines, pattern.span, "Nil") {
-                push_edit(found, "E516", pattern.span, "[]", source, lines, 3);
-            }
-        }
+        PatternKind::Name(name) if name == "Nil" => walk_written_nil_pattern(pattern, walk, found),
         PatternKind::Constructor(name, args) if name == "Cons" && args.len() == 2 => {
-            if let Some(text) = parser::list_pattern_source(pattern) {
-                push_cons_edit(
-                    found,
-                    "E516",
-                    pattern.span,
-                    &text,
-                    source,
-                    lines,
-                    tokens,
-                    index,
-                );
-            }
+            walk_written_cons_pattern(pattern, walk, found)
         }
-        PatternKind::Constructor(_, args) => {
-            for arg in args {
-                walk_pattern(arg, source, lines, tokens, index, found);
-            }
-        }
+        PatternKind::Constructor(_, args) => walk_pattern_args(args, walk, found),
         PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => {
-            for (_, field) in fields {
-                if let Some(field) = field {
-                    walk_pattern(field, source, lines, tokens, index, found);
-                }
-            }
+            walk_pattern_fields(fields, walk, found)
         }
         _ => {}
+    }
+}
+
+/// 綴りが `Nil` のパターン。
+fn walk_written_nil_pattern(pattern: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
+    if spelled(walk.source, walk.lines, pattern.span, "Nil") {
+        push_edit(
+            found.fixes,
+            "E516",
+            pattern.span,
+            "[]",
+            walk.source,
+            walk.lines,
+            3,
+        );
+    }
+}
+
+/// 綴りが `Cons` のパターンを `[a, ...b]` へ。
+fn walk_written_cons_pattern(pattern: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
+    if let Some(text) = parser::list_pattern_source(pattern) {
+        push_cons_edit(
+            found.fixes,
+            "E516",
+            pattern.span,
+            &text,
+            walk.source,
+            walk.lines,
+            walk.tokens,
+            walk.index,
+        );
+    }
+}
+
+/// `Constructor` の引数を辿る。
+fn walk_pattern_args(args: &[Pattern], walk: &Walk<'_>, found: &mut Found<'_>) {
+    for arg in args {
+        walk_pattern(arg, walk, found);
+    }
+}
+
+/// `Record` / `NamedConstructor` のフィールドを辿る。
+fn walk_pattern_fields(
+    fields: &[(parser::DeclaredName, Option<Pattern>)],
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
+    for (_, field) in fields {
+        if let Some(field) = field {
+            walk_pattern(field, walk, found);
+        }
     }
 }
 
@@ -1478,10 +1866,16 @@ fn list_expression(node: &Node) -> Option<String> {
         return None;
     }
     let mut parts = vec![parser::canonical(&args[0])];
-    let mut tail = &args[1];
+    list_parts(&args[1], &mut parts);
+    Some(format!("[{}]", parts.join(", ")))
+}
+
+/// `Cons` の連なりを `[a, b, ...rest]` の要素へ広げる。
+fn list_parts(tail: &Node, parts: &mut Vec<String>) {
+    let mut tail = tail;
     loop {
         match &tail.kind {
-            NodeKind::Name(name) if name == "Nil" => break,
+            NodeKind::Name(name) if name == "Nil" => return,
             NodeKind::Call(callee, args) | NodeKind::Apply(callee, args)
                 if matches!(&callee.kind, NodeKind::Name(name) if name == "Cons")
                     && args.len() == 2 =>
@@ -1491,11 +1885,10 @@ fn list_expression(node: &Node) -> Option<String> {
             }
             _ => {
                 parts.push(format!("...{}", parser::canonical(tail)));
-                break;
+                return;
             }
         }
     }
-    Some(format!("[{}]", parts.join(", ")))
 }
 
 /// True when the source at `anchor` spells `text`. The canonical `[]` and the
