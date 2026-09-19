@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use hado::parser::{BinOp, Node, NodeKind, Span, canonical, parse_source};
+use hado::parser::{canonical, parse_source, BinOp, Node, NodeKind, Span};
 
 /// Repository root: two levels above `CARGO_MANIFEST_DIR` (`crates/hado`).
 fn repo_root() -> PathBuf {
@@ -123,7 +123,9 @@ fn corpus_counts() {
             Err(error) => panic!("{rel}: {error}"),
         };
         match checked {
-            Err(msg) if is_e1xx(&code) => assert!(msg.contains(&format!("error[{code}]")), "{rel}: {msg}"),
+            Err(msg) if is_e1xx(&code) => {
+                assert!(msg.contains(&format!("error[{code}]")), "{rel}: {msg}")
+            }
             Err(msg) => {
                 assert!(
                     !msg.contains("error[E1"),
@@ -135,22 +137,38 @@ fn corpus_counts() {
     }
 
     let spec = read_rel(&root, "docs/spec.md");
-    let codes: std::collections::BTreeSet<_> = spec.lines().filter_map(|line| {
-        let code = line.strip_prefix("| E")?.split('|').next()?.trim();
-        (code.len() == 3 && code.bytes().all(|b| b.is_ascii_digit())).then(|| format!("E{code}"))
-    }).collect();
+    let codes: std::collections::BTreeSet<_> = spec
+        .lines()
+        .filter_map(|line| {
+            let code = line.strip_prefix("| E")?.split('|').next()?.trim();
+            (code.len() == 3 && code.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| format!("E{code}"))
+        })
+        .collect();
     assert!(!codes.is_empty(), "spec diagnostic table is empty");
     let rejects = list_hado(&root.join("tests/reject"));
-    let declared: std::collections::BTreeSet<_> = rejects.iter().map(|path| {
-        header_value(&std::fs::read_to_string(path).unwrap(), "// error:").expect("reject header")
-    }).collect();
+    let declared: std::collections::BTreeSet<_> = rejects
+        .iter()
+        .map(|path| {
+            header_value(&std::fs::read_to_string(path).unwrap(), "// error:")
+                .expect("reject header")
+        })
+        .collect();
     assert_eq!(declared, codes, "reject codes must match the specification");
     assert_eq!(rejects.len(), codes.len(), "one reject per diagnostic code");
     let accepts = list_hado(&root.join("tests/accept"));
     assert!(!accepts.is_empty(), "empty accept corpus");
     assert_eq!(accept_ok.len(), accepts.len(), "accept count");
-    assert_eq!(e1xx_ok.len(), codes.iter().filter(|code| is_e1xx(code)).count(), "E1xx count");
-    assert_eq!(non_e1xx_ok.len(), codes.iter().filter(|code| !is_e1xx(code)).count(), "non-E1xx count");
+    assert_eq!(
+        e1xx_ok.len(),
+        codes.iter().filter(|code| is_e1xx(code)).count(),
+        "E1xx count"
+    );
+    assert_eq!(
+        non_e1xx_ok.len(),
+        codes.iter().filter(|code| !is_e1xx(code)).count(),
+        "non-E1xx count"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -209,9 +227,9 @@ fn decoy_probes() {
     for (label, src, code) in ng_cases {
         match parse_source(src, "decoy") {
             Err(d) if d.code.as_deref() == Some(code) => println!("parse_decoy_ng: {label}"),
-            other => panic!(
-                "decoy ng-case {label}: expected error[{code}], got {other:?} ({src:?})"
-            ),
+            other => {
+                panic!("decoy ng-case {label}: expected error[{code}], got {other:?} ({src:?})")
+            }
         }
     }
 }
@@ -358,7 +376,12 @@ fn render(rng: &mut Rng, node: &Node, indent: usize) -> String {
         NodeKind::Bin(op, l, r) => {
             let ls = render_operand(rng, l, *op, true, indent + 1);
             let rs = render_operand(rng, r, *op, false, indent + 1);
-            format!("{ls}{}{}{}{rs}", ws(rng, indent), op.as_str(), ws(rng, indent))
+            format!(
+                "{ls}{}{}{}{rs}",
+                ws(rng, indent),
+                op.as_str(),
+                ws(rng, indent)
+            )
         }
         other => panic!("render: unexpected node kind {other:?}"),
     }
@@ -403,9 +426,7 @@ fn expression_tree_round_trip() {
                     ok += 1;
                 } else {
                     println!("parse_tree_mismatch: {i} expected={expected} got={got} src={src:?}");
-                    failures.push(format!(
-                        "#{i}: expected {expected}, got {got}, src={src:?}"
-                    ));
+                    failures.push(format!("#{i}: expected {expected}, got {got}, src={src:?}"));
                 }
             }
             Err(d) => {
@@ -428,7 +449,12 @@ fn auxiliary_sources(directory: &Path, entry: &Path, result: &mut Vec<PathBuf>) 
         let path = item.unwrap().path();
         if path.is_dir() {
             auxiliary_sources(&path, entry, result);
-        } else if path != entry && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+        } else if path != entry
+            && matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("hd" | "hdi")
+            )
+        {
             result.push(path);
         }
     }
@@ -448,6 +474,8 @@ fn corpus_auxiliary_source_files_parse_recursively() {
     for path in sources {
         let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
         let source = std::fs::read_to_string(&path).unwrap();
-        parse_source(&source, &relative).unwrap_or_else(|error| panic!("auxiliary source failed to parse: {relative}: {error}"));
+        parse_source(&source, &relative).unwrap_or_else(|error| {
+            panic!("auxiliary source failed to parse: {relative}: {error}")
+        });
     }
 }

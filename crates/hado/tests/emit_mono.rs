@@ -41,7 +41,11 @@ fn unary_operations_and_float_division_generate_typed_instructions() {
         let function = hado::emit::lower_mono_function(&program.functions[0], &checked).unwrap();
         let flags = cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder());
         cranelift_codegen::verify_function(&function, &flags).unwrap();
-        assert!(function.display().to_string().contains(instruction), "{}", function.display());
+        assert!(
+            function.display().to_string().contains(instruction),
+            "{}",
+            function.display()
+        );
     }
 }
 
@@ -51,7 +55,11 @@ fn direct_calls_import_the_fixed_signature() {
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
-    let source = program.functions.iter().find(|f| f.name == "twice").unwrap();
+    let source = program
+        .functions
+        .iter()
+        .find(|f| f.name == "twice")
+        .unwrap();
     let function = hado::emit::lower_mono_function(source, &checked).unwrap();
     let flags = cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder());
     cranelift_codegen::verify_function(&function, &flags).unwrap();
@@ -60,11 +68,20 @@ fn direct_calls_import_the_fixed_signature() {
 
 #[test]
 fn recursive_tail_positions_emit_return_call() {
-    let source = "def rec down n => if n == 0 => 0 | let next = n - 1 -> down next\ndef main = down 3";
+    let source =
+        "def rec down n => if n == 0 => 0 | let next = n - 1 -> down next\ndef main = down 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
-    let function = hado::emit::lower_mono_function(program.functions.iter().find(|function| function.name == "down").unwrap(), &checked).unwrap();
+    let function = hado::emit::lower_mono_function(
+        program
+            .functions
+            .iter()
+            .find(|function| function.name == "down")
+            .unwrap(),
+        &checked,
+    )
+    .unwrap();
     let flags = cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder());
     cranelift_codegen::verify_function(&function, &flags).unwrap();
     let clif = function.display().to_string();
@@ -94,11 +111,24 @@ fn mono_object_links_and_executes_recursive_calls() {
 #[test]
 fn closures_execute_direct_values_and_captured_environments() {
     for (index, source, expected) in [
-        (0, "def inc x => x + 1\ndef main = let f = inc -> f 4", "5\n"),
-        (1, "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3", "10\n"),
-        (2, "def main = let offset = 7 -> let f = fn(x => x + offset) -> (f 3) + (f 5)", "22\n"),
+        (
+            0,
+            "def inc x => x + 1\ndef main = let f = inc -> f 4",
+            "5\n",
+        ),
+        (
+            1,
+            "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3",
+            "10\n",
+        ),
+        (
+            2,
+            "def main = let offset = 7 -> let f = fn(x => x + offset) -> (f 3) + (f 5)",
+            "22\n",
+        ),
     ] {
-        let path = std::env::temp_dir().join(format!("hado-closure-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-closure-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -125,7 +155,8 @@ fn tail_calls_survive_arity_changes_and_captured_indirection() {
         "def rec loop offset n => if n == 0 => offset | let f = fn(x => loop offset x) -> f (n - 1)\ndef main = loop 42 100000000",
     ];
     for (index, source) in cases.iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-tail-path-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-tail-path-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success(), "case {index}: {output:?}");
@@ -165,8 +196,11 @@ fn constructor_switches_execute_immediate_and_boxed_variants() {
 #[test]
 fn constructor_switch_values_flow_into_following_arithmetic() {
     for (index, argument, expected) in [(0, "Some(40)", "42\n"), (1, "None", "11\n")] {
-        let source = format!("def main = let option = {argument} -> (if option | Some(n) => n | None => 9) + 2");
-        let path = std::env::temp_dir().join(format!("hado-switch-value-{}-{index}", std::process::id()));
+        let source = format!(
+            "def main = let option = {argument} -> (if option | Some(n) => n | None => 9) + 2"
+        );
+        let path =
+            std::env::temp_dir().join(format!("hado-switch-value-{}-{index}", std::process::id()));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -178,17 +212,31 @@ fn constructor_switch_values_flow_into_following_arithmetic() {
 #[test]
 fn integer_division_handles_zero_and_wrapping_boundary() {
     for (index, expression, stdout, stderr, status) in [
-        (0, "7 / 2", "3\n", "", 0), (1, "7 % 2", "1\n", "", 0),
-        (2, "7 / 0", "", "DivisionByZero\n", 1), (3, "7 % 0", "", "DivisionByZero\n", 1),
-        (4, "(-9223372036854775807 - 1) / -1", "-9223372036854775808\n", "", 0),
+        (0, "7 / 2", "3\n", "", 0),
+        (1, "7 % 2", "1\n", "", 0),
+        (2, "7 / 0", "", "DivisionByZero\n", 1),
+        (3, "7 % 0", "", "DivisionByZero\n", 1),
+        (
+            4,
+            "(-9223372036854775807 - 1) / -1",
+            "-9223372036854775808\n",
+            "",
+            0,
+        ),
         (5, "(-9223372036854775807 - 1) % -1", "0\n", "", 0),
-        (6, "-7 / 2", "-3\n", "", 0), (7, "-7 % 2", "-1\n", "", 0),
+        (6, "-7 / 2", "-3\n", "", 0),
+        (7, "-7 % 2", "-1\n", "", 0),
     ] {
         let source = format!("def main = {expression}");
-        let path = std::env::temp_dir().join(format!("hado-division-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-division-{}-{index}", std::process::id()));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
-        assert_eq!(output.status.code(), Some(status), "{expression}: {output:?}");
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "{expression}: {output:?}"
+        );
         assert_eq!(output.stdout, stdout.as_bytes(), "{expression}");
         assert_eq!(output.stderr, stderr.as_bytes(), "{expression}");
         std::fs::remove_file(path).unwrap();
@@ -197,9 +245,16 @@ fn integer_division_handles_zero_and_wrapping_boundary() {
 
 #[test]
 fn nested_literal_patterns_merge_values_without_reaching_impossible_paths() {
-    for (index, argument, expected) in [(0, "Some(true)", "42\n"), (1, "Some(false)", "11\n"), (2, "None", "2\n")] {
+    for (index, argument, expected) in [
+        (0, "Some(true)", "42\n"),
+        (1, "Some(false)", "11\n"),
+        (2, "None", "2\n"),
+    ] {
         let source = format!("def main = let option = {argument} -> (if option | Some(true) => 40 | Some(false) => 9 | None => 0) + 2");
-        let path = std::env::temp_dir().join(format!("hado-nested-pattern-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hado-nested-pattern-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -218,7 +273,9 @@ fn string_literals_are_linked_as_static_data() {
     let object = path.with_extension("o");
     hado::emit::compile_mono_to_object(&program, &checked, &object).unwrap();
     let bytes = std::fs::read(&object).unwrap();
-    assert!(bytes.windows("あ😀".len()).any(|part| part == "あ😀".as_bytes()));
+    assert!(bytes
+        .windows("あ😀".len())
+        .any(|part| part == "あ😀".as_bytes()));
     hado::link_executable(&object, &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
@@ -229,9 +286,14 @@ fn string_literals_are_linked_as_static_data() {
 
 #[test]
 fn string_equality_compares_contents_across_static_objects() {
-    for (index, text, expected) in [(0, "あ😀", "1\n"), (1, "あ😁", "0\n"), (2, "あ", "0\n")] {
-        let source = format!("def equal text => text == \"あ😀\"\ndef main = if equal \"{text}\" => 1 | 0");
-        let path = std::env::temp_dir().join(format!("hado-string-equality-{}-{index}", std::process::id()));
+    for (index, text, expected) in [(0, "あ😀", "1\n"), (1, "あ😁", "0\n"), (2, "あ", "0\n")]
+    {
+        let source =
+            format!("def equal text => text == \"あ😀\"\ndef main = if equal \"{text}\" => 1 | 0");
+        let path = std::env::temp_dir().join(format!(
+            "hado-string-equality-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -251,7 +313,10 @@ fn derived_string_comparison_executes_lexicographic_order() {
         let source = format!("def main = compare \"{left}\" \"{right}\"");
         let ir = hado::dump_mono(&source, "t").unwrap();
         assert!(ir.contains("compare_String"));
-        let path = std::env::temp_dir().join(format!("hado-string-compare-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hado-string-compare-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -264,7 +329,10 @@ fn derived_string_comparison_executes_lexicographic_order() {
 fn record_equality_uses_derived_field_comparisons() {
     for (index, value, expected) in [(0, 3, "1\n"), (1, 4, "0\n")] {
         let source = format!("type Inner = {{ count: Int }}\ntype Item = {{ inner: Inner; text: String }}\ndef main = if {{ inner = {{ count = 3 }}; text = \"あ\" }} == {{ text = \"あ\"; inner = {{ count = {value} }} }} => 1 | 0");
-        let path = std::env::temp_dir().join(format!("hado-record-equality-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hado-record-equality-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -284,7 +352,8 @@ fn recursive_adt_equality_compares_tags_and_payloads() {
         (4, "Some(3)", "Some(3)", "1\n"),
     ] {
         let source = format!("def main = if {left} == {right} => 1 | 0");
-        let path = std::env::temp_dir().join(format!("hado-adt-equality-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-adt-equality-{}-{index}", std::process::id()));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -297,7 +366,10 @@ fn recursive_adt_equality_compares_tags_and_payloads() {
 fn record_compare_uses_declaration_order() {
     for (index, x, y, expected) in [(0, 1, 9, "-1\n"), (1, 2, 0, "0\n"), (2, 2, 1, "1\n")] {
         let source = format!("type Pair = {{ first: Int; second: Int }}\ndef main = compare {{ second = {y}; first = {x} }} {{ first = 2; second = 0 }}");
-        let path = std::env::temp_dir().join(format!("hado-record-compare-{}-{index}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hado-record-compare-{}-{index}",
+            std::process::id()
+        ));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -309,12 +381,17 @@ fn record_compare_uses_declaration_order() {
 #[test]
 fn adt_compare_uses_constructor_order_and_recursive_payloads() {
     for (index, source, expected) in [
-        (0, "type Choice = | Zebra | Apple\ndef main = compare Zebra Apple", "-1\n"),
+        (
+            0,
+            "type Choice = | Zebra | Apple\ndef main = compare Zebra Apple",
+            "-1\n",
+        ),
         (1, "def main = compare [1, 2] [1, 3]", "-1\n"),
         (2, "def main = compare [1, 2] [1, 2]", "0\n"),
         (3, "def main = compare [2] [1, 9]", "1\n"),
     ] {
-        let path = std::env::temp_dir().join(format!("hado-adt-compare-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-adt-compare-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -328,14 +405,28 @@ fn runtime_calls_keep_types_and_remain_non_tail() {
     use hado::mono::{Constant, Expression, Program};
     use hado::runtime_abi::RuntimeFunction;
     let text = |s: &str| Expression::Constant(Constant::String(s.into()));
-    let joined = Expression::call_runtime(RuntimeFunction::StringConcat, vec![text("あ"), text("😀")]).unwrap();
+    let joined =
+        Expression::call_runtime(RuntimeFunction::StringConcat, vec![text("あ"), text("😀")])
+            .unwrap();
     let entry = Expression::call_runtime(RuntimeFunction::StringLength, vec![joined]).unwrap();
     assert!(matches!(entry, Expression::CallRuntime { .. }));
-    assert!(Expression::call_runtime(RuntimeFunction::StringLength, vec![Expression::Constant(Constant::Int(1))]).is_err());
+    assert!(Expression::call_runtime(
+        RuntimeFunction::StringLength,
+        vec![Expression::Constant(Constant::Int(1))]
+    )
+    .is_err());
     let checked = hado::check_source("def main = 0", "t").unwrap();
     let path = std::env::temp_dir().join(format!("hado-runtime-call-{}", std::process::id()));
     let object = path.with_extension("o");
-    hado::emit::compile_mono_to_object(&Program { entry, functions: vec![] }, &checked, &object).unwrap();
+    hado::emit::compile_mono_to_object(
+        &Program {
+            entry,
+            functions: vec![],
+        },
+        &checked,
+        &object,
+    )
+    .unwrap();
     hado::link_executable(&object, &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
@@ -371,8 +462,13 @@ fn string_main_prints_utf8_and_newline() {
 
 #[test]
 fn boolean_and_unit_main_use_derived_printers() {
-    for (index, source, expected) in [(0, "def main = 1 < 2", "true\n"), (1, "def main = 2 < 1", "false\n"), (2, "def main = ()", "")] {
-        let path = std::env::temp_dir().join(format!("hado-simple-print-{}-{index}", std::process::id()));
+    for (index, source, expected) in [
+        (0, "def main = 1 < 2", "true\n"),
+        (1, "def main = 2 < 1", "false\n"),
+        (2, "def main = ()", ""),
+    ] {
+        let path =
+            std::env::temp_dir().join(format!("hado-simple-print-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -385,7 +481,8 @@ fn boolean_and_unit_main_use_derived_printers() {
 fn char_main_encodes_unicode_scalars_as_utf8() {
     for (index, character) in ['A', 'é', 'あ', '😀'].iter().enumerate() {
         let source = format!("def main = '{character}'");
-        let path = std::env::temp_dir().join(format!("hado-char-print-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-char-print-{}-{index}", std::process::id()));
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -397,7 +494,8 @@ fn char_main_encodes_unicode_scalars_as_utf8() {
 #[test]
 fn float_main_passes_f64_values_to_the_runtime() {
     for (index, expression, expected) in [(0, "1.5 * 2.5", "3.75\n"), (1, "-1.25", "-1.25\n")] {
-        let path = std::env::temp_dir().join(format!("hado-float-print-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-float-print-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def main = {expression}"), "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -408,9 +506,19 @@ fn float_main_passes_f64_values_to_the_runtime() {
 
 #[test]
 fn integer_to_string_preserves_signed_boundaries() {
-    for (index, expression, expected) in [(0, "0", "0\n"), (1, "-42", "-42\n"), (2, "(-9223372036854775807 - 1)", "-9223372036854775808\n")] {
-        let path = std::env::temp_dir().join(format!("hado-int-string-{}-{index}", std::process::id()));
-        hado::build::executable(&format!("def main = __int_to_string ({expression})"), "stdlib/test.hd", &path).unwrap();
+    for (index, expression, expected) in [
+        (0, "0", "0\n"),
+        (1, "-42", "-42\n"),
+        (2, "(-9223372036854775807 - 1)", "-9223372036854775808\n"),
+    ] {
+        let path =
+            std::env::temp_dir().join(format!("hado-int-string-{}-{index}", std::process::id()));
+        hado::build::executable(
+            &format!("def main = __int_to_string ({expression})"),
+            "stdlib/test.hd",
+            &path,
+        )
+        .unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, expected.as_bytes());
@@ -420,9 +528,19 @@ fn integer_to_string_preserves_signed_boundaries() {
 
 #[test]
 fn float_to_string_preserves_numeric_values() {
-    for (index, expression, expected) in [(0, "1.25", "1.25\n"), (1, "-3.5", "-3.5\n"), (2, "0.0", "0\n")] {
-        let path = std::env::temp_dir().join(format!("hado-float-string-{}-{index}", std::process::id()));
-        hado::build::executable(&format!("def main = __float_to_string ({expression})"), "stdlib/test.hd", &path).unwrap();
+    for (index, expression, expected) in [
+        (0, "1.25", "1.25\n"),
+        (1, "-3.5", "-3.5\n"),
+        (2, "0.0", "0\n"),
+    ] {
+        let path =
+            std::env::temp_dir().join(format!("hado-float-string-{}-{index}", std::process::id()));
+        hado::build::executable(
+            &format!("def main = __float_to_string ({expression})"),
+            "stdlib/test.hd",
+            &path,
+        )
+        .unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, expected.as_bytes());
@@ -433,7 +551,8 @@ fn float_to_string_preserves_numeric_values() {
 #[test]
 fn char_to_string_preserves_utf8() {
     for (index, character) in ['A', 'é', 'あ', '😀'].iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-char-string-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-char-string-{}-{index}", std::process::id()));
         let source = format!("def main = __char_to_string '{character}'");
         hado::build::executable(&source, "stdlib/test.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
@@ -446,7 +565,8 @@ fn char_to_string_preserves_utf8() {
 #[test]
 fn enum_main_prints_the_selected_constructor() {
     for (index, variant) in ["Zebra", "Apple"].iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-enum-print-{}-{index}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("hado-enum-print-{}-{index}", std::process::id()));
         let source = format!("type Choice = | Zebra | Apple\ndef main = {variant}");
         hado::build::executable(&source, "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
@@ -458,8 +578,12 @@ fn enum_main_prints_the_selected_constructor() {
 
 #[test]
 fn result_main_selects_output_stream_and_exit_status() {
-    for (index, expression, stdout, stderr, status) in [(0, "7 / 2", "3\n", "", 0), (1, "7 / 0", "", "DivisionByZero\n", 1)] {
-        let path = std::env::temp_dir().join(format!("hado-result-main-{}-{index}", std::process::id()));
+    for (index, expression, stdout, stderr, status) in [
+        (0, "7 / 2", "3\n", "", 0),
+        (1, "7 / 0", "", "DivisionByZero\n", 1),
+    ] {
+        let path =
+            std::env::temp_dir().join(format!("hado-result-main-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def main = {expression}"), "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert_eq!(output.status.code(), Some(status));
@@ -472,7 +596,8 @@ fn result_main_selects_output_stream_and_exit_status() {
 #[test]
 fn record_main_formats_fields_in_declaration_order() {
     let path = std::env::temp_dir().join(format!("hado-record-print-{}", std::process::id()));
-    let source = "type Item = { count: Int; enabled: Bool }\ndef main = { enabled = true; count = 3 }";
+    let source =
+        "type Item = { count: Int; enabled: Bool }\ndef main = { enabled = true; count = 3 }";
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
@@ -482,8 +607,12 @@ fn record_main_formats_fields_in_declaration_order() {
 
 #[test]
 fn option_main_formats_payload_and_nullary_variant() {
-    for (index, expression, expected) in [(0, "Some(3)", "Some(3)\n"), (1, "if true => None | Some(3)", "None\n")] {
-        let path = std::env::temp_dir().join(format!("hado-option-print-{}-{index}", std::process::id()));
+    for (index, expression, expected) in [
+        (0, "Some(3)", "Some(3)\n"),
+        (1, "if true => None | Some(3)", "None\n"),
+    ] {
+        let path =
+            std::env::temp_dir().join(format!("hado-option-print-{}-{index}", std::process::id()));
         hado::build::executable(&format!("def main = {expression}"), "t", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
@@ -509,7 +638,12 @@ fn recursive_list_main_uses_finite_formatter_functions() {
 #[test]
 fn functions_can_reference_top_level_values() {
     let path = std::env::temp_dir().join(format!("hado-global-value-{}", std::process::id()));
-    hado::build::executable("def offset = 3\ndef add n => n + offset\ndef main = add 39", "t", &path).unwrap();
+    hado::build::executable(
+        "def offset = 3\ndef add n => n + offset\ndef main = add 39",
+        "t",
+        &path,
+    )
+    .unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
     assert!(output.status.success());
     assert_eq!(output.stdout, b"42\n");
@@ -543,9 +677,18 @@ fn unit_output_prints_option_payloads_without_a_status_channel() {
     for (index, (expression, ty, stdout)) in [
         ("Some(())", "Void Option", "Some(())\n"),
         ("None", "Void Option", "None\n"),
-    ].into_iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("hado-unit-option-{}-{index}", std::process::id()));
-        hado::build::executable(&format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"), "unit-print.hd", &path).unwrap();
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path =
+            std::env::temp_dir().join(format!("hado-unit-option-{}-{index}", std::process::id()));
+        hado::build::executable(
+            &format!("def identity (x: {ty}): {ty} => x\ndef main = identity ({expression})"),
+            "unit-print.hd",
+            &path,
+        )
+        .unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert_eq!(output.status.code(), Some(0));
         assert_eq!(output.stdout, stdout.as_bytes());

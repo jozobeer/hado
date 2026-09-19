@@ -2,7 +2,11 @@ use crate::parser::{Ast, Diagnostic, Item, Span, TypeDef, TypeExpr, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
-    match violations(ast, path).into_iter().map(|violation| violation.diagnostic).min_by_key(crate::diagnostic_order) {
+    match violations(ast, path)
+        .into_iter()
+        .map(|violation| violation.diagnostic)
+        .min_by_key(crate::diagnostic_order)
+    {
         Some(error) => Err(error),
         None => Ok(()),
     }
@@ -35,10 +39,14 @@ pub(crate) fn violations(ast: &Ast, path: &str) -> Vec<Violation> {
                     diagnostics.push(Violation {
                         definition: (*name).into(),
                         reference: *reference,
-                        diagnostic: Diagnostic { related: None,
-                            path: path.into(), line: span.line, col: span.col,
+                        diagnostic: Diagnostic {
+                            related: None,
+                            path: path.into(),
+                            line: span.line,
+                            col: span.col,
                             code: Some("E302".into()),
-                            message: "recursive type arguments must preserve declared parameters".into(),
+                            message: "recursive type arguments must preserve declared parameters"
+                                .into(),
                         },
                     });
                 }
@@ -48,9 +56,16 @@ pub(crate) fn violations(ast: &Ast, path: &str) -> Vec<Violation> {
     diagnostics
 }
 
-fn changed_argument(args: &[TypeExpr], parameters: &[crate::parser::DeclaredName], reference: Span) -> Option<Span> {
+fn changed_argument(
+    args: &[TypeExpr],
+    parameters: &[crate::parser::DeclaredName],
+    reference: Span,
+) -> Option<Span> {
     for (index, arg) in args.iter().enumerate() {
-        if !parameters.get(index).is_some_and(|param| matches!(&arg.kind, TypeKind::Name(name) if name == &param.name)) {
+        if !parameters
+            .get(index)
+            .is_some_and(|param| matches!(&arg.kind, TypeKind::Name(name) if name == &param.name))
+        {
             return Some(arg.span);
         }
     }
@@ -88,11 +103,15 @@ fn references(def: &TypeDef) -> Vec<(&str, &[TypeExpr], Span)> {
             }
             TypeKind::Adt(variants) => {
                 for variant in variants {
-                    for ty in variant.payload.types() { collect(ty, &mut result); }
+                    for ty in variant.payload.types() {
+                        collect(ty, &mut result);
+                    }
                 }
             }
             TypeKind::Apply(_, args) => {
-                for arg in args { collect(arg, &mut result); }
+                for arg in args {
+                    collect(arg, &mut result);
+                }
             }
             _ => {}
         }
@@ -110,7 +129,11 @@ fn collect<'a>(ty: &'a TypeExpr, result: &mut Vec<(&'a str, &'a [TypeExpr], Span
             }
         }
         TypeKind::Adt(variants) => {
-            for variant in variants { for ty in variant.payload.types() { collect(ty, result); } }
+            for variant in variants {
+                for ty in variant.payload.types() {
+                    collect(ty, result);
+                }
+            }
         }
         TypeKind::Group(args) => {
             for arg in args {

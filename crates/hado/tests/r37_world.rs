@@ -5,39 +5,68 @@ struct Case(std::path::PathBuf);
 impl Case {
     fn new(source: &str) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!("hado-r37-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "hado-r37-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("main.hd"), source).unwrap();
         Self(dir)
     }
     fn command(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_hado")).args(args).arg(self.0.join("main.hd")).output().unwrap()
+        Command::new(env!("CARGO_BIN_EXE_hado"))
+            .args(args)
+            .arg(self.0.join("main.hd"))
+            .output()
+            .unwrap()
     }
     fn prints_type(&self, expected: &str) {
         let output = self.command(&["check", "--print-type"]);
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), format!("{expected}\n"));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("{expected}\n")
+        );
     }
     fn runs(&self, expected: i64) {
         let built = self.command(&["build"]);
         assert_eq!(built.status.code(), Some(0), "{built:?}");
         assert!(built.stderr.is_empty());
-        let output = Command::new(self.0.join("main")).current_dir(&self.0).output().unwrap();
+        let output = Command::new(self.0.join("main"))
+            .current_dir(&self.0)
+            .output()
+            .unwrap();
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), format!("{expected}\n"));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("{expected}\n")
+        );
     }
 }
-impl Drop for Case { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+impl Drop for Case {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 #[test]
 fn operation_result_rows_reach_the_call_without_effectful_handler_arms() {
-    for (annotation, expected) in [("", "String"), (" {Error}", "String {Error}"), (" {Error, Bar}", "String {Bar, Error}")] {
+    for (annotation, expected) in [
+        ("", "String"),
+        (" {Error}", "String {Error}"),
+        (" {Error, Bar}", "String {Bar, Error}"),
+    ] {
         for (param, arm, call) in [("", "", "pick"), ("(n: Int)", " _", "pick 3")] {
             // §37: an effect that nothing names is E513, so `Bar` is declared only
             // where the annotation's row uses it.
-            let bar = if annotation.contains("Bar") { "effect Bar\nonce other: Int\n" } else { "" };
+            let bar = if annotation.contains("Bar") {
+                "effect Bar\nonce other: Int\n"
+            } else {
+                ""
+            };
             Case::new(&format!("{bar}effect Foo\nonce pick{param}: Int{annotation}\nhandler Foo as H\nonce pick{arm} => 7\ndef main = Int.to_string (with H -> {call})\n")).prints_type(expected);
         }
     }
@@ -77,16 +106,25 @@ fn shadowed_again_is_a_local_let_value() {
 #[test]
 fn prelude_once_defaults_cover_every_operation() {
     let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
-    let replies: std::collections::HashSet<_> = checked.operations.iter()
+    let replies: std::collections::HashSet<_> = checked
+        .operations
+        .iter()
         .filter(|(_, kind)| **kind == hado::parser::OpKind::Once)
-        .map(|(name, _)| name).collect();
+        .map(|(name, _)| name)
+        .collect();
     assert!(!replies.is_empty());
     assert_eq!(replies, checked.default_operations.keys().collect());
     for operation in ["args", "env", "cwd"] {
-        assert_eq!(checked.default_operations[operation], format!("EnvDefault.{operation}"));
+        assert_eq!(
+            checked.default_operations[operation],
+            format!("EnvDefault.{operation}")
+        );
     }
     for definition in checked.default_operations.values() {
-        assert!(checked.module_definitions.contains_key(definition), "{definition}");
+        assert!(
+            checked.module_definitions.contains_key(definition),
+            "{definition}"
+        );
     }
 }
 
@@ -95,17 +133,51 @@ fn default_definitions_are_required_and_checked_after_inference() {
     let prefix = "effect Error\nabort raise(error: Exception)\neffect World\n";
     for (operation, signature, definition, expected) in [
         ("once pick: Int", "", "", Some("E204")),
-        ("once pick: Int", "def pick: String Pure", "def pick = \"wrong\"", Some("E305")),
-        ("once pick: Int", "def pick: Int {Error}", "def pick = raise { message = \"x\" }", Some("E305")),
-        ("once pick: Int {Error}", "def pick: Int Pure", "def pick = 11", None),
-        ("once pick(n: Int): Int {Error}", "def pick(n: Int): Int Pure", "def pick n => n + 1", None),
-        ("once pick(n: Int): Int", "def pick: Int Pure", "def pick = 11", Some("E301")),
-        ("once pick: Int", "def pick(n: Int): Int Pure", "def pick n => n + 1", Some("E301")),
+        (
+            "once pick: Int",
+            "def pick: String Pure",
+            "def pick = \"wrong\"",
+            Some("E305"),
+        ),
+        (
+            "once pick: Int",
+            "def pick: Int {Error}",
+            "def pick = raise { message = \"x\" }",
+            Some("E305"),
+        ),
+        (
+            "once pick: Int {Error}",
+            "def pick: Int Pure",
+            "def pick = 11",
+            None,
+        ),
+        (
+            "once pick(n: Int): Int {Error}",
+            "def pick(n: Int): Int Pure",
+            "def pick n => n + 1",
+            None,
+        ),
+        (
+            "once pick(n: Int): Int",
+            "def pick: Int Pure",
+            "def pick = 11",
+            Some("E301"),
+        ),
+        (
+            "once pick: Int",
+            "def pick(n: Int): Int Pure",
+            "def pick n => n + 1",
+            Some("E301"),
+        ),
     ] {
         let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\nimplement WorldDefault as WorldDefault\n{definition}\n");
         let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");
         match expected {
-            Some(code) => assert_eq!(result.err().expect(&source).code, Some(code.to_owned()), "{source}"),
+            Some(code) => assert_eq!(
+                result.err().expect(&source).code,
+                Some(code.to_owned()),
+                "{source}"
+            ),
             None => assert!(result.is_ok(), "{source}: {:?}", result.err()),
         }
     }
@@ -118,7 +190,9 @@ fn runtime_preserves_argv_and_copies_length_delimited_environment_names() {
     let source = case.0.join("probe.c");
     let object = case.0.join("probe.o");
     let executable = case.0.join("probe");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 #include "hado_runtime.h"
 #include <assert.h>
 #include <string.h>
@@ -140,25 +214,50 @@ int32_t hado_entry(void) {
     assert(hado_env_has((const HadoString *)&key) == 0);
     return 0;
 }
-"#).unwrap();
-    let compiled = Command::new("cc").args(["-std=c11", "-Wall", "-Werror", "-c"])
-        .arg(&source).arg("-I").arg(root.join("runtime")).arg("-o").arg(&object).output().unwrap();
-    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+"#,
+    )
+    .unwrap();
+    let compiled = Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Werror", "-c"])
+        .arg(&source)
+        .arg("-I")
+        .arg(root.join("runtime"))
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
     hado::link_executable(&object, &executable).unwrap();
     use std::os::unix::ffi::OsStrExt;
-    let output = Command::new(executable).args(["first", ""])
-        .arg(std::ffi::OsStr::from_bytes(&[255])).env("R37_KEY", "copied").env("R37_KEYX", "tail")
-        .current_dir(&case.0).output().unwrap();
+    let output = Command::new(executable)
+        .args(["first", ""])
+        .arg(std::ffi::OsStr::from_bytes(&[255]))
+        .env("R37_KEY", "copied")
+        .env("R37_KEYX", "tail")
+        .current_dir(&case.0)
+        .output()
+        .unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "{output:?}"
+    );
 }
 
 #[test]
 fn io_is_a_prelude_effect_with_all_five_defaults() {
-    Case::new("def main = [List.length args, Bytes.length read_stdin]\n").prints_type("Int List {Env, Error, Io}");
+    Case::new("def main = [List.length args, Bytes.length read_stdin]\n")
+        .prints_type("Int List {Env, Error, Io}");
     let checked = hado::check_source("def main = 0\n", "main.hd").unwrap();
     for operation in ["read_file", "write_file", "log", "read_dir", "read_stdin"] {
-        assert_eq!(checked.default_operations[operation], format!("IoDefault.{operation}"));
+        assert_eq!(
+            checked.default_operations[operation],
+            format!("IoDefault.{operation}")
+        );
     }
 }
 
@@ -173,7 +272,9 @@ fn io_runtime_classifies_errno_and_copies_sorts_and_filters_directory_names() {
         std::fs::write(case.0.join("entries").join(name), b"data").unwrap();
     }
     std::fs::write(case.0.join("file"), b"data").unwrap();
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 #include "hado_runtime.c"
 #include <assert.h>
 int32_t hado_entry(void) {
@@ -204,11 +305,31 @@ int32_t hado_entry(void) {
     assert(hado_io_read_dir((const HadoString *)&path) == 3);
     return 0;
 }
-"#).unwrap();
-    let compiled = Command::new("cc").args(["-std=c11", "-Wall", "-Werror"])
-        .arg(&source).arg("-I").arg(root.join("runtime")).arg("-lgc").arg("-o").arg(&executable).output().unwrap();
-    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
-    let output = Command::new(executable).current_dir(&case.0).output().unwrap();
+"#,
+    )
+    .unwrap();
+    let compiled = Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Werror"])
+        .arg(&source)
+        .arg("-I")
+        .arg(root.join("runtime"))
+        .arg("-lgc")
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let output = Command::new(executable)
+        .current_dir(&case.0)
+        .output()
+        .unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "{output:?}"
+    );
 }

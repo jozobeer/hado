@@ -44,11 +44,22 @@ fn unresolved_receivers_keep_diagnostic_stage_and_position_order() {
 fn catch_all_patterns_are_exhaustive_before_redundancy_checks() {
     for index in 0..20 {
         for (arms, argument) in [
-            (format!("Some(value) => value + {index} | _ => 0"), "Some(1)"),
+            (
+                format!("Some(value) => value + {index} | _ => 0"),
+                "Some(1)",
+            ),
             (format!("true => {index} | _ => -1"), "true"),
         ] {
             let source = format!("def choose | {arms}\ndef main = choose ({argument})");
-            assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E503"), "{source}");
+            assert_eq!(
+                check_source(&source, "coverage.hd")
+                    .err()
+                    .unwrap()
+                    .code
+                    .as_deref(),
+                Some("E503"),
+                "{source}"
+            );
         }
     }
 }
@@ -58,7 +69,14 @@ fn variable_arm_is_not_decomposition_and_reconstruction() {
     for index in 0..20 {
         let name = format!("value{index}");
         let source = format!("def identity | {name} => {name}\ndef main = identity {index}");
-        assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E512"));
+        assert_eq!(
+            check_source(&source, "coverage.hd")
+                .err()
+                .unwrap()
+                .code
+                .as_deref(),
+            Some("E512")
+        );
     }
 }
 
@@ -69,7 +87,14 @@ fn sole_parameter_branch_checks_all_four_conditions() {
         "def f value => if value | Some(value) => value + 1 | 0\ndef main = f (Some(1))",
         "def main = fn(value => if value | Some(x) => x + 1 | 0) (Some(1))",
     ] {
-        assert_eq!(check_source(source, "coverage.hd").err().unwrap().code.as_deref(), Some("E515"));
+        assert_eq!(
+            check_source(source, "coverage.hd")
+                .err()
+                .unwrap()
+                .code
+                .as_deref(),
+            Some("E515")
+        );
     }
     for source in [
         "def f value extra => if value | Some(x) => x + extra | extra\ndef main = f (Some(1)) 2",
@@ -88,14 +113,23 @@ fn sole_parameter_branch_checks_all_four_conditions() {
 fn let_patterns_must_cover_the_entire_payload_type() {
     for index in 0..20 {
         for (prefix, tail) in [
-            ("def main = let ", format!("Some(value) = Some({index}) -> value + 1")),
-            ("def main = let ", format!("Some(value)? = Some(Some({index})) -> Some(value + 1)")),
+            (
+                "def main = let ",
+                format!("Some(value) = Some({index}) -> value + 1"),
+            ),
+            (
+                "def main = let ",
+                format!("Some(value)? = Some(Some({index})) -> Some(value + 1)"),
+            ),
         ] {
-            let error = check_source(&format!("{prefix}{tail}"), "coverage.hd").err().unwrap();
+            let error = check_source(&format!("{prefix}{tail}"), "coverage.hd")
+                .err()
+                .unwrap();
             assert_eq!(error.code.as_deref(), Some("E402"));
             assert_eq!((error.line, error.col), (1, prefix.len() + 1));
         }
-        let source = format!("type Id = | Id(Int)\ndef main = let Id(value) = Id({index}) -> value + 1");
+        let source =
+            format!("type Id = | Id(Int)\ndef main = let Id(value) = Id({index}) -> value + 1");
         check_source(&source, "coverage.hd").unwrap();
     }
 }
@@ -104,15 +138,31 @@ fn let_patterns_must_cover_the_entire_payload_type() {
 fn do_requires_a_rail_and_records_require_a_candidate() {
     for index in 0..20 {
         let source = format!("def main = do {index} -> Some(1)");
-        assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E303"));
+        assert_eq!(
+            check_source(&source, "coverage.hd")
+                .err()
+                .unwrap()
+                .code
+                .as_deref(),
+            Some("E303")
+        );
         let source = format!("def main = {{ missing{index} = 1 }}");
-        assert_eq!(check_source(&source, "coverage.hd").err().unwrap().code.as_deref(), Some("E304"));
+        assert_eq!(
+            check_source(&source, "coverage.hd")
+                .err()
+                .unwrap()
+                .code
+                .as_deref(),
+            Some("E304")
+        );
     }
 }
 
 #[test]
 fn unused_bindings_include_parameters_and_nested_patterns() {
-    let error = check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.hd").err().unwrap();
+    let error = check_source("def f _ x => x + 1\ndef main = f 1 2", "coverage.hd")
+        .err()
+        .unwrap();
     assert_eq!(error.code.as_deref(), Some("E519"));
     assert_eq!((error.line, error.col), (1, 7));
     for (source, name) in [
@@ -142,7 +192,9 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
 #[test]
 fn record_patterns_resolve_the_whole_field_set() {
     for index in 0..12 {
-        let source = format!("def f value => let {{ absent{index} }} = value -> absent{index} + 1\ndef main = f 1");
+        let source = format!(
+            "def f value => let {{ absent{index} }} = value -> absent{index} + 1\ndef main = f 1"
+        );
         let error = check_source(&source, "coverage.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E304"));
         assert_eq!(error.col, source.find('{').unwrap() + 1);

@@ -17,7 +17,7 @@ $ find tests/accept -name main.hd -exec wc -l {} + | sort -rn | grep -v total | 
 
 ## 原因
 
-`docs/wants.md` 53 は「自分用のプログラムを常に 1 本」と言うが、いまある `tools/gates/main.hd:1` と `tools/diagnostics/main.hd:1` は入力が自前の構造化された出力で、任意のテキストを読まない。
+`docs/wants.md` 53 は「自分用のプログラムを常に 1 本」と言うが、いまある `tools/gates/main.hd` の `last_passed` と `tools/diagnostics/main.hd` は入力が自前の構造化された出力で、任意のテキストを読まない。
 
 ## 案
 

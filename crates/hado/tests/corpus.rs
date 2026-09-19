@@ -43,16 +43,31 @@ fn header_value(text: &str, marker: &str) -> Option<String> {
 }
 
 fn expected_output(text: &str) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    let headers: Vec<_> = text.lines().filter_map(|line| {
-        line.strip_prefix("// expect:").map(|value| (0, value))
-            .or_else(|| line.strip_prefix("// expect-error:").map(|value| (1, value)))
-    }).collect();
+    let headers: Vec<_> = text
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("// expect:")
+                .map(|value| (0, value))
+                .or_else(|| {
+                    line.strip_prefix("// expect-error:")
+                        .map(|value| (1, value))
+                })
+        })
+        .collect();
     let [(status, value)] = headers.as_slice() else {
         return Err("expected exactly one output header".into());
     };
     let value = value.trim();
-    let bytes = if value.is_empty() { Vec::new() } else { format!("{value}\n").into_bytes() };
-    Ok(if *status == 0 { (0, bytes, Vec::new()) } else { (1, Vec::new(), bytes) })
+    let bytes = if value.is_empty() {
+        Vec::new()
+    } else {
+        format!("{value}\n").into_bytes()
+    };
+    Ok(if *status == 0 {
+        (0, bytes, Vec::new())
+    } else {
+        (1, Vec::new(), bytes)
+    })
 }
 
 fn launch(exe: &Path, work: &Path) -> std::io::Result<std::process::Output> {
@@ -76,8 +91,11 @@ mod launch_tests {
     impl Scratch {
         fn new() -> Self {
             let nonce = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let path = std::env::temp_dir().join(format!("hado-corpus-launch-{}-{nonce}", std::process::id()));
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir()
+                .join(format!("hado-corpus-launch-{}-{nonce}", std::process::id()));
             std::fs::create_dir(&path).unwrap();
             Self(path)
         }
@@ -102,15 +120,21 @@ mod launch_tests {
                let contents = read_file \"fixture\" ->\n\
                do write_file \"written\" contents ->\n\
                { stdin = input; same = read_file \"written\" == contents }\n",
-            "main.hd", &object,
-        ).unwrap();
+            "main.hd",
+            &object,
+        )
+        .unwrap();
         let exe = work.join("main");
         hado::link_executable(&object, &exe).unwrap();
 
         let output = launch(&exe, &work).unwrap();
 
-        println!("launch: status={:?} stdout={:?} stderr={:?}", output.status.code(),
-            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        println!(
+            "launch: status={:?} stdout={:?} stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(output.status.code(), Some(0));
         assert!(output.stderr.is_empty(), "{output:?}");
         assert_eq!(output.stdout, b"{ stdin = 0; same = true }\n");
@@ -128,29 +152,59 @@ mod launch_tests {
         let scratch = Scratch::new();
         std::fs::create_dir(scratch.0.join("ambient")).unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "launch_tests::isolates_work_and_stdin", "--nocapture"])
+            .args([
+                "--exact",
+                "launch_tests::isolates_work_and_stdin",
+                "--nocapture",
+            ])
             .env(CHILD_ROOT, &scratch.0)
             .current_dir(scratch.0.join("ambient"))
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-            .spawn().unwrap();
-        child.stdin.take().unwrap().write_all(b"stdin-must-disturb\n").unwrap();
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"stdin-must-disturb\n")
+            .unwrap();
         let output = child.wait_with_output().unwrap();
         let path = scratch.0.clone();
         drop(scratch);
 
-        assert!(!path.exists(), "scratch was not removed: {}", path.display());
+        assert!(
+            !path.exists(),
+            "scratch was not removed: {}",
+            path.display()
+        );
         println!("{}", String::from_utf8_lossy(&output.stdout));
-        assert!(output.status.success(), "child: {:?}\n{}", output.status,
-            String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "child: {:?}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
         // libtest はフィルタが 0 件でも終了 0 を返す。子が launch を実際に通ったことを
         // 印字で確かめないと、テスト名がずれた瞬間に固定が測られなくなる。
         let printed = String::from_utf8_lossy(&output.stdout);
-        assert!(printed.contains("launch: status=Some(0)"), "child did not run launch:\n{printed}");
-        assert!(printed.contains("1 passed"), "child ran no test:\n{printed}");
+        assert!(
+            printed.contains("launch: status=Some(0)"),
+            "child did not run launch:\n{printed}"
+        );
+        assert!(
+            printed.contains("1 passed"),
+            "child ran no test:\n{printed}"
+        );
     }
 }
 
-fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
+fn try_accept(
+    rel: &str,
+    text: &str,
+    compile: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
     let (status, stdout, stderr) = expected_output(text)?;
     let stem = rel.replace('/', "_");
     let work = std::env::temp_dir().join(format!("hado-corpus-{}-{stem}", std::process::id()));
@@ -162,7 +216,10 @@ fn try_accept(rel: &str, text: &str, compile: impl FnOnce(&Path) -> Result<(), S
         hado::link_executable(&obj, &exe)?;
         let out = launch(&exe, &work).map_err(|e| e.to_string())?;
         if out.status.code() != Some(status) || out.stderr != stderr || out.stdout != stdout {
-            return Err(format!("status={:?} stdout={:?} stderr={:?}", out.status, out.stdout, out.stderr));
+            return Err(format!(
+                "status={:?} stdout={:?} stderr={:?}",
+                out.status, out.stdout, out.stderr
+            ));
         }
         Ok(())
     })();
@@ -211,12 +268,16 @@ fn corpus() {
         let text = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
         let result = if rel.starts_with("tests/accept/") {
             try_accept(rel, &text, |object| {
-                hado::project::Project::load(&root.join(rel)).map_err(|error| error.to_string())?.compile_to_object(object)
+                hado::project::Project::load(&root.join(rel))
+                    .map_err(|error| error.to_string())?
+                    .compile_to_object(object)
             })
         } else {
             try_reject(rel, &text)
         };
-        if let Err(error) = result { failures.push(format!("{rel}: {error}")); }
+        if let Err(error) = result {
+            failures.push(format!("{rel}: {error}"));
+        }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
@@ -224,12 +285,17 @@ fn corpus() {
 /// Every `.hd`/`.hdi` file under `directory`, recursively, sorted by path bytes.
 fn source_files(directory: &Path) -> Vec<PathBuf> {
     fn walk(directory: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(directory) else { return };
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, out);
-            } else if matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            } else if matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("hd" | "hdi")
+            ) {
                 out.push(path);
             }
         }
@@ -248,7 +314,9 @@ fn library_representative(case_directory: &Path) -> Option<PathBuf> {
         if file.extension().and_then(|extension| extension.to_str()) != Some("hd") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(file) else { continue };
+        let Ok(text) = std::fs::read_to_string(file) else {
+            continue;
+        };
         if let Ok(ast) = parse_source(&text, &file.to_string_lossy()) {
             if ast.library.is_some() {
                 return Some(file.clone());
@@ -285,7 +353,9 @@ fn library_corpus() {
                     failures.push(format!("{rel}: {error}"));
                 }
             }
-            Err(hado::project::LoadError::Diagnostic(error)) => failures.push(format!("{rel}: {error}")),
+            Err(hado::project::LoadError::Diagnostic(error)) => {
+                failures.push(format!("{rel}: {error}"))
+            }
             Err(error) => failures.push(format!("{rel}: {error}")),
         }
     }
@@ -300,16 +370,56 @@ fn generated_output_headers_enforce_stream_status_and_empty_output() {
         let failure = format!("def main = raise {{ message = \"{number}\" }}");
         let empty_failure = "def main = raise { message = \"\" }";
         for (case, source, header, accepted) in [
-            ("stdout", success.clone(), format!("// expect: {number}"), true),
-            ("stderr", failure.clone(), format!("// expect-error: {number}"), true),
-            ("wrong-stream", failure, format!("// expect: {number}"), false),
-            ("wrong-status", success.clone(), format!("// expect-error: {number}"), false),
-            ("wrong-value", success.clone(), format!("// expect: {}", number + 1), false),
+            (
+                "stdout",
+                success.clone(),
+                format!("// expect: {number}"),
+                true,
+            ),
+            (
+                "stderr",
+                failure.clone(),
+                format!("// expect-error: {number}"),
+                true,
+            ),
+            (
+                "wrong-stream",
+                failure,
+                format!("// expect: {number}"),
+                false,
+            ),
+            (
+                "wrong-status",
+                success.clone(),
+                format!("// expect-error: {number}"),
+                false,
+            ),
+            (
+                "wrong-value",
+                success.clone(),
+                format!("// expect: {}", number + 1),
+                false,
+            ),
             ("empty", "def main = ()".into(), "// expect:".into(), true),
-            ("empty-error", empty_failure.into(), "// expect-error:".into(), false),
-            ("empty-error-wrong-status", empty_failure.into(), "// expect:".into(), false),
+            (
+                "empty-error",
+                empty_failure.into(),
+                "// expect-error:".into(),
+                false,
+            ),
+            (
+                "empty-error-wrong-status",
+                empty_failure.into(),
+                "// expect:".into(),
+                false,
+            ),
             ("missing", success.clone(), String::new(), false),
-            ("both", success, format!("// expect: {number}\n// expect-error: {number}"), false),
+            (
+                "both",
+                success,
+                format!("// expect: {number}\n// expect-error: {number}"),
+                false,
+            ),
         ] {
             let text = format!("{header}\n{source}");
             let result = try_accept(&format!("generated-{index}-{case}"), &text, |object| {

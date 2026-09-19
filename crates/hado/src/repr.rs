@@ -17,31 +17,39 @@ pub fn machine_type(ty: &Type, checked: &Checked) -> Result<MachineType, String>
         Type::Char => MachineType::I32,
         Type::String | Type::Bytes | Type::Closure(..) => MachineType::Pointer,
         Type::Abstract(..) => return Err("abstract type needs its concrete representation".into()),
-        Type::Data(name, _) if name == crate::mono::OUTCOME => MachineType::Pointer,
-        Type::Data(name, _) if name == crate::mono::ARRAY => MachineType::Pointer,
-        Type::Data(name, _) if checked.records.contains_key(name) => MachineType::Pointer,
-        Type::Data(name, _) => {
-            let mut found = false;
-            let mut has_payload = false;
-            for scheme in checked.constructors.values() {
-                let (result, payload) = match scheme.body() {
-                    Ty::Fn(fields, result, _) => (result.as_ref(), !fields.is_empty()),
-                    result => (result, false),
-                };
-                if matches!(result, Ty::Adt(constructor_type, _) if constructor_type == name) {
-                    found = true;
-                    has_payload |= payload;
-                }
-            }
-            if !found {
-                return Err(format!("unknown data type {name}"));
-            }
-            if has_payload {
-                MachineType::Pointer
-            } else {
-                MachineType::I64
-            }
+        Type::Data(name, _) if is_boxed_data(name, checked) => MachineType::Pointer,
+        Type::Data(name, _) => data_type(name, checked)?,
+    })
+}
+
+/// 宣言した data 型が箱で表されるか。Outcome・Array は常に箱で、record も箱である。
+/// それ以外は構築子が payload を持つかで決まる（`data_type` が見る）。
+fn is_boxed_data(name: &str, checked: &Checked) -> bool {
+    name == crate::mono::OUTCOME || name == crate::mono::ARRAY || checked.records.contains_key(name)
+}
+
+/// 構築子を持つ data 型の表現。payload を持つ構築子が 1 つでもあれば箱、
+/// そうでなければ即値。構築子が 1 つも無ければ未知の型である。
+fn data_type(name: &str, checked: &Checked) -> Result<MachineType, String> {
+    let mut found = false;
+    let mut has_payload = false;
+    for scheme in checked.constructors.values() {
+        let (result, payload) = match scheme.body() {
+            Ty::Fn(fields, result, _) => (result.as_ref(), !fields.is_empty()),
+            result => (result, false),
+        };
+        if matches!(result, Ty::Adt(constructor_type, _) if constructor_type == name) {
+            found = true;
+            has_payload |= payload;
         }
+    }
+    if !found {
+        return Err(format!("unknown data type {name}"));
+    }
+    Ok(if has_payload {
+        MachineType::Pointer
+    } else {
+        MachineType::I64
     })
 }
 
@@ -126,8 +134,13 @@ pub fn constructor_layout(
         // Construct/Project nodes, while every effect shares these offsets.
         let fields = match constructor {
             "$Done" => {
-                let Type::Data(_, args) = ty else { unreachable!() };
-                vec![machine_type(args.first().ok_or("outcome missing success type")?, checked)?]
+                let Type::Data(_, args) = ty else {
+                    unreachable!()
+                };
+                vec![machine_type(
+                    args.first().ok_or("outcome missing success type")?,
+                    checked,
+                )?]
             }
             _ if constructor.starts_with("$Yield#") => vec![MachineType::I64, MachineType::Pointer],
             _ if constructor.starts_with("$Fail#") => vec![MachineType::I64],
@@ -194,20 +207,28 @@ pub fn function_signature(
     })
 }
 
-
 pub fn constructor_tag(constructor: &str, ty: &Type, checked: &Checked) -> Result<u32, String> {
     if let Some(tag) = crate::mono::outcome_tag(constructor) {
         return Ok(tag);
     }
-    let scheme = checked.constructors.get(constructor).ok_or("unknown constructor")?;
+    let scheme = checked
+        .constructors
+        .get(constructor)
+        .ok_or("unknown constructor")?;
     let mut inference = crate::types::Inference::default();
     let instantiated = inference.instantiate(scheme);
     let result = match &instantiated {
         Ty::Fn(_, result, _) => result.as_ref(),
         ty => ty,
     };
-    inference.unify(result, &Ty::from(ty)).map_err(|error| format!("constructor type mismatch: {error:?}"))?;
-    checked.constructor_tags.get(constructor).copied().ok_or_else(|| "missing constructor tag".into())
+    inference
+        .unify(result, &Ty::from(ty))
+        .map_err(|error| format!("constructor type mismatch: {error:?}"))?;
+    checked
+        .constructor_tags
+        .get(constructor)
+        .copied()
+        .ok_or_else(|| "missing constructor tag".into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,17 +237,23 @@ pub enum ByteOrder {
     Big,
 }
 
-pub fn string_literal_data(value: &str, pointer_bytes: u32, order: ByteOrder) -> Result<Vec<u8>, String> {
+pub fn string_literal_data(
+    value: &str,
+    pointer_bytes: u32,
+    order: ByteOrder,
+) -> Result<Vec<u8>, String> {
     let mut bytes = match pointer_bytes {
         4 => {
-            let length = u32::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
+            let length =
+                u32::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
             match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),
             }
         }
         8 => {
-            let length = u64::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
+            let length =
+                u64::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
             match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),

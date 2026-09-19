@@ -6,7 +6,9 @@ fn utf8_strings_count_scalars_and_preserve_embedded_nul() {
     let source = dir.join("test.c");
     let object = dir.join("test.o");
     let executable = dir.join("test");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 #include "hado_runtime.h"
 #include <assert.h>
 #include <string.h>
@@ -30,10 +32,23 @@ int32_t hado_entry(void) {
     assert(hado_string_compare(hado_string_concat((const HadoString *)&empty, left), left) == 0);
     return 0;
 }
-"#).unwrap();
-    let status = std::process::Command::new("cc").args(["-std=c11", "-Wall", "-Werror", "-c"]).arg(&source).arg("-I").arg(root.join("runtime")).arg("-o").arg(&object).status().unwrap();
+"#,
+    )
+    .unwrap();
+    let status = std::process::Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Werror", "-c"])
+        .arg(&source)
+        .arg("-I")
+        .arg(root.join("runtime"))
+        .arg("-o")
+        .arg(&object)
+        .status()
+        .unwrap();
     assert!(status.success());
     hado::link_executable(&object, &executable).unwrap();
-    assert!(std::process::Command::new(executable).status().unwrap().success());
+    assert!(std::process::Command::new(executable)
+        .status()
+        .unwrap()
+        .success());
     std::fs::remove_dir_all(dir).unwrap();
 }

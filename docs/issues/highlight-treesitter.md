@@ -32,7 +32,7 @@ filetype と parser は取れるが、`FileType` で `vim.treesitter.start()` �
 
 ## 原因
 
-文法は `docs/spec.md:2325` の付録C に散文で置かれ、機械可読ではない。`docs/wants.md` 51 は付録C からの生成を想定するが、生成の前に付録C を文法ファイルにする工程が要る。
+文法は `docs/spec.md` の付録C に散文で置かれ、機械可読ではない。`docs/wants.md` 51 は付録C からの生成を想定するが、生成の前に付録C を文法ファイルにする工程が要る。
 
 ## 案
 

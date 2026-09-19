@@ -15,101 +15,190 @@ fn print_diagnostic(project: &Project, error: &hado::parser::Diagnostic) {
     }
 }
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// コマンドラインの解釈結果。`main` はここから実際の処理を選ぶ。
+struct Cli<'a> {
+    command: &'a str,
+    print: bool,
+    type_name: Option<&'a str>,
+    fix: bool,
+    check_only: bool,
+    output: Option<&'a str>,
+    path: Option<&'a str>,
+    program_args: Vec<String>,
+}
+
+/// 使い方を出して終了コード 2 を返す。引数の誤りはすべてここへ集める。
+fn usage_error() -> ExitCode {
+    usage();
+    ExitCode::from(2)
+}
+
+fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     let Some(command) = args.first().map(String::as_str) else {
-        usage();
-        return ExitCode::from(2);
+        return Err(usage_error());
     };
-    if !matches!(command, "check" | "dump-mono" | "build" | "run" | "fmt" | "test") {
-        usage();
-        return ExitCode::from(2);
+    if !matches!(
+        command,
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test"
+    ) {
+        return Err(usage_error());
     }
-    let mut print = false;
-    let mut type_name: Option<&str> = None;
-    let mut fix = false;
-    let mut check_only = false;
-    let mut output: Option<&str> = None;
-    let mut path: Option<&str> = None;
-    let mut program_args: Vec<String> = Vec::new();
-    let rest = &args[1..];
+    let mut cli = Cli {
+        command,
+        print: false,
+        type_name: None,
+        fix: false,
+        check_only: false,
+        output: None,
+        path: None,
+        program_args: Vec::new(),
+    };
+    parse_flags(&mut cli, &args[1..])?;
+    if cli.path.is_none() {
+        return Err(usage_error());
+    }
+    Ok(cli)
+}
+
+/// 引数を 1 つ読んだ結果。`Stop` は `run` の `--` の後をすべて取り込んだ印。
+enum Step {
+    Next,
+    Stop,
+}
+
+fn parse_flags<'a>(cli: &mut Cli<'a>, rest: &'a [String]) -> Result<(), ExitCode> {
     let mut index = 0;
     while index < rest.len() {
-        let arg = rest[index].as_str();
-        match arg {
-            // `run` の `--` の後だけが子プロセスの引数である。
-            "--" if command == "run" => {
-                program_args.extend(rest[index + 1..].iter().cloned());
-                break;
-            }
-            "--print-type" if command == "check" => print = true,
-            // §58.3: `--print-type=<名前>` はその定義の型を出す。
-            value if command == "check" && value.starts_with("--print-type=") => {
-                let name = &value["--print-type=".len()..];
-                if name.is_empty() {
-                    usage();
-                    return ExitCode::from(2);
-                }
-                print = true;
-                type_name = Some(name);
-            }
-            "--fix" if command == "check" || command == "build" => fix = true,
-            // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
-            "--format" if matches!(command, "check" | "build" | "run" | "test") => {
-                index += 1;
-                let Some(value) = rest.get(index) else {
-                    usage();
-                    return ExitCode::from(2);
-                };
-                if value != "json" {
-                    usage();
-                    return ExitCode::from(2);
-                }
-                FORMAT_JSON.store(true, Ordering::Relaxed);
-            }
-            "--check" if command == "fmt" => check_only = true,
-            "-o" | "--output" if command == "build" => {
-                index += 1;
-                let Some(value) = rest.get(index) else {
-                    usage();
-                    return ExitCode::from(2);
-                };
-                output = Some(value.as_str());
-            }
-            value if !value.starts_with('-') && path.is_none() => path = Some(value),
-            _ => {
-                usage();
-                return ExitCode::from(2);
-            }
+        match next_token(cli, rest, &mut index)? {
+            Step::Next => index += 1,
+            Step::Stop => break,
         }
-        index += 1;
     }
-    let Some(path) = path else {
-        usage();
-        return ExitCode::from(2);
+    Ok(())
+}
+
+fn next_token<'a>(
+    cli: &mut Cli<'a>,
+    rest: &'a [String],
+    index: &mut usize,
+) -> Result<Step, ExitCode> {
+    let arg = rest[*index].as_str();
+    // `run` の `--` の後だけが子プロセスの引数である。
+    if arg == "--" && cli.command == "run" {
+        cli.program_args.extend(rest[*index + 1..].iter().cloned());
+        return Ok(Step::Stop);
+    }
+    if take_option(cli, arg, rest, index)? {
+        return Ok(Step::Next);
+    }
+    if let Some(path) = positional_path(cli, arg) {
+        cli.path = Some(path);
+        return Ok(Step::Next);
+    }
+    Err(usage_error())
+}
+
+fn take_option<'a>(
+    cli: &mut Cli<'a>,
+    arg: &'a str,
+    rest: &'a [String],
+    index: &mut usize,
+) -> Result<bool, ExitCode> {
+    match arg {
+        "--print-type" if cli.command == "check" => cli.print = true,
+        // §58.3: `--print-type=<名前>` はその定義の型を出す。
+        value if cli.command == "check" && value.starts_with("--print-type=") => {
+            cli.print = true;
+            cli.type_name = Some(named_type(value)?);
+        }
+        "--fix" if cli.command == "check" || cli.command == "build" => cli.fix = true,
+        // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
+        "--format" if prints_diagnostics(cli.command) => {
+            enable_json(rest, index)?;
+        }
+        "--check" if cli.command == "fmt" => cli.check_only = true,
+        "-o" | "--output" if cli.command == "build" => {
+            cli.output = Some(value_after(rest, index)?);
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn positional_path<'a>(cli: &Cli<'a>, arg: &'a str) -> Option<&'a str> {
+    if arg.starts_with('-') || cli.path.is_some() {
+        return None;
+    }
+    Some(arg)
+}
+
+fn prints_diagnostics(command: &str) -> bool {
+    matches!(command, "check" | "build" | "run" | "test")
+}
+
+fn named_type(value: &str) -> Result<&str, ExitCode> {
+    let name = &value["--print-type=".len()..];
+    if name.is_empty() {
+        return Err(usage_error());
+    }
+    Ok(name)
+}
+
+fn enable_json(rest: &[String], index: &mut usize) -> Result<(), ExitCode> {
+    if value_after(rest, index)? != "json" {
+        return Err(usage_error());
+    }
+    FORMAT_JSON.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+fn value_after<'a>(rest: &'a [String], index: &mut usize) -> Result<&'a str, ExitCode> {
+    *index += 1;
+    rest.get(*index).map(String::as_str).ok_or_else(usage_error)
+}
+
+fn run(cli: &Cli<'_>) -> ExitCode {
+    let input = match input_path(cli) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    if cli.command == "fmt" {
+        return format_command(cli, input);
+    }
+    if cli.fix && cli.command == "check" {
+        return check_with_fix(input, cli.type_name);
+    }
+    if cli.command == "run" {
+        return run_program(input, &cli.program_args);
+    }
+    if cli.command == "test" {
+        return run_tests(input);
+    }
+    run_project_command(cli, input)
+}
+
+fn input_path<'a>(cli: &Cli<'a>) -> Result<&'a Path, ExitCode> {
+    let Some(path) = cli.path else {
+        return Err(usage_error());
     };
     let input = Path::new(path);
     if input.extension().and_then(|extension| extension.to_str()) != Some("hd") {
         eprintln!("input must have the .hd extension");
-        return ExitCode::from(1);
+        return Err(ExitCode::from(1));
     }
-    if command == "fmt" {
-        return match format_sources(input, check_only) {
-            Ok(changed) if check_only && changed => ExitCode::from(1),
-            Ok(_) => ExitCode::SUCCESS,
-            Err(code) => code,
-        };
+    Ok(input)
+}
+
+fn format_command(cli: &Cli<'_>, input: &Path) -> ExitCode {
+    match format_sources(input, cli.check_only) {
+        Ok(changed) if cli.check_only && changed => ExitCode::from(1),
+        Ok(_) => ExitCode::SUCCESS,
+        Err(code) => code,
     }
-    if fix && command == "check" {
-        return check_with_fix(input, type_name);
-    }
-    if command == "run" {
-        return run_program(input, &program_args);
-    }
-    if command == "test" {
-        return run_tests(input);
-    }
-    if fix && command == "build" {
+}
+
+fn run_project_command(cli: &Cli<'_>, input: &Path) -> ExitCode {
+    if cli.fix && cli.command == "build" {
         // §58.1: `build --fix` writes the canonical form before reading the
         // project, so the build sees the formatted sources.
         if let Err(code) = format_sources(input, false) {
@@ -123,44 +212,65 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    if command == "build" {
-        let target = match output {
-            Some(output) => PathBuf::from(output),
-            None => input.with_extension(""),
-        };
-        return match project.build(&target) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("{message}");
-                ExitCode::from(1)
-            }
-        };
+    match cli.command {
+        "build" => build_command(cli, input, &project),
+        "dump-mono" => dump_mono(&project),
+        _ => check_command(cli, input, &project),
     }
-    if command == "dump-mono" {
-        return match project.dump_mono() {
-            Ok(output) => {
-                print!("{output}");
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                print_diagnostic(&project, &error);
-                ExitCode::from(1)
-            }
-        };
+}
+
+fn build_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
+    let target = match cli.output {
+        Some(output) => PathBuf::from(output),
+        None => input.with_extension(""),
+    };
+    match project.build(&target) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("{message}");
+            ExitCode::from(1)
+        }
     }
-    match if print { project.check_for_print() } else { project.check() } {
-        Ok(checked) => {
-            if print {
-                if let Err(code) = print_type(&checked, &project, type_name, input) {
-                    return code;
-                }
-            }
+}
+
+fn dump_mono(project: &Project) -> ExitCode {
+    match project.dump_mono() {
+        Ok(output) => {
+            print!("{output}");
             ExitCode::SUCCESS
         }
         Err(error) => {
-            print_diagnostic(&project, &error);
+            print_diagnostic(project, &error);
             ExitCode::from(1)
         }
+    }
+}
+
+fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
+    let checked = match if cli.print {
+        project.check_for_print()
+    } else {
+        project.check()
+    } {
+        Ok(checked) => checked,
+        Err(error) => {
+            print_diagnostic(project, &error);
+            return ExitCode::from(1);
+        }
+    };
+    if cli.print {
+        if let Err(code) = print_type(&checked, project, cli.type_name, input) {
+            return code;
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match parse_args(&args) {
+        Ok(cli) => run(&cli),
+        Err(code) => code,
     }
 }
 
@@ -316,7 +426,11 @@ fn run_tests(input: &Path) -> ExitCode {
         }
     }
     println!("test: {passed}/{} passed", tests.len());
-    if passed == tests.len() { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if passed == tests.len() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 /// `run` reports the program's exit code as its own (§58).

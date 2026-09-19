@@ -1,10 +1,14 @@
 use crate::parser::{Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) const BUILTIN_TYPES: &[&str] = &["Int", "Float", "Bool", "Char", "String", "Bytes", "Array", "Void", "Fn"];
+pub(crate) const BUILTIN_TYPES: &[&str] = &[
+    "Int", "Float", "Bool", "Char", "String", "Bytes", "Array", "Void", "Fn",
+];
 
 pub(crate) fn is_upper_reference(name: &str) -> bool {
-    name.rsplit("::").next().is_some_and(|name| name.starts_with(char::is_uppercase))
+    name.rsplit("::")
+        .next()
+        .is_some_and(|name| name.starts_with(char::is_uppercase))
 }
 
 pub(crate) fn is_value_reference(name: &str) -> bool {
@@ -66,18 +70,27 @@ pub(crate) fn bound_names(pattern: &Pattern) -> BTreeSet<String> {
 
 pub(crate) fn bindings(pattern: &Pattern) -> Vec<(&str, crate::parser::Span)> {
     match &pattern.kind {
-        PatternKind::Name(name) if !crate::names::is_upper_reference(name) => vec![(name, pattern.span)],
+        PatternKind::Name(name) if !crate::names::is_upper_reference(name) => {
+            vec![(name, pattern.span)]
+        }
         PatternKind::Constructor(_, args) => args.iter().flat_map(bindings).collect(),
-        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => fields.iter().flat_map(|(name, nested)| match nested {
-            Some(nested) => bindings(nested),
-            None => vec![(name.name.as_str(), name.span)],
-        }).collect(),
+        PatternKind::Record(fields) | PatternKind::NamedConstructor(_, fields) => fields
+            .iter()
+            .flat_map(|(name, nested)| match nested {
+                Some(nested) => bindings(nested),
+                None => vec![(name.name.as_str(), name.span)],
+            })
+            .collect(),
         _ => Vec::new(),
     }
 }
 
 fn bind(pattern: &Pattern, bound: &mut BTreeSet<String>) {
-    bound.extend(bindings(pattern).into_iter().map(|(name, _)| name.to_owned()));
+    bound.extend(
+        bindings(pattern)
+            .into_iter()
+            .map(|(name, _)| name.to_owned()),
+    );
 }
 
 pub(crate) fn references(node: &Node, name: &str) -> bool {
@@ -100,19 +113,17 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
         }
         NodeKind::Apply(callee, args) | NodeKind::Call(callee, args) => {
             free_names(callee, bound, result);
-            for arg in args {
-                free_names(arg, bound, result);
-            }
+            free_names_all(args, bound, result);
         }
         NodeKind::List(items, tail) => {
-            for item in items.iter().chain(tail.iter().map(Box::as_ref)) {
-                free_names(item, bound, result);
-            }
+            free_names_all(
+                items.iter().chain(tail.iter().map(Box::as_ref)),
+                bound,
+                result,
+            );
         }
         NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
-            for (_, value) in fields {
-                free_names(value, bound, result);
-            }
+            free_names_all(fields.iter().map(|(_, value)| value), bound, result);
         }
         NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
             free_names(value, bound, result);
@@ -126,7 +137,12 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
         }
         NodeKind::Fn { params, body } => {
             let mut bound = bound.clone();
-            bound.extend(params.iter().filter(|p| p.name != "_").map(|p| p.name.clone()));
+            bound.extend(
+                params
+                    .iter()
+                    .filter(|p| p.name != "_")
+                    .map(|p| p.name.clone()),
+            );
             free_names(body, &bound, result);
         }
         NodeKind::BoolBranch { cond, then, els } => {
@@ -135,38 +151,65 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
             }
         }
         NodeKind::CondBranch { arms, fallback } => {
-            for (condition, body) in arms {
-                free_names(condition, bound, result);
-                free_names(body, bound, result);
-            }
-            if let Some(body) = fallback {
-                free_names(body, bound, result);
-            }
+            free_cond_branch(arms, fallback, bound, result);
         }
         NodeKind::PatternBranch {
             scrutinees,
             arms,
             fallback,
         } => {
-            for scrutinee in scrutinees {
-                free_names(scrutinee, bound, result);
-            }
-            for (patterns, body) in arms {
-                let mut bound = bound.clone();
-                for pattern in patterns {
-                    bind(pattern, &mut bound);
-                }
-                free_names(body, &bound, result);
-            }
-            if let Some(body) = fallback {
-                free_names(body, bound, result);
-            }
+            free_pattern_branch(scrutinees, arms, fallback, bound, result);
         }
         NodeKind::With { args, body, .. } => {
-            for arg in args { free_names(arg, bound, result); }
+            free_names_all(args, bound, result);
             free_names(body, bound, result);
         }
         _ => {}
+    }
+}
+
+fn free_names_all<'a>(
+    nodes: impl IntoIterator<Item = &'a Node>,
+    bound: &BTreeSet<String>,
+    result: &mut BTreeSet<String>,
+) {
+    for node in nodes {
+        free_names(node, bound, result);
+    }
+}
+
+fn free_cond_branch(
+    arms: &[(Node, Node)],
+    fallback: &Option<Box<Node>>,
+    bound: &BTreeSet<String>,
+    result: &mut BTreeSet<String>,
+) {
+    for (condition, body) in arms {
+        free_names(condition, bound, result);
+        free_names(body, bound, result);
+    }
+    if let Some(body) = fallback {
+        free_names(body, bound, result);
+    }
+}
+
+fn free_pattern_branch(
+    scrutinees: &[Node],
+    arms: &[(Vec<Pattern>, Node)],
+    fallback: &Option<Box<Node>>,
+    bound: &BTreeSet<String>,
+    result: &mut BTreeSet<String>,
+) {
+    free_names_all(scrutinees, bound, result);
+    for (patterns, body) in arms {
+        let mut bound = bound.clone();
+        for pattern in patterns {
+            bind(pattern, &mut bound);
+        }
+        free_names(body, &bound, result);
+    }
+    if let Some(body) = fallback {
+        free_names(body, bound, result);
     }
 }
 
@@ -185,25 +228,57 @@ struct Namespaces {
 }
 
 pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
-    let inspection = if crate::has_main_definition(ast) { crate::Inspection::Entry } else { crate::Inspection::Library };
+    let inspection = if crate::has_main_definition(ast) {
+        crate::Inspection::Entry
+    } else {
+        crate::Inspection::Library
+    };
     resolve_with_prelude(ast, path, None, inspection)
 }
 
-pub(crate) fn resolve_with_prelude(ast: &Ast, path: &str, trusted_start: Option<usize>, inspection: crate::Inspection) -> Result<(), crate::parser::Diagnostic> {
+pub(crate) fn resolve_with_prelude(
+    ast: &Ast,
+    path: &str,
+    trusted_start: Option<usize>,
+    inspection: crate::Inspection,
+) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
-    if let Err(error) = crate::type_realizations::check(ast, path) { diagnostics.push(error); }
-    if let Err(error) = declarations(&ast.items, path) { diagnostics.push(error); }
-    if let Err(error) = entry_form(ast, path, inspection) { diagnostics.push(error); }
-    if let Err(error) = check_cycles(ast, path) { diagnostics.push(error); }
+    if let Err(error) = crate::type_realizations::check(ast, path) {
+        diagnostics.push(error);
+    }
+    if let Err(error) = declarations(&ast.items, path) {
+        diagnostics.push(error);
+    }
+    if let Err(error) = entry_form(ast, path, inspection) {
+        diagnostics.push(error);
+    }
+    if let Err(error) = check_cycles(ast, path) {
+        diagnostics.push(error);
+    }
     record_field_duplicates(&ast.items, path, &mut diagnostics);
-    declaration_types(&ast.items, &BTreeSet::new(), &BTreeMap::new(), &BTreeSet::new(), path, &mut diagnostics);
-    match diagnostics.into_iter().map(|error| crate::check::arm_diagnostic(ast, error)).min_by_key(crate::diagnostic_order) {
+    declaration_types(
+        &ast.items,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        path,
+        &mut diagnostics,
+    );
+    match diagnostics
+        .into_iter()
+        .map(|error| crate::check::arm_diagnostic(ast, error))
+        .min_by_key(crate::diagnostic_order)
+    {
         Some(error) => Err(error),
         None => Ok(()),
     }
 }
 
-fn record_field_duplicates(items: &[Item], path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
+fn record_field_duplicates(
+    items: &[Item],
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
     for item in items {
         match item {
             Item::Def(def) => {
@@ -216,7 +291,11 @@ fn record_field_duplicates(items: &[Item], path: &str, diagnostics: &mut Vec<cra
     }
 }
 
-fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<crate::parser::Diagnostic>) {
+fn expression_field_duplicates(
+    node: &Node,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
     if let NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) = &node.kind {
         let mut names = Declared::new();
         for (name, _) in fields {
@@ -231,129 +310,306 @@ fn expression_field_duplicates(node: &Node, path: &str, diagnostics: &mut Vec<cr
 }
 
 fn declaration_types(
-    items: &[Item], inherited: &BTreeSet<String>, inherited_signatures: &BTreeMap<String, Vec<String>>,
-    inherited_effects: &BTreeSet<String>, path: &str,
+    items: &[Item],
+    inherited: &BTreeSet<String>,
+    inherited_signatures: &BTreeMap<String, Vec<String>>,
+    inherited_effects: &BTreeSet<String>,
+    path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
+    let mut types = visible_types(items, inherited);
+    let effects = visible_effects(items, inherited_effects);
+    let signatures = visible_signatures(items, inherited_signatures);
+    hide_shadowed_module_types(items, &mut types);
+    export_signature_types(items, &signatures, &mut types);
+    for item in items {
+        declaration_item(item, &types, &effects, &signatures, path, diagnostics);
+    }
+}
+
+fn visible_types(items: &[Item], inherited: &BTreeSet<String>) -> BTreeSet<String> {
     let mut types = inherited.clone();
     types.extend(BUILTIN_TYPES.iter().map(|name| (*name).to_owned()));
     types.extend(items.iter().filter_map(|item| match item {
         Item::TypeDef(def) => Some(def.name.clone()),
         _ => None,
     }));
-    let mut effects = inherited_effects.clone();
+    types
+}
+
+fn visible_effects(items: &[Item], inherited: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut effects = inherited.clone();
     effects.extend(items.iter().filter_map(|item| match item {
         Item::Effect(effect) => Some(effect.name.clone()),
         _ => None,
     }));
-    let mut signatures = inherited_signatures.clone();
-    let mut local_signatures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    effects
+}
+
+fn visible_signatures(
+    items: &[Item],
+    inherited: &BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut signatures = inherited.clone();
+    let mut local: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for item in items {
         if let Item::ModuleSig(signature) = item {
-            local_signatures.entry(signature.name.clone()).or_default().extend(signature.items.iter().filter_map(|item| match item {
-                Item::TypeDef(def) => Some(def.name.clone()),
-                _ => None,
-            }));
+            local.entry(signature.name.clone()).or_default().extend(
+                signature.items.iter().filter_map(|item| match item {
+                    Item::TypeDef(def) => Some(def.name.clone()),
+                    _ => None,
+                }),
+            );
         }
     }
-    signatures.extend(local_signatures.into_iter().map(|(name, types)| (name, types.into_iter().collect())));
+    signatures.extend(
+        local
+            .into_iter()
+            .map(|(name, types)| (name, types.into_iter().collect())),
+    );
+    signatures
+}
+
+fn hide_shadowed_module_types(items: &[Item], types: &mut BTreeSet<String>) {
     for item in items {
         if let Item::ModuleImpl(module) = item {
             let prefix = format!("{}.", module.name);
             types.retain(|name| !name.starts_with(&prefix));
         }
     }
+}
+
+fn export_signature_types(
+    items: &[Item],
+    signatures: &BTreeMap<String, Vec<String>>,
+    types: &mut BTreeSet<String>,
+) {
     for item in items {
         if let Item::ModuleImpl(module) = item {
             if !matches!(&module.form, crate::parser::ImplementationForm::Functor(_)) {
                 if let Some(exported) = signatures.get(&module.sig) {
-                    types.extend(exported.iter().map(|name| format!("{}.{name}", module.name)));
-                }
-            }
-        }
-    }
-    for item in items {
-        match item {
-            Item::ModuleSig(signature) => {
-                let mut contract_types: BTreeSet<_> = types.iter().filter(|name| !name.contains('.')).cloned().collect();
-                for (contract, members) in &signatures {
-                    contract_types.extend(members.iter().map(|member| format!("{contract}.{member}")));
-                }
-                declaration_types(&signature.items, &contract_types, &signatures, &effects, path, diagnostics);
-            }
-            Item::ModuleImpl(module) => {
-                let mut local = types.clone();
-                if let crate::parser::ImplementationForm::Functor(params) = &module.form {
-                    for param in params {
-                        let prefix = format!("{}.", param.name);
-                        local.retain(|name| !name.starts_with(&prefix));
-                        if let Some(exported) = signatures.get(&param.contract) {
-                            local.extend(exported.iter().map(|name| format!("{}.{name}", param.name)));
-                        }
-                    }
-                }
-                declaration_types(&module.items, &local, &signatures, &effects, path, diagnostics);
-            }
-            Item::SigDef(def) => {
-                let mut local = types.clone();
-                local.extend(def.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
-                for ty in def.params.iter().filter_map(|param| param.ty.as_ref()).chain(def.ret.iter()) {
-                    resolve_type_names(ty, &local, &effects, path, diagnostics);
-                }
-            }
-            Item::TypeDef(def) => {
-                let mut local = types.clone();
-                local.extend(def.params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
-                if let Some(ty) = &def.ty { resolve_type_names(ty, &local, &effects, path, diagnostics); }
-            }
-            Item::Def(def) => {
-                let body = match &def.kind {
-                    DefKind::Value(body) => body,
-                    DefKind::Function { params, ret, body } => {
-                        for ty in params.iter().filter_map(|param| param.ty.as_ref()).chain(ret.iter()) {
-                            resolve_type_names(ty, &types, &effects, path, diagnostics);
-                        }
-                        body
-                    }
-                };
-                expression_type_names(body, &types, &effects, path, diagnostics);
-            }
-            Item::Effect(effect) => {
-                let mut local = types.clone();
-                local.extend(effect.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
-                for op in &effect.ops {
-                    for ty in op.params.iter().filter_map(|param| param.ty.as_ref()).chain(op.ret.iter()) {
-                        resolve_type_names(ty, &local, &effects, path, diagnostics);
-                    }
-                }
-            }
-            Item::Handler(handler) => {
-                let mut local = types.clone();
-                local.extend(handler.type_params.iter().filter(|param| param.name != "_").map(|param| param.name.clone()));
-                for ty in handler.params.iter().filter_map(|param| param.ty.as_ref()) {
-                    resolve_type_names(ty, &local, &effects, path, diagnostics);
-                }
-                for arm in &handler.arms {
-                    match arm {
-                        crate::parser::HandlerArm::Operation { params, body, .. } => {
-                            for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
-                                resolve_type_names(ty, &local, &effects, path, diagnostics);
-                            }
-                            expression_type_names(body, &local, &effects, path, diagnostics);
-                        }
-                        crate::parser::HandlerArm::Return { param, body, .. } => {
-                            if let Some(ty) = &param.ty { resolve_type_names(ty, &local, &effects, path, diagnostics); }
-                            expression_type_names(body, &local, &effects, path, diagnostics);
-                        }
-                    }
+                    types.extend(
+                        exported
+                            .iter()
+                            .map(|name| format!("{}.{name}", module.name)),
+                    );
                 }
             }
         }
     }
 }
 
+fn declaration_item(
+    item: &Item,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    signatures: &BTreeMap<String, Vec<String>>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    match item {
+        Item::ModuleSig(signature) => {
+            declaration_module_sig(signature, types, effects, signatures, path, diagnostics)
+        }
+        Item::ModuleImpl(module) => {
+            declaration_module_impl(module, types, effects, signatures, path, diagnostics)
+        }
+        Item::SigDef(def) => declaration_sig_def(def, types, effects, path, diagnostics),
+        Item::TypeDef(def) => declaration_type_def(def, types, effects, path, diagnostics),
+        Item::Def(def) => declaration_def(def, types, effects, path, diagnostics),
+        Item::Effect(effect) => declaration_effect(effect, types, effects, path, diagnostics),
+        Item::Handler(handler) => declaration_handler(handler, types, effects, path, diagnostics),
+    }
+}
+
+fn declaration_module_sig(
+    signature: &crate::parser::ModuleSig,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    signatures: &BTreeMap<String, Vec<String>>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut contract_types: BTreeSet<_> = types
+        .iter()
+        .filter(|name| !name.contains('.'))
+        .cloned()
+        .collect();
+    for (contract, members) in signatures {
+        contract_types.extend(members.iter().map(|member| format!("{contract}.{member}")));
+    }
+    declaration_types(
+        &signature.items,
+        &contract_types,
+        signatures,
+        effects,
+        path,
+        diagnostics,
+    );
+}
+
+fn declaration_module_impl(
+    module: &crate::parser::ModuleImpl,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    signatures: &BTreeMap<String, Vec<String>>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut local = types.clone();
+    if let crate::parser::ImplementationForm::Functor(params) = &module.form {
+        for param in params {
+            let prefix = format!("{}.", param.name);
+            local.retain(|name| !name.starts_with(&prefix));
+            if let Some(exported) = signatures.get(&param.contract) {
+                local.extend(exported.iter().map(|name| format!("{}.{name}", param.name)));
+            }
+        }
+    }
+    declaration_types(
+        &module.items,
+        &local,
+        signatures,
+        effects,
+        path,
+        diagnostics,
+    );
+}
+
+fn declaration_sig_def(
+    def: &crate::parser::SigDef,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut local = types.clone();
+    local.extend(
+        def.type_params
+            .iter()
+            .filter(|param| param.name != "_")
+            .map(|param| param.name.clone()),
+    );
+    for ty in def
+        .params
+        .iter()
+        .filter_map(|param| param.ty.as_ref())
+        .chain(def.ret.iter())
+    {
+        resolve_type_names(ty, &local, effects, path, diagnostics);
+    }
+}
+
+fn declaration_type_def(
+    def: &crate::parser::TypeDef,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut local = types.clone();
+    local.extend(
+        def.params
+            .iter()
+            .filter(|param| param.name != "_")
+            .map(|param| param.name.clone()),
+    );
+    if let Some(ty) = &def.ty {
+        resolve_type_names(ty, &local, effects, path, diagnostics);
+    }
+}
+
+fn declaration_def(
+    def: &crate::parser::Def,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let body = match &def.kind {
+        DefKind::Value(body) => body,
+        DefKind::Function { params, ret, body } => {
+            for ty in params
+                .iter()
+                .filter_map(|param| param.ty.as_ref())
+                .chain(ret.iter())
+            {
+                resolve_type_names(ty, types, effects, path, diagnostics);
+            }
+            body
+        }
+    };
+    expression_type_names(body, types, effects, path, diagnostics);
+}
+
+fn declaration_effect(
+    effect: &crate::parser::EffectDecl,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut local = types.clone();
+    local.extend(
+        effect
+            .type_params
+            .iter()
+            .filter(|param| param.name != "_")
+            .map(|param| param.name.clone()),
+    );
+    for op in &effect.ops {
+        for ty in op
+            .params
+            .iter()
+            .filter_map(|param| param.ty.as_ref())
+            .chain(op.ret.iter())
+        {
+            resolve_type_names(ty, &local, effects, path, diagnostics);
+        }
+    }
+}
+
+fn declaration_handler(
+    handler: &crate::parser::HandlerDecl,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    let mut local = types.clone();
+    local.extend(
+        handler
+            .type_params
+            .iter()
+            .filter(|param| param.name != "_")
+            .map(|param| param.name.clone()),
+    );
+    for ty in handler.params.iter().filter_map(|param| param.ty.as_ref()) {
+        resolve_type_names(ty, &local, effects, path, diagnostics);
+    }
+    for arm in &handler.arms {
+        match arm {
+            crate::parser::HandlerArm::Operation { params, body, .. } => {
+                for ty in params.iter().filter_map(|param| param.ty.as_ref()) {
+                    resolve_type_names(ty, &local, effects, path, diagnostics);
+                }
+                expression_type_names(body, &local, effects, path, diagnostics);
+            }
+            crate::parser::HandlerArm::Return { param, body, .. } => {
+                if let Some(ty) = &param.ty {
+                    resolve_type_names(ty, &local, effects, path, diagnostics);
+                }
+                expression_type_names(body, &local, effects, path, diagnostics);
+            }
+        }
+    }
+}
+
 fn expression_type_names(
-    node: &Node, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
+    node: &Node,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     if let NodeKind::Fn { params, .. } = &node.kind {
@@ -361,76 +617,125 @@ fn expression_type_names(
             resolve_type_names(ty, types, effects, path, diagnostics);
         }
     }
-    for child in crate::check::children(node) { expression_type_names(child, types, effects, path, diagnostics); }
+    for child in crate::check::children(node) {
+        expression_type_names(child, types, effects, path, diagnostics);
+    }
 }
 
 fn resolve_type_names(
-    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
+    ty: &crate::parser::TypeExpr,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    use crate::parser::TypeKind;
+    if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &ty.kind {
+        if !types.contains(name) {
+            diagnostics.push(crate::parser::Diagnostic {
+                related: None,
+                path: path.into(),
+                line: ty.name_span.line,
+                col: ty.name_span.col,
+                code: Some("E204".into()),
+                message: format!("unknown type {name}"),
+            });
+        }
+    }
+    resolve_type_children(ty, types, effects, path, diagnostics);
+    if let Some(crate::parser::EffectRow::Row(labels)) = &ty.effects {
+        for label in labels {
+            resolve_effect_label(label, types, effects, path, diagnostics);
+        }
+    }
+}
+
+fn resolve_type_children(
+    ty: &crate::parser::TypeExpr,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     use crate::parser::TypeKind;
     match &ty.kind {
-        TypeKind::Name(name) | TypeKind::Apply(name, _) => {
-            if !types.contains(name) {
-                diagnostics.push(crate::parser::Diagnostic { related: None,
-                    path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
-                    code: Some("E204".into()), message: format!("unknown type {name}"),
-                });
+        TypeKind::Apply(_, args) | TypeKind::Group(args) => {
+            for arg in args {
+                resolve_type_names(arg, types, effects, path, diagnostics);
             }
-            if let TypeKind::Apply(_, args) = &ty.kind {
-                for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
-            }
-        }
-        TypeKind::Group(args) => {
-            for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
         }
         TypeKind::Record(fields) => {
-            for field in fields { resolve_type_names(&field.ty, types, effects, path, diagnostics); }
+            for field in fields {
+                resolve_type_names(&field.ty, types, effects, path, diagnostics);
+            }
         }
         TypeKind::Adt(variants) => {
             for variant in variants {
-                for payload in variant.payload.types() { resolve_type_names(payload, types, effects, path, diagnostics); }
+                for payload in variant.payload.types() {
+                    resolve_type_names(payload, types, effects, path, diagnostics);
+                }
             }
         }
-    }
-    if let Some(crate::parser::EffectRow::Row(labels)) = &ty.effects {
-        for label in labels { resolve_effect_label(label, types, effects, path, diagnostics); }
+        TypeKind::Name(_) => {}
     }
 }
 
 fn resolve_effect_label(
-    ty: &crate::parser::TypeExpr, types: &BTreeSet<String>, effects: &BTreeSet<String>, path: &str,
+    ty: &crate::parser::TypeExpr,
+    types: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+    path: &str,
     diagnostics: &mut Vec<crate::parser::Diagnostic>,
 ) {
     use crate::parser::TypeKind;
     match &ty.kind {
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !effects.contains(name) {
-                diagnostics.push(crate::parser::Diagnostic { related: None,
-                    path: path.into(), line: ty.name_span.line, col: ty.name_span.col,
-                    code: Some("E204".into()), message: format!("unknown effect {name}"),
+                diagnostics.push(crate::parser::Diagnostic {
+                    related: None,
+                    path: path.into(),
+                    line: ty.name_span.line,
+                    col: ty.name_span.col,
+                    code: Some("E204".into()),
+                    message: format!("unknown effect {name}"),
                 });
             }
             if let TypeKind::Apply(_, args) = &ty.kind {
-                for arg in args { resolve_type_names(arg, types, effects, path, diagnostics); }
+                for arg in args {
+                    resolve_type_names(arg, types, effects, path, diagnostics);
+                }
             }
         }
         _ => {}
     }
 }
 
-fn entry_form(ast: &Ast, path: &str, inspection: crate::Inspection) -> Result<(), crate::parser::Diagnostic> {
+fn entry_form(
+    ast: &Ast,
+    path: &str,
+    inspection: crate::Inspection,
+) -> Result<(), crate::parser::Diagnostic> {
     let main = ast.items.iter().find_map(|item| match item {
         Item::Def(def) if def.name == "main" => Some(def),
         _ => None,
     });
-    if main.is_some_and(|def| matches!(def.kind, DefKind::Value(_))) { return Ok(()); }
+    if main.is_some_and(|def| matches!(def.kind, DefKind::Value(_))) {
+        return Ok(());
+    }
     // A library inspection has no entry by definition (§52); an argument-taking
     // `main` is still E206 (§10).
-    if inspection == crate::Inspection::Library && main.is_none() { return Ok(()); }
+    if inspection == crate::Inspection::Library && main.is_none() {
+        return Ok(());
+    }
     let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
-    Err(crate::parser::Diagnostic { related: None, path: path.into(), line: span.line, col: span.col,
-        code: Some("E206".into()), message: "main must be a value definition".into() })
+    Err(crate::parser::Diagnostic {
+        related: None,
+        path: path.into(),
+        line: span.line,
+        col: span.col,
+        code: Some("E206".into()),
+        message: "main must be a value definition".into(),
+    })
 }
 
 fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnostic> {
@@ -453,12 +758,19 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
                 register(&mut names.modules, &module.name, module.name_span, path)?;
                 if let crate::parser::ImplementationForm::Functor(params) = &module.form {
                     let mut parameters = Declared::new();
-                    for param in params { register(&mut parameters, &param.name, param.name_span, path)?; }
+                    for param in params {
+                        register(&mut parameters, &param.name, param.name_span, path)?;
+                    }
                 }
                 declarations(&module.items, path)?;
             }
             Item::ModuleSig(signature) => {
-                register(&mut names.signatures, &signature.name, signature.name_span, path)?;
+                register(
+                    &mut names.signatures,
+                    &signature.name,
+                    signature.name_span,
+                    path,
+                )?;
                 declarations(&signature.items, path)?;
             }
             Item::Effect(effect) => {
@@ -477,9 +789,14 @@ fn declarations(items: &[Item], path: &str) -> Result<(), crate::parser::Diagnos
     Ok(())
 }
 
-fn register_parameters(parameters: &[crate::parser::DeclaredName], path: &str) -> Result<(), crate::parser::Diagnostic> {
+fn register_parameters(
+    parameters: &[crate::parser::DeclaredName],
+    path: &str,
+) -> Result<(), crate::parser::Diagnostic> {
     let mut names = Declared::new();
-    for parameter in parameters { register(&mut names, &parameter.name, parameter.span, path)?; }
+    for parameter in parameters {
+        register(&mut names, &parameter.name, parameter.span, path)?;
+    }
     Ok(())
 }
 
@@ -495,13 +812,17 @@ fn register_type_members(
                 register(names, &variant.name.name, variant.name.span, path)?;
                 if let crate::parser::ConstructorPayload::Named(fields) = &variant.payload {
                     let mut fields_seen = Declared::new();
-                    for field in fields { register(&mut fields_seen, &field.name.name, field.name.span, path)?; }
+                    for field in fields {
+                        register(&mut fields_seen, &field.name.name, field.name.span, path)?;
+                    }
                 }
             }
         }
         TypeKind::Record(fields) => {
             let mut names = Declared::new();
-            for field in fields { register(&mut names, &field.name.name, field.name.span, path)?; }
+            for field in fields {
+                register(&mut names, &field.name.name, field.name.span, path)?;
+            }
         }
         _ => {}
     }
@@ -516,7 +837,11 @@ fn register(
 ) -> Result<(), crate::parser::Diagnostic> {
     if let Some(&first) = names.get(name) {
         return Err(crate::parser::Diagnostic {
-            related: Some(crate::parser::Related { path: path.into(), line: first.line, col: first.col }),
+            related: Some(Box::new(crate::parser::Related {
+                path: path.into(),
+                line: first.line,
+                col: first.col,
+            })),
             path: path.into(),
             line: span.line,
             col: span.col,
@@ -530,31 +855,79 @@ fn register(
 
 pub(crate) fn check_cycles(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = Vec::new();
-    for group in definition_groups(ast).into_iter().filter(|group| group.len() > 1) {
-        for item in &ast.items {
-            let Item::Def(def) = item else { continue };
-            if !group.contains(&def.name) { continue; }
-            let violation = if matches!(def.kind, DefKind::Value(_)) {
-                Some(("E207", "recursive cycles cannot include value definitions"))
-            } else if !def.rec {
-                Some(("E208", "every mutually recursive function requires rec"))
-            } else { None };
-            if let Some((code, message)) = violation {
-                diagnostics.push(crate::parser::Diagnostic { related: None, path: path.into(), line: def.span.line, col: def.span.col,
-                    code: Some(code.into()), message: format!("{message}: {}", group.join(", ")) });
-            }
-        }
+    for group in definition_groups(ast)
+        .into_iter()
+        .filter(|group| group.len() > 1)
+    {
+        collect_cycle_violations(&ast.items, &group, path, &mut diagnostics);
     }
-    for item in &ast.items {
-        if let Item::ModuleImpl(module) = item {
-            if let Err(error) = check_cycles(&Ast { items: module.items.clone(), span: module.span, library: None, branches_after_fallback: vec![], branch_anchors: vec![], branch_spans: vec![], written_list_patterns: vec![], long_condition_functions: vec![], equality_anchors: vec![], qualified_type_anchors: vec![], name_sites: vec![] }, path) {
-                diagnostics.push(error);
-            }
-        }
-    }
+    collect_module_cycle_violations(ast, path, &mut diagnostics);
     match diagnostics.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
+    }
+}
+
+fn cycle_violation(def: &crate::parser::Def) -> Option<(&'static str, &'static str)> {
+    if matches!(def.kind, DefKind::Value(_)) {
+        Some(("E207", "recursive cycles cannot include value definitions"))
+    } else if !def.rec {
+        Some(("E208", "every mutually recursive function requires rec"))
+    } else {
+        None
+    }
+}
+
+fn collect_cycle_violations(
+    items: &[Item],
+    group: &[String],
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    for item in items {
+        let Item::Def(def) = item else { continue };
+        if !group.contains(&def.name) {
+            continue;
+        }
+        if let Some((code, message)) = cycle_violation(def) {
+            diagnostics.push(crate::parser::Diagnostic {
+                related: None,
+                path: path.into(),
+                line: def.span.line,
+                col: def.span.col,
+                code: Some(code.into()),
+                message: format!("{message}: {}", group.join(", ")),
+            });
+        }
+    }
+}
+
+fn collect_module_cycle_violations(
+    ast: &Ast,
+    path: &str,
+    diagnostics: &mut Vec<crate::parser::Diagnostic>,
+) {
+    for item in &ast.items {
+        if let Item::ModuleImpl(module) = item {
+            if let Err(error) = check_cycles(
+                &Ast {
+                    items: module.items.clone(),
+                    span: module.span,
+                    library: None,
+                    branches_after_fallback: vec![],
+                    branch_anchors: vec![],
+                    branch_spans: vec![],
+                    written_list_patterns: vec![],
+                    long_condition_functions: vec![],
+                    equality_anchors: vec![],
+                    qualified_type_anchors: vec![],
+                    name_sites: vec![],
+                },
+                path,
+            ) {
+                diagnostics.push(error);
+            }
+        }
     }
 }
 
@@ -566,7 +939,11 @@ fn dependency_graph(ast: &Ast) -> BTreeMap<String, BTreeSet<String>> {
             match &def.kind {
                 DefKind::Value(body) => free_names(body, &BTreeSet::new(), &mut references),
                 DefKind::Function { params, body, .. } => {
-                    let bound = params.iter().filter(|p| p.name != "_").map(|p| p.name.clone()).collect();
+                    let bound = params
+                        .iter()
+                        .filter(|p| p.name != "_")
+                        .map(|p| p.name.clone())
+                        .collect();
                     free_names(body, &bound, &mut references);
                 }
             }
@@ -578,5 +955,13 @@ fn dependency_graph(ast: &Ast) -> BTreeMap<String, BTreeSet<String>> {
 
 pub fn unused_definitions(ast: &Ast, roots: &[String]) -> Vec<String> {
     let graph = dependency_graph(ast);
-    graph.keys().filter(|name| !roots.iter().any(|root| reachable(root, name, &graph, &mut BTreeSet::new()))).cloned().collect()
+    graph
+        .keys()
+        .filter(|name| {
+            !roots
+                .iter()
+                .any(|root| reachable(root, name, &graph, &mut BTreeSet::new()))
+        })
+        .cloned()
+        .collect()
 }

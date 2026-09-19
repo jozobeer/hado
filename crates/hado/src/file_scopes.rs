@@ -26,10 +26,13 @@ pub(crate) fn isolate(ast: &mut Ast, file_index: usize) -> Vec<String> {
 }
 
 fn definition_names(items: &[Item]) -> BTreeSet<String> {
-    items.iter().filter_map(|item| match item {
-        Item::Def(definition) => Some(definition.name.clone()),
-        _ => None,
-    }).collect()
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Def(definition) => Some(definition.name.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 struct FileScope {
@@ -86,8 +89,12 @@ impl FileScope {
     fn handler(&self, handler: &mut HandlerDecl, inherited: &BTreeSet<String>) {
         for arm in &mut handler.arms {
             match arm {
-                HandlerArm::Operation { params, body, .. } => self.function(params, body, inherited),
-                HandlerArm::Return { param, body, .. } => self.function(std::slice::from_ref(param), body, inherited),
+                HandlerArm::Operation { params, body, .. } => {
+                    self.function(params, body, inherited)
+                }
+                HandlerArm::Return { param, body, .. } => {
+                    self.function(std::slice::from_ref(param), body, inherited)
+                }
             }
         }
     }
@@ -119,8 +126,14 @@ impl FileScope {
                 self.expression(value, bound);
                 self.pattern_body(pat, body, bound);
             }
-            NodeKind::PatternBranch { scrutinees, arms, fallback } => {
-                for scrutinee in scrutinees { self.expression(scrutinee, bound); }
+            NodeKind::PatternBranch {
+                scrutinees,
+                arms,
+                fallback,
+            } => {
+                for scrutinee in scrutinees {
+                    self.expression(scrutinee, bound);
+                }
                 for (patterns, body) in arms {
                     let mut local = bound.clone();
                     for pattern in patterns {
@@ -135,12 +148,16 @@ impl FileScope {
     }
 
     fn optional(&self, node: &mut Option<Box<Node>>, bound: &BTreeSet<String>) {
-        if let Some(node) = node { self.expression(node, bound); }
+        if let Some(node) = node {
+            self.expression(node, bound);
+        }
     }
 
     fn unbound_children(&self, node: &mut Node, bound: &BTreeSet<String>) {
         match &mut node.kind {
-            NodeKind::Neg(value) | NodeKind::Not(value) | NodeKind::Field(value, _) => self.expression(value, bound),
+            NodeKind::Neg(value) | NodeKind::Not(value) | NodeKind::Field(value, _) => {
+                self.expression(value, bound)
+            }
             NodeKind::Bin(_, left, right) | NodeKind::Pipe(left, right) => {
                 self.expression(left, bound);
                 self.expression(right, bound);
@@ -151,7 +168,9 @@ impl FileScope {
             }
             NodeKind::Apply(callee, arguments) | NodeKind::Call(callee, arguments) => {
                 self.expression(callee, bound);
-                for argument in arguments { self.expression(argument, bound); }
+                for argument in arguments {
+                    self.expression(argument, bound);
+                }
             }
             _ => self.aggregate_children(node, bound),
         }
@@ -160,10 +179,14 @@ impl FileScope {
     fn aggregate_children(&self, node: &mut Node, bound: &BTreeSet<String>) {
         match &mut node.kind {
             NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
-                for (_, value) in fields { self.expression(value, bound); }
+                for (_, value) in fields {
+                    self.expression(value, bound);
+                }
             }
             NodeKind::List(values, tail) => {
-                for value in values { self.expression(value, bound); }
+                for value in values {
+                    self.expression(value, bound);
+                }
                 self.optional(tail, bound);
             }
             NodeKind::BoolBranch { cond, then, els } => {
@@ -178,9 +201,17 @@ impl FileScope {
                 }
                 self.optional(fallback, bound);
             }
-            NodeKind::Int(_) | NodeKind::Float(_) | NodeKind::Char(_) | NodeKind::Str(_) | NodeKind::Bool(_) | NodeKind::Void | NodeKind::Resume => {}
+            NodeKind::Int(_)
+            | NodeKind::Float(_)
+            | NodeKind::Char(_)
+            | NodeKind::Str(_)
+            | NodeKind::Bool(_)
+            | NodeKind::Void
+            | NodeKind::Resume => {}
             NodeKind::With { args, body, .. } => {
-                for arg in args { self.expression(arg, bound); }
+                for arg in args {
+                    self.expression(arg, bound);
+                }
                 self.expression(body, bound);
             }
             _ => unreachable!("scoped expressions and scalar children are handled first"),

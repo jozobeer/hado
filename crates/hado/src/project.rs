@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::collections::{BTreeMap, BTreeSet};
 use crate::lexer::{Tok, TokKind};
 use crate::parser::{Ast, Diagnostic, Related, Span};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
 struct SourceFile {
@@ -27,22 +27,41 @@ impl Project {
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
-        let library_error = library_main.map(|span| Diagnostic { related: None,
-            path: files[0].path.clone(), line: span.line, col: span.col,
+        let library_error = library_main.map(|span| Diagnostic {
+            related: None,
+            path: files[0].path.clone(),
+            line: span.line,
+            col: span.col,
             code: Some("E206".into()),
             message: "a library directory cannot declare main".into(),
         });
         // §56: E205 と E206 は同じ名前解決の段階なので、アンカー位置のソース順で選ぶ。
-        if let Some(error) = [duplicate_library, library_error].into_iter().flatten()
-            .min_by_key(crate::diagnostic_order) {
+        if let Some(error) = [duplicate_library, library_error]
+            .into_iter()
+            .flatten()
+            .min_by_key(crate::diagnostic_order)
+        {
             return Err(LoadError::Diagnostic(source_diagnostic(&files, error)));
         }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
         let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
         // §52: another file's `main` is an entry only in an entry inspection.
-        parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry { other_entry_roots } else { Vec::new() };
-        let namespaces: Vec<_> = files.iter().map(|file| (file.offset, file.directory.clone())).collect();
-        crate::resolve_namespaces(&mut parsed, &namespaces, &directories, &libraries, &files[0].path);
+        parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry {
+            other_entry_roots
+        } else {
+            Vec::new()
+        };
+        let namespaces: Vec<_> = files
+            .iter()
+            .map(|file| (file.offset, file.directory.clone()))
+            .collect();
+        crate::resolve_namespaces(
+            &mut parsed,
+            &namespaces,
+            &directories,
+            &libraries,
+            &files[0].path,
+        );
         Ok(Self { parsed, files })
     }
 
@@ -115,11 +134,15 @@ impl Project {
     /// `true` when the file changed. The rewrite is matched by code and anchor,
     /// so a diagnostic without a local rewrite leaves the file untouched.
     pub fn apply_canonical_fix(&self, error: &Diagnostic) -> Result<bool, String> {
-        let Some(code) = error.code.as_deref() else { return Ok(false) };
+        let Some(code) = error.code.as_deref() else {
+            return Ok(false);
+        };
         if !crate::fixes::is_fixable(code) {
             return Ok(false);
         }
-        let Some(file) = self.source_file(&error.path) else { return Ok(false) };
+        let Some(file) = self.source_file(&error.path) else {
+            return Ok(false);
+        };
         let source = std::fs::read_to_string(file).map_err(|error| error.to_string())?;
         let Some(fix) = crate::fixes::fix_at(&source, code, error.line, error.col) else {
             return Ok(false);
@@ -170,7 +193,9 @@ pub enum LoadError {
 }
 
 impl From<Diagnostic> for LoadError {
-    fn from(error: Diagnostic) -> Self { Self::Diagnostic(error) }
+    fn from(error: Diagnostic) -> Self {
+        Self::Diagnostic(error)
+    }
 }
 
 impl std::fmt::Display for LoadError {
@@ -183,27 +208,45 @@ impl std::fmt::Display for LoadError {
 }
 
 fn root_directory(entry: &Path) -> &Path {
-    entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."))
+    entry
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
 }
 
 fn relative_source(path: &Path, root: &Path) -> PathBuf {
-    path.strip_prefix(root).map(Path::to_path_buf)
+    path.strip_prefix(root)
+        .map(Path::to_path_buf)
         .unwrap_or_else(|_| PathBuf::from(path.file_name().unwrap()))
 }
 
 fn namespace_parts(relative: &Path) -> Vec<String> {
-    relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect()
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect()
 }
 
 fn valid_directory_name(name: &str) -> bool {
-    if !name.starts_with(char::is_lowercase) { return false; }
-    let Ok(tokens) = crate::lexer::lex_full(name) else { return false; };
+    if !name.starts_with(char::is_lowercase) {
+        return false;
+    }
+    let Ok(tokens) = crate::lexer::lex_full(name) else {
+        return false;
+    };
     matches!(tokens.as_slice(), [Tok { kind: TokKind::Name(value), .. }, Tok { kind: TokKind::Eof, .. }] if value == name)
 }
 
-fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, directories: &mut BTreeSet<Vec<String>>) -> Result<(), LoadError> {
-    let mut entries = std::fs::read_dir(directory).map_err(|error| io_error(directory, error))?
-        .collect::<Result<Vec<_>, _>>().map_err(|error| io_error(directory, error))?;
+fn collect_sources(
+    directory: &Path,
+    root: &Path,
+    paths: &mut Vec<PathBuf>,
+    directories: &mut BTreeSet<Vec<String>>,
+) -> Result<(), LoadError> {
+    let mut entries = std::fs::read_dir(directory)
+        .map_err(|error| io_error(directory, error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io_error(directory, error))?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
@@ -224,12 +267,19 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
             }
             let name = entry.file_name();
             if !name.to_str().is_some_and(valid_directory_name) {
-                return Err(LoadError::Input(format!("invalid namespace directory: {}", relative_source(&path, root).display())));
+                return Err(LoadError::Input(format!(
+                    "invalid namespace directory: {}",
+                    relative_source(&path, root).display()
+                )));
             }
             directories.insert(namespace_parts(&relative_source(&path, root)));
             collect_sources(&path, root, paths, directories)?;
         } else if path.is_file()
-            && matches!(path.extension().and_then(|extension| extension.to_str()), Some("hd" | "hdi")) {
+            && matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("hd" | "hdi")
+            )
+        {
             paths.push(path);
         }
     }
@@ -237,8 +287,14 @@ fn collect_sources(directory: &Path, root: &Path, paths: &mut Vec<PathBuf>, dire
 }
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
-    Diagnostic { related: None, path: path.to_string_lossy().into_owned(), line: 1, col: 1,
-        code: None, message: error.to_string() }
+    Diagnostic {
+        related: None,
+        path: path.to_string_lossy().into_owned(),
+        line: 1,
+        col: 1,
+        code: None,
+        message: error.to_string(),
+    }
 }
 
 /// §50: the sources of the project whose entry is `entry`, paired with the
@@ -249,7 +305,12 @@ pub fn source_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
     let (root, paths, _) = collect_paths(entry)?;
     Ok(paths
         .into_iter()
-        .map(|path| (relative_source(&path, &root).to_string_lossy().into_owned(), path))
+        .map(|path| {
+            (
+                relative_source(&path, &root).to_string_lossy().into_owned(),
+                path,
+            )
+        })
         .collect())
 }
 
@@ -262,25 +323,37 @@ pub fn test_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
         .into_iter()
         .filter(|path| path.parent() == Some(root.as_path()))
         .filter(|path| {
-            path.file_name().is_some_and(|name| name.as_encoded_bytes().ends_with(b"_test.hd"))
+            path.file_name()
+                .is_some_and(|name| name.as_encoded_bytes().ends_with(b"_test.hd"))
         })
-        .map(|path| (relative_source(&path, &root).to_string_lossy().into_owned(), path))
+        .map(|path| {
+            (
+                relative_source(&path, &root).to_string_lossy().into_owned(),
+                path,
+            )
+        })
         .collect())
 }
 
+/// The root, the paths of the project in reading order, and the namespace
+/// directories `read_files` needs.
+type CollectedPaths = (PathBuf, Vec<PathBuf>, BTreeSet<Vec<String>>);
+
 /// The paths of the project in reading order, with the root and the namespace
 /// directories `read_files` needs.
-fn collect_paths(
-    entry: &Path,
-) -> Result<(PathBuf, Vec<PathBuf>, BTreeSet<Vec<String>>), LoadError> {
+fn collect_paths(entry: &Path) -> Result<CollectedPaths, LoadError> {
     let root = root_directory(entry).to_path_buf();
     let mut paths = Vec::new();
     let mut directories = BTreeSet::from([Vec::new()]);
     collect_sources(&root, &root, &mut paths, &mut directories)?;
     let selected = relative_source(entry, &root);
     paths.retain(|path| relative_source(path, &root) != selected);
-    paths.sort_by(|a, b| relative_source(a, &root).as_os_str().as_encoded_bytes()
-        .cmp(relative_source(b, &root).as_os_str().as_encoded_bytes()));
+    paths.sort_by(|a, b| {
+        relative_source(a, &root)
+            .as_os_str()
+            .as_encoded_bytes()
+            .cmp(relative_source(b, &root).as_os_str().as_encoded_bytes())
+    });
     paths.insert(0, entry.to_path_buf());
     Ok((root, paths, directories))
 }
@@ -301,22 +374,41 @@ fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagn
     let relative = relative_source(path, root);
     let display = relative.to_string_lossy().into_owned();
     let text = std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?;
-    let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic { related: None,
-        path: display.clone(), line: error.line, col: error.col,
-        code: error.code.map(str::to_owned), message: error.message,
+    let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+        related: None,
+        path: display.clone(),
+        line: error.line,
+        col: error.col,
+        code: error.code.map(str::to_owned),
+        message: error.message,
     })?;
-    for token in &mut tokens { token.span.line += offset; }
+    for token in &mut tokens {
+        token.span.line += offset;
+    }
     let directory = namespace_parts(relative.parent().unwrap_or(Path::new("")));
-    Ok(TokenFile { source: SourceFile { physical: path.to_path_buf(), path: display, directory, offset }, tokens })
+    Ok(TokenFile {
+        source: SourceFile {
+            physical: path.to_path_buf(),
+            path: display,
+            directory,
+            offset,
+        },
+        tokens,
+    })
 }
 
-fn parse_files(files: &[TokenFile], libraries: &BTreeSet<Vec<String>>) -> Result<(Ast, Vec<String>, Option<Span>), Diagnostic> {
+fn parse_files(
+    files: &[TokenFile],
+    libraries: &BTreeSet<Vec<String>>,
+) -> Result<(Ast, Vec<String>, Option<Span>), Diagnostic> {
     let mut ast = parse_file(&files[0], libraries)?;
     let mut library_main = library_main_span(&ast, &files[0].source.directory, libraries);
     let mut roots = crate::file_scopes::isolate(&mut ast, 0);
     for (index, file) in files.iter().enumerate().skip(1) {
-        let mut parsed = parse_file(file, libraries)
-            .map_err(|mut error| { error.line -= file.source.offset; error })?;
+        let mut parsed = parse_file(file, libraries).map_err(|mut error| {
+            error.line -= file.source.offset;
+            error
+        })?;
         if library_main.is_none() {
             library_main = library_main_span(&parsed, &file.source.directory, libraries);
         }
@@ -336,7 +428,10 @@ fn parse_file(file: &TokenFile, libraries: &BTreeSet<Vec<String>>) -> Result<Ast
     match (parsed, role_error) {
         (Ok(ast), None) => Ok(ast),
         (Ok(_), Some(error)) | (Err(error), None) => Err(error),
-        (Err(syntax), Some(role)) => Err([syntax, role].into_iter().min_by_key(crate::diagnostic_order).unwrap()),
+        (Err(syntax), Some(role)) => Err([syntax, role]
+            .into_iter()
+            .min_by_key(crate::diagnostic_order)
+            .unwrap()),
     }
 }
 
@@ -344,14 +439,25 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
     let interface = path.extension().is_some_and(|extension| extension == "hdi");
     let mut outer = true;
     for token in tokens {
-        let invalid = (interface && matches!(token.kind, TokKind::KwImplement | TokKind::KwLibrary))
+        let invalid = (interface
+            && matches!(token.kind, TokKind::KwImplement | TokKind::KwLibrary))
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
-            return Some(Diagnostic { related: None, path: path.to_string_lossy().into_owned(), line: token.span.line,
-                col: token.span.col, code: Some("E100".into()),
-                message: "declaration is not allowed in this file".into() });
+            return Some(Diagnostic {
+                related: None,
+                path: path.to_string_lossy().into_owned(),
+                line: token.span.line,
+                col: token.span.col,
+                code: Some("E100".into()),
+                message: "declaration is not allowed in this file".into(),
+            });
         }
-        if matches!(token.kind, TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler) { outer = false; }
+        if matches!(
+            token.kind,
+            TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler
+        ) {
+            outer = false;
+        }
     }
     None
 }
@@ -359,8 +465,15 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
 /// A `main` in a directory that declares `library` is E206 (§52), whichever
 /// file of the directory it sits in. The prohibition does not depend on the
 /// shape of the definition, so any `def main` counts.
-fn library_main_span(ast: &Ast, directory: &[String], libraries: &BTreeSet<Vec<String>>) -> Option<Span> {
-    libraries.contains(directory).then(|| crate::main_definition_span(ast)).flatten()
+fn library_main_span(
+    ast: &Ast,
+    directory: &[String],
+    libraries: &BTreeSet<Vec<String>>,
+) -> Option<Span> {
+    libraries
+        .contains(directory)
+        .then(|| crate::main_definition_span(ast))
+        .flatten()
 }
 
 /// Directories that declare `library`, in file order (entry first, then relative path bytes).
@@ -374,21 +487,36 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
     for file in files {
         let mut declared = false;
         for token in &file.tokens {
-            if token.kind != TokKind::KwLibrary { continue; }
+            if token.kind != TokKind::KwLibrary {
+                continue;
+            }
             if declared || roots.contains(&file.source.directory) {
-                let related = firsts.get(&file.source.directory)
-                    .map(|(path, first)| Related { path: path.clone(), line: first.line, col: first.col });
-                let error = Diagnostic { related, path: file.source.path.clone(), line: token.span.line,
-                    col: token.span.col, code: Some("E205".into()),
-                    message: "duplicate library declaration".into() };
-                if duplicate.as_ref().map_or(true, |current| crate::diagnostic_order(&error) < crate::diagnostic_order(current)) {
+                let related = firsts.get(&file.source.directory).map(|(path, first)| {
+                    Box::new(Related {
+                        path: path.clone(),
+                        line: first.line,
+                        col: first.col,
+                    })
+                });
+                let error = Diagnostic {
+                    related,
+                    path: file.source.path.clone(),
+                    line: token.span.line,
+                    col: token.span.col,
+                    code: Some("E205".into()),
+                    message: "duplicate library declaration".into(),
+                };
+                if duplicate.as_ref().is_none_or(|current| {
+                    crate::diagnostic_order(&error) < crate::diagnostic_order(current)
+                }) {
                     duplicate = Some(error);
                 }
                 continue;
             }
             declared = true;
             roots.insert(file.source.directory.clone());
-            firsts.entry(file.source.directory.clone())
+            firsts
+                .entry(file.source.directory.clone())
                 .or_insert_with(|| (file.source.path.clone(), token.span));
         }
     }

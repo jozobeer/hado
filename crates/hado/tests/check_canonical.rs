@@ -101,11 +101,7 @@ fn duplicate_patterns_ignore_bound_variable_names() {
             Some("E405")
         );
     }
-    let ast = parse_source(
-        "def f | Some(1) => 1 | Some(2) => 2 | 0",
-        "t",
-    )
-    .unwrap();
+    let ast = parse_source("def f | Some(1) => 1 | Some(2) => 2 | 0", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -127,20 +123,12 @@ fn repeated_or_unreachable_conditions_are_rejected() {
 
 #[test]
 fn identical_branches_ignore_local_names_but_preserve_free_names() {
-    let ast = parse_source(
-        "def main = if true => fn(x => x + 1) | fn(y => y + 1)",
-        "t",
-    )
-    .unwrap();
+    let ast = parse_source("def main = if true => fn(x => x + 1) | fn(y => y + 1)", "t").unwrap();
     assert_eq!(
         check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
         Some("E502")
     );
-    let ast = parse_source(
-        "def main = if true => fn(x => x + a) | fn(y => y + b)",
-        "t",
-    )
-    .unwrap();
+    let ast = parse_source("def main = if true => fn(x => x + a) | fn(y => y + b)", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -177,7 +165,11 @@ fn non_boolean_literal_patterns_require_fallback_at_any_depth() {
         let source = format!("{source} | 0");
         check::check_ast(&parse_source(&source, "t").unwrap(), "t").unwrap();
     }
-    let ast = parse_source("def f | Some(true) => 1 | Some(false) => 0 | None => -1", "t").unwrap();
+    let ast = parse_source(
+        "def f | Some(true) => 1 | Some(false) => 0 | None => -1",
+        "t",
+    )
+    .unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -213,10 +205,10 @@ fn equality_columns_for_one_variable_require_pattern_syntax() {
 
 #[test]
 fn nullary_constructors_keep_their_identity_during_normalization() {
-    let source =
-        "type Color = | Red | Blue\ndef f | Red => 1 | Blue => 2\ndef main = f Red";
+    let source = "type Color = | Red | Blue\ndef f | Red => 1 | Blue => 2\ndef main = f Red";
     hado::check_source(source, "t").unwrap();
-    let source = "type Color = | Red | Blue\ndef f | Red => 1 | Red => 2 | Blue => 3\ndef main = f Red";
+    let source =
+        "type Color = | Red | Blue\ndef f | Red => 1 | Red => 2 | Blue => 3\ndef main = f Red";
     assert_eq!(
         hado::check_source(source, "t")
             .err()
@@ -340,9 +332,8 @@ fn rebuilding_every_constructor_is_redundant() {
 fn record_rebuilding_ignores_field_order_but_preserves_values() {
     let prefix = "type Pair = { left: Int; right: Int }\n";
     let suffix = "\ndef main = f { left = 1; right = 2 }";
-    let source = format!(
-        "{prefix}def f | {{ left = a; right = b }} => {{ right = b; left = a }}{suffix}"
-    );
+    let source =
+        format!("{prefix}def f | {{ left = a; right = b }} => {{ right = b; left = a }}{suffix}");
     assert_eq!(
         hado::check_source(&source, "t")
             .err()
@@ -351,16 +342,14 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
             .as_deref(),
         Some("E507")
     );
-    let source = format!(
-        "{prefix}def f | {{ left = a; right = b }} => {{ right = a; left = b }}{suffix}"
-    );
+    let source =
+        format!("{prefix}def f | {{ left = a; right = b }} => {{ right = a; left = b }}{suffix}");
     hado::check_source(&source, "t").unwrap();
 }
 
 #[test]
 fn unchanged_none_branch_requires_railway_syntax() {
-    let source =
-        "def f | Some(x) => Some(x + 1) | None => None\ndef main = f (Some(1))";
+    let source = "def f | Some(x) => Some(x + 1) | None => None\ndef main = f (Some(1))";
     assert_eq!(
         hado::check_source(source, "t")
             .err()
@@ -369,8 +358,7 @@ fn unchanged_none_branch_requires_railway_syntax() {
             .as_deref(),
         Some("E508")
     );
-    let source =
-        "def f | Some(x) => Some(x + 1) | None => Some(0)\ndef main = f (None)";
+    let source = "def f | Some(x) => Some(x + 1) | None => Some(0)\ndef main = f (None)";
     hado::check_source(source, "t").unwrap();
 }
 
@@ -451,10 +439,7 @@ fn boolean_patterns_must_cover_both_values_without_redundant_fallback() {
 #[test]
 fn adt_branches_cover_constructor_alternatives() {
     for (source, code) in [
-        (
-            "def f | Some(v) => v\ndef main = f (Some(1))",
-            "E402",
-        ),
+        ("def f | Some(v) => v\ndef main = f (Some(1))", "E402"),
         (
             "def f | Some(v) => v | None => 0 | 2\ndef main = f (Some(1))",
             "E403",
@@ -534,7 +519,9 @@ fn generated_boolean_payload_subsets_match_finite_domain_oracle() {
                 )
             })
             .collect();
-        let source = format!("type Pair = | Pair(Bool, Bool)\ndef f{arms}\ndef main = f (Pair(false, false))");
+        let source = format!(
+            "type Pair = | Pair(Bool, Bool)\ndef f{arms}\ndef main = f (Pair(false, false))"
+        );
         let checked = hado::check_source(&source, "t");
         if mask.count_ones() == 4 {
             checked.unwrap();
@@ -553,9 +540,15 @@ fn generated_boolean_payload_subsets_match_finite_domain_oracle() {
             checked.unwrap();
         }
     }
-    let source =
-        "type Pair = | Pair(Bool, Bool)\ndef f | 0\ndef main = f (Pair(false, false))";
-    assert_eq!(hado::check_source(source, "t").err().unwrap().code.as_deref(), Some("E100"));
+    let source = "type Pair = | Pair(Bool, Bool)\ndef f | 0\ndef main = f (Pair(false, false))";
+    assert_eq!(
+        hado::check_source(source, "t")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E100")
+    );
 }
 
 #[test]
@@ -583,14 +576,10 @@ fn nested_adt_coverage_tracks_inner_alternatives() {
 fn recursive_list_coverage_terminates_and_finds_missing_lengths() {
     for (arms, expected) in [
         ("[] => 0 | [_] => 1", Some("E402")),
-        (
-            "[] => 0 | [_] => 1 | [_, _, ..._] => 2",
-            None,
-        ),
+        ("[] => 0 | [_] => 1 | [_, _, ..._] => 2", None),
         ("[] => 0 | [_, ..._] => 1 | 2", Some("E403")),
     ] {
-        let source =
-            format!("def length_class | {arms}\ndef main = length_class [1, 2, 3]");
+        let source = format!("def length_class | {arms}\ndef main = length_class [1, 2, 3]");
         let result = hado::check_source(&source, "t");
         match expected {
             Some(code) => assert_eq!(result.err().unwrap().code.as_deref(), Some(code)),

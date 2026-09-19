@@ -20,7 +20,7 @@ x
 
 ## 原因
 
-§54 の決定。`docs/spec.md:1845` が終了コードを 0 と 1 の二値に保つと定め、`runtime/hado_runtime.c:539` の `hado_abort_error` が `exit(1)` で `Failure is an effect` を OS の境界で 0/1 に潰す。
+§54 の決定。`docs/spec.md` が終了コードを 0 と 1 の二値に保つと定め、`runtime/hado_runtime.c` の `hado_abort_error` が `exit(1)` で `Failure is an effect` を OS の境界で 0/1 に潰す。
 
 ## 案
 

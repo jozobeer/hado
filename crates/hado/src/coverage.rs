@@ -16,7 +16,13 @@ pub(crate) fn covers_pattern(pattern: &Pattern, families: &Families) -> Option<b
 }
 
 pub(crate) fn covers_rows(rows: &[Vec<Pattern>], families: &Families) -> Option<bool> {
-    covers(&rows.iter().map(|row| row.iter().map(cell).collect()).collect::<Vec<_>>(), families)
+    covers(
+        &rows
+            .iter()
+            .map(|row| row.iter().map(cell).collect())
+            .collect::<Vec<_>>(),
+        families,
+    )
 }
 
 fn cell(pattern: &Pattern) -> Cell {

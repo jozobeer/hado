@@ -21,7 +21,7 @@ $ grep -rn 'implement Map' stdlib/ | wc -l
 
 `docs/wants.md` 33 は association list を想定している。typeclass も演算子過負荷も無い（§4）ので、比較を誰が持つかが決まっていなかった。
 
-組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs:3845` の `derive_comparison`）、モジュールの型変数の上で呼べることを実測した（2026-09-18）。
+組み込みの `compare` は単相化時に型ごとに派生され（`crates/hado/src/mono.rs` の `derive_comparison`）、モジュールの型変数の上で呼べることを実測した（2026-09-18）。
 
 ```
 $ cat main.hd

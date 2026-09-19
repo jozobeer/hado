@@ -13,7 +13,7 @@
 
 ## 環境
 
-- Rust、`cc`、`libgc-dev`。Cranelift の版は `Cargo.lock` に固定
+- Rust（rustfmt と clippy を含む）、`cc`、`libgc-dev`。Cranelift の版は `Cargo.lock` に固定
 - `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/verify-ci.sh` はワークフローを YAML として読むので `yaml` も要る（Ubuntu は `python3-yaml`）
 - `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
@@ -22,6 +22,8 @@
 
 ```
 cargo test --offline                 # 単体テストとコーパス判定
+cargo fmt --all --check                  # 整形（門番 verify-rustfmt、quick）
+cargo clippy --offline --all-targets -- -D warnings # lint（門番 verify-clippy、core）
 bash scripts/verify-*.sh             # リポジトリルートから。最後に PASSED: n/N
 bash scripts/corpus-lock.sh [--check]   # corpus lock を作り直す / 照合する
 cargo run --offline -q -- check [--print-type] <file>

@@ -135,9 +135,18 @@ fn constructor_tags_follow_declaration_order_within_each_type() {
     let checked = hado::check_source("type First = | Zebra | Apple\ntype Second = | Yes | No\ndef main = Zebra == Apple && Yes == No", "t").unwrap();
     let first = Type::Data("First".into(), vec![]);
     let second = Type::Data("Second".into(), vec![]);
-    assert_eq!(hado::repr::constructor_tag("Zebra", &first, &checked).unwrap(), 0);
-    assert_eq!(hado::repr::constructor_tag("Apple", &first, &checked).unwrap(), 1);
-    assert_eq!(hado::repr::constructor_tag("Yes", &second, &checked).unwrap(), 0);
+    assert_eq!(
+        hado::repr::constructor_tag("Zebra", &first, &checked).unwrap(),
+        0
+    );
+    assert_eq!(
+        hado::repr::constructor_tag("Apple", &first, &checked).unwrap(),
+        1
+    );
+    assert_eq!(
+        hado::repr::constructor_tag("Yes", &second, &checked).unwrap(),
+        0
+    );
     assert!(hado::repr::constructor_tag("Yes", &first, &checked).is_err());
 }
 
@@ -154,6 +163,9 @@ fn string_literals_encode_byte_lengths_in_target_order() {
         assert_eq!(&data[..width as usize], prefix);
         assert_eq!(&data[width as usize..], "a\0あ".as_bytes());
     }
-    assert_eq!(string_literal_data("", 8, ByteOrder::Little).unwrap(), vec![0; 8]);
+    assert_eq!(
+        string_literal_data("", 8, ByteOrder::Little).unwrap(),
+        vec![0; 8]
+    );
     assert!(string_literal_data("x", 2, ByteOrder::Little).is_err());
 }

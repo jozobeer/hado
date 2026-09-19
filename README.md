@@ -42,6 +42,8 @@ scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて�
 scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
 scripts/run-gates.sh --jobs 8 --tier full 出力先 # 同じ判定を 8 並列で（既定 1=直列）
 bash scripts/verify-m0.sh                # 門番は単独でも走る
+cargo fmt --all --check                  # 整形。verify-rustfmt（quick）と同じ
+cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（core）と同じ
 ```
 
 `run-gates.sh` は 1 回の全走のあいだ、同じ内容の門番と `cargo test` の実走を 1 度に
@@ -49,6 +51,8 @@ bash scripts/verify-m0.sh                # 門番は単独でも走る
 あるときだけ効く（33 節）。層に門番を足すときは `--tier core 出力先 verify-r33` の
 ように書く。門番を 1 本ずつ別のシェルで走らせると、畳み込みは各門番の入れ子の
 範囲でしか効かない。文書の整合は `scripts/lint-docs.sh` が持ち、full の最後に回る。
+Rust の整形と lint は `scripts/verify-rustfmt.sh`（quick）と `scripts/verify-clippy.sh`
+（core）が守る（`docs/rounds/rust-lint.md`）。
 
 `--jobs N`（既定 1）は門番を N 並列で走らせる（34 節）。判定は変えず、直列と
 同じ `PASSED: n/N` を出す。既定が直列なのは再現性のためで、`--jobs` なしの
