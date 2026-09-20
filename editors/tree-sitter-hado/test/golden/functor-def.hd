@@ -1,0 +1,2 @@
+implement Store as MakeStore(Id: UserId)
+type T = Int

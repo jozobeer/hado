@@ -1,0 +1,1 @@
+implement Store as IntStore = MakeStore(IntId)

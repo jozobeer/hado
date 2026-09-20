@@ -1,0 +1,34 @@
+(source_file
+  (definition
+    (name)
+    (expression
+      (pipe
+        (or
+          (and
+            (compare
+              (additive
+                (multiplicative
+                  (unary
+                    (application
+                      (postfix
+                        (primary
+                          (name)
+                        )
+                        (name)
+                      )
+                      (postfix
+                        (primary
+                          (name)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)

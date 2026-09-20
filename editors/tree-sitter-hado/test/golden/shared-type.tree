@@ -1,0 +1,18 @@
+(source_file
+  (implement_section
+    (contract_ref
+      (upper_name)
+    )
+    (upper_name)
+    (shared_type_realization
+      (upper_name)
+      (type_expr
+        (type_atom
+          (type_ref
+            (upper_name)
+          )
+        )
+      )
+    )
+  )
+)

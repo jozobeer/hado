@@ -1,0 +1,14 @@
+(source_file
+  (apply_section
+    (contract_ref
+      (upper_name)
+    )
+    (upper_name)
+    (impl_ref
+      (upper_name)
+    )
+    (impl_ref
+      (upper_name)
+    )
+  )
+)

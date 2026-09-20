@@ -1,0 +1,26 @@
+(source_file
+  (definition
+    (name)
+    (expression
+      (pipe
+        (or
+          (and
+            (compare
+              (additive
+                (multiplicative
+                  (unary
+                    (postfix
+                      (primary
+                        (float)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
