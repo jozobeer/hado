@@ -228,7 +228,12 @@ def run_in_pty(argv, env, cwd, timeout=120):
         # 門番が赤ではなくハングし、赤の理由が読めない。
         if b'Press ENTER' in chunk or b'-- More --' in chunk:
             os.write(master, b'\r')
-    if proc.poll() is None:
+    # Neovim は端末を閉じてから終了するので、pty の read が EIO で抜けた直後は
+    # poll() がまだ None のことがある（CPU を取り合う 2 コアの runner で頻発する）。
+    # poll() を終了の判定に使わず、締め切りまで終了を待つ。
+    try:
+        proc.wait(timeout=max(deadline - time.time(), 0))
+    except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
         os.close(master)
