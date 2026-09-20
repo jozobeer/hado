@@ -48,6 +48,7 @@ GOLDEN_NAMES = (
     'with-continuation',
     'pipe-precedence',
     'library',
+    'library-late',
     'module',
     'implement-body',
     'functor-def',
@@ -117,6 +118,13 @@ ABSENT = (
     (0, '//', '// comment 12345', '@number'),
     (2, '"text 42"', '"text 42"', '@number'),
     (9, r'"a\nb\tc\\d\"e"', r'"a\nb\tc\\d\"e"', '@number'),
+)
+# 契約の `.hdi` も同じ filetype で開けること。位置ではなく filetype と
+# parser・query・highlighter と extmark の有無だけを測る。
+HDI_LINES = (
+    'module Store',
+    'type T',
+    'def create(name: String): T',
 )
 # 門番が約束する字句クラス。query から読めた capture にこれが揃っていること。
 PROMISED = (
@@ -214,14 +222,14 @@ def run_in_pty(argv, env, cwd, timeout=120):
     return proc.returncode, out
 
 
-def nvim_probe(nvim, so, work):
+def nvim_probe(nvim, so, work, name, source):
     rtp = work / 'rtp'
-    (rtp / 'queries' / 'hado').mkdir(parents=True)
+    (rtp / 'queries' / 'hado').mkdir(parents=True, exist_ok=True)
     shutil.copy(PKG / 'queries' / 'hado' / 'highlights.scm',
                 rtp / 'queries' / 'hado' / 'highlights.scm')
-    probe = work / 'probe.hd'
-    probe.write_text('\n'.join(PROBE_LINES) + '\n')
-    out_file = work / 'marks.txt'
+    probe = work / name
+    probe.write_text('\n'.join(source) + '\n')
+    out_file = work / (name + '.marks')
     if out_file.exists():
         out_file.unlink()
     env = dict(os.environ)
@@ -352,7 +360,7 @@ def main():
     check('declaration forms and section 7 precedence goldens match', goldens)
 
     def highlights():
-        text = nvim_probe(nvim, state['so'], work)
+        text = nvim_probe(nvim, state['so'], work, 'probe.hd', PROBE_LINES)
         status, captures, marks = parse_probe_output(text)
         assert status.get('filetype') == 'hado', 'filetype: %r' % status.get('filetype')
         assert status.get('parser') == 'true', 'parser not available: %r' % status
@@ -392,6 +400,17 @@ def main():
                  and m[2] >= last_row]
         assert not whole, 'an extmark covers the whole file'
         assert len(marks) >= len(PROBES), 'too few extmarks: %d' % len(marks)
+        # 契約の `.hdi` も同じ filetype で、parser と query と highlighter が働き、
+        # extmark が付くこと。
+        hdi_text = nvim_probe(nvim, state['so'], work, 'probe.hdi', HDI_LINES)
+        hdi_status, _, hdi_marks = parse_probe_output(hdi_text)
+        assert hdi_status.get('filetype') == 'hado', \
+            '.hdi filetype: %r' % hdi_status.get('filetype')
+        assert hdi_status.get('parser') == 'true', '.hdi parser not available'
+        assert hdi_status.get('active') == 'true', '.hdi highlighter is not active'
+        hq = hdi_status.get('query', '').split()
+        assert hq and hq[0] == 'true' and int(hq[1]) > 0, '.hdi query not loaded'
+        assert hdi_marks, '.hdi has no extmarks'
         state['mark_count'] = len(marks)
 
     check('Neovim marks each promised token with its capture group', highlights)

@@ -1,0 +1,3 @@
+module Store
+type T
+library

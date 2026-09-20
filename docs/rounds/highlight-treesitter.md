@@ -54,7 +54,7 @@
     高い優先順位、`word: ($) => $.name`、record の `;` 区切り、`prec.right` の節。
   - 実装から分かったこと: tree-sitter の文脈付き字句は、その状態で無効な
     キーワードを `name` に落とす。`word` を宣言しないと宣言の頭を飲み込む。
-  - Refactor: 優先順位の golden 38 本を置き、`tree-sitter generate` の
+  - Refactor: 優先順位の golden 16 本を置き、`tree-sitter generate` の
     `Unresolved conflict` を順に消した。
 - **学習**: 正規表現の lookahead は使えない。`-x` の XML は演算子トークンで
   壊れることがあるので、門番は既定の s 式を正規化して使う。`nvim --version` は
@@ -67,7 +67,7 @@
 - `editors/tree-sitter-hado/queries/hado/highlights.scm`: capture ごとに 1 group。
 - `editors/tree-sitter-hado/tree-sitter.json`、`README.md`、`.gitignore`（`src/` と
   `*.so` は `tree-sitter generate` の生成物）。
-- `editors/tree-sitter-hado/test/golden/`: 宣言形 22 本と §7 の境界 16 本の `.hd` と
+- `editors/tree-sitter-hado/test/golden/`: 宣言形 23 本と §7 の境界 16 本の `.hd` と
   `.tree`。
 - `scripts/treesitter_dump.py`: parse の s 式を node 種別だけの木にする。
 - `scripts/treesitter-setup.sh`: 版と checksum を固定した取得。
@@ -78,7 +78,7 @@
 ### 判定
 
 - `bash scripts/verify-treesitter.sh` が `PASSED: 5/5`。受理コーパス 133 件と
-  `stdlib/` 10 件の 143 件、golden 38 本、extmark 34 個。
+  `stdlib/` 10 件の 143 件、golden 39 本、`.hd` の extmark 34 個と `.hdi` の extmark。
 - 門番が赤になることを 3 つの変異で確かめる。
   1. constructor の capture を `@type` に寄せる → `@constructor` が消えて 4/5。
   2. `//` を `--` にする → 117/143 が ERROR / MISSING、コメントの extmark も消えて
@@ -97,10 +97,12 @@
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
-| 付録C | 宣言の形（`def` 4 形・`type`・`module`・`implement`・functor・`shared type`・`effect`・`handler`） | 構文 | 受理 | `test/golden/` の宣言形 22 本、`scripts/verify-treesitter.sh` |
+| 付録C | 宣言の形（`def` 4 形・`type`・`module`・`implement`・functor・`shared type`・`effect`・`handler`） | 構文 | 受理 | `test/golden/` の宣言形 23 本、`scripts/verify-treesitter.sh` |
 | 付録C | 比較は非結合 | 構文 | ERROR | `test/golden/prec-cmp-nonassoc.tree` |
 | §7 | 優先順位（`\|>` < `\|\|` < `&&` < 比較 < `+` < `*` < 単項 < 適用 < `.`） | 構文 | 受理 | `test/golden/prec-*.tree` の 16 本 |
 | 付録C | 空白とコメント（`//`）は区切りで意味を持たない | 字句 | 受理 | 受理コーパス 143 件、ハイライトのコメント探針 |
+| §52 | `library` は最初の見出しより前の outer_item | 構文 | 受理 / ERROR | `test/golden/library.tree` と `library-late.tree` |
+| §50 | 契約の `.hdi` も同じ filetype で開ける | 字句 | 受理 | `verify-treesitter.sh` の `.hdi` 探針 |
 | 付録C | 文字列と文字のエスケープ（`\n` `\t` `\\` `\"` `\'`） | 字句 | 受理 | `verify-treesitter.sh` のエスケープ探針 |
 | §12 | `if` の腕は真偽・条件列・パターンの 3 形 | 構文 | 受理 | `test/golden/if-*.tree` の 3 本 |
 | §47 | `implement X as Y` は本文を持てる。`(Name: Contract)` は functor 定義、`= Functor(Arg)` は本文の無い適用 | 構文 | 受理 | `test/golden/implement-body.tree`・`functor-def.tree`・`functor-apply.tree` |
@@ -119,7 +121,7 @@ $ find tests/accept -type f \( -name '*.hd' -o -name '*.hdi' \) | wc -l
 $ ls stdlib/*.hd | wc -l
 10
 $ ls editors/tree-sitter-hado/test/golden/*.hd | wc -l
-38
+39
 
 # 道具の取得（版と checksum は script の定数が正）
 $ bash scripts/treesitter-setup.sh --cache /tmp/hado-setup-fresh
@@ -143,7 +145,7 @@ OK: declaration forms and section 7 precedence goldens match
 OK: Neovim marks each promised token with its capture group
 PASSED: 5/5
 corpus files: 143
-goldens: 38
+goldens: 39
 extmarks: 34
 real	0m4.251s
 
