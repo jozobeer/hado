@@ -1,0 +1,3 @@
+# `tree-sitter generate` の生成物。門番が毎回作る。
+src/
+*.so
