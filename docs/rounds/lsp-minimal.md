@@ -191,11 +191,49 @@ Neovim 0.12.5。`hado check` の配管（`--format json`、`--print-type`）は�
 
 builder が設計を決めたら、ここに決定と理由を書く。
 
+- **D1. 終端は `lexer::Span` が持ち、`Diagnostic` は `Range`（始点 + 終端）へ広げない。**
+  `Span` に `end_line` `end_col` を足し、`Span::point` / `Span::until` / `Span::before` を
+  置く。`Diagnostic` にも同じ 2 フィールドを足すが、`Diagnostic` は `Span` を持たず
+  `line` `col` を持ち続ける（`format!` の `{:?}`・`Display`・門番の逐語が `line` `col` の
+  綴りに依存しているため、フィールド名を変えない）。
+- **D2. 全 `Span` 構築点（11 件）を一斉に直す。** `Span` は `Copy` な構造体で、1 箇所でも
+  フィールドを足すと全構築点が型エラーになる。`Span::point` で意味が変わらない箇所を
+  まとめ、`Span::until` で範囲が伸びる箇所を選ぶ。
+- **D3. 位置の同一性は始点で比べる（`check::same_start`）。** 範囲が伸びると、
+  「同じ要素か」を `span == span` で見ていた 4 箇所（`type_has_span`、`condition_is_direct`、
+  `def_at`、`branch_entry`）が壊れる。いずれも要素の始まりだけを見る意味だったので、
+  始点比較へ寄せる。これは §58.4 の範囲追加が既存の意味論を変えないための必須の追随で、
+  `cargo test` の全緑が根拠（下の実測）。
+- **D4. `Diagnostic` の終端は「その診断の書き換え範囲（§57）」から引く。**
+  §58.4 の終端はアンカーの構文要素の終端だが、判定 J3 は `end_col - col` が対象の
+  スカラ数であることを要求し、判定 J10 は code action の edit が `check --fix` とバイト
+  一致することを要求する。両方を満たす自然な定義が「§57 の書き換え範囲」で、これは
+  `fixes::fix_range` が既に持っている。書き換えの無い診断は始点と同じ位置で終わる。
+  理由: これで `end_*` が CLI と LSP で同じ 1 つの真実になり、J3 と J10 が別々の実装を
+  持たない。
+- **D5. 連続する離れた診断の範囲は `Span` の伝播で決め、枝は parser の記録に合わせる。**
+  式・型のノードは「最後に消費したトークンの終端」まで伸ばす（`Parser::to` /
+  `TypeExpr::ending_at`）。枝（`PatternBranch` / `CondBranch`）は `branch_spans` に記録する
+  終端と `node.span` の終端を必ず一致させる。`branch_entry` が枝を span で引くため、
+  ここがずれると §57 の書き換えが丸ごと落ちる（下の実測の E507 がそれ）。
+- **D6. `Project` は読み込んだ本文を保持する。** `Project::load` が読んだ各 source の本文を
+  `Rc<String>` で持ち、`diagnostic_end` と LSP の `range_in_parse` がそこから範囲を引く。
+  overlay（未保存の本文）を扱う LSP が、位置の裏のバイト列を disk から読み直せないため。
+- **D7. 差し当たり `fixes::fixes` は自分の解析から範囲を引く経路（`range_in`）を持つ。**
+  LSP は overlay を解析するので、「パスを読み直して `fixes()` を呼ぶ」経路は使えない。
+
 ### 工程
 
 builder が進めた順と、工程ごとに回した門番をここに書く。着地の作法は AGENTS.md の
 「着地の直前に main を取り込み、lock を作り直す」に従い、着地後の full 層は CI（push to
 main）の run を実測に書く。
+
+1. `docs: lsp-minimal のラウンドを書く`（`4674532`、着手時の契約）。
+2. `cargo fmt --all` / `cargo test --offline` を回しながら、`Span` の終端（D1〜D5）と
+   `Project` の本文保持（D6）を入れる。
+3. `--show-all`・`--format json` の終端・`--print-type` の型（J2〜J4）。
+4. `hado lsp`（J5〜J10）。
+5. 門番 `scripts/verify-lsp-minimal.sh` と仕様 §58 系・`README.md`。
 
 ### 仕様への疑義
 

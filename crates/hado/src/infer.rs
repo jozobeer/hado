@@ -1626,6 +1626,8 @@ impl Checker<'_> {
             path: self.path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: code.map(str::to_owned),
             message: message.into(),
         }
@@ -3314,7 +3316,7 @@ impl Checker<'_> {
     fn operation_payload(&mut self, name: &str, row: &Row) -> Result<(Vec<Ty>, Ty), Diagnostic> {
         let scheme = self.values.get(name).cloned().ok_or_else(|| {
             self.error(
-                Span { line: 1, col: 1 },
+                Span::point(1, 1),
                 Some("E204"),
                 &format!("unbound name {name}"),
             )

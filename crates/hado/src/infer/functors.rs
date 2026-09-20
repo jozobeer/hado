@@ -47,6 +47,8 @@ pub(super) fn duplicate_applications(ast: &Ast, path: &str) -> Vec<Diagnostic> {
                 path: path.into(),
                 line: module.span.line,
                 col: module.span.col,
+                end_line: module.span.line,
+                end_col: module.span.col,
                 code: Some("E604".into()),
                 message: "duplicate functor application".into(),
             })

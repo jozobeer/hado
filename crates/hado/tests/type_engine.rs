@@ -64,7 +64,7 @@ fn constrained_scheme_instantiates_predicate_with_function_type() {
     let mut inference = hado::types::Inference::default();
     let variable = inference.fresh();
     let function = hado::types::Ty::fn_of(vec![variable.clone()], hado::types::Ty::Bool);
-    let origin = Some(hado::lexer::Span { line: 7, col: 13 });
+    let origin = Some(hado::lexer::Span::point(7, 13));
     let scheme = inference.generalize_constrained(
         &function,
         &[],

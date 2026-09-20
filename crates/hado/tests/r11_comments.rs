@@ -12,10 +12,7 @@ fn generated_comment_markers_preserve_tokens_or_report_first_character() {
             (format!("def main = {padding}"), format!("\n{value}")),
             (format!("def main = {value} {padding}"), "\n".into()),
         ] {
-            let expected = Span {
-                line: 1,
-                col: prefix.chars().count() + 1,
-            };
+            let expected = Span::point(1, prefix.chars().count() + 1);
             for marker in ["--", "#"] {
                 let source = format!("{prefix}{marker} comment{suffix}");
                 let error = lexer::lex_full(&source).unwrap_err();

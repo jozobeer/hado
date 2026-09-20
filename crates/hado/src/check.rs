@@ -10,6 +10,8 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E517".into()),
             message: "write condition arms directly after the function parameters".into(),
         });
@@ -20,6 +22,8 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E516".into()),
             message: "use List pattern syntax instead of Nil or Cons".into(),
         });
@@ -30,6 +34,8 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E404".into()),
             message: "fallback must be the last branch".into(),
         });
@@ -37,7 +43,7 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     if let Err(error) = crate::names::check_cycles(ast, path) {
         diagnostics.push(error);
     }
-    check_items(&ast.items, &ast.items, None, path, &mut diagnostics);
+    check_items(ast, &ast.items, &ast.items, None, path, &mut diagnostics);
     match diagnostics
         .into_iter()
         .map(|error| arm_diagnostic(ast, error))
@@ -58,8 +64,10 @@ pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
             .iter()
             .find(|(source, _)| source.line == error.line && source.col == error.col)
         {
-            error.line = pipe.line;
-            error.col = pipe.col;
+            // The anchor moves to the `|`, and the range moves with it: §58.4
+            // の終端はアンカーの要素の終端なので、`|` 1 文字分になる。
+            let span = pipe.until(*pipe);
+            error.set_span(span);
         }
     }
     qualified_type_diagnostic(ast, error)
@@ -167,8 +175,11 @@ fn node_type_has_span(node: &Node, span: crate::parser::Span) -> bool {
         .any(|child| node_type_has_span(child, span))
 }
 
+/// Whether `ty` is the type written at `span`. §58.4 で型の範囲は最後のトークン
+/// まで伸びたので、同じ位置かを問うところは始まりで比べる（`M.T` の型は `M` から
+/// 始まるが、範囲は `T` まで及ぶ）。
 fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> bool {
-    if ty.span == span {
+    if same_start(ty.span, span) {
         return true;
     }
     if let Some(crate::parser::EffectRow::Row(effects)) = &ty.effects {
@@ -178,7 +189,8 @@ fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> boo
     }
     match &ty.kind {
         crate::parser::TypeKind::Adt(variants) => variants.iter().any(|variant| {
-            variant.name.span == span || variant.payload.types().any(|ty| type_has_span(ty, span))
+            same_start(variant.name.span, span)
+                || variant.payload.types().any(|ty| type_has_span(ty, span))
         }),
         crate::parser::TypeKind::Apply(_, args) | crate::parser::TypeKind::Group(args) => {
             args.iter().any(|ty| type_has_span(ty, span))
@@ -190,7 +202,15 @@ fn type_has_span(ty: &crate::parser::TypeExpr, span: crate::parser::Span) -> boo
     }
 }
 
+/// Two spans that begin at the same line and column. A span that gained an end
+/// (§58.4) still names the same element as the point span it came from, so the
+/// tables that look a position up by its start keep working.
+pub(crate) fn same_start(left: crate::parser::Span, right: crate::parser::Span) -> bool {
+    left.line == right.line && left.col == right.col
+}
+
 fn check_items(
+    ast: &Ast,
     items: &[Item],
     contracts: &[Item],
     members: Option<&[Item]>,
@@ -201,6 +221,7 @@ fn check_items(
         check_type_parameters(item, path, diagnostics);
         match item {
             Item::Def(def) => check_definition(
+                ast,
                 def,
                 is_contract_member(members, &def.name),
                 path,
@@ -217,6 +238,7 @@ fn check_items(
                 }
             }
             Item::ModuleImpl(module) => check_items(
+                ast,
                 &module.items,
                 contracts,
                 contract_members(contracts, &module.sig),
@@ -224,7 +246,7 @@ fn check_items(
                 diagnostics,
             ),
             Item::ModuleSig(signature) => {
-                check_items(&signature.items, contracts, None, path, diagnostics)
+                check_items(ast, &signature.items, contracts, None, path, diagnostics)
             }
             Item::Effect(effect) => {
                 for op in &effect.ops {
@@ -264,13 +286,14 @@ fn is_contract_member(members: Option<&[Item]>, name: &str) -> bool {
 }
 
 fn check_definition(
+    ast: &Ast,
     def: &crate::parser::Def,
     contract_member: bool,
     path: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &def.kind {
-        DefKind::Value(body) => check_node(body, path, diagnostics, false),
+        DefKind::Value(body) => check_node(ast, body, path, diagnostics, false),
         DefKind::Function { params, ret, body } => {
             if !contract_member {
                 for param in params.iter().filter(|param| param.name == "_") {
@@ -279,6 +302,8 @@ fn check_definition(
                         path: path.into(),
                         line: param.span.line,
                         col: param.span.col,
+                        end_line: param.span.line,
+                        end_col: param.span.col,
                         code: Some("E519".into()),
                         message:
                             "underscore parameters require a contract member or anonymous function"
@@ -304,7 +329,10 @@ fn check_definition(
             {
                 diagnostics.push(error);
             }
-            check_node(body, path, diagnostics, body.span == def.span);
+            // §32: `def f | ...` の腕は定義と同じ位置から始まる。範囲が閉じ `)`
+            // まで伸びても、直接の位置かは始まりで決まる。
+            let at_start = body.span.line == def.span.line && body.span.col == def.span.col;
+            check_node(ast, body, path, diagnostics, at_start);
         }
     }
 }
@@ -331,6 +359,8 @@ fn duplicate_effect(effect: &TypeExpr, path: &str) -> Diagnostic {
         path: path.into(),
         line: effect.name_span.line,
         col: effect.name_span.col,
+        end_line: effect.name_span.line,
+        end_col: effect.name_span.col,
         code: Some("E522".into()),
         message: "duplicate effect in row".into(),
     }
@@ -393,6 +423,8 @@ fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnost
             path: path.into(),
             line: parameter.span.line,
             col: parameter.span.col,
+            end_line: parameter.span.line,
+            end_col: parameter.span.col,
             code: Some("E518".into()),
             message: format!("type parameter {} is unused", parameter.name),
         });
@@ -447,6 +479,8 @@ fn check_unused<'a>(
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E505".into()),
             message: format!("binding {name} is unused"),
         });
@@ -509,6 +543,8 @@ fn check_sole_parameter_branch(
         path: path.into(),
         line: span.line,
         col: span.col,
+        end_line: span.line,
+        end_col: span.col,
         code: Some("E515".into()),
         message: "use pattern arms directly for the sole parameter".into(),
     })
@@ -539,12 +575,23 @@ pub(crate) fn matrix_coverage(
         path: path.into(),
         line: location.line,
         col: location.col,
+        end_line: location.line,
+        end_col: location.col,
         code: Some(code.into()),
         message: message.into(),
     })
 }
 
-fn check_boolean_form(node: &Node, path: &str, direct_condition: bool) -> Result<(), Diagnostic> {
+/// §24: a Boolean `if` written as pattern arms, or a single condition arm.
+/// §58.4: the anchor is the branch itself, so the range runs from its start to
+/// its last arm; `node.span` may reach further (the next `|`, the enclosing `)`),
+/// so the extent the parser recorded for the branch is used instead.
+fn check_boolean_form(
+    ast: &Ast,
+    node: &Node,
+    path: &str,
+    direct_condition: bool,
+) -> Result<(), Diagnostic> {
     let redundant = match &node.kind {
         NodeKind::PatternBranch { scrutinees, arms, .. } => {
             scrutinees.len() == 1
@@ -563,19 +610,28 @@ fn check_boolean_form(node: &Node, path: &str, direct_condition: bool) -> Result
     if !redundant {
         return Ok(());
     }
+    let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
         related: None,
         path: path.into(),
-        line: node.span.line,
-        col: node.span.col,
+        line: span.line,
+        col: span.col,
+        end_line: span.end_line,
+        end_col: span.end_col,
         code: Some("E520".into()),
         message: "use a Boolean branch instead of Boolean pattern arms or a single condition arm"
             .into(),
     })
 }
 
-fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct_condition: bool) {
-    if let Err(error) = check_boolean_form(node, path, direct_condition) {
+fn check_node(
+    ast: &Ast,
+    node: &Node,
+    path: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+    direct_condition: bool,
+) {
+    if let Err(error) = check_boolean_form(ast, node, path, direct_condition) {
         diagnostics.push(error);
     }
     check_fn_node(node, path, diagnostics);
@@ -585,8 +641,19 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
             diagnostics.push(error);
         }
     }
+    for check in BRANCH_CHECKS {
+        if let Err(error) = check(ast, node, path) {
+            diagnostics.push(error);
+        }
+    }
     for child in children(node) {
-        check_node(child, path, diagnostics, condition_is_direct(node, child));
+        check_node(
+            ast,
+            child,
+            path,
+            diagnostics,
+            condition_is_direct(node, child),
+        );
     }
 }
 
@@ -594,15 +661,20 @@ fn check_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>, direct
 type NodeCheck = fn(&Node, &str) -> Result<(), Diagnostic>;
 
 /// ノードごとの検査。順序は診断の出る順に効くので、並びを変えない。
-const NODE_CHECKS: [NodeCheck; 7] = [
+/// `check_rewrap` だけは枝の範囲を要するので `NODE_CHECKS` の外で走る。
+const NODE_CHECKS: [NodeCheck; 6] = [
     check_cons_tail,
     check_duplicate_patterns,
     check_conditions,
     check_literal_fallback,
     check_local_redundancy,
-    check_rewrap,
     check_repropagation,
 ];
+
+/// 枝の範囲を見る検査。順序は `NODE_CHECKS` の `check_local_redundancy` の直後。
+type BranchCheck = fn(&Ast, &Node, &str) -> Result<(), Diagnostic>;
+
+const BRANCH_CHECKS: [BranchCheck; 1] = [check_rewrap];
 
 /// `fn` の引数についての検査。使われない束縛・腕の形・型に載る効果を見る。
 fn check_fn_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
@@ -641,11 +713,15 @@ fn check_bindings(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 /// 子を条件の直接の位置として見るか。`fn` の本体と、`case` の腕の `if` が
-/// 直接の位置にあたる。
+/// 直接の位置にあたる。§58.4 で `fn` の範囲は閉じ `)` まで伸びたが、本体が
+/// 直接の位置かは始まりで決まる（`fn(| ...)` の腕は `fn` と同じ位置から始まる）。
 fn condition_is_direct(node: &Node, child: &Node) -> bool {
     let arm_condition = matches!(node.kind, NodeKind::PatternBranch { .. })
         && matches!(child.kind, NodeKind::CondBranch { .. });
-    arm_condition || (matches!(node.kind, NodeKind::Fn { .. }) && child.span == node.span)
+    let fn_body_at_start = matches!(node.kind, NodeKind::Fn { .. })
+        && child.span.line == node.span.line
+        && child.span.col == node.span.col;
+    arm_condition || fn_body_at_start
 }
 
 fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
@@ -673,6 +749,8 @@ fn identical_branches(node: &Node, path: &str) -> Result<(), Diagnostic> {
         path: path.into(),
         line: node.span.line,
         col: node.span.col,
+        end_line: node.span.line,
+        end_col: node.span.col,
         code: Some("E502".into()),
         message: format!(
             "identical branch results at {}:{} and {}:{}",
@@ -705,6 +783,8 @@ fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         path: path.into(),
         line: pat.span.line,
         col: pat.span.col,
+        end_line: pat.span.line,
+        end_col: pat.span.col,
         code: Some("E504".into()),
         message: "use do to discard a success value".into(),
     })
@@ -721,6 +801,8 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: pat.span.line,
             col: pat.span.col,
+            end_line: pat.span.line,
+            end_col: pat.span.col,
             code: Some("E506".into()),
             message: "a plain let binding cannot discard its value".into(),
         });
@@ -736,6 +818,8 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         path: path.into(),
         line: node.span.line,
         col: node.span.col,
+        end_line: node.span.line,
+        end_col: node.span.col,
         code: Some("E501".into()),
         message: format!(
             "binding {bound} is returned unchanged at {}:{}",
@@ -779,6 +863,8 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
         path: path.into(),
         line: pattern.span.line,
         col: pattern.span.col,
+        end_line: pattern.span.line,
+        end_col: pattern.span.col,
         code: Some(code.into()),
         message: message.into(),
     })
@@ -819,6 +905,8 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         path: path.into(),
         line: body.span.line,
         col: body.span.col,
+        end_line: body.span.line,
+        end_col: body.span.col,
         code: Some("E508".into()),
         message: format!(
             "absence bound at {}:{} is propagated unchanged; use let p? = or do",
@@ -859,15 +947,29 @@ pub(crate) fn rewrap_branch(node: &Node) -> Option<&Node> {
     None
 }
 
-fn check_rewrap(node: &Node, path: &str) -> Result<(), Diagnostic> {
+/// The extent of a branch node as the parser recorded it (§57 keeps the whole
+/// branch there for the local rewrites), when one is recorded.
+fn branch_extent(ast: &Ast, node: &Node) -> Option<crate::parser::Span> {
+    ast.branch_spans
+        .iter()
+        .find(|(start, _, _)| start.line == node.span.line && start.col == node.span.col)
+        .map(|(_, _, end)| node.span.until(*end))
+}
+
+/// §45, §58.4: the anchor is the whole `if`, so the range runs from the `if`
+/// to the last arm. §57 rewrites that same extent to the scrutinee.
+fn check_rewrap(ast: &Ast, node: &Node, path: &str) -> Result<(), Diagnostic> {
     let Some(scrutinee) = rewrap_branch(node) else {
         return Ok(());
     };
+    let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
         related: None,
         path: path.into(),
-        line: node.span.line,
-        col: node.span.col,
+        line: span.line,
+        col: span.col,
+        end_line: span.end_line,
+        end_col: span.end_col,
         code: Some("E507".into()),
         message: format!(
             "branches reconstruct the value at {}:{}",
@@ -890,6 +992,8 @@ fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
+            end_line: node.span.line,
+            end_col: node.span.col,
             code: Some("E402".into()),
             message: "non-Boolean literal patterns require a fallback".into(),
         });
@@ -919,6 +1023,8 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
+            end_line: node.span.line,
+            end_col: node.span.col,
             code: Some("E401".into()),
             message: "condition columns require a fallback".into(),
         });
@@ -933,6 +1039,8 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 path: path.into(),
                 line: condition.span.line,
                 col: condition.span.col,
+                end_line: condition.span.line,
+                end_col: condition.span.col,
                 code: Some("E406".into()),
                 message: format!(
                     "condition is redundant after {}:{}",
@@ -954,6 +1062,8 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 path: path.into(),
                 line: node.span.line,
                 col: node.span.col,
+                end_line: node.span.line,
+                end_col: node.span.col,
                 code: Some("E511".into()),
                 message: "use literal patterns for equality tests of one variable".into(),
             });
@@ -1016,6 +1126,8 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 path: path.into(),
                 line: pattern.span.line,
                 col: pattern.span.col,
+                end_line: pattern.span.line,
+                end_col: pattern.span.col,
                 code: Some(
                     if same_row(previous, patterns) {
                         "E405"
@@ -1041,6 +1153,8 @@ fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
             path: path.into(),
             line: node.span.line,
             col: node.span.col,
+            end_line: node.span.line,
+            end_col: node.span.col,
             code: Some("E510".into()),
             message: "use List literal syntax instead of Nil or Cons".into(),
         });

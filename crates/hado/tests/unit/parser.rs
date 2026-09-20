@@ -137,7 +137,7 @@ fn adt_accepts_leading_pipe() {
                 .map(|name| crate::parser::ConstructorDecl {
                     name: crate::parser::DeclaredName {
                         name: name.into(),
-                        span: Span { line: 1, col: 1 }
+                        span: Span::point(1, 1)
                     },
                     payload: crate::parser::ConstructorPayload::Nullary
                 })
@@ -270,7 +270,7 @@ fn pattern_shaped_fallback_before_an_arm_still_records_e404() {
     );
     assert_eq!(
         ast.branches_after_fallback[0],
-        crate::lexer::Span { line: 4, col: 3 }
+        crate::lexer::Span::point(4, 3).until(crate::lexer::Span::point(4, 4))
     );
 }
 
@@ -379,8 +379,8 @@ fn m0_parse_entry() {
 fn type_expr(kind: TypeKind) -> TypeExpr {
     TypeExpr {
         kind,
-        span: Span { line: 1, col: 1 },
-        name_span: Span { line: 1, col: 1 },
+        span: Span::point(1, 1),
+        name_span: Span::point(1, 1),
         effects: None,
     }
 }

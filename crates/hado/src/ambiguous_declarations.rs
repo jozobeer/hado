@@ -171,6 +171,8 @@ fn record(
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E205".into()),
             message: format!("duplicate declaration {name}"),
         });

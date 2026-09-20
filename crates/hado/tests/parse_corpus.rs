@@ -268,7 +268,7 @@ impl Rng {
 fn node(kind: NodeKind) -> Node {
     Node {
         kind,
-        span: Span { line: 0, col: 0 },
+        span: Span::point(0, 0),
     }
 }
 

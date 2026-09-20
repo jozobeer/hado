@@ -411,6 +411,8 @@ pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
         path: path.into(),
         line: 1,
         col: 1,
+        end_line: 1,
+        end_col: 1,
         code: Some("E206".into()),
         message: "build requires an entry file with main; check treats this directory as a library"
             .into(),
@@ -444,6 +446,8 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
         path: path.into(),
         line: ast.span.line,
         col: ast.span.col,
+        end_line: ast.span.line,
+        end_col: ast.span.col,
         code: None,
         message: "main must be a value definition for lowering".into(),
     })?;
@@ -452,6 +456,8 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
         path: path.into(),
         line: main.span.line,
         col: main.span.col,
+        end_line: main.span.line,
+        end_col: main.span.col,
         code: None,
         message,
     })?;
