@@ -11,8 +11,6 @@ ng() { echo "NG: $1 ($2)"; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 hado() { cargo run --offline -q -- "$@"; }
-cargo build --offline --bin hado >/dev/null 2>&1
-bin="${CARGO_TARGET_DIR:-$HOME/.cargo/target}/debug/hado"
 
 # 71-a: check --fix で受理される。
 mkdir -p "$work/a" && cp tests/reject/E504/main.hd "$work/a/main.hd"
@@ -45,8 +43,8 @@ plain = src.replace('let _? = ', 'do ')
 (w / 'plain').mkdir(parents=True, exist_ok=True)
 (w / 'plain' / 'main.hd').write_text(plain)
 PY
-got=$(cd "$work/a" && "$bin" run main.hd 2>&1)
-want=$(cd "$work/plain" && "$bin" run main.hd 2>&1)
+got=$(hado run "$work/a/main.hd" 2>&1)
+want=$(hado run "$work/plain/main.hd" 2>&1)
 if [ -n "$want" ] && [ "$got" = "$want" ]; then
   ok "71-c the fixed file runs like the hand-written do version"
 else
@@ -88,3 +86,4 @@ else
 fi
 
 echo "PASSED: $pass/$total"
+[ "$pass" -eq "$total" ]
