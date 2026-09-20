@@ -11,7 +11,12 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-tools=$(bash scripts/treesitter-setup.sh)
+# 道具の展開先と門番の作業場所は 1 つの一時ディレクトリにまとめ、終了時に消す。
+# 層別の全走で何度も呼ばれるので、/tmp に展開物を積み上げない。
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+tools=$(bash scripts/treesitter-setup.sh --cache "$work/tools")
 ts=$(printf '%s\n' "$tools" | sed -n 's/^tree-sitter //p')
 nvim=$(printf '%s\n' "$tools" | sed -n 's/^nvim //p')
 if [ ! -x "$ts" ]; then
@@ -23,4 +28,4 @@ if [ ! -x "$nvim" ]; then
     exit 1
 fi
 
-exec python3 scripts/treesitter-check.py "$ts" "$nvim"
+python3 scripts/treesitter-check.py "$ts" "$nvim" "$work/check"
