@@ -1901,9 +1901,11 @@ Float: to_string
 def A ok_or(value: A Option, error: Exception): A {Error}
 ```
 
-効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append` `head` `nth` `take` `drop`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains` `join` `trim`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string` `abs` `min` `max`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` `sort` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
+効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append` `sort` `head` `nth` `take` `drop`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains` `join` `trim`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string` `abs` `min` `max`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
 
-`sort` は比較関数を引数に取る merge sort とする。
+`sort` は比較関数を引数に取る merge sort とし、比較関数の型は `Pure` とする。比較の結果は分岐の条件に置かれるので（第36節）、効果を持つ比較関数は型が合わない。
+
+`map` は関数を、`filter` は述語を、先頭の要素から順に適用する。効果を持つ関数や述語の呼び出し順はこれで定まる。
 
 `String.length` は Unicode スカラ値の個数とする。
 

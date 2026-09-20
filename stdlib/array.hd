@@ -15,17 +15,21 @@ def set xs index value =>
     => to_list xs |> replace index value |> of_list
     | raise { message = "IndexOutOfRange" }
 def of_list xs => build xs 0 (List.length xs |> __array_alloc)
-def to_list xs => elements xs 0 (length xs)
+def to_list xs => elements xs (length xs - 1) []
 // target は構築中だけに閉じ込め、全 slot を埋めた後で公開する。
 def rec build xs index target =>
   if xs
   | [] => target
   | [head, ...tail] => build tail (index + 1) (__array_fill_unchecked target index head)
-def rec elements xs index count =>
-  if index >= count => [] | [__array_get xs index, ...elements xs (index + 1) count]
-def rec replace xs index value =>
+// 添字を末尾から先頭へ動かし、その順に cons する。reverse は要らない。
+def rec elements xs index acc =>
+  if index < 0 => acc | elements xs (index - 1) [__array_get xs index, ...acc]
+def replace xs index value => replace_go xs index value []
+def rec replace_go xs index value prefix =>
   if xs
-  | [] => []
-  | [head, ...tail] => replace_head head tail index value
-def rec replace_head head tail index value =>
-  if index == 0 => [value, ...tail] | [head, ...replace tail (index - 1) value]
+  | [] => List.reverse prefix
+  | [head, ...tail] => replace_keep head tail index value prefix
+def rec replace_keep head tail index value prefix =>
+  if index == 0
+    => List.append (List.reverse prefix) [value, ...tail]
+    | replace_go tail (index - 1) value [head, ...prefix]

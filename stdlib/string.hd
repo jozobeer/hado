@@ -22,18 +22,19 @@ def get s index =>
 def split s separator =>
   if length separator == 0
     => raise { message = "EmptySeparator" }
-    | split_from s separator 0 (length separator) (length s)
-def rec split_from(s: String, separator: String, start: Int, width: Int, count: Int): String List {Error} =>
+    | split_go s separator 0 (length separator) (length s) []
+def rec split_go(s: String, separator: String, start: Int, width: Int, count: Int, acc: String List): String List {Error} =>
   let found = __string_find s separator start ->
   if found < 0
-    => [slice s start count]
-    | [slice s start found, ...split_from s separator (found + width) width count]
+    => List.reverse [slice s start count, ...acc]
+    | split_go s separator (found + width) width count [slice s start found, ...acc]
 def starts_with s prefix =>
   length prefix <= length s && __string_slice s 0 (length prefix) == prefix
 def contains s part => length part == 0 || __string_find s part 0 >= 0
-def rec join values separator =>
+def join values separator => join_go values separator ""
+def rec join_go values separator acc =>
   if values
-  | [] => ""
-  | [value] => value
-  | [head, ...tail] => concat head (concat separator (join tail separator))
+  | [] => acc
+  | [value] => concat acc value
+  | [head, ...tail] => join_go tail separator (concat acc (concat head separator))
 def trim s => __string_trim s
