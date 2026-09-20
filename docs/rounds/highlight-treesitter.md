@@ -253,3 +253,45 @@ editors/tree-sitter-hado/test/golden/type-named-record.hd
 editors/tree-sitter-hado/test/golden/malformed-string.hd
 editors/tree-sitter-hado/test/golden/malformed-char.hd
 ```
+
+### 着地後の全走と探針の pty 駆動の修正（treesitter-probe-wait）
+
+着地後の main の full 層は CI が回す（run 35509038986 と再走）。赤は 2 本で、`verify-r71` は PR #17、本件の `verify-treesitter` はこの節の修正で消す。検査 5 は「Neovim did not exit within 120s」で赤になったが、120 秒は待っていない。原因は探針の pty 駆動で、Neovim が端末を閉じてから終了するまでの窓で `poll()` を見て kill していた。CPU を取り合う 2 vCPU の runner でこの窓を踏む。同じ内容で PR #16 の core（run 35507702750）だけ緑、その後の 4 走行は赤だった。
+
+```
+# CI の run 35513686265 では treesitter が最後の門番。取得と parser の build を含めて 53 秒
+$ gh run view 35513686265 --log | grep -E 'RUN: verify-treesitter|TALLY'
+2026-09-20T13:55:31.0058613Z RUN: verify-treesitter -> .../target/ci-gates/verify-treesitter.log
+2026-09-20T13:56:24.1254459Z TALLY: 590/591 passed; red: verify-treesitter.log
+
+# 手元で再現。2 コアに固定し、同じコアに busy loop を 3 本置く
+$ for i in 1 2 3; do taskset -c 0,1 sh -c 'while :; do :; done' & done
+$ taskset -c 0,1 python3 scripts/treesitter-check.py "$ts" "$nvim" "$work"   # 修正前、3 回
+NG: Neovim marks each promised token with its capture group (Neovim did not exit within 120s)
+PASSED: 4/5
+NG: Neovim marks each promised token with its capture group (Neovim did not exit within 120s)
+PASSED: 4/5
+PASSED: 5/5
+（各 5 秒前後）
+
+$ taskset -c 0,1 python3 scripts/treesitter-check.py "$ts" "$nvim" "$work"   # 修正後、10 回
+PASSED: 5/5
+（10 回とも）
+
+# 端末を閉じてから 1 秒後に終了するプロセスを run_in_pty に渡す（timeout=10）
+$ python3 -c 'run_in_pty(["sh", "-c", "echo hi; exec >/dev/null 2>&1 </dev/null; sleep 1; exit 7"], env, "/tmp", timeout=10)'
+Neovim did not exit within 10s   # 修正前、0.0 秒で
+rc=7 out=b'hi\r\n'               # 修正後、1.0 秒で
+
+# 本物のハングは修正後も締め切りで止まる（timeout=2）
+$ （端末を開いたまま sleep 300）
+Neovim did not exit within 2s
+$ （端末を閉じてから sleep 300）
+Neovim did not exit within 2s
+
+$ bash scripts/verify-treesitter.sh          # 負荷なし
+PASSED: 5/5
+corpus files: 143
+goldens: 43
+extmarks: 39
+```
