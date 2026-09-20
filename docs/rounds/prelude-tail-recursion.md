@@ -249,3 +249,20 @@ PASSED: 262/262
 
 `cargo test` は rc=0、5 分 46 秒。core 層には `verify-prelude-tail-recursion.sh` と `verify-m1-corpus.sh` が入る。quick 層と core 層は red なし。
 
+main へ着地した木（`4341408`、追跡ファイルの変更なし）での全走。
+
+```
+$ bash scripts/run-gates.sh --jobs 8 --tier full target/gates-postlanding
+TALLY: 3768/3768 passed; red: none
+$ ls target/gates-postlanding/*.log | wc -l
+81
+$ grep -h '^NG:' target/gates-postlanding/*.log | wc -l
+0
+$ grep -h 'cargo-test passed' target/gates-postlanding/verify-m0.log
+OK: 2 cargo-test passed=819
+$ tail -1 target/gates-postlanding/lint-docs.log
+PASSED: 10/10
+```
+
+`verify-prelude-tail-recursion.sh` は `PASSED: 8/8`。赤は無し。
+
