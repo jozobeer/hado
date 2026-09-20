@@ -17,9 +17,9 @@ const PREC = {
   MULTIPLICATIVE: 6,
   UNARY: 7,
   APPLICATION: 8,
-  // constructor の payload は並置より先に読む（付録C の注記）。パターン側は
-  // さらに強い。`| Some(x) => ...` で式とパターンの両方が読めるため。
-  CONSTRUCTOR: 9,
+  // constructor の payload は並置より先に読む（付録C の注記）。式側は GLR の
+  // 自己 conflict（`conflicts` の `$.constructor_expr`）で解く。パターン側は
+  // 優先順位で強くする。`| Some(x) => ...` で式とパターンの両方が読めるため。
   CONSTRUCTOR_PATTERN: 10,
 };
 
