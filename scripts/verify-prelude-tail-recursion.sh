@@ -228,7 +228,14 @@ for i in range(DEPTH):
 value(root, 'read_dir', f'List.length (read_dir "{entries}")', DEPTH, prelude='')
 args = build(root, 'args', 'def main = List.length args')
 expect(args, f'{ARG_DEPTH}\n'.encode(), stack_kb=ARG_STACK_KB, args=['a'] * ARG_DEPTH)
-print(f'env/io: read_dir at {DEPTH} entries, args at {ARG_DEPTH}')
+
+# 効果を持つ呼び出しを `|>` で書くと、末尾呼び出しの引数のリストで単相化が
+# `list element type mismatch` になる（docs/issues/pipe-in-tail-argument.md）。
+# handler の下で両方の公開経路が単相化を通ることを測る。
+caught = 'handler Error as H\nabort raise e => e.message\nreturn _ => "ok"\ndef main = with H -> '
+expect(build(root, 'caught_dir', caught + f'read_dir "{root}/nope"'), b'NotFound\n')
+expect(build(root, 'caught_args', caught + 'List.length args'), b'ok\n')
+print(f'env/io: read_dir at {DEPTH} entries, args at {ARG_DEPTH}, both under a handler')
 PY
 }
 
