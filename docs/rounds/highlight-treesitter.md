@@ -35,6 +35,15 @@
   highlight group を記録する。group の名前は query の capture から
   `@<capture>.hado` として門番側で計算する。
 
+### 仕様への疑義
+
+- 付録C の `program := outer_item* section*` は、`type_definition` と `definition` を
+  最初の見出しより前に限る。実装（`crates/hado/src/parser.rs` の `parse_items`）は
+  見出しの後も宣言を読み続ける。文法は実装に合わせて
+  `source_file := library? (type_definition | definition | section)*` とした。仕様本文
+  （付録C）と実装のどちらが正かは決めず、ここに記録する。`library` の位置だけは
+  付録C どおり最初の見出しより前に限り、`library-late` の golden で測る。
+
 ### ループの記録
 
 - **探索**: 文法の正は付録C と第7節。`crates/hado/src/parser.rs` の `parse_items` が
@@ -147,7 +156,7 @@ PASSED: 5/5
 corpus files: 143
 goldens: 39
 extmarks: 34
-real	0m4.251s
+real	0m5.318s
 
 # 変異 1: constructor の capture を @type に寄せる
 $ bash scripts/verify-treesitter.sh
@@ -166,12 +175,35 @@ NG: accept corpus and stdlib parse without ERROR or MISSING (2/143 files have ER
 NG: declaration forms and section 7 precedence goldens match (golden prec-not-and differs: ...)
 PASSED: 3/5
 
-$ git status --short
-（門番の走行後も追跡外の生成物は残らない）
+# 取得の照合（cache を壊すと取り直す）
+$ printf 'not a real archive' > /tmp/hado-ts-corrupt/tree-sitter-linux-x64.gz
+$ bash scripts/treesitter-setup.sh --cache /tmp/hado-ts-corrupt
+treesitter-setup: checksum mismatch for cached tree-sitter-linux-x64.gz; refetching
+treesitter-setup: fetching tree-sitter-linux-x64.gz
+...
+tree-sitter /tmp/hado-ts-corrupt/tree-sitter-0.27.0
+nvim /tmp/hado-ts-corrupt/nvim-linux-x86_64/bin/nvim
 
-$ git log --oneline -4
+# 門番の走行後に追跡外の生成物は残らない
+$ git status --short
+（空）
+
+$ cargo test --offline
+test result: ok. ... 0 failed（exit 0）
+
+$ bash scripts/run-gates.sh --tier quick --jobs 4 /tmp/hado-quick
+TALLY: 38/38 passed; red: none
+
+$ bash scripts/lint-docs.sh
+PASSED: 10/10
+
+$ git log --oneline main..HEAD
+de365a4 refactor: 使っていない constructor の優先順位を消す
+452018a test: library の位置と .hdi の探針を門番に足す
+7dd3e47 docs: highlight-treesitter のラウンドを書く
 82617af docs: tree-sitter-hado の使い方と取得ツールを書く
 d5d4165 feat: tree-sitter の門番と道具の取得を足す
 bc6585a refactor: tree-sitter の dumper が parse の集計行を読まないようにする
 efd1c26 test: tree-sitter の golden と node 列の正規化を足す
+3598fbb feat: Hado の tree-sitter 文法とハイライト query を足す
 ```
