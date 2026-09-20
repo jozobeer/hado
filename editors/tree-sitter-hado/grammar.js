@@ -53,15 +53,21 @@ module.exports = grammar({
   ],
 
   rules: {
-    // 付録C「プログラム」。Rust の parser（`crates/hado/src/parser.rs:parse_items`）は
-    // 見出しの後も宣言を読み続ける。`effect` と `handler` の本文は操作だけなので、
-    // その後の `def` は外の宣言に戻る。`implement` の本文は次の見出しまで続く。
-    source_file: ($) => seq(optional($.library), repeat($._item)),
+    // 付録C「プログラム」。`library` は繰り返す outer_item の 1 つなので、最初の
+    // 見出しより前なら宣言の間にも置ける（`crates/hado/src/parser.rs:parse_items` の
+    // `outer` も同じで、見出しの後は `library` を読まない）。見出しの後も宣言は
+    // 読み続ける。`effect` と `handler` の本文は操作だけなので、その後の `def` は
+    // 外の宣言に戻る。`implement` の本文は次の見出しまで続く。
+    source_file: ($) =>
+      seq(
+        repeat(choice($.library, $._outer_item)),
+        repeat(seq($._section, repeat($._outer_item))),
+      ),
 
-    // 付録C「プログラム」: 最初の見出しより前の `library`
+    // 付録C「プログラム」: 最初の見出しより前の outer_item
     library: () => keyword('library'),
 
-    _item: ($) => choice($.type_definition, $.definition, $._section),
+    _outer_item: ($) => choice($.type_definition, $.definition),
 
     _section: ($) =>
       choice(
@@ -117,11 +123,17 @@ module.exports = grammar({
         choice(
           repeat1(seq('|', $.constructor)),
           $.record_type,
-          seq($.upper_name, $.record_type),
+          $.named_constructor,
           // `implement` 本文の実体化（第47節）。`shared` 付きは別の node
           $.type_expr,
         ),
       ),
+
+    // 付録C「型定義」の `"=" upper_name record_type`。名前付き field を持つ単一の
+    // constructor で、宣言した型名と payload の名前を別の node に分ける。裸の
+    // `upper_name` は `type_expr` とも読めるので、ここでは `record_type` を必須に
+    // して `$.constructor` との衝突を避ける。
+    named_constructor: ($) => seq($.upper_name, $.record_type),
 
     shared_type_realization: ($) =>
       seq(
@@ -456,9 +468,12 @@ module.exports = grammar({
 
     float: () => /[0-9]+\.[0-9]+/,
 
-    char: () => token(seq("'", choice(seq('\\', /[nt\\']/), /[^'\\]/), "'")),
+    // 付録C「字句」。生の改行は文字列にも文字にも入れられない（`crates/hado/src/lexer.rs`
+    // の `lex_string` と `lex_char` が拒む）。閉じ忘れを次の行へ飲み込ませない。
+    char: () => token(seq("'", choice(seq('\\', /[nt\\']/), /[^'\\\n]/), "'")),
 
-    string: () => token(seq('"', repeat(choice(seq('\\', /[nt\\"]/), /[^"\\]/)), '"')),
+    string: () =>
+      token(seq('"', repeat(choice(seq('\\', /[nt\\"]/), /[^"\\\n]/)), '"')),
 
     bool: () => choice(keyword('true'), keyword('false')),
 

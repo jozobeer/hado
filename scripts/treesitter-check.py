@@ -49,6 +49,7 @@ GOLDEN_NAMES = (
     'pipe-precedence',
     'library',
     'library-late',
+    'library-middle',
     'module',
     'implement-body',
     'functor-def',
@@ -56,8 +57,12 @@ GOLDEN_NAMES = (
     'shared-type',
     'type-realization',
     'type-adt',
+    'type-named-record',
     'effect',
     'handler',
+    # 字句の閉じ忘れは ERROR になる
+    'malformed-string',
+    'malformed-char',
     # 第7節の優先順位
     'prec-add-mul',
     'prec-mul-add',
@@ -90,6 +95,7 @@ PROBE_LINES = (
     'def key = not false',
     r'def esc = "a\nb\tc\\d\"e"',
     r"def esc2 = '\n'",
+    'type Named = Payload { value: Int }',
 )
 # (行, 行内の綴り, 期待する capture)
 PROBES = (
@@ -112,12 +118,17 @@ PROBES = (
     (8, 'false', '@boolean'),
     (9, r'"a\nb\tc\\d\"e"', '@string'),
     (10, r"'\n'", '@character'),
+    # 名前付き field の constructor では、宣言した型名と payload の名前を分ける。
+    (11, 'Named', '@type'),
+    (11, 'Payload', '@constructor'),
 )
 # (行, 開始の綴り, 長さの基準になる綴り, 範囲内に現れてはいけない capture)
 ABSENT = (
     (0, '//', '// comment 12345', '@number'),
     (2, '"text 42"', '"text 42"', '@number'),
     (9, r'"a\nb\tc\\d\"e"', r'"a\nb\tc\\d\"e"', '@number'),
+    # `Payload` に @type が重ならない（`type_definition` の直接の子ではない）。
+    (11, 'Payload', 'Payload', '@type'),
 )
 # 契約の `.hdi` も同じ filetype で開けること。位置ではなく filetype と
 # parser・query・highlighter と extmark の有無だけを測る。
@@ -213,6 +224,10 @@ def run_in_pty(argv, env, cwd, timeout=120):
         # 応答しないと Neovim が待つ。
         if b'\x1b[6n' in chunk:
             os.write(master, b'\x1b[1;1R')
+        # 想定外のエラー表示で Neovim が入力待ちになったら閉じる。ここで止まると
+        # 門番が赤ではなくハングし、赤の理由が読めない。
+        if b'Press ENTER' in chunk or b'-- More --' in chunk:
+            os.write(master, b'\r')
     if proc.poll() is None:
         proc.kill()
         proc.wait()
@@ -275,11 +290,17 @@ def parse_probe_output(text):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print('usage: treesitter-check.py <tree-sitter> <nvim>', file=sys.stderr)
+    if len(sys.argv) not in (3, 4):
+        print('usage: treesitter-check.py <tree-sitter> <nvim> [work-dir]',
+              file=sys.stderr)
         return 2
     ts, nvim = sys.argv[1], sys.argv[2]
-    work = Path(tempfile.mkdtemp(prefix='hado-treesitter-'))
+    if len(sys.argv) == 4:
+        # 呼んだ側が作業場所を所有し、後始末もする（門番の wrapper が消す）。
+        work = Path(sys.argv[3])
+        work.mkdir(parents=True, exist_ok=True)
+    else:
+        work = Path(tempfile.mkdtemp(prefix='hado-treesitter-'))
     passed = []
     total = []
 

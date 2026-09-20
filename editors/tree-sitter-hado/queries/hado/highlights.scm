@@ -64,11 +64,8 @@
 (constructor (upper_name) @constructor)
 (constructor_expr (upper_name) @constructor)
 (constructor_pattern (upper_name) @constructor)
-; `type T = Payload { ... }` の `Payload` は record_type の直前の upper_name
-(type_definition
-  (upper_name) @constructor
-  .
-  (record_type))
+; `type T = Payload { ... }` の `Payload`
+(named_constructor (upper_name) @constructor)
 
 ; `name`（値・field・引数・名前空間）。キーワードは `word` で締め出してある。
 (name) @variable
