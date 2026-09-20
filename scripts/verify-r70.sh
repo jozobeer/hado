@@ -71,3 +71,4 @@ else
 fi
 
 echo "PASSED: $pass/$total"
+[ "$pass" -eq "$total" ]
