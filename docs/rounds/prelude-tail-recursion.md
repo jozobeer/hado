@@ -234,3 +234,18 @@ OK: f env and io: args and read_dir at the depth
 PASSED: 8/8
 ```
 
+着地前の最終の木での全走（corpus lock を作り直した後、`git status --short` は空）。
+
+```
+$ cargo test --offline --no-fail-fast 2>&1 | grep -c '^test result: ok'
+66
+$ bash scripts/run-gates.sh --tier quick target/gates-quick
+TALLY: 38/38 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core
+TALLY: 586/586 passed; red: none
+$ bash scripts/verify-r37.sh
+PASSED: 262/262
+```
+
+`cargo test` は rc=0、5 分 46 秒。core 層には `verify-prelude-tail-recursion.sh` と `verify-m1-corpus.sh` が入る。quick 層と core 層は red なし。
+
