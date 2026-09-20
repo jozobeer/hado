@@ -62,6 +62,9 @@ def render(node, indent, lines):
 
 def main():
     text = sys.stdin.read()
+    # 末尾の集計行（`<path>\tParse: ...`）は木ではない。ERROR を含むことがあり、
+    # そのまま読むと余計な node が増える。
+    text = '\n'.join(line for line in text.splitlines() if '\tParse:' not in line)
     lines = []
     for node in parse(text):
         render(node, 0, lines)
