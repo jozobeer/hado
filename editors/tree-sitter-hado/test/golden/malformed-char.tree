@@ -1,0 +1,30 @@
+(source_file
+  (ERROR
+    (name)
+    (ERROR)
+  )
+  (definition
+    (name)
+    (expression
+      (pipe
+        (or
+          (and
+            (compare
+              (additive
+                (multiplicative
+                  (unary
+                    (postfix
+                      (primary
+                        (int)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)

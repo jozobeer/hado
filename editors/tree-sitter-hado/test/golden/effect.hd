@@ -1,0 +1,4 @@
+effect Ask
+once ask: String
+abort stop
+again yield(value: Int): Void

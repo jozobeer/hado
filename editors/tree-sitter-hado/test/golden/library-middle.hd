@@ -1,0 +1,8 @@
+type A = { x: Int }
+
+library
+
+def f = 1
+
+module M
+type T

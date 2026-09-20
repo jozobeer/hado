@@ -1,0 +1,6 @@
+library
+
+type Found = { value: Int }
+
+module Store
+type T

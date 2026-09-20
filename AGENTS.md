@@ -17,6 +17,7 @@
 - `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/verify-ci.sh` はワークフローを YAML として読むので `yaml` も要る（Ubuntu は `python3-yaml`）
 - `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
+- `curl`・`tar`・`gunzip`・`sha256sum`（coreutils）。`scripts/treesitter-setup.sh` が固定した版の tree-sitter CLI と Neovim を取ってきて展開するのに使う
 
 ## コマンド
 

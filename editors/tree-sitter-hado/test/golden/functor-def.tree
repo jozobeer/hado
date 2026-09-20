@@ -1,0 +1,24 @@
+(source_file
+  (functor_section
+    (contract_ref
+      (upper_name)
+    )
+    (upper_name)
+    (functor_param
+      (upper_name)
+      (contract_ref
+        (upper_name)
+      )
+    )
+    (type_definition
+      (upper_name)
+      (type_expr
+        (type_atom
+          (type_ref
+            (upper_name)
+          )
+        )
+      )
+    )
+  )
+)

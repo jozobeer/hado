@@ -1,0 +1,24 @@
+(source_file
+  (library)
+  (type_definition
+    (upper_name)
+    (record_type
+      (field_type
+        (name)
+        (type_expr
+          (type_atom
+            (type_ref
+              (upper_name)
+            )
+          )
+        )
+      )
+    )
+  )
+  (module_section
+    (upper_name)
+    (module_item
+      (upper_name)
+    )
+  )
+)

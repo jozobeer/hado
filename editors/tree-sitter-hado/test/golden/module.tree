@@ -1,0 +1,30 @@
+(source_file
+  (module_section
+    (upper_name)
+    (module_item
+      (upper_name)
+    )
+    (module_item
+      (name)
+      (contract_param
+        (name)
+        (type_expr
+          (type_atom
+            (type_ref
+              (upper_name)
+            )
+          )
+        )
+      )
+      (result
+        (type_expr
+          (type_atom
+            (type_ref
+              (upper_name)
+            )
+          )
+        )
+      )
+    )
+  )
+)

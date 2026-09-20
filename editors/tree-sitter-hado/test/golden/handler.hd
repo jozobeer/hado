@@ -1,0 +1,5 @@
+handler Ask as H
+once ask => ""
+abort stop => 0
+again yield x => resume ()
+return v => v

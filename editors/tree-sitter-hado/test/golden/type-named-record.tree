@@ -1,0 +1,30 @@
+(source_file
+  (type_definition
+    (upper_name)
+    (named_constructor
+      (upper_name)
+      (record_type
+        (field_type
+          (name)
+          (type_expr
+            (type_atom
+              (type_ref
+                (upper_name)
+              )
+            )
+          )
+        )
+        (field_type
+          (name)
+          (type_expr
+            (type_atom
+              (type_ref
+                (upper_name)
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)

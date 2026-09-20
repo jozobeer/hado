@@ -1,0 +1,1 @@
+type User = Payload { id: Int; name: String }

@@ -1,0 +1,2 @@
+implement Store as S
+shared type T = Int

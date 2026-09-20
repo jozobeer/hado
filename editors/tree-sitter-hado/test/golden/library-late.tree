@@ -1,0 +1,11 @@
+(source_file
+  (module_section
+    (upper_name)
+    (module_item
+      (upper_name)
+    )
+  )
+  (ERROR
+    (name)
+  )
+)

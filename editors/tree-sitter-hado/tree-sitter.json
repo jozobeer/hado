@@ -1,0 +1,27 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/tree-sitter.json",
+  "grammars": [
+    {
+      "name": "hado",
+      "camelcase": "Hado",
+      "title": "Hado",
+      "scope": "source.hado",
+      "file-types": ["hd", "hdi"],
+      "injection-regex": "^hado$",
+      "highlights": "queries/hado/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Hado grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "hado"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/jozobeer/hado"
+    }
+  }
+}
