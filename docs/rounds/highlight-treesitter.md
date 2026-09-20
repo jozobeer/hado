@@ -41,8 +41,9 @@
   最初の見出しより前に限る。実装（`crates/hado/src/parser.rs` の `parse_items`）は
   見出しの後も宣言を読み続ける。文法は実装に合わせて
   `source_file := library? (type_definition | definition | section)*` とした。仕様本文
-  （付録C）と実装のどちらが正かは決めず、ここに記録する。`library` の位置だけは
-  付録C どおり最初の見出しより前に限り、`library-late` の golden で測る。
+  （付録C）と実装のどちらが正かは決めず、ここに記録する。`library` は付録C の
+  `outer_item` の 1 つなので最初の見出しより前のどこにでも置け（`library-middle`）、
+  見出しの後は実装と同じく読まない（`library-late` が ERROR）。
 
 ### ループの記録
 
@@ -76,7 +77,7 @@
 - `editors/tree-sitter-hado/queries/hado/highlights.scm`: capture ごとに 1 group。
 - `editors/tree-sitter-hado/tree-sitter.json`、`README.md`、`.gitignore`（`src/` と
   `*.so` は `tree-sitter generate` の生成物）。
-- `editors/tree-sitter-hado/test/golden/`: 宣言形 23 本と §7 の境界 16 本の `.hd` と
+- `editors/tree-sitter-hado/test/golden/`: 宣言形 27 本と §7 の境界 16 本の `.hd` と
   `.tree`。
 - `scripts/treesitter_dump.py`: parse の s 式を node 種別だけの木にする。
 - `scripts/treesitter-setup.sh`: 版と checksum を固定した取得。
@@ -87,7 +88,7 @@
 ### 判定
 
 - `bash scripts/verify-treesitter.sh` が `PASSED: 5/5`。受理コーパス 133 件と
-  `stdlib/` 10 件の 143 件、golden 39 本、`.hd` の extmark 34 個と `.hdi` の extmark。
+  `stdlib/` 10 件の 143 件、golden 43 本、`.hd` の extmark 39 個と `.hdi` の extmark。
 - 門番が赤になることを 3 つの変異で確かめる。
   1. constructor の capture を `@type` に寄せる → `@constructor` が消えて 4/5。
   2. `//` を `--` にする → 117/143 が ERROR / MISSING、コメントの extmark も消えて
@@ -106,11 +107,13 @@
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
-| 付録C | 宣言の形（`def` 4 形・`type`・`module`・`implement`・functor・`shared type`・`effect`・`handler`） | 構文 | 受理 | `test/golden/` の宣言形 23 本、`scripts/verify-treesitter.sh` |
+| 付録C | 宣言の形（`def` 4 形・`type`・`module`・`implement`・functor・`shared type`・`effect`・`handler`） | 構文 | 受理 | `test/golden/` の宣言形 27 本、`scripts/verify-treesitter.sh` |
 | 付録C | 比較は非結合 | 構文 | ERROR | `test/golden/prec-cmp-nonassoc.tree` |
 | §7 | 優先順位（`\|>` < `\|\|` < `&&` < 比較 < `+` < `*` < 単項 < 適用 < `.`） | 構文 | 受理 | `test/golden/prec-*.tree` の 16 本 |
 | 付録C | 空白とコメント（`//`）は区切りで意味を持たない | 字句 | 受理 | 受理コーパス 143 件、ハイライトのコメント探針 |
-| §52 | `library` は最初の見出しより前の outer_item | 構文 | 受理 / ERROR | `test/golden/library.tree` と `library-late.tree` |
+| §52 | `library` は最初の見出しより前の outer_item（宣言の間にも置ける） | 構文 | 受理 / ERROR | `library.tree`・`library-middle.tree`・`library-late.tree` |
+| 付録C | 文字列と文字に生の改行は入れられない（`lexer.rs` が拒む） | 字句 | ERROR | `malformed-string.tree`・`malformed-char.tree` |
+| 付録C | 名前付き field の constructor の payload は constructor | 構文 | 受理 | `type-named-record.tree` とハイライトの探針 |
 | §50 | 契約の `.hdi` も同じ filetype で開ける | 字句 | 受理 | `verify-treesitter.sh` の `.hdi` 探針 |
 | 付録C | 文字列と文字のエスケープ（`\n` `\t` `\\` `\"` `\'`） | 字句 | 受理 | `verify-treesitter.sh` のエスケープ探針 |
 | §12 | `if` の腕は真偽・条件列・パターンの 3 形 | 構文 | 受理 | `test/golden/if-*.tree` の 3 本 |
@@ -130,7 +133,7 @@ $ find tests/accept -type f \( -name '*.hd' -o -name '*.hdi' \) | wc -l
 $ ls stdlib/*.hd | wc -l
 10
 $ ls editors/tree-sitter-hado/test/golden/*.hd | wc -l
-39
+43
 
 # 道具の取得（版と checksum は script の定数が正）
 $ bash scripts/treesitter-setup.sh --cache /tmp/hado-setup-fresh
@@ -154,8 +157,8 @@ OK: declaration forms and section 7 precedence goldens match
 OK: Neovim marks each promised token with its capture group
 PASSED: 5/5
 corpus files: 143
-goldens: 39
-extmarks: 34
+goldens: 43
+extmarks: 39
 real	0m5.318s
 
 # 変異 1: constructor の capture を @type に寄せる
@@ -206,4 +209,47 @@ d5d4165 feat: tree-sitter の門番と道具の取得を足す
 bc6585a refactor: tree-sitter の dumper が parse の集計行を読まないようにする
 efd1c26 test: tree-sitter の golden と node 列の正規化を足す
 3598fbb feat: Hado の tree-sitter 文法とハイライト query を足す
+```
+
+### レビュー対応（PR #16）
+
+未解決の指摘 4 件はすべて実体で確認できたので、すべて直した。
+
+```
+# 指摘 1: 文字列と文字に生の改行が入る（`lexer.rs` の lex_string / lex_char が拒む）
+# 指摘 2: `type T = Payload { ... }` の `Payload` が @type と @constructor の両方に乗る
+# 指摘 3: 門番の一時ディレクトリが残る
+# 指摘 4: `library` を先頭に限っている（付録C の outer_item は繰り返す）
+
+$ bash scripts/verify-treesitter.sh          # 修正後
+PASSED: 5/5
+corpus files: 143
+goldens: 43
+extmarks: 39
+
+# 直した探針が回帰を捕まえること（変異を入れて赤を確認）
+$ （`$.named_constructor` を直接の upper_name に戻す）
+NG: declaration forms and section 7 precedence goldens match (golden type-named-record differs: ...)
+NG: Neovim marks each promised token with its capture group (highlighter is not active)
+PASSED: 3/5
+（4 秒で赤。pcall で包む前は Neovim が入力待ちになり 120 秒かかっていた）
+
+$ （`library` を先頭だけに戻す）
+NG: declaration forms and section 7 precedence goldens match (golden library-middle differs: ...)
+PASSED: 4/5
+
+$ （文字列から改行の除外を外す）
+NG: declaration forms and section 7 precedence goldens match (golden malformed-string differs: ...)
+PASSED: 4/5
+
+# 一時ディレクトリの後始末（TMPDIR を固定して数える）
+$ D=/tmp/hado-tmpdir-test; mkdir -p $D; TMPDIR=$D bash scripts/verify-treesitter.sh; ls -A $D | wc -l
+0
+
+# 新しく足した golden
+$ ls editors/tree-sitter-hado/test/golden/{library-middle,type-named-record,malformed-string,malformed-char}.hd
+editors/tree-sitter-hado/test/golden/library-middle.hd
+editors/tree-sitter-hado/test/golden/type-named-record.hd
+editors/tree-sitter-hado/test/golden/malformed-string.hd
+editors/tree-sitter-hado/test/golden/malformed-char.hd
 ```
