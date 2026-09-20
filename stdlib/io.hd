@@ -29,8 +29,10 @@ def read_dir path =>
   let status = __io_read_dir path ->
   if status == 0 => directory_elements (__io_dir_count 0 - 1) [] | raise { message = io_failure_message status }
 // 添字を末尾から先頭へ動かし、その順に cons する。reverse は要らない。
+// `|>` にしない: 効果を持つ呼び出しを `|>` で書くと、末尾呼び出しの引数の
+// リストで単相化が `list element type mismatch` になる（docs/issues/pipe-in-tail-argument.md）。
 def rec directory_elements (index: Int, acc: String List): String List {Error} =>
-  if index < 0 => acc | directory_elements (index - 1) [__io_dir_get index |> Bytes.to_string, ...acc]
+  if index < 0 => acc | directory_elements (index - 1) [Bytes.to_string (__io_dir_get index), ...acc]
 def read_stdin =
   let status = __io_read_stdin 0 ->
   if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }
