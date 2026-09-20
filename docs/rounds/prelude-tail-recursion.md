@@ -23,6 +23,8 @@
 - `docs/spec.md` §55（適用順の 1 文と、`sort` の比較子の `Pure`）
 - `tests/accept/` に先頭順の `map` と `filter`（効果付き）を 1 本ずつ
 - `scripts/verify-prelude-tail-recursion.sh`（`# tier: core`、`# round: prelude-tail-recursion`）
+- `crates/hado/tests/r26_effects.rs` に `filter` の呼び出し順の単体テスト（PR #12 の取り込み）
+- `docs/issues/pipe-in-tail-argument.md` `docs/issues/effectful-closure-in-array.md`（このラウンドで当たった単相化の穴。PR #7 の受け皿）
 - 26 本の棚卸し表（このファイルの実測）
 
 ### 工程
@@ -209,3 +211,26 @@ main.hd:9:61: error[E305]: expected Fn(Int, Int => Int), found Fn(Int, Int => In
 `cargo test --offline --no-fail-fast` は 66 本すべて `test result: ok`、rc=0（5 分 44 秒）。`stdlib/string.hd` が `List.reverse` を使うようになったので、`crates/hado/tests/prelude.rs` の自己完結の対象に `stdlib/list.hd` を足した（型宣言は言語が名前で解決する `Exception` と `List` を除く）。
 
 書き直しの途中で E511 に当たった。`Array.replace` の内側の `if | index == 0 => ... | ...` は腕の条件列として読まれ、「全条件が同一変数 `==` リテラル」で拒否される。`replace_go` と `replace_keep` に分け、`index == 0` を関数本体の Boolean branch に置いた。
+
+`stdlib/env.hd` と `stdlib/io.hd` を末尾形にした直後、r37 の門番が 4 本赤になった。効果を持つ呼び出しを `|>` で書いた要素を、末尾呼び出しの引数のリストに置くと、単相化が `list element type mismatch` で落ちる。`Bytes.to_string (__argv_get index)` の直接適用に直すと通る。この形は着手前の実装（`git checkout 062548e -- stdlib/`）でも同じ `list element type mismatch` で落ちるので、このラウンドが作った不具合ではなく、`|>` の結果型が `application` と同じ型を引かない単相化の穴である。`docs/issues/pipe-in-tail-argument.md` に切った。
+
+```
+$ bash scripts/verify-r37.sh
+NG: 37-g(5) read_dir missing caught
+NG: 37-g(5) read_dir file caught
+NG: 37-g(5) read_dir denied-dir caught
+NG: 37-d(3) error-handler
+PASSED: 258/262
+$ <直接適用に直した後>
+PASSED: 262/262
+```
+
+同じ形が prelude に戻らないよう、深さの門番の `f` に handler の下で `read_dir` と `args` を単相化させる 2 本を足した。
+
+```
+$ bash scripts/verify-prelude-tail-recursion.sh
+env/io: read_dir at 30000 entries, args at 80000, both under a handler
+OK: f env and io: args and read_dir at the depth
+PASSED: 8/8
+```
+
