@@ -624,3 +624,30 @@ TALLY: 601/601 passed; red: none
 core を最初に回したときは `verify-cognitive-complexity` が赤だった。J2〜J4 と LSP で
 足した分岐が `def_name_at`・`check_command`・`take_option` を閾値（7）の上へ押し出して
 いたので、3 つとも切り出して下へ戻した（`5de6ccf`）。
+
+### 着地後の全走（2026-09-21）
+
+着地は PR #19（squash、`26b0c3c`）で main に入った。PR の `gates` は core 層を回し、
+21 分 32 秒で緑（run 35575986680）。着地後の main の push では CI が full 層を回し、
+32 分 40 秒で `success`（run 35582189880）。`red: none`。
+
+```
+$ gh run list --branch main --limit 1
+completed  success  feat: hado lsp で診断・hover・code action を返す（lsp-minimal） (#19)
+  ci  main  push  35582189880  32m40s  2026-09-21T09:14:59Z
+
+$ git log --oneline origin/main -1
+26b0c3c feat: hado lsp で診断・hover・code action を返す（lsp-minimal） (#19)
+```
+
+着地の前に手元でも full 層を通した。直列（`--jobs 1`）で 3783/3783、`red: none`。
+
+```
+$ bash scripts/run-gates.sh --jobs 1 --tier full <out>
+TALLY: 3783/3783 passed; red: none
+```
+
+並列（既定の jobs）で先に回したときは `verify-gate-cache`・`verify-m1-corpus`・`verify-m7`
+の 3 本が赤になったが、3 本とも単独では緑で、`verify-m1-corpus` の検査 7 が開始時に
+`docs` と `scripts` を固定するためだった（同じ木を並列の門番が触る。AGENTS.md の
+「門番の走行中は木を触らない」）。CI は並列でも緑だった。
