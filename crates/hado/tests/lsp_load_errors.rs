@@ -89,7 +89,25 @@ fn invalid_namespace_directory_is_published_instead_of_an_empty_list() {
     let text = "def main = 1\n";
     let root = workspace(&[("main.hd", text)]);
     std::fs::create_dir(root.join("Lib")).unwrap();
-    let params = publish_diagnostics_for(&root, "main.hd", text);
+    refusal_published(&root, "main.hd", text);
+}
+
+#[test]
+fn a_contract_opened_alone_sees_the_refusal_of_its_candidates() {
+    // §58.5: a `.hdi` opened on its own takes the `.hd` files under the root as
+    // its candidates, and is not an entry itself. The refusal belongs to the
+    // candidates' root, so it must reach the contract too; otherwise the
+    // contract looks clean while every candidate fails to load.
+    let contract = "module M\ndef f (x: Int): Int\n";
+    let root = workspace(&[("api/store.hdi", contract), ("main.hd", "def main = 1\n")]);
+    std::fs::create_dir(root.join("Lib")).unwrap();
+    refusal_published(&root, "api/store.hdi", contract);
+}
+
+/// The `publishDiagnostics` parameters of `file`, asserting that the tree's
+/// refusal reached the editor instead of an empty list.
+fn refusal_published(root: &Path, file: &str, text: &str) {
+    let params = publish_diagnostics_for(root, file, text);
     let diagnostics = params["diagnostics"]
         .as_array()
         .expect("diagnostics is an array");
@@ -100,6 +118,6 @@ fn invalid_namespace_directory_is_published_instead_of_an_empty_list() {
     let message = diagnostics[0]["message"].as_str().unwrap_or("");
     assert!(
         message.contains("invalid namespace directory"),
-        "expected the CLI refusal on the entry, got {params}"
+        "expected the CLI refusal on {file}, got {params}"
     );
 }

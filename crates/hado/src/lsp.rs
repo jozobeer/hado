@@ -639,9 +639,14 @@ impl Server {
     /// and its diagnostics are the merge of the candidates that read it.
     fn analyze(&self) -> BTreeMap<String, Vec<Value>> {
         let overlay = self.overlay();
+        let open: Vec<PathBuf> = self
+            .documents
+            .values()
+            .map(|document| document.path.clone())
+            .collect();
         let mut collected: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
         for entry in self.entry_candidates() {
-            for (path, diagnostic) in diagnostics_of(&entry, &overlay) {
+            for (path, diagnostic) in diagnostics_of(&entry, &overlay, &open) {
                 collected.entry(path).or_default().push(diagnostic);
             }
         }
@@ -788,7 +793,11 @@ pub fn diagnostic_value(encoding: PositionEncoding, text: &str, error: &Diagnost
 /// The diagnostics one entry contributes, paired with the physical file they
 /// belong to. A load that fails with a positioned diagnostic still reports it:
 /// a syntax error is exactly the kind of thing the editor must show.
-fn diagnostics_of(entry: &Path, overlay: &project::Overlay) -> Vec<(PathBuf, Diagnostic)> {
+fn diagnostics_of(
+    entry: &Path,
+    overlay: &project::Overlay,
+    open: &[PathBuf],
+) -> Vec<(PathBuf, Diagnostic)> {
     match Project::load_with_overlay(entry, overlay) {
         Ok(project) => {
             let paths: HashMap<String, PathBuf> = project
@@ -814,23 +823,32 @@ fn diagnostics_of(entry: &Path, overlay: &project::Overlay) -> Vec<(PathBuf, Dia
         }
         // §51: an invalid namespace directory is a load refusal, not an E-code.
         // Dropping it here publishes an empty list, so the editor looks clean
-        // while `hado check` refuses. Surface the same message on the entry.
-        Err(project::LoadError::Input(message)) => vec![(
-            entry.to_path_buf(),
-            Diagnostic {
-                related: None,
-                path: entry
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| entry.to_string_lossy().into_owned()),
-                line: 1,
-                col: 1,
-                end_line: 1,
-                end_col: 1,
-                code: None,
-                message,
-            },
-        )],
+        // while `hado check` refuses. The refusal belongs to the analysis root,
+        // not to the entry that happened to walk it first, so every open
+        // document under that root gets it. A `.hdi` opened on its own is not an
+        // entry, and would otherwise never see the refusal of its candidates.
+        Err(project::LoadError::Input(message)) => {
+            let root = entry.parent().unwrap_or_else(|| Path::new("."));
+            open.iter()
+                .filter(|path| component_prefix(root, path))
+                .map(|path| {
+                    let diagnostic = Diagnostic {
+                        related: None,
+                        path: path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                        line: 1,
+                        col: 1,
+                        end_line: 1,
+                        end_col: 1,
+                        code: None,
+                        message: message.clone(),
+                    };
+                    (path.clone(), diagnostic)
+                })
+                .collect()
+        }
     }
 }
 
