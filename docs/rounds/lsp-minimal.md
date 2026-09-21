@@ -253,6 +253,31 @@ main）の run を実測に書く。
 5. 門番 `scripts/verify-lsp-minimal.sh` と仕様 §58 系・`README.md`。§58.4 は 7 フィールド
    から 9 フィールドへ改め、終端を §57 の書き換え範囲と定める（Q1 の決着）。
 
+### 工程（実測）
+
+実際に進めた順と、各コミットで回した門番。
+
+1. `4674532 docs: lsp-minimal のラウンドを書く`（契約）。
+2. `27a9b5a feat: 診断の範囲に終端を持たせ、§58.4 の end_line / end_col を出す`。
+   `Span` に終端（D1・D2）を足し、位置の同一性を開始点で見る（D3）。回した門番:
+   `cargo test --offline`、`verify-rustfmt`、`verify-clippy`。
+3. `20ee32b`・`2ad7a10 docs: ...` — 決定 D1〜D7 と疑義 Q1・Q2 の決着。
+4. `83d56f0 feat: --show-all と、止まっていても型を返す --print-type を入れる`（J2〜J4）。
+   回した門番: `cargo test --offline`、`verify-m1-corpus`、`verify-r47`・`verify-r16`。
+5. `b55de46 fix: 枝の書き換え範囲が最後のトークンを落とすのを直す`。J9 の
+   code action の範囲を測る途中で見つけた既存の不具合。`branch_range` が枝の最後の
+   トークンの開始を終端にしていたので、`check --fix` が `if b => 1 | 0 0` を作っていた。
+   `LineMap::end_offset` を足して直し、腕の形（§31・§32）は `catch_all_range` から外す
+   （外さないと E512 の書き換えが腕の本体を越えて `| f` を作る。HEAD では書き換えを
+   出さず正しかったので、これは退行になる）。
+6. `186435c feat: hado lsp で診断・hover・code action を返す`（J5〜J10）。
+7. `ee671ff docs: §58.4 の終端と §58.5 の LSP、README の Neovim 設定を書く`。
+8. `5b3cf14 docs: lsp-minimal の実測を書く`（J2〜J5・J7・J9・J10 の実測）。
+9. `3ed7528`・`29a8a14`・`6e88512`・`44fd924`・`bd29c53` — 契約のメンバを位置から
+   引けるようにし（J8）、契約が宣言する型を実装が無くても契約名で引けるようにする。
+10. `b1d8165 test: lsp-minimal の門番を足す`、`404013d docs: 門番の実測と、6 つの変異の
+    結果を書く`。回した門番: `verify-lsp-minimal`（9/9）、quick 層（38/38、red: none）。
+
 ### 仕様への疑義
 
 builder が見つけた疑義をここに書く（上の「前提のずれ」は計画時のもの）。
