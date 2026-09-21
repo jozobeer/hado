@@ -64,7 +64,7 @@ assert 'spec-map' not in front, 'the front matter mentions spec-map'
 versions = set(re.findall(r'v[0-9]+(?:\.[0-9]+)+', front))
 assert versions == {'v0.4'}, versions
 bad = []
-for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md']:
+for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md']:
     if 'spec-map' in Path(rel).read_text():
         bad.append(rel)
 for path in sorted(Path('scripts').glob('verify-*.sh')):
@@ -130,7 +130,7 @@ spec = Path('docs/spec.md').read_text()
 headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
 letters = {name[-1] for name in re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M)}
 bad = []
-for rel in ['docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'docs/bug.md', 'docs/wants.md']:
+for rel in ['docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md', 'docs/bug.md', 'docs/wants.md']:
     text = Path(rel).read_text()
     missing = sorted({n for n in re.findall(r'§(\d+(?:\.\d+)?)', text)} - headings)
     missing += sorted({a for a in re.findall(r'付録([A-Z])', text)} - letters)
