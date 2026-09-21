@@ -157,29 +157,50 @@ impl Project {
             .iter()
             .find(|file| file.physical.as_path() == physical)?;
         let line = line + file.offset;
-        let def = self.parsed.ast.items.iter().find_map(|item| match item {
-            crate::parser::Item::Def(def)
-                if def.name_span.line == line
-                    && def.name_span.col <= col
-                    && col < def.name_span.end_col =>
-            {
-                Some(def)
+        let contains =
+            |span: crate::parser::Span| span.line == line && span.col <= col && col < span.end_col;
+        // §47: a `.hdi` contract has no top-level `def`; its members live in
+        // `module M` blocks as signature definitions, so both are searched.
+        let mut found: Option<(crate::parser::Span, Option<String>)> = None;
+        for item in &self.parsed.ast.items {
+            if let crate::parser::Item::Def(def) = item {
+                if contains(def.name_span) {
+                    found = Some((def.name_span, None));
+                    break;
+                }
             }
-            _ => None,
-        })?;
+            if let crate::parser::Item::ModuleSig(module) = item {
+                if let Some(span) = module.items.iter().find_map(|inner| match inner {
+                    crate::parser::Item::SigDef(def) if contains(def.name_span) => {
+                        Some(def.name_span)
+                    }
+                    _ => None,
+                }) {
+                    // §47, §51: a member is keyed `module.member` in `Checked`,
+                    // because that is the name the rest of the program uses.
+                    found = Some((span, Some(module.name.clone())));
+                    break;
+                }
+            }
+        }
+        let (name_span, module) = found?;
         // §50: name resolution rewrites `def.name` to its internal `fileN$name`
         // spelling, so the name the user typed comes from the span the parser
         // recorded rather than from the rewritten field. `Checked` is keyed by
         // that source spelling.
         let text = self.source_of(&file.path)?;
-        let local = def.name_span.line.saturating_sub(file.offset);
+        let local = name_span.line.saturating_sub(file.offset);
         let line_text = text.split('\n').nth(local.saturating_sub(1))?;
-        let start = def.name_span.col.saturating_sub(1);
-        let end = def.name_span.end_col.saturating_sub(1);
+        let start = name_span.col.saturating_sub(1);
+        let end = name_span.end_col.saturating_sub(1);
         if start > end {
             return None;
         }
-        Some(line_text.chars().skip(start).take(end - start).collect())
+        let name: String = line_text.chars().skip(start).take(end - start).collect();
+        Some(match module {
+            Some(module) => format!("{module}.{name}"),
+            None => name,
+        })
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
