@@ -73,3 +73,42 @@ NG: hado build of every accept case links and the executable matches
 PASSED: 2/4
 real	0m55.234s
 ```
+
+工程 3。埋め込んだ木（`94e232b`）で測った（2026-09-22）。`cargo test` の基準値は main と同じコードの worktree `readme-users` で同時刻に測り、どちらも他の走行と CPU を分け合っている。
+
+```
+$ time bash scripts/verify-embed-runtime.sh
+OK: cargo install --path crates/hado into a private root
+OK: the --target-dir of the install is removed
+run: 111 accept cases match their headers (109 expect output)
+OK: hado run of every accept case matches its header outside the checkout
+build: 111 accept cases match their headers (109 expect output)
+OK: hado build of every accept case links and the executable matches
+PASSED: 4/4
+real	1m18.343s
+$ time cargo test --offline 2>&1 | grep -E "^test result" | grep -vc "0 failed"
+0
+real	8m58.740s
+$ time cargo test --offline 2>&1 | grep -E "^test result" | grep -vc "0 failed"    # 基準。main の木、worktree readme-users
+0
+real	7m50.872s
+$ cargo fmt --all --check; echo fmt=$?
+fmt=0
+$ cargo clippy --offline --all-targets -- -D warnings 2>&1 | tail -1
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.99s
+$ bash scripts/verify-cognitive-complexity.sh 2>&1 | tail -1
+PASSED: 3/3
+$ cargo build --offline --release 2>&1 | tail -1; ls -la target/release/hado
+    Finished `release` profile [optimized] target(s) in 1m 01s
+-rwxrwxr-x 2 zyun zyun 18394232 Sep 22 00:17 target/release/hado
+$ ls -la /tmp/claude-1000/-home-zyun-git-local-hado/9e879231-0b7a-468b-bd3a-244a2e3465ca/scratchpad/install/bin/hado    # 埋め込む前の木（1657838）から cargo install --path crates/hado --root した release
+-rwxrwxr-x 1 zyun zyun 10869808 Sep 21 23:52 /tmp/claude-1000/-home-zyun-git-local-hado/9e879231-0b7a-468b-bd3a-244a2e3465ca/scratchpad/install/bin/hado
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 10/10
+$ bash scripts/verify-r42.sh 2>&1 | tail -1
+PASSED: 5/5
+$ bash scripts/corpus-lock.sh --check; echo exit=$?
+exit=0
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
+TALLY: 38/38 passed; red: none
+```
