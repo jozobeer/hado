@@ -639,14 +639,32 @@ impl Server {
     /// and its diagnostics are the merge of the candidates that read it.
     fn analyze(&self) -> BTreeMap<String, Vec<Value>> {
         let overlay = self.overlay();
-        let open: Vec<PathBuf> = self
+        // A load refusal belongs to the analysis root of the entry that found
+        // it. The documents whose analysis uses that root are the entry itself
+        // (when it is open) and the open contracts that selected the entry as a
+        // candidate. A sibling `.hd` is not one of them: its own analysis root is
+        // its own directory, which can load cleanly.
+        let contracts: Vec<(PathBuf, PathBuf)> = self
             .documents
             .values()
-            .map(|document| document.path.clone())
+            .filter(|document| is_extension(&document.path, "hdi"))
+            .map(|document| (document.path.clone(), self.contract_root(&document.path)))
             .collect();
         let mut collected: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
         for entry in self.entry_candidates() {
-            for (path, diagnostic) in diagnostics_of(&entry, &overlay, &open) {
+            let mut recipients: Vec<PathBuf> = contracts
+                .iter()
+                .filter(|(_, root)| component_prefix(root, &entry))
+                .map(|(path, _)| path.clone())
+                .collect();
+            if self
+                .documents
+                .values()
+                .any(|document| document.path == entry)
+            {
+                recipients.push(entry.clone());
+            }
+            for (path, diagnostic) in diagnostics_of(&entry, &overlay, &recipients) {
                 collected.entry(path).or_default().push(diagnostic);
             }
         }
@@ -752,13 +770,20 @@ impl Server {
         }
     }
 
-    /// Deduplicate by URI/line/column/code and order by the checker's stage
-    /// order, so a merge does not depend on which candidate was opened first.
+    /// Deduplicate by URI/line/column/code/message and order by the checker's
+    /// stage order, so a merge does not depend on which candidate was opened
+    /// first. The message is part of the identity: two load refusals of
+    /// different roots share line 1, column 1 and no code, but are distinct.
     fn render(&self, diagnostics: &[Diagnostic], text: &str) -> Vec<Value> {
         let mut ordered: Vec<&Diagnostic> = Vec::new();
         let mut seen = BTreeSet::new();
         for diagnostic in diagnostics {
-            let key = (diagnostic.line, diagnostic.col, diagnostic.code.clone());
+            let key = (
+                diagnostic.line,
+                diagnostic.col,
+                diagnostic.code.clone(),
+                diagnostic.message.clone(),
+            );
             if seen.insert(key) {
                 ordered.push(diagnostic);
             }
@@ -796,7 +821,7 @@ pub fn diagnostic_value(encoding: PositionEncoding, text: &str, error: &Diagnost
 fn diagnostics_of(
     entry: &Path,
     overlay: &project::Overlay,
-    open: &[PathBuf],
+    recipients: &[PathBuf],
 ) -> Vec<(PathBuf, Diagnostic)> {
     match Project::load_with_overlay(entry, overlay) {
         Ok(project) => {
@@ -823,16 +848,15 @@ fn diagnostics_of(
         }
         // §51: an invalid namespace directory is a load refusal, not an E-code.
         // Dropping it here publishes an empty list, so the editor looks clean
-        // while `hado check` refuses. The refusal belongs to the analysis root,
-        // not to the entry that happened to walk it first, so every open
-        // document under that root gets it. A `.hdi` opened on its own is not an
-        // entry, and would otherwise never see the refusal of its candidates.
-        Err(project::LoadError::Input(message)) => {
-            let root = entry.parent().unwrap_or_else(|| Path::new("."));
-            open.iter()
-                .filter(|path| component_prefix(root, path))
-                .map(|path| {
-                    let diagnostic = Diagnostic {
+        // while `hado check` refuses. `recipients` is every open document whose
+        // analysis used this root (the caller decides; a `.hdi` opened on its
+        // own is not an entry, and would otherwise never see it).
+        Err(project::LoadError::Input(message)) => recipients
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    Diagnostic {
                         related: None,
                         path: path
                             .file_name()
@@ -844,11 +868,10 @@ fn diagnostics_of(
                         end_col: 1,
                         code: None,
                         message: message.clone(),
-                    };
-                    (path.clone(), diagnostic)
-                })
-                .collect()
-        }
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
