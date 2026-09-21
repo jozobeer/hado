@@ -1,8 +1,14 @@
 use crate::lexer::{Tok, TokKind};
 use crate::parser::{Ast, Diagnostic, Related, Span};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+
+/// The text of documents the caller holds open but has not saved (§58). Keys
+/// are the paths the project enumerates, so an entry is overridden only when
+/// the same path is also part of the project. `read_file` uses this text
+/// instead of disk: an editor's unsaved buffer is what the checker must see.
+pub type Overlay = HashMap<PathBuf, String>;
 
 #[derive(Clone)]
 struct SourceFile {
@@ -30,7 +36,14 @@ pub struct Project {
 
 impl Project {
     pub fn load(entry: &Path) -> Result<Self, LoadError> {
-        let (token_files, directories) = read_files(entry)?;
+        Self::load_with_overlay(entry, &Overlay::new())
+    }
+
+    /// §58: `load`, reading a source through `overlay` when the overlay holds
+    /// its path. The LSP checks a document the editor has not saved, so the
+    /// bytes behind a position must come from the overlay rather than disk.
+    pub fn load_with_overlay(entry: &Path, overlay: &Overlay) -> Result<Self, LoadError> {
+        let (token_files, directories) = read_files(entry, overlay)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
@@ -131,6 +144,42 @@ impl Project {
     /// passed and there is a type, `None` says there is one.
     pub fn is_library(&self) -> bool {
         self.parsed.inspection == crate::Inspection::Library
+    }
+
+    /// §58: the name of the top-level `def` whose name span contains the
+    /// 1-based scalar position (`line`, `col`) of the file at `physical`, or
+    /// `None` when the position is not on one. The span is compared in the
+    /// file's own coordinates, so the cursor of an open document finds its own
+    /// definition whatever else the project read.
+    pub fn def_name_at(&self, physical: &Path, line: usize, col: usize) -> Option<String> {
+        let file = self
+            .files
+            .iter()
+            .find(|file| file.physical.as_path() == physical)?;
+        let line = line + file.offset;
+        let def = self.parsed.ast.items.iter().find_map(|item| match item {
+            crate::parser::Item::Def(def)
+                if def.name_span.line == line
+                    && def.name_span.col <= col
+                    && col < def.name_span.end_col =>
+            {
+                Some(def)
+            }
+            _ => None,
+        })?;
+        // §50: name resolution rewrites `def.name` to its internal `fileN$name`
+        // spelling, so the name the user typed comes from the span the parser
+        // recorded rather than from the rewritten field. `Checked` is keyed by
+        // that source spelling.
+        let text = self.source_of(&file.path)?;
+        let local = def.name_span.line.saturating_sub(file.offset);
+        let line_text = text.split('\n').nth(local.saturating_sub(1))?;
+        let start = def.name_span.col.saturating_sub(1);
+        let end = def.name_span.end_col.saturating_sub(1);
+        if start > end {
+            return None;
+        }
+        Some(line_text.chars().skip(start).take(end - start).collect())
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
@@ -429,6 +478,48 @@ pub fn source_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
         .collect())
 }
 
+/// §58: the `.hd` files under `root`, in byte order of their relative paths.
+/// The LSP takes the entries a contract can belong to from these; enumeration
+/// is disk-based, while the text of any of them that is open comes from the
+/// overlay. `root` is a folder a user opened, not necessarily a hado project,
+/// so a name §50 would reject and a directory that cannot be listed are passed
+/// over rather than hiding the rest of the tree.
+pub fn hd_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    collect_hd_files(root, &mut paths);
+    paths.sort_by(|a, b| {
+        relative_source(a, root)
+            .as_os_str()
+            .as_encoded_bytes()
+            .cmp(relative_source(b, root).as_os_str().as_encoded_bytes())
+    });
+    paths
+}
+
+fn collect_hd_files(directory: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name();
+        let bytes = name.as_encoded_bytes();
+        if bytes.starts_with(b".") {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            if bytes.starts_with(b"__") {
+                continue;
+            }
+            collect_hd_files(&path, paths);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("hd") {
+            paths.push(path);
+        }
+    }
+}
+
 /// §58.2: the tests of the project: the root directory's `*_test.hd`, in the
 /// order the checker reads them. A test needs `main`, and only a root file can
 /// hold one (§50, §52), so the subdirectories contribute none.
@@ -473,22 +564,36 @@ fn collect_paths(entry: &Path) -> Result<CollectedPaths, LoadError> {
     Ok((root, paths, directories))
 }
 
-fn read_files(entry: &Path) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
+fn read_files(
+    entry: &Path,
+    overlay: &Overlay,
+) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
     let (root, paths, directories) = collect_paths(entry)?;
     let mut files = Vec::new();
     let mut offset = 0;
     for path in paths {
-        let file = read_file(&path, &root, offset)?;
+        let file = read_file(&path, &root, offset, overlay)?;
         offset = file.tokens.last().unwrap().span.line + 1;
         files.push(file);
     }
     Ok((files, directories))
 }
 
-fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagnostic> {
+fn read_file(
+    path: &Path,
+    root: &Path,
+    offset: usize,
+    overlay: &Overlay,
+) -> Result<TokenFile, Diagnostic> {
     let relative = relative_source(path, root);
     let display = relative.to_string_lossy().into_owned();
-    let text = std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?;
+    // §58: an open document is read from the overlay; anything else comes from
+    // disk. `collect_paths` already enumerated the paths, so the overlay only
+    // replaces the text of a file that is part of the project.
+    let text = match overlay.get(path) {
+        Some(text) => text.clone(),
+        None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
+    };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
         related: None,
         path: display.clone(),
@@ -669,7 +774,7 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
 /// The 1-based line and column (in Unicode scalars, §50) of a byte offset.
 /// The count is the lexer's own: a `\n` ends the line, every other scalar is
 /// one column.
-fn position_at(source: &str, offset: usize) -> (usize, usize) {
+pub fn position_at(source: &str, offset: usize) -> (usize, usize) {
     let mut line = 1;
     let mut col = 1;
     for character in source[..offset.min(source.len())].chars() {

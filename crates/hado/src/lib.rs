@@ -4,6 +4,7 @@ mod file_scopes;
 pub mod fixes;
 mod functor_instances;
 pub mod lexer;
+pub mod lsp;
 mod namespaces;
 pub mod parser;
 pub mod project;

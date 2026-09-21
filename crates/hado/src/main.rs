@@ -41,9 +41,26 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     if !matches!(
         command,
-        "check" | "dump-mono" | "build" | "run" | "fmt" | "test"
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp"
     ) {
         return Err(usage_error());
+    }
+    // §58: `lsp` speaks JSON-RPC on stdin and stdout and takes no file.
+    if command == "lsp" {
+        if args.len() != 1 {
+            return Err(usage_error());
+        }
+        return Ok(Cli {
+            command,
+            print: false,
+            type_name: None,
+            fix: false,
+            check_only: false,
+            show_all: false,
+            output: None,
+            path: None,
+            program_args: Vec::new(),
+        });
     }
     let mut cli = Cli {
         command,
@@ -163,6 +180,10 @@ fn value_after<'a>(rest: &'a [String], index: &mut usize) -> Result<&'a str, Exi
 }
 
 fn run(cli: &Cli<'_>) -> ExitCode {
+    // §58: the LSP reads and writes the protocol streams, not a source file.
+    if cli.command == "lsp" {
+        return ExitCode::from(hado::lsp::serve() as u8);
+    }
     let input = match input_path(cli) {
         Ok(input) => input,
         Err(code) => return code,
@@ -533,6 +554,6 @@ fn print_type(
 
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd>"
+        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | lsp"
     );
 }
