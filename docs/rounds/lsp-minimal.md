@@ -584,3 +584,33 @@ settle のループ）。門番は「ある版の後にそれより古い版が�
 （`crates/hado/tests/lsp_protocol.rs`）で祖先を辿ることを固定した。このテストは
 変異 6 で赤になる。門番の `contract-hdi` は根を明示する 4 つの対照
 （契約だけ・入れ子・実装と同時・根を渡さない入れ子）を持ち、うち 3 つが緑になる。
+
+### 着地前の全走（2026-09-21）
+
+main は `fb1c29d` で、この枝はその上にある（`git merge-base --is-ancestor main HEAD`
+が真）。取り込むものが無いので `git merge main` は不要で、lock に差分は無い。
+
+```
+$ bash scripts/corpus-lock.sh --check
+（差分なし）
+
+$ bash scripts/lint-docs.sh
+PASSED: 10/10
+
+$ cargo test --offline
+test result: ok. ... （69 本すべて ok、rc=0）
+```
+
+層別。quick は 38/38、core は 600/600 で、どちらも `red: none`。
+
+```
+$ bash scripts/run-gates.sh --tier quick <out>
+TALLY: 38/38 passed; red: none
+
+$ bash scripts/run-gates.sh --tier core <out>
+TALLY: 600/600 passed; red: none
+```
+
+core を最初に回したときは `verify-cognitive-complexity` が赤だった。J2〜J4 と LSP で
+足した分岐が `def_name_at`・`check_command`・`take_option` を閾値（7）の上へ押し出して
+いたので、3 つとも切り出して下へ戻した（`5de6ccf`）。
