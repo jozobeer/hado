@@ -31,7 +31,7 @@ fn uri(path: &Path) -> String {
 }
 
 /// Opens only the contract and asks for the hover at (`line`, `character`),
-/// 0-based in UTF-16 as the default encoding. Returns the hover result.
+/// 0-based in UTF-16 as the default encoding.
 fn hover_on_contract(root: &Path, contract: &str, text: &str, line: u64, character: u64) -> Value {
     let mut server = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("lsp")

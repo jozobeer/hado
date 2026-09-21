@@ -296,7 +296,7 @@ fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
             } else if let Some(name) = cli.type_name {
                 // §58.3: a name that is not there is `no definition named`; a
                 // name whose inference failed (Q2) is there but has no type to
-                // print. Both end with exit code 1.
+                // print.
                 let message = if checked.type_of(name).is_some() {
                     "no type for"
                 } else {
