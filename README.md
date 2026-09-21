@@ -68,7 +68,7 @@ main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let 
 
 ## エディタ（Neovim）
 
-`hado lsp` は LSP を stdio で話す。Neovim 0.12 の組み込み client から使う。設定は数行で、`vim.lsp.config` に `cmd` と filetype を渡して `vim.lsp.enable` で有効にする。
+`hado lsp` は LSP を stdio で話す。Neovim 0.12 の組み込み client から使う。
 
 ```lua
 vim.filetype.add({ extension = { hd = "hado", hdi = "hado" } })
@@ -79,7 +79,7 @@ vim.lsp.config("hado", {
 vim.lsp.enable("hado")
 ```
 
-`scripts/hado-lsp.sh` は自分の位置からリポジトリ根を求め、`cargo run --offline -q -- lsp` を実行する。`hado` を `PATH` に置く必要は無い（`<checkout>` はこのリポジトリの絶対パスに置き換える）。
+`<checkout>` はこのリポジトリの絶対パスに置き換える。`hado` を `PATH` に置く必要は無い。
 
 診断・hover（カーソル下の最上位 `def` の型）・「正準形へ置換」の code action の 3 つが効く。code action は `check --fix` と同じ書き換えを返す。`.hdi` の契約も `hado` として開き、診断と hover を返す（契約には書き換え対象の式が無いので code action は空になる）。補完・rename・go to definition は入っていない。
 
