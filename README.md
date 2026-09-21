@@ -37,7 +37,7 @@ $ cargo run --offline -q -- run tests/accept/create_user/main.hd
 ok
 ```
 
-`hado` を `PATH` に置くなら `cargo install --offline --path crates/hado` で `~/.cargo/bin/hado` に入る。入れた `hado` は checkout と `target/` に依存しない（prelude とランタイムは埋め込み）。使う環境にも `cc` と `libgc-dev` は要る。以後の `cargo run --offline -q --` は `hado` に読み替える。
+`hado` を `PATH` に置くなら `cargo install --locked --offline --path crates/hado` で `~/.cargo/bin/hado` に入る。`--locked` は `Cargo.lock` の版で作るためで、無いと `cargo install` は lock を無視して解決し直す。入れた `hado` は checkout と `target/` に依存しない（prelude とランタイムは埋め込み）。使う環境にも `cc` と `libgc-dev` は要る。以後の `cargo run --offline -q --` は `hado` に読み替える。
 
 自分のプログラムを書く手順は [docs/getting-started.md](docs/getting-started.md)。
 
