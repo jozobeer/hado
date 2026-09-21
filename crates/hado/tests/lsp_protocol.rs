@@ -4,8 +4,9 @@
 //! must count bytes, and `initialize` must advertise one encoding.
 
 use hado::lsp::{
-    decode_position, encode_position, frame_message, initialize_result, normalize_path,
-    read_message, scalar_to_byte, scalar_to_utf16, units_before, uri_to_path, PositionEncoding,
+    decode_position, encode_position, frame_message, initialize_result, library_root,
+    normalize_path, read_message, scalar_to_byte, scalar_to_utf16, units_before, uri_to_path,
+    PositionEncoding,
 };
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -168,4 +169,35 @@ fn normalize_path_removes_dot_components() {
         normalize_path(std::path::Path::new("/tmp/./a/../b.hd")),
         PathBuf::from("/tmp/b.hd")
     );
+}
+
+#[test]
+fn library_root_walks_up_to_the_directory_declaring_library() {
+    // §58.5: with no workspace folder and no `rootUri`, the entry candidates for
+    // a `.hdi` opened on its own come from the outermost ANCESTOR that declares
+    // `library`. A nested contract must not be rooted at its own directory, or
+    // no `.hd` candidate is found and the contract gets no diagnostics.
+    let base = std::env::temp_dir().join(format!("hado-lsp-root-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("api")).unwrap();
+    std::fs::write(base.join("root.hd"), "library\n").unwrap();
+    std::fs::write(base.join("main.hd"), "def use (x: Int) => x\n").unwrap();
+    std::fs::write(
+        base.join("api/store.hdi"),
+        "module M\ndef f (x: Int): Int\n",
+    )
+    .unwrap();
+
+    let root = library_root(&base.join("api/store.hdi"));
+    assert_eq!(
+        root, base,
+        "the root must be the ancestor declaring `library`, not the contract's own directory"
+    );
+
+    // With no `library` anywhere above it, the contract's own directory is used.
+    std::fs::remove_file(base.join("root.hd")).unwrap();
+    let root = library_root(&base.join("api/store.hdi"));
+    assert_eq!(root, base.join("api"));
+
+    let _ = std::fs::remove_dir_all(&base);
 }

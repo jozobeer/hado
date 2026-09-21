@@ -849,7 +849,7 @@ fn component_prefix(prefix: &Path, path: &Path) -> bool {
 /// The outermost ancestor of the contract that declares `library`, else the
 /// contract's own directory. A `.hd` with a `library` declaration is an
 /// analysis root; it is never built, so no E206 is raised for it.
-fn library_root(contract: &Path) -> PathBuf {
+pub fn library_root(contract: &Path) -> PathBuf {
     let parent = contract.parent().unwrap_or_else(|| Path::new("."));
     let mut root = parent.to_path_buf();
     for ancestor in parent.ancestors() {
