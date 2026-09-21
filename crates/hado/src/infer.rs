@@ -46,6 +46,7 @@ struct Checker<'a> {
     constructors: HashMap<String, Scheme>,
     records: HashMap<String, (Vec<String>, Scheme)>,
     modules: HashMap<String, HashMap<String, Scheme>>,
+    contracts: HashMap<String, HashMap<String, Scheme>>,
     abstract_types: HashMap<String, (usize, String)>,
     projections: Vec<(Ty, FieldName, Ty, Span)>,
     comparison_constraints: Vec<ComparisonConstraint>,
@@ -135,6 +136,7 @@ pub(crate) fn infer_with_diagnostics(
         constructors: HashMap::new(),
         records: HashMap::new(),
         modules: HashMap::new(),
+        contracts: HashMap::new(),
         abstract_types: HashMap::new(),
         projections: Vec::new(),
         comparison_constraints: Vec::new(),
@@ -190,6 +192,7 @@ pub(crate) fn infer_with_diagnostics(
             named_constructors: checker.named_constructors.clone(),
             module_definitions: checker.module_definitions.clone(),
             modules: checker.modules.clone(),
+            contracts: checker.contracts.clone(),
             constructor_tags: checker.constructor_tags.clone(),
             constructors: checker.constructors.clone(),
             records: checker.records.clone(),
@@ -475,6 +478,7 @@ impl Checker<'_> {
         self.check_realization_cycles(&ast.items);
         self.check_comparison_constraints();
         self.check_row_constraints();
+        self.collect_contract_exports(&signatures);
         self.finish_main(ast, definitions, inspection)
     }
 
@@ -832,6 +836,61 @@ impl Checker<'_> {
             }
         }
         Ok(exports)
+    }
+
+    /// §58.3: the type each contract declares for its members, spelled from the
+    /// contract alone. `modules` holds the same declarations as one
+    /// implementation instantiates them (`Mem.T`, `shared` revealed), so a
+    /// contract with no implementation, or with several, has no entry there.
+    /// Here the contract's own abstract types read `Store.T`, and the result is
+    /// the same whichever implementations the program has (§58.5: what a
+    /// contract's hover shows does not depend on the entry that read it). A
+    /// member whose declaration does not resolve is left out; its diagnostic
+    /// belongs to the stages that already own it, so nothing is reported here.
+    fn collect_contract_exports(
+        &mut self,
+        signatures: &HashMap<String, &crate::parser::ModuleSig>,
+    ) {
+        for (name, signature) in signatures {
+            if self.ambiguous_signatures.contains(name) {
+                continue;
+            }
+            let exports = self.contract_exports(signature);
+            self.contracts.insert(name.clone(), exports);
+        }
+    }
+
+    fn contract_exports(
+        &mut self,
+        signature: &crate::parser::ModuleSig,
+    ) -> HashMap<String, Scheme> {
+        // The arity check in `annotation_inner` reads `abstract_types`, so the
+        // contract's own types are registered for the duration and taken back
+        // after: an annotation outside the contract must not resolve `Store.T`
+        // through here.
+        let saved_abstract_types = self.abstract_types.clone();
+        let mut abstracts = HashMap::new();
+        for item in &signature.items {
+            if let Item::TypeDef(def) = item {
+                let qualified = format!("{}.{}", signature.name, def.name);
+                self.abstract_types
+                    .insert(qualified.clone(), (def.params.len(), qualified.clone()));
+                abstracts.insert(def.name.clone(), Ty::Abstract(qualified, vec![]));
+            }
+        }
+        let mut exports = HashMap::new();
+        for item in &signature.items {
+            let Item::SigDef(member) = item else { continue };
+            let mut parameters = abstracts.clone();
+            for parameter in &member.type_params {
+                parameters.insert(parameter.name.clone(), self.inference.fresh());
+            }
+            if let Ok(ty) = self.signature_type(member, &parameters, true) {
+                exports.insert(member.name.clone(), self.inference.generalize(&ty, &[]));
+            }
+        }
+        self.abstract_types = saved_abstract_types;
+        exports
     }
 
     fn infer_module_items<'a>(

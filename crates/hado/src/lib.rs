@@ -75,6 +75,8 @@ pub struct Checked {
     pub module_definitions: std::collections::HashMap<String, types::Scheme>,
     pub modules:
         std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
+    pub contracts:
+        std::collections::HashMap<String, std::collections::HashMap<String, types::Scheme>>,
     pub constructor_tags: std::collections::HashMap<String, u32>,
     pub constructors: std::collections::HashMap<String, types::Scheme>,
     pub records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
@@ -146,7 +148,8 @@ impl Checked {
     }
 
     /// The scheme behind a name: the entry file's own outer `def`s first (§50),
-    /// then the implementations' members (`lib::Util.helper`, `List.map`).
+    /// then the implementations' members (`lib::Util.helper`, `List.map`), then
+    /// the members a contract declares under its own name (`Store.find`).
     /// `has_type` and `type_of` share this lookup so that a name either has a
     /// type or is reported missing, never both.
     fn scheme_of(&self, name: &str) -> Option<&types::Scheme> {
@@ -156,9 +159,14 @@ impl Checked {
         // §47, §51: a member `A.name` has the type its contract declares, which
         // is the one the source can use at that name. An implementation's own
         // type may be more polymorphic (E602 requires it to be), and its extra
-        // definitions are not visible outside at all (E204).
+        // definitions are not visible outside at all (E204). A contract's own
+        // name reaches the declaration whether or not it has an implementation
+        // (§58.5: hover on a `.hdi`).
         let (module, member) = name.rsplit_once('.')?;
-        self.modules.get(module)?.get(member)
+        self.modules
+            .get(module)
+            .and_then(|members| members.get(member))
+            .or_else(|| self.contracts.get(module)?.get(member))
     }
 }
 

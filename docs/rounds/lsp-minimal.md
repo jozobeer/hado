@@ -226,6 +226,18 @@ builder が設計を決めたら、ここに決定と理由を書く。
   `--print-type` が `no type for` で落ちていた（`verify-r55.sh` の 55-e が赤）。同じ探索に
   乗せて直し、無い名前は §58.3 の `no definition named`、推論が失敗した名前（Q2）だけが
   `no type for` になる。
+- **D9. 契約が宣言するメンバの型は、契約名で鍵付けした `Checked.contracts` に契約だけから
+  作る。** `Checked.modules` は同じ宣言を実装ごとに実体化した形（抽象型は `Mem.T`、
+  `shared` は解けた型）で持つので、実装が 0 の契約（ライブラリの公開面。§39・§52）と
+  実装が 2 つ以上の契約には引ける鍵が無い。`contracts` は契約自身の抽象型を `Store.T` と
+  綴り、他の契約の `X.T` は `contract_types` の束縛のまま解く（実装がちょうど 1 つでなければ
+  `Error` で、hover は `null`）。探索順は最上位の `def` → 実装名 → 契約名。診断は 1 件も
+  足さない（宣言が解けないメンバは表に無いだけで、その診断は既存の段階が持つ）。
+  理由: §58.5 は契約の URI の結果が候補の順序に依らないことを求め、契約だけから作った
+  型は実装の個数と名前に依らない。同名の実装（`implement Store as Store`）が `shared type
+  T = Int` を持つときは実装名の表が先に当たり、契約の hover も解けた型（`Int Option`）を
+  出す。CLI の `--print-type=Store.find` と hover が同じ 1 つの経路なので、J4 の一致は
+  保たれる。
 
 ### 工程
 
@@ -291,6 +303,15 @@ builder が見つけた疑義をここに書く（上の「前提のずれ」は
   `Err` 経路を使う」という記述は前提がずれているが（上の「前提のずれ」）、経路で分ける
   方針はそのずれに影響されない。
 
+- **Q3. §58.3 の「`<契約名>.<member>`」は実装名で引いており、実装 0 のときの抽象型の
+  綴りが仕様に無い。** §58.3 は `lib::Util.helper` の `Util` を契約名と呼ぶが、値の参照は
+  実装の名前で行い（§47）、`implement Store as Mem` なら源の綴りは `Mem.find` である。
+  着手時の実装は実装名でしか引けず、契約名 `Store.find` は「無い名前」だった。§58.5 は
+  契約の URI に hover を返すと定めるので、D9 で契約名でも引けるようにしたが、契約名で
+  引いたときに抽象型を `Store.T` と綴ること、`shared` を解かないこと、同名の実装があれば
+  実装名の表が先に当たることは、仕様のどこにも書かれていない。決着は人の判断待ちで、
+  仕様本文の改稿は工程 5 に含める。
+
 ## 系譜
 
 | 仕様の節 | 要求 | 種別 | 判定 | 根拠 |
@@ -305,6 +326,7 @@ builder が見つけた疑義をここに書く（上の「前提のずれ」は
 | §58.3 | 網羅性・冗長・単相化で止まっていても型を返す | 型の印字 | 拒否 | J4 |
 | §58.4 | `end_line` `end_col`、`--show-all` | 診断の出力 | 拒否 | J2、J3 |
 | §58 の新しい小節 | 診断・hover・code action、lifecycle、position encoding、契約の URI | LSP | 受理・拒否 | J5〜J10 |
+| §58.5 | 契約の URI の hover は、実装の有無と個数に依らず契約が宣言する型 | LSP | 受理 | J8、`crates/hado/tests/lsp_hover_contract.rs`、`print_type_members.rs` |
 
 ## 実測
 
@@ -426,4 +448,38 @@ NG: 55-e an implementation member is printed by name
 PASSED: 6/7
 $ bash scripts/verify-r55.sh | tail -1         # 直した後
 PASSED: 7/7
+```
+
+### 契約のメンバの型の実測（2026-09-21）
+
+J8（契約の hover）。契約だけを開き（`.hd` は開かない）、`rootUri` を作業ディレクトリに
+した生の JSON-RPC で `good` の位置に hover を送る。返る型は `check --print-type=<契約名>.
+<member>` と同じで、入れ子の契約は祖先の `.hd` を入口にして `api::M.good` で引ける。
+
+```
+$ python3 hover.py <flat> store.hdi 2 4        # type T = | A | B / module M / def good (x: Int): T
+{"id": 2, "jsonrpc": "2.0", "result": {"contents": {"kind": "plaintext", "value": "Fn(Int => T {A})"}}}
+$ python3 hover.py <nested> api/store.hdi 2 4
+{"id": 2, "jsonrpc": "2.0", "result": {"contents": {"kind": "plaintext", "value": "Fn(Int => api::T {A})"}}}
+$ cargo run --offline -q -- check --print-type=M.good <flat>/main.hd
+Fn(Int => T {A})
+$ cargo run --offline -q -- check --print-type=api::M.good <nested>/main.hd
+Fn(Int => api::T {A})
+```
+
+抽象型を持つ契約 `Store`（`type T`、`type A Box`、`def A find(id: Int, x: A): T Option`）を
+実装 0・1（`Mem`）・2（`Mem` と `Disk`）・同名 `shared` で測る。契約名の印字は実装の個数に
+依らず、実装名の印字は実装ごとに変わる（D9）。
+
+```
+$ cargo run --offline -q -- check --print-type=Store.find <実装 0>/main.hd
+Fn(Int, A => Store.T Option {B})
+$ cargo run --offline -q -- check --print-type=Store.find <実装 1>/main.hd
+Fn(Int, A => Store.T Option {B})
+$ cargo run --offline -q -- check --print-type=Mem.find <実装 1>/main.hd
+Fn(Int, A => Mem.T Option {B})
+$ cargo run --offline -q -- check --print-type=Store.find <実装 2>/main.hd
+Fn(Int, A => Store.T Option {B})
+$ cargo run --offline -q -- check --print-type=Store.find <implement Store as Store, shared type T = Int>/main.hd
+Fn(Int, A => Int Option {B})
 ```
