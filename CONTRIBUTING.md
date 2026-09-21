@@ -8,11 +8,11 @@
 
 ```
 cargo test --offline                     # 単体テストとコーパス判定
-scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い門番（≦ 2 分）
-scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
-scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
-scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
-scripts/run-gates.sh --jobs 8 --tier full 出力先 # 同じ判定を 8 並列で（既定 1=直列）
+bash scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い門番（≦ 2 分）
+bash scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
+bash scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
+bash scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
+bash scripts/run-gates.sh --jobs 8 --tier full 出力先 # 同じ判定を 8 並列で（既定 1=直列）
 bash scripts/verify-m0.sh                # 門番は単独でも走る
 cargo fmt --all --check                  # 整形。verify-rustfmt（quick）と同じ
 cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（core）と同じ
