@@ -898,7 +898,7 @@ impl Parser<'_> {
         let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
         if self.kind() == &TokKind::Pipe {
-            let (params, body) = self.parse_arm_function(span)?;
+            let (params, body) = self.parse_arm_function(span, name_span)?;
             return Ok(Item::Def(Def {
                 name,
                 name_span,
@@ -2239,12 +2239,19 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_arm_function(&mut self, span: Span) -> Result<(Vec<Param>, Node), Diagnostic> {
+    fn parse_arm_function(
+        &mut self,
+        span: Span,
+        name_span: Span,
+    ) -> Result<(Vec<Param>, Node), Diagnostic> {
         // This name cannot occur in source, so lowering cannot capture a user binding.
         let name = "$argument".to_string();
+        // The scrutinee stands for the definition's own name, so it carries the
+        // name's span rather than the whole `def`: the rewrites (§57) read the
+        // source at that position to spell the parameter back.
         let scrutinee = Node {
             kind: NodeKind::Name(name.clone()),
-            span,
+            span: name_span,
         };
         let body = self.parse_pattern_branch(span, vec![scrutinee])?;
         Ok((
@@ -2466,7 +2473,9 @@ impl Parser<'_> {
         self.bump();
         self.expect(&TokKind::LParen)?;
         let (params, body) = if self.kind() == &TokKind::Pipe {
-            self.parse_arm_function(span)?
+            // An anonymous `fn` has no name to read back, so the scrutinee keeps
+            // the `fn` keyword's span.
+            self.parse_arm_function(span, span)?
         } else {
             let params = self.parse_lambda_params()?;
             let body = self.parse_function_body(span)?;

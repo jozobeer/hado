@@ -425,6 +425,16 @@ fn catch_all_range(
     branches: &[(Span, Span, Span)],
 ) -> Option<usize> {
     let (_, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    // The arm forms (§31, §32) carry `$argument` as their scrutinee and their
+    // branch spans the whole definition, so the range below would run past the
+    // arm's own body. They have their own rewrites (E515/E517).
+    if matches!(&node.kind, NodeKind::PatternBranch { scrutinees, .. }
+        if scrutinees
+            .iter()
+            .any(|s| matches!(&s.kind, NodeKind::Name(name) if name == "$argument")))
+    {
+        return None;
+    }
     // A comment would be lost, and a `let` could bind the same name again.
     if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
         return None;
@@ -1459,7 +1469,10 @@ fn branch_range(
         }
         close?
     } else {
-        trim_back(source, lines.offset(source, after))
+        // `after` is the branch's LAST token, so its own end is the end of the
+        // branch. Taking only its start would leave that token outside the
+        // rewrite (`if b | true => 1 | false => 0` lost its trailing `0`).
+        trim_back(source, lines.end_offset(source, after))
     };
     (start <= end).then_some((start, end))
 }
@@ -1899,6 +1912,19 @@ impl LineMap {
     }
 
     /// The byte offset of a 1-based line / column span. `col` counts characters.
+    /// The byte offset just past `span` (its exclusive end), in the same line
+    /// table. §58.4 の終端と同じく、対象の最後のスカラの次を指す。
+    fn end_offset(&self, source: &str, span: Span) -> usize {
+        let Some(&start) = self.starts.get(span.end_line.saturating_sub(1)) else {
+            return source.len();
+        };
+        source[start..]
+            .char_indices()
+            .nth(span.end_col.saturating_sub(1))
+            .map(|(at, _)| start + at)
+            .unwrap_or(source.len())
+    }
+
     fn offset(&self, source: &str, span: Span) -> usize {
         let Some(&start) = self.starts.get(span.line.saturating_sub(1)) else {
             return source.len();
