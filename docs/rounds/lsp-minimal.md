@@ -327,3 +327,86 @@ rc=0
 $ nvim --headless -u NONE -i NONE -c 'lua local c = vim.lsp.protocol.make_client_capabilities(); print(vim.fn.has("nvim-0.12"), vim.lsp.config ~= nil, vim.lsp.enable ~= nil, vim.lsp.start ~= nil, vim.inspect(c.general.positionEncodings))' -c 'qa!'
 1 true true true { "utf-8", "utf-16", "utf-32" }
 ```
+
+### 実装の実測（2026-09-21）
+
+J2（`--show-all`）。同じ段階の E505 を 2 件持つ入力を門番と同じ形で生成し、
+既定が 1 件、`--show-all` が全件をアンカー順に出すことを見る。
+
+```
+$ cargo run --offline -q -- check --format json <2 件の E505>/main.hd
+{"path": "main.hd", "line": 2, "col": 7, ..., "code": "E505", "message": "binding unusedA is unused", ...}
+$ cargo run --offline -q -- check --show-all --format json <同>/main.hd
+{"path": "main.hd", "line": 2, "col": 7, ..., "code": "E505", "message": "binding unusedA is unused", ...}
+{"path": "main.hd", "line": 5, "col": 7, ..., "code": "E505", "message": "binding unusedB is unused", ...}
+```
+
+段階をまたぐ対照。独立な E204（名前解決）と E505（冗長）を持つ 1 ファイルでは、
+`--show-all` でも最初の段階の E204 だけが出る。E602（型）と E402（網羅性）でも
+同じで、E602 だけが出る。
+
+```
+$ cargo run --offline -q -- check --show-all --format json <E602 と E402>/main.hd
+{"path": "main.hd", "line": 4, "col": 1, ..., "code": "E602", "message": "missing signature member", "related": {"path": "main.hd", "line": 3, "col": 5, "label": "declared in the contract"}}
+```
+
+J3（終端）。E507 は `def f`（3 行目）から `| None => None`（5 行目）までを覆い、
+issue の完了条件の逐語と一致する。書き換えの無い E402 は開始と同じ位置で終わる。
+
+```
+$ cargo run --offline -q -- check --format json tests/reject/E507/main.hd
+{"path": "main.hd", "line": 3, "col": 1, "end_line": 5, "end_col": 12, "code": "E507", ...}
+$ cargo run --offline -q -- check --format json tests/reject/E402/main.hd
+{"path": "main.hd", "line": 4, "col": 3, "end_line": 4, "end_col": 3, "code": "E402", ...}
+```
+
+J4（止まっていても型を返す）。E4xx・E5xx・E6xx では診断と型の両方、E1xx・E2xx・
+E3xx では診断だけを出す。
+
+```
+$ cargo run --offline -q -- check --print-type tests/reject/E402/main.hd
+main.hd:4:3: error[E402]: not all constructor values are covered
+Int
+$ cargo run --offline -q -- check --print-type tests/reject/E505/main.hd
+main.hd:4:7: error[E505]: binding unused is unused
+Int
+$ cargo run --offline -q -- check --print-type tests/reject/E602/main.hd
+main.hd:8:1: error[E602]: missing signature member; declared in the contract at main.hd:7:5
+Int
+$ cargo run --offline -q -- check --print-type tests/reject/E301/main.hd
+main.hd:6:12: error[E301]: cannot unify Fn(Int, Int => Int {A}) with Fn(Int, Int, Int => B {C})
+```
+
+J7・J9（lifecycle と符号化）。標準入出力に直接入力を送り、応答を読む。
+
+```
+$ printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | cargo run --offline -q -- lsp
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"codeActionProvider":true,"hoverProvider":true,"positionEncoding":"utf-16","textDocumentSync":1}}}
+```
+
+`positionEncodings` に `["utf-8","utf-16"]` を出す initialize では `utf-8` を広告し、
+`shutdown` が `null` を返し、`exit` で終了コード 0 になる。
+
+J5・J10（未保存の本文・hover・code action）。作業ディレクトリに `.hd` を生成し、
+`didOpen` の後に hover と code action を送る。hover は `check --print-type=target`
+と同じ型を返し、code action の編集を本文に適用した結果は `check --fix` とバイト
+一致する。
+
+```
+{"method":"textDocument/publishDiagnostics","params":{"diagnostics":[{"code":"E520","range":{"end":{"character":53,"line":1},"start":{"character":24,"line":1}},"severity":1,"source":"hado"}],"uri":".../lsp_e2e.hd","version":1}}
+{"id":10,"jsonrpc":"2.0","result":{"contents":{"kind":"plaintext","value":"Fn(Bool => Int {A})"}}}
+{"id":11,"jsonrpc":"2.0","result":[{"edit":{"changes":{".../lsp_e2e.hd":[{"newText":"if b => 1 | 0","range":{"end":{"character":53,"line":1},"start":{"character":24,"line":1}}}]}},"kind":"quickfix","title":"if b => 1 | 0"}]}
+$ cargo run --offline -q -- check --print-type=target <同>/lsp_e2e.hd
+Fn(Bool => Int {A})
+$ cmp <code action を適用した本文> <check --fix を適用した本文> && echo BYTE-IDENTICAL
+BYTE-IDENTICAL
+```
+
+途中で見つけた既存の不具合。`branch_range` が枝の最後のトークンの開始を終端に
+していたので、`check --fix` が `if b | true => 1 | false => 0` を `if b => 1 | 0 0`
+にしていた（末尾の `0` が余る）。直した後は正しい `if b => 1 | 0` になる。
+
+```
+$ cargo run --offline -q -- check --fix <E520 の入力>/main.hd; sed -n 1p <同>/main.hd
+def target (b: Bool) => if b => 1 | 0
+```
