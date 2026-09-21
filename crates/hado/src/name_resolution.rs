@@ -141,6 +141,8 @@ impl Resolver<'_> {
             path: self.path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some(code.into()),
             message: format!("invalid name reference {name}"),
         });

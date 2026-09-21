@@ -1,7 +1,14 @@
 use crate::lexer::{Tok, TokKind};
 use crate::parser::{Ast, Diagnostic, Related, Span};
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+
+/// The text of documents the caller holds open but has not saved (§58). Keys
+/// are the paths the project enumerates, so an entry is overridden only when
+/// the same path is also part of the project. `read_file` uses this text
+/// instead of disk: an editor's unsaved buffer is what the checker must see.
+pub type Overlay = HashMap<PathBuf, String>;
 
 #[derive(Clone)]
 struct SourceFile {
@@ -14,16 +21,29 @@ struct SourceFile {
 struct TokenFile {
     source: SourceFile,
     tokens: Vec<Tok>,
+    text: String,
 }
 
 pub struct Project {
     parsed: crate::ParsedSource,
     files: Vec<SourceFile>,
+    /// §58.4: the sources as they were read, so a diagnostic's end can be
+    /// resolved without reading the file again. The LSP checks a document that
+    /// is not on disk, so the bytes behind a position must travel with the
+    /// project rather than be fetched by path afterwards.
+    sources: RefCell<Vec<(String, std::rc::Rc<String>)>>,
 }
 
 impl Project {
     pub fn load(entry: &Path) -> Result<Self, LoadError> {
-        let (token_files, directories) = read_files(entry)?;
+        Self::load_with_overlay(entry, &Overlay::new())
+    }
+
+    /// §58: `load`, reading a source through `overlay` when the overlay holds
+    /// its path. The LSP checks a document the editor has not saved, so the
+    /// bytes behind a position must come from the overlay rather than disk.
+    pub fn load_with_overlay(entry: &Path, overlay: &Overlay) -> Result<Self, LoadError> {
+        let (token_files, directories) = read_files(entry, overlay)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
@@ -32,6 +52,8 @@ impl Project {
             path: files[0].path.clone(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E206".into()),
             message: "a library directory cannot declare main".into(),
         });
@@ -62,11 +84,131 @@ impl Project {
             &libraries,
             &files[0].path,
         );
-        Ok(Self { parsed, files })
+        let sources = token_files
+            .iter()
+            .map(|file| {
+                (
+                    file.source.path.clone(),
+                    std::rc::Rc::new(file.text.clone()),
+                )
+            })
+            .collect();
+        Ok(Self {
+            parsed,
+            files,
+            sources: RefCell::new(sources),
+        })
     }
 
+    /// §50: the sources of this project, in reading order, paired with the path
+    /// diagnostics print for them. The entry comes first.
+    pub fn source_texts(&self) -> Vec<(String, std::path::PathBuf, std::rc::Rc<String>)> {
+        let texts = self.sources.borrow();
+        self.files
+            .iter()
+            .filter_map(|file| {
+                texts
+                    .iter()
+                    .find(|(path, _)| path == &file.path)
+                    .map(|(_, text)| (file.path.clone(), file.physical.clone(), text.clone()))
+            })
+            .collect()
+    }
+
+    /// The source a position is counted in, by the path a diagnostic prints.
+    fn source_of(&self, path: &str) -> Option<std::rc::Rc<String>> {
+        let texts = self.sources.borrow();
+        texts
+            .iter()
+            .find(|(name, _)| name == path)
+            .or_else(|| texts.first())
+            .map(|(_, text)| text.clone())
+    }
+
+    /// §58.4: the end of a diagnostic's range, taken from this project's own
+    /// parse. The LSP checks a text that is not on disk, so the range must come
+    /// from the AST the diagnostic came from rather than from reading the path
+    /// back. `None` when no local rewrite (§57) starts at the anchor.
+    pub fn range_in_parse(
+        &self,
+        path: &str,
+        code: &str,
+        line: usize,
+        col: usize,
+    ) -> Option<(usize, usize)> {
+        let text = self.source_of(path)?;
+        crate::fixes::range_in(&self.parsed.ast, &text, code, line, col)
+    }
+
+    /// Whether any diagnostic was reported at all: `Some(empty)` says the check
+    /// passed and there is a type, `None` says there is one.
     pub fn is_library(&self) -> bool {
         self.parsed.inspection == crate::Inspection::Library
+    }
+
+    /// §47: the name span the cursor is on, with the module that declares it.
+    /// A `.hdi` contract has no top-level `def`; its members live in `module M`
+    /// blocks as signature definitions, so both are searched.
+    fn name_span_at(
+        &self,
+        line: usize,
+        col: usize,
+    ) -> Option<(crate::parser::Span, Option<String>)> {
+        let contains =
+            |span: crate::parser::Span| span.line == line && span.col <= col && col < span.end_col;
+        for item in &self.parsed.ast.items {
+            match item {
+                crate::parser::Item::Def(def) if contains(def.name_span) => {
+                    return Some((def.name_span, None));
+                }
+                crate::parser::Item::ModuleSig(module) => {
+                    let member = module.items.iter().find_map(|inner| match inner {
+                        crate::parser::Item::SigDef(def) if contains(def.name_span) => {
+                            Some(def.name_span)
+                        }
+                        _ => None,
+                    });
+                    if let Some(span) = member {
+                        // §47, §51: a member is keyed `module.member` in
+                        // `Checked`, the name the rest of the program uses.
+                        return Some((span, Some(module.name.clone())));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// §58: the name of the top-level `def` whose name span contains the
+    /// 1-based scalar position (`line`, `col`) of the file at `physical`, or
+    /// `None` when the position is not on one. The span is compared in the
+    /// file's own coordinates, so the cursor of an open document finds its own
+    /// definition whatever else the project read.
+    pub fn def_name_at(&self, physical: &Path, line: usize, col: usize) -> Option<String> {
+        let file = self
+            .files
+            .iter()
+            .find(|file| file.physical.as_path() == physical)?;
+        let line = line + file.offset;
+        let (name_span, module) = self.name_span_at(line, col)?;
+        // §50: name resolution rewrites `def.name` to its internal `fileN$name`
+        // spelling, so the name the user typed comes from the span the parser
+        // recorded rather than from the rewritten field. `Checked` is keyed by
+        // that source spelling.
+        let text = self.source_of(&file.path)?;
+        let local = name_span.line.saturating_sub(file.offset);
+        let line_text = text.split('\n').nth(local.saturating_sub(1))?;
+        let start = name_span.col.saturating_sub(1);
+        let end = name_span.end_col.saturating_sub(1);
+        if start > end {
+            return None;
+        }
+        let name: String = line_text.chars().skip(start).take(end - start).collect();
+        Some(match module {
+            Some(module) => format!("{module}.{name}"),
+            None => name,
+        })
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
@@ -79,9 +221,55 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    /// §56・§58.4: 最初に当たる段階の診断を全件（アンカー順）と、型が得られたかどうかを
+    /// 返す。`--show-all` と `--print-type`、LSP の診断が同じ列を使う（plan.md L1・L2）。
+    pub fn check_all(
+        &self,
+        reject_user_main_effects: bool,
+    ) -> (Vec<Diagnostic>, Option<crate::Checked>) {
+        let (errors, checked) =
+            crate::check_parsed_all(&self.parsed, &self.files[0].path, reject_user_main_effects);
+        (
+            errors
+                .into_iter()
+                .map(|error| source_diagnostic(&self.files, error))
+                .collect(),
+            checked,
+        )
+    }
+
     pub fn dump_mono(&self) -> Result<String, Diagnostic> {
         crate::dump_parsed(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
+    }
+
+    /// §58.4: the end of a diagnostic's range, as the exclusive end of the
+    /// tokens the local rewrite (§57) behind the anchor replaces. A diagnostic
+    /// without a local rewrite ends where it starts. The bytes are the ones the
+    /// project was read with, so an unsaved document reports its own end.
+    pub fn diagnostic_end(&self, error: &Diagnostic) -> (usize, usize) {
+        let (Some(code), Some(text)) = (error.code.as_deref(), self.source_of(&error.path)) else {
+            return (error.line, error.col);
+        };
+        let Some((start, end)) = crate::fixes::fix_range(&text, code, error.line, error.col) else {
+            return (error.line, error.col);
+        };
+        let (start_line, start_col) = position_at(&text, start);
+        if (start_line, start_col) != (error.line, error.col) {
+            return (error.line, error.col);
+        }
+        position_at(&text, end)
+    }
+
+    /// The diagnostic with its end filled in (§58.4). Every path that shows a
+    /// diagnostic goes through here, so the CLI and the LSP agree on ranges.
+    pub fn ended(&self, error: &Diagnostic) -> Diagnostic {
+        let (end_line, end_col) = self.diagnostic_end(error);
+        Diagnostic {
+            end_line,
+            end_col,
+            ..error.clone()
+        }
     }
 
     /// The diagnostic as the CLI prints it: the canonical form is appended
@@ -106,11 +294,14 @@ impl Project {
             ),
             None => "null".to_string(),
         };
+        let (end_line, end_col) = self.diagnostic_end(error);
         format!(
-            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
+            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
             json_string(&error.path),
             error.line,
             error.col,
+            end_line,
+            end_col,
             option_string(error.code.as_deref()),
             json_string(&error.message),
             option_string(self.canonical_hint(error).as_deref()),
@@ -292,6 +483,8 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
         path: path.to_string_lossy().into_owned(),
         line: 1,
         col: 1,
+        end_line: 1,
+        end_col: 1,
         code: None,
         message: error.to_string(),
     }
@@ -312,6 +505,48 @@ pub fn source_paths(entry: &Path) -> Result<Vec<(String, PathBuf)>, LoadError> {
             )
         })
         .collect())
+}
+
+/// §58: the `.hd` files under `root`, in byte order of their relative paths.
+/// The LSP takes the entries a contract can belong to from these; enumeration
+/// is disk-based, while the text of any of them that is open comes from the
+/// overlay. `root` is a folder a user opened, not necessarily a hado project,
+/// so a name §50 would reject and a directory that cannot be listed are passed
+/// over rather than hiding the rest of the tree.
+pub fn hd_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    collect_hd_files(root, &mut paths);
+    paths.sort_by(|a, b| {
+        relative_source(a, root)
+            .as_os_str()
+            .as_encoded_bytes()
+            .cmp(relative_source(b, root).as_os_str().as_encoded_bytes())
+    });
+    paths
+}
+
+fn collect_hd_files(directory: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name();
+        let bytes = name.as_encoded_bytes();
+        if bytes.starts_with(b".") {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            if bytes.starts_with(b"__") {
+                continue;
+            }
+            collect_hd_files(&path, paths);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("hd") {
+            paths.push(path);
+        }
+    }
 }
 
 /// §58.2: the tests of the project: the root directory's `*_test.hd`, in the
@@ -358,27 +593,43 @@ fn collect_paths(entry: &Path) -> Result<CollectedPaths, LoadError> {
     Ok((root, paths, directories))
 }
 
-fn read_files(entry: &Path) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
+fn read_files(
+    entry: &Path,
+    overlay: &Overlay,
+) -> Result<(Vec<TokenFile>, BTreeSet<Vec<String>>), LoadError> {
     let (root, paths, directories) = collect_paths(entry)?;
     let mut files = Vec::new();
     let mut offset = 0;
     for path in paths {
-        let file = read_file(&path, &root, offset)?;
+        let file = read_file(&path, &root, offset, overlay)?;
         offset = file.tokens.last().unwrap().span.line + 1;
         files.push(file);
     }
     Ok((files, directories))
 }
 
-fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagnostic> {
+fn read_file(
+    path: &Path,
+    root: &Path,
+    offset: usize,
+    overlay: &Overlay,
+) -> Result<TokenFile, Diagnostic> {
     let relative = relative_source(path, root);
     let display = relative.to_string_lossy().into_owned();
-    let text = std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?;
+    // §58: an open document is read from the overlay; anything else comes from
+    // disk. `collect_paths` already enumerated the paths, so the overlay only
+    // replaces the text of a file that is part of the project.
+    let text = match overlay.get(path) {
+        Some(text) => text.clone(),
+        None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
+    };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
         related: None,
         path: display.clone(),
         line: error.line,
         col: error.col,
+        end_line: error.line,
+        end_col: error.col,
         code: error.code.map(str::to_owned),
         message: error.message,
     })?;
@@ -394,6 +645,7 @@ fn read_file(path: &Path, root: &Path, offset: usize) -> Result<TokenFile, Diagn
             offset,
         },
         tokens,
+        text,
     })
 }
 
@@ -448,6 +700,8 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
                 path: path.to_string_lossy().into_owned(),
                 line: token.span.line,
                 col: token.span.col,
+                end_line: token.span.line,
+                end_col: token.span.col,
                 code: Some("E100".into()),
                 message: "declaration is not allowed in this file".into(),
             });
@@ -503,6 +757,8 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     path: file.source.path.clone(),
                     line: token.span.line,
                     col: token.span.col,
+                    end_line: token.span.line,
+                    end_col: token.span.col,
                     code: Some("E205".into()),
                     message: "duplicate library declaration".into(),
                 };
@@ -542,6 +798,23 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
         error.message = error.message.replace(&format!("file{index}$"), "");
     }
     error
+}
+
+/// The 1-based line and column (in Unicode scalars, §50) of a byte offset.
+/// The count is the lexer's own: a `\n` ends the line, every other scalar is
+/// one column.
+pub fn position_at(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut col = 1;
+    for character in source[..offset.min(source.len())].chars() {
+        if character == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
 }
 
 /// A JSON string literal, or `null` when there is nothing to write (§58.4).

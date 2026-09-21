@@ -247,6 +247,18 @@ impl TypeExpr {
             effects: None,
         }
     }
+
+    /// A type expression whose extent runs from `span` to the last token the
+    /// caller consumed. §58.4 reports the types' tokens through the diagnostic
+    /// anchored to them, so their extents matter.
+    fn ending_at(kind: TypeKind, span: Span, end: Span) -> Self {
+        Self {
+            kind,
+            span: span.until(end),
+            name_span: span,
+            effects: None,
+        }
+    }
 }
 
 impl PartialEq for TypeExpr {
@@ -539,15 +551,39 @@ pub(crate) fn related_label(code: &str) -> Option<&'static str> {
 
 /// One-line diagnostic (`<path>:<line>:<col>: error[CODE]: <message>` for
 /// E1xx, plain `error: <message>` otherwise). A related position stays on the
-/// same line, because one run reports one diagnostic (§56).
+/// same line, because one run reports one diagnostic (§56). The end is the
+/// exclusive end of the element the diagnostic is anchored to (§58.4): the
+/// token for most codes, the whole branch for E507.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     pub path: String,
     pub line: usize,
     pub col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
     pub code: Option<String>,
     pub message: String,
     pub related: Option<Box<Related>>,
+}
+
+impl Diagnostic {
+    /// The full extent of the anchored element.
+    pub fn span(&self) -> Span {
+        Span {
+            line: self.line,
+            col: self.col,
+            end_line: self.end_line,
+            end_col: self.end_col,
+        }
+    }
+
+    /// Anchor this diagnostic at `span`, keeping start and end together.
+    pub fn set_span(&mut self, span: Span) {
+        self.line = span.line;
+        self.col = span.col;
+        self.end_line = span.end_line;
+        self.end_col = span.end_col;
+    }
 }
 
 impl fmt::Display for Diagnostic {
@@ -618,6 +654,8 @@ fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
         path: path.to_string(),
         line: e.line,
         col: e.col,
+        end_line: e.line,
+        end_col: e.col,
         code: e.code.map(|s| s.to_string()),
         message: e.message,
     }
@@ -688,6 +726,21 @@ impl Parser<'_> {
         self.cur().span
     }
 
+    /// The end of the token most recently consumed. A node built right after
+    /// its last token takes its extent from here, so §58.4 can report a range
+    /// rather than a start.
+    fn last_end(&self) -> Span {
+        match self.pos.checked_sub(1) {
+            Some(previous) => self.toks[previous].span,
+            None => self.cur().span,
+        }
+    }
+
+    /// `start` extended to the end of the token most recently consumed.
+    fn to(&self, start: Span) -> Span {
+        start.until(self.last_end())
+    }
+
     fn bump(&mut self) {
         if self.pos + 1 < self.toks.len() {
             self.pos += 1;
@@ -720,6 +773,8 @@ impl Parser<'_> {
             path: self.path.to_string(),
             line: s.line,
             col: s.col,
+            end_line: s.end_line,
+            end_col: s.end_col,
             code: Some(code.unwrap_or("E100").to_string()),
             message: message.into(),
         }
@@ -843,7 +898,7 @@ impl Parser<'_> {
         let name_span = self.span();
         let name = self.expect_lower_name("a declaration name")?;
         if self.kind() == &TokKind::Pipe {
-            let (params, body) = self.parse_arm_function(span)?;
+            let (params, body) = self.parse_arm_function(span, name_span)?;
             return Ok(Item::Def(Def {
                 name,
                 name_span,
@@ -853,7 +908,7 @@ impl Parser<'_> {
                     ret: None,
                     body,
                 },
-                span,
+                span: self.to(span),
             }));
         }
         if self.kind() == &TokKind::Eq {
@@ -872,7 +927,7 @@ impl Parser<'_> {
                 name_span,
                 rec: false,
                 kind: DefKind::Value(body),
-                span,
+                span: self.to(span),
             }))
         } else {
             let params = self.parse_params(false)?;
@@ -896,7 +951,7 @@ impl Parser<'_> {
                 name_span,
                 rec,
                 kind: DefKind::Function { params, ret, body },
-                span,
+                span: self.to(span),
             }))
         }
     }
@@ -925,7 +980,7 @@ impl Parser<'_> {
             type_params,
             params,
             ret,
-            span,
+            span: self.to(span),
         }))
     }
 
@@ -950,7 +1005,7 @@ impl Parser<'_> {
             params,
             ty,
             shared,
-            span,
+            span: self.to(span),
         }))
     }
 
@@ -1397,7 +1452,12 @@ impl Parser<'_> {
                         "constructor alternatives require a leading |",
                     ));
                 }
-                Ok(TypeExpr::of(TypeKind::Adt(vec![constructor]), span))
+                let end = self.last_end();
+                Ok(TypeExpr::ending_at(
+                    TypeKind::Adt(vec![constructor]),
+                    span,
+                    end,
+                ))
             }
             _ if context == TypeContext::Implementation => self.parse_alias_type(),
             _ => {
@@ -1419,7 +1479,8 @@ impl Parser<'_> {
             self.bump();
             constructors.push(self.parse_constructor_type()?);
         }
-        Ok(TypeExpr::of(TypeKind::Adt(constructors), span))
+        let end = self.last_end();
+        Ok(TypeExpr::ending_at(TypeKind::Adt(constructors), span, end))
     }
 
     fn shared_body_anchor(&self) -> Option<Span> {
@@ -1436,7 +1497,14 @@ impl Parser<'_> {
 
     fn parse_alias_type(&mut self) -> Result<TypeExpr, Diagnostic> {
         let prefix = match self.kind() {
-            TokKind::Name(name) => Some(TypeExpr::of(TypeKind::Name(name.clone()), self.span())),
+            TokKind::Name(name) => {
+                let span = self.span();
+                Some(TypeExpr::ending_at(
+                    TypeKind::Name(name.clone()),
+                    span,
+                    span,
+                ))
+            }
             _ => None,
         };
         match (self.parse_type(), prefix) {
@@ -1470,7 +1538,8 @@ impl Parser<'_> {
             self.bump();
         }
         self.expect(&TokKind::RBrace)?;
-        Ok(TypeExpr::of(TypeKind::Record(fields), span))
+        let end = self.last_end();
+        Ok(TypeExpr::ending_at(TypeKind::Record(fields), span, end))
     }
 
     fn parse_constructor_type(&mut self) -> Result<ConstructorDecl, Diagnostic> {
@@ -1563,12 +1632,8 @@ impl Parser<'_> {
             name.push('.');
             name.push_str(&self.expect_upper_name("a qualified type name")?);
         }
-        Ok(TypeExpr {
-            kind: TypeKind::Name(name),
-            span,
-            name_span: span,
-            effects: None,
-        })
+        let end = self.last_end();
+        Ok(TypeExpr::ending_at(TypeKind::Name(name), span, end))
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr, Diagnostic> {
@@ -1587,9 +1652,10 @@ impl Parser<'_> {
                 TypeKind::Group(args) => args,
                 _ => vec![ty],
             };
+            let end = reference.span;
             ty = TypeExpr {
                 kind: TypeKind::Apply(name, args),
-                span,
+                span: span.until(end),
                 name_span: reference.name_span,
                 effects: None,
             };
@@ -1614,7 +1680,8 @@ impl Parser<'_> {
                         "type argument groups require at least two types",
                     ));
                 }
-                Ok(TypeExpr::of(TypeKind::Group(args), span))
+                let end = self.last_end();
+                Ok(TypeExpr::ending_at(TypeKind::Group(args), span, end))
             }
             _ => self.parse_type_ref(),
         }
@@ -1635,9 +1702,11 @@ impl Parser<'_> {
         } else {
             TypeExpr::of(TypeKind::Group(args), span)
         };
-        Ok(TypeExpr::of(
+        let end = self.last_end();
+        Ok(TypeExpr::ending_at(
             TypeKind::Apply("Fn".into(), vec![params, result]),
             span,
+            end,
         ))
     }
 
@@ -1715,9 +1784,10 @@ impl Parser<'_> {
                     "constructor cannot be a pipe target",
                 ));
             }
+            let span = pipe_span.until(right.span);
             left = Node {
                 kind: NodeKind::Pipe(Box::new(left), Box::new(right)),
-                span: pipe_span,
+                span,
             };
         }
         Ok(left)
@@ -1824,18 +1894,20 @@ impl Parser<'_> {
             let span = self.span();
             self.bump();
             let operand = self.parse_unary()?;
+            let end = self.last_end();
             Ok(Node {
                 kind: NodeKind::Neg(Box::new(operand)),
-                span,
+                span: span.until(end),
             })
         } else if self.kind() == &TokKind::KwNot {
             // `not` sits in the same precedence tier as unary `-` (§7).
             let span = self.span();
             self.bump();
             let operand = self.parse_unary()?;
+            let end = self.last_end();
             Ok(Node {
                 kind: NodeKind::Not(Box::new(operand)),
-                span,
+                span: span.until(end),
             })
         } else {
             self.parse_apply()
@@ -1859,9 +1931,10 @@ impl Parser<'_> {
                     "constructor arguments require parentheses",
                 ));
             }
+            let end = self.last_end();
             Ok(Node {
                 kind: NodeKind::Apply(Box::new(f), args),
-                span,
+                span: span.until(end),
             })
         }
     }
@@ -1893,6 +1966,7 @@ impl Parser<'_> {
             let field_span = self.span();
             let field = self.expect_lower_name("a field name")?;
             let span = node.span;
+            let end = self.last_end();
             node = Node {
                 kind: NodeKind::Field(
                     Box::new(node),
@@ -1902,7 +1976,7 @@ impl Parser<'_> {
                         span: field_span,
                     },
                 ),
-                span,
+                span: span.until(end),
             };
         }
         Ok(node)
@@ -1964,6 +2038,7 @@ impl Parser<'_> {
             }
             other => return Err(self.error(None, format!("expected an expression, found {other}"))),
         };
+        let span = self.to(span);
         Ok(Node { kind, span })
     }
 
@@ -1996,13 +2071,14 @@ impl Parser<'_> {
         }
         let mut node = Node {
             kind: NodeKind::Name(name.clone()),
-            span,
+            span: self.to(span),
         };
         while self.kind() == &TokKind::Dot {
             let dot = self.span();
             self.bump();
             let field_span = self.span();
             let field = self.expect_lower_name("a field name after `.`")?;
+            let end = self.last_end();
             node = Node {
                 kind: NodeKind::Field(
                     Box::new(node),
@@ -2012,7 +2088,7 @@ impl Parser<'_> {
                         span: field_span,
                     },
                 ),
-                span,
+                span: span.until(end),
             };
         }
         if !constructor_head(&node) {
@@ -2020,12 +2096,11 @@ impl Parser<'_> {
         }
         if self.kind() == &TokKind::LBrace {
             self.bump();
+            let fields = self.parse_record_fields()?;
+            let end = self.last_end();
             return Ok(Node {
-                kind: NodeKind::NamedConstructor(
-                    DeclaredName { name, span },
-                    self.parse_record_fields()?,
-                ),
-                span,
+                kind: NodeKind::NamedConstructor(DeclaredName { name, span }, fields),
+                span: span.until(end),
             });
         }
         if name == "Ok" && self.kind() == &TokKind::Void {
@@ -2034,9 +2109,10 @@ impl Parser<'_> {
                 span: self.span(),
             };
             self.bump();
+            let end = self.last_end();
             return Ok(Node {
                 kind: NodeKind::Apply(Box::new(node), vec![unit]),
-                span,
+                span: span.until(end),
             });
         }
         if self.kind() == &TokKind::LParen {
@@ -2048,9 +2124,10 @@ impl Parser<'_> {
                     span: self.span(),
                 };
                 self.bump();
+                let end = self.last_end();
                 return Ok(Node {
                     kind: NodeKind::Apply(Box::new(node), vec![unit]),
-                    span,
+                    span: span.until(end),
                 });
             }
             loop {
@@ -2061,9 +2138,10 @@ impl Parser<'_> {
                 self.bump();
             }
             self.expect(&TokKind::RParen)?;
+            let end = self.last_end();
             return Ok(Node {
                 kind: NodeKind::Call(Box::new(node), args),
-                span,
+                span: span.until(end),
             });
         }
         Ok(node)
@@ -2161,12 +2239,19 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_arm_function(&mut self, span: Span) -> Result<(Vec<Param>, Node), Diagnostic> {
+    fn parse_arm_function(
+        &mut self,
+        span: Span,
+        name_span: Span,
+    ) -> Result<(Vec<Param>, Node), Diagnostic> {
         // This name cannot occur in source, so lowering cannot capture a user binding.
         let name = "$argument".to_string();
+        // The scrutinee stands for the definition's own name, so it carries the
+        // name's span rather than the whole `def`: the rewrites (§57) read the
+        // source at that position to spell the parameter back.
         let scrutinee = Node {
             kind: NodeKind::Name(name.clone()),
-            span,
+            span: name_span,
         };
         let body = self.parse_pattern_branch(span, vec![scrutinee])?;
         Ok((
@@ -2209,14 +2294,15 @@ impl Parser<'_> {
                 "pattern branch requires at least one arm",
             ));
         }
-        self.branch_spans.push((span, first_pipe, self.span()));
+        let end = self.last_end();
+        self.branch_spans.push((span.until(end), first_pipe, end));
         Ok(Node {
             kind: NodeKind::PatternBranch {
                 scrutinees,
                 arms,
                 fallback,
             },
-            span,
+            span: span.until(end),
         })
     }
 
@@ -2321,12 +2407,13 @@ impl Parser<'_> {
                 self.record_fallback_end();
             }
         }
+        let end = self.last_end();
         if let Some(first_pipe) = branch_first_pipe {
-            self.branch_spans.push((span, first_pipe, self.span()));
+            self.branch_spans.push((span.until(end), first_pipe, end));
         }
         Ok(Node {
             kind: NodeKind::CondBranch { arms, fallback },
-            span,
+            span: span.until(end),
         })
     }
 
@@ -2364,7 +2451,11 @@ impl Parser<'_> {
         } else {
             None
         };
-        Ok(Param { name, ty, span })
+        Ok(Param {
+            name,
+            ty,
+            span: self.to(span),
+        })
     }
 
     fn parse_lambda_params(&mut self) -> Result<Vec<Param>, Diagnostic> {
@@ -2382,19 +2473,22 @@ impl Parser<'_> {
         self.bump();
         self.expect(&TokKind::LParen)?;
         let (params, body) = if self.kind() == &TokKind::Pipe {
-            self.parse_arm_function(span)?
+            // An anonymous `fn` has no name to read back, so the scrutinee keeps
+            // the `fn` keyword's span.
+            self.parse_arm_function(span, span)?
         } else {
             let params = self.parse_lambda_params()?;
             let body = self.parse_function_body(span)?;
             (params, body)
         };
         self.expect(&TokKind::RParen)?;
+        let end = self.last_end();
         Ok(Node {
             kind: NodeKind::Fn {
                 params,
                 body: Box::new(body),
             },
-            span,
+            span: span.until(end),
         })
     }
 
@@ -2423,7 +2517,10 @@ impl Parser<'_> {
                 body: Box::new(body),
             }
         };
-        Ok(Node { kind, span })
+        Ok(Node {
+            kind,
+            span: self.to(span),
+        })
     }
 
     fn parse_do(&mut self) -> Result<Node, Diagnostic> {
@@ -2432,12 +2529,13 @@ impl Parser<'_> {
         let value = self.parse_expr()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
+        let end = self.last_end();
         Ok(Node {
             kind: NodeKind::DoQ {
                 value: Box::new(value),
                 body: Box::new(body),
             },
-            span,
+            span: span.until(end),
         })
     }
 
@@ -2463,13 +2561,14 @@ impl Parser<'_> {
         };
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
+        let end = self.last_end();
         Ok(Node {
             kind: NodeKind::With {
                 handler,
                 args,
                 body: Box::new(body),
             },
-            span,
+            span: span.until(end),
         })
     }
 
@@ -2644,7 +2743,7 @@ fn declaration_keyword(kind: &TokKind) -> bool {
 }
 
 fn bin_node(op: BinOp, left: Node, right: Node) -> Node {
-    let span = left.span;
+    let span = left.span.until(right.span);
     Node {
         kind: NodeKind::Bin(op, Box::new(left), Box::new(right)),
         span,

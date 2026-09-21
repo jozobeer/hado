@@ -4,10 +4,45 @@
 //! Every token carries a 1-based `Span`. Whitespace (including newlines) and
 //! line comments are skipped: the parser does not look at newlines (付録C).
 
+/// A 1-based start and an exclusive end, both counted in Unicode scalars (the
+/// unit `Lexer::bump` already uses, §50). The end is the column of the scalar
+/// after the last one of the element, so `end_col - col` is the number of
+/// scalars the element spans and `end_line - line` is its line count minus one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub line: usize,
     pub col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
+impl Span {
+    /// A span with no extent, for a position the grammar does not spell as a
+    /// token (name resolution and functor instances synthesize one).
+    pub const fn point(line: usize, col: usize) -> Self {
+        Span {
+            line,
+            col,
+            end_line: line,
+            end_col: col,
+        }
+    }
+
+    /// The span that starts here and ends where `end` ends. The parser uses it
+    /// to give a node the extent of the last token it consumed.
+    pub const fn until(self, end: Span) -> Self {
+        Span {
+            line: self.line,
+            col: self.col,
+            end_line: end.end_line,
+            end_col: end.end_col,
+        }
+    }
+
+    /// Whether the whole of `self` is before `other` in the §50 order.
+    pub fn before(self, other: Span) -> bool {
+        (self.line, self.col) < (other.line, other.col)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -205,7 +240,7 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
         i: 0,
         line: 1,
         col: 1,
-        tok_start: Span { line: 1, col: 1 },
+        tok_start: Span::point(1, 1),
     };
     let mut toks = Vec::new();
     loop {
@@ -232,7 +267,12 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
             }
             Some(_) => {
                 let kind = lx.lex_token()?;
-                toks.push(Tok { kind, span });
+                // The token runs from where it started to where the lexer
+                // stands now, both in the scalar unit `bump` counts.
+                toks.push(Tok {
+                    kind,
+                    span: span.until(lx.span()),
+                });
             }
         }
     }
@@ -269,10 +309,7 @@ impl Lexer<'_> {
     }
 
     fn span(&self) -> Span {
-        Span {
-            line: self.line,
-            col: self.col,
-        }
+        Span::point(self.line, self.col)
     }
 
     fn err(&self, code: Option<&'static str>, message: impl Into<String>) -> LexError {
@@ -662,6 +699,14 @@ mod tests {
     fn spans_are_one_based() {
         let toks = lex("1\n  + 2").unwrap();
         let plus = &toks[1];
-        assert_eq!(plus.span, Span { line: 2, col: 3 });
+        assert_eq!((plus.span.line, plus.span.col), (2, 3));
+        assert_eq!((plus.span.end_line, plus.span.end_col), (2, 4));
+    }
+
+    #[test]
+    fn span_ends_count_scalars() {
+        let toks = lex("\"あ😀\"").unwrap();
+        let text = &toks[0];
+        assert_eq!((text.span.col, text.span.end_col), (1, 5));
     }
 }

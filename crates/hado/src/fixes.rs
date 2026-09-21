@@ -37,8 +37,18 @@ pub fn fixes(source: &str) -> Vec<Fix> {
     let Ok(ast) = parser::parse_source(source, "fix") else {
         return Vec::new();
     };
+    let mut found = Vec::new();
+    collect_fixes(source, &ast, &mut found);
+    prune_overlaps(found)
+}
+
+/// The rewrites a parsed source offers, in the order they were found (the
+/// caller sorts and prunes them). The caller may supply the AST it already
+/// parsed: §58.4 の診断の範囲は書き換えの範囲なので、CLI と LSP は自分の
+/// 解析から範囲を引く（解析を 2 度行わない）。
+fn collect_fixes(source: &str, ast: &parser::Ast, found: &mut Vec<Fix>) {
     let Ok(tokens) = lex_full(source) else {
-        return Vec::new();
+        return;
     };
     let lines = LineMap::new(source);
     let index = TokenIndex::new(&tokens);
@@ -49,17 +59,21 @@ pub fn fixes(source: &str) -> Vec<Fix> {
         index: &index,
         branches: &ast.branch_spans,
     };
-    let mut found = Vec::new();
 
     for span in &ast.long_condition_functions {
-        if let Some(fix) = condition_arm_fix(source, &lines, &tokens, &index, &ast, *span) {
+        if let Some(fix) = condition_arm_fix(source, &lines, &tokens, &index, ast, *span) {
             found.push(fix);
         }
     }
     for item in &ast.items {
-        walk_item(item, &walk, &mut found);
+        walk_item(item, &walk, found);
     }
+}
 
+/// The rewrites that survive the overlap rule: at the same start the outermost
+/// one wins, so a `Cons` chain is rewritten whole. The caller may pass the
+/// rewrites it already collected; this sorts them in place.
+pub fn prune_overlaps(mut found: Vec<Fix>) -> Vec<Fix> {
     // 同じ開始位置では外側（終わりが後ろ）を先に残し、重なる編集を落とす。
     found.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
     let mut accepted: Vec<Fix> = Vec::new();
@@ -78,6 +92,31 @@ pub fn fix_at(source: &str, code: &str, line: usize, col: usize) -> Option<Fix> 
     fixes(source)
         .into_iter()
         .find(|fix| fix.code == code && fix.line == line && fix.col == col)
+}
+
+/// The byte range a local rewrite (§57) replaces, when one starts at the
+/// anchor. This is the diagnostic's end as well: §58.4 の終端は書き換える
+/// 範囲の終端で、LSP の code action の range と同じものである。
+pub fn fix_range(source: &str, code: &str, line: usize, col: usize) -> Option<(usize, usize)> {
+    fix_at(source, code, line, col).map(|fix| (fix.start, fix.end))
+}
+
+/// The same range, taken from a project's own parse: the LSP checks a text that
+/// is not on disk, so the rewrites must come from the same AST the diagnostic
+/// came from rather than from reading the path back.
+pub(crate) fn range_in(
+    ast: &parser::Ast,
+    source: &str,
+    code: &str,
+    line: usize,
+    col: usize,
+) -> Option<(usize, usize)> {
+    let mut found = Vec::new();
+    collect_fixes(source, ast, &mut found);
+    prune_overlaps(found)
+        .into_iter()
+        .find(|fix| fix.code == code && fix.line == line && fix.col == col)
+        .map(|fix| (fix.start, fix.end))
 }
 
 /// The canonical form to show next to a diagnostic, if one of the rewrites
@@ -386,6 +425,16 @@ fn catch_all_range(
     branches: &[(Span, Span, Span)],
 ) -> Option<usize> {
     let (_, end) = branch_range(node, Tail::If, source, lines, tokens, index, branches)?;
+    // The arm forms (§31, §32) carry `$argument` as their scrutinee and their
+    // branch spans the whole definition, so the range below would run past the
+    // arm's own body. They have their own rewrites (E515/E517).
+    if matches!(&node.kind, NodeKind::PatternBranch { scrutinees, .. }
+        if scrutinees
+            .iter()
+            .any(|s| matches!(&s.kind, NodeKind::Name(name) if name == "$argument")))
+    {
+        return None;
+    }
     // A comment would be lost, and a `let` could bind the same name again.
     if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
         return None;
@@ -933,7 +982,9 @@ fn condition_arm_fix(
 fn def_at(items: &[Item], span: Span) -> Option<&parser::Def> {
     for item in items {
         match item {
-            Item::Def(def) if def.span == span => return Some(def),
+            // The record names the definition by where it starts; §58.4 で範囲が
+            // 伸びても、同じ定義を指す。
+            Item::Def(def) if crate::check::same_start(def.span, span) => return Some(def),
             Item::ModuleImpl(module) => {
                 if let Some(found) = def_at(&module.items, span) {
                     return Some(found);
@@ -1418,7 +1469,10 @@ fn branch_range(
         }
         close?
     } else {
-        trim_back(source, lines.offset(source, after))
+        // `after` is the branch's LAST token, so its own end is the end of the
+        // branch. Taking only its start would leave that token outside the
+        // rewrite (`if b | true => 1 | false => 0` lost its trailing `0`).
+        trim_back(source, lines.end_offset(source, after))
     };
     (start <= end).then_some((start, end))
 }
@@ -1426,7 +1480,9 @@ fn branch_range(
 /// The parser's record for one branch: its start, its first `|`, and the token
 /// after it.
 fn branch_entry(span: Span, branches: &[(Span, Span, Span)]) -> Option<&(Span, Span, Span)> {
-    branches.iter().find(|(start, _, _)| *start == span)
+    branches
+        .iter()
+        .find(|(start, _, _)| crate::check::same_start(*start, span))
 }
 
 /// Blanks between the branch and the next token stay out of the range, so the
@@ -1856,6 +1912,19 @@ impl LineMap {
     }
 
     /// The byte offset of a 1-based line / column span. `col` counts characters.
+    /// The byte offset just past `span` (its exclusive end), in the same line
+    /// table. §58.4 の終端と同じく、対象の最後のスカラの次を指す。
+    fn end_offset(&self, source: &str, span: Span) -> usize {
+        let Some(&start) = self.starts.get(span.end_line.saturating_sub(1)) else {
+            return source.len();
+        };
+        source[start..]
+            .char_indices()
+            .nth(span.end_col.saturating_sub(1))
+            .map(|(at, _)| start + at)
+            .unwrap_or(source.len())
+    }
+
     fn offset(&self, source: &str, span: Span) -> usize {
         let Some(&start) = self.starts.get(span.line.saturating_sub(1)) else {
             return source.len();

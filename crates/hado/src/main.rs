@@ -22,6 +22,8 @@ struct Cli<'a> {
     type_name: Option<&'a str>,
     fix: bool,
     check_only: bool,
+    /// §58.4 / plan.md L1: 同じ段階の診断を全件出す（既定は先頭の 1 件）。
+    show_all: bool,
     output: Option<&'a str>,
     path: Option<&'a str>,
     program_args: Vec<String>,
@@ -39,9 +41,26 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     if !matches!(
         command,
-        "check" | "dump-mono" | "build" | "run" | "fmt" | "test"
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp"
     ) {
         return Err(usage_error());
+    }
+    // §58: `lsp` speaks JSON-RPC on stdin and stdout and takes no file.
+    if command == "lsp" {
+        if args.len() != 1 {
+            return Err(usage_error());
+        }
+        return Ok(Cli {
+            command,
+            print: false,
+            type_name: None,
+            fix: false,
+            check_only: false,
+            show_all: false,
+            output: None,
+            path: None,
+            program_args: Vec::new(),
+        });
     }
     let mut cli = Cli {
         command,
@@ -49,6 +68,7 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
         type_name: None,
         fix: false,
         check_only: false,
+        show_all: false,
         output: None,
         path: None,
         program_args: Vec::new(),
@@ -104,13 +124,10 @@ fn take_option<'a>(
     rest: &'a [String],
     index: &mut usize,
 ) -> Result<bool, ExitCode> {
+    if cli.command == "check" && check_option(cli, arg)? {
+        return Ok(true);
+    }
     match arg {
-        "--print-type" if cli.command == "check" => cli.print = true,
-        // §58.3: `--print-type=<名前>` はその定義の型を出す。
-        value if cli.command == "check" && value.starts_with("--print-type=") => {
-            cli.print = true;
-            cli.type_name = Some(named_type(value)?);
-        }
         "--fix" if cli.command == "check" || cli.command == "build" => cli.fix = true,
         // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
         "--format" if prints_diagnostics(cli.command) => {
@@ -120,6 +137,22 @@ fn take_option<'a>(
         "-o" | "--output" if cli.command == "build" => {
             cli.output = Some(value_after(rest, index)?);
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// `check` だけが受ける印。当たったかを返す。
+fn check_option<'a>(cli: &mut Cli<'a>, arg: &'a str) -> Result<bool, ExitCode> {
+    match arg {
+        "--print-type" => cli.print = true,
+        // §58.3: `--print-type=<名前>` はその定義の型を出す。
+        value if value.starts_with("--print-type=") => {
+            cli.print = true;
+            cli.type_name = Some(named_type(value)?);
+        }
+        // §58.4 / plan.md L1: 同じ段階の診断を全件、アンカー順に出す。
+        "--show-all" => cli.show_all = true,
         _ => return Ok(false),
     }
     Ok(true)
@@ -158,6 +191,10 @@ fn value_after<'a>(rest: &'a [String], index: &mut usize) -> Result<&'a str, Exi
 }
 
 fn run(cli: &Cli<'_>) -> ExitCode {
+    // §58: the LSP reads and writes the protocol streams, not a source file.
+    if cli.command == "lsp" {
+        return ExitCode::from(hado::lsp::serve() as u8);
+    }
     let input = match input_path(cli) {
         Ok(input) => input,
         Err(code) => return code,
@@ -247,23 +284,56 @@ fn dump_mono(project: &Project) -> ExitCode {
 }
 
 fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
-    let checked = match if cli.print {
-        project.check_for_print()
+    // `--print-type` keeps E706 so the printed main type keeps its effect row
+    // (`docs/spec.md` §58.3); the plain check rejects a user effect on `main`.
+    let (errors, checked) = project.check_all(!cli.print);
+    // §58.4 / L1: `--show-all` は同じ段階の全件、既定は先頭の 1 件だけ。
+    let shown = if cli.show_all {
+        errors.as_slice()
     } else {
-        project.check()
-    } {
-        Ok(checked) => checked,
-        Err(error) => {
-            print_diagnostic(project, &error);
-            return ExitCode::from(1);
-        }
+        &errors[..errors.len().min(1)]
     };
+    for error in shown {
+        print_diagnostic(project, error);
+    }
     if cli.print {
-        if let Err(code) = print_type(&checked, project, cli.type_name, input) {
+        if let Err(code) = print_requested_type(cli, project, input, checked.as_ref()) {
             return code;
         }
     }
-    ExitCode::SUCCESS
+    if errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// §58.3 / L2: E4xx・E5xx・E6xx で止まっていても型を出す。型が無いのは字句・
+/// 構文・名前解決・型の致命で、推論が `Error` を残したときだけ（Q2 の決着）。
+fn print_requested_type(
+    cli: &Cli<'_>,
+    project: &Project,
+    input: &Path,
+    checked: Option<&hado::Checked>,
+) -> Result<(), ExitCode> {
+    let Some(checked) = checked else {
+        return Ok(());
+    };
+    if checked.has_type(cli.type_name) {
+        return print_type(checked, project, cli.type_name, input);
+    }
+    let Some(name) = cli.type_name else {
+        return Ok(());
+    };
+    // §58.3: a name that is not there is `no definition named`; a name whose
+    // inference failed (Q2) is there but has no type to print.
+    let message = if checked.type_of(name).is_some() {
+        "no type for"
+    } else {
+        "no definition named"
+    };
+    eprintln!("check: {message} {name} in {}", input.display());
+    Err(ExitCode::from(1))
 }
 
 fn main() -> ExitCode {
@@ -509,6 +579,6 @@ fn print_type(
 
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd>"
+        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | lsp"
     );
 }

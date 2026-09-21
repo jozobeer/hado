@@ -23,7 +23,13 @@ $ cargo run --offline -q -- check [--print-type] <file> # 検査。--print-type 
 $ cargo run --offline -q -- dump-mono <file>            # 単相化後のプログラムを印字
 $ cargo run --offline -q -- build <file.hd>              # 入力の隣に実行ファイルを置く
 $ cargo run --offline -q -- run <file.hd>                # 実行ファイルを一時ディレクトリに作り、隣に何も残さない
+$ cargo run --offline -q -- lsp                          # LSP サーバ（stdio）。エディタから使う
 ```
+
+`check` は既定で先頭の段階の診断を 1 件だけ出す。`--show-all` を足すと同じ段階の
+診断を全件、アンカー順に出す（字句・構文の致命と型の致命は 1 件のまま）。`check
+--print-type=<名前>` は、網羅性・冗長・契約の検査で止まっていても型を返す（字句・
+構文・名前解決・型の致命では型が無い）。
 
 拒否の例:
 
@@ -31,6 +37,29 @@ $ cargo run --offline -q -- run <file.hd>                # 実行ファイルを
 $ cargo run --offline -q -- check tests/reject/E508/main.hd
 main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let p? = or do; canonical form: let user? = find_user id -> Some(user + 1)
 ```
+
+## エディタ（Neovim）
+
+`hado lsp` は LSP を stdio で話す。Neovim 0.12 の組み込み client から使う。設定は
+数行で、`vim.lsp.config` に `cmd` と filetype を渡して `vim.lsp.enable` で有効にする。
+
+```lua
+vim.filetype.add({ extension = { hd = "hado", hdi = "hado" } })
+vim.lsp.config("hado", {
+  cmd = { "<checkout>/scripts/hado-lsp.sh" },
+  filetypes = { "hado" },
+})
+vim.lsp.enable("hado")
+```
+
+`scripts/hado-lsp.sh` は自分の位置からリポジトリ根を求め、`cargo run --offline -q --
+lsp` を実行する。`hado` を `PATH` に置く必要は無い（`<checkout>` はこのリポジトリの
+絶対パスに置き換える）。
+
+診断・hover（カーソル下の最上位 `def` の型）・「正準形へ置換」の code action の 3 つが
+効く。code action は `check --fix` と同じ書き換えを返す。`.hdi` の契約も `hado` として
+開き、診断と hover を返す（契約には書き換え対象の式が無いので code action は空になる）。
+補完・rename・go to definition は入っていない。
 
 ## 検証
 

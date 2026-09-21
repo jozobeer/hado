@@ -139,6 +139,8 @@ fn unused_declarations(
                 path: path.into(),
                 line: span.line,
                 col: span.col,
+                end_line: span.line,
+                end_col: span.col,
                 code: Some("E513".into()),
                 message: "unused top-level declaration".into(),
             })
@@ -175,6 +177,8 @@ fn module_diagnostics(
                 path: path.into(),
                 line: parameter.name_span.line,
                 col: parameter.name_span.col,
+                end_line: parameter.name_span.line,
+                end_col: parameter.name_span.col,
                 code: Some("E521".into()),
                 message: "unused functor parameter".into(),
             });
@@ -230,6 +234,8 @@ fn local_data_diagnostics(
                 path: path.into(),
                 line: def.span.line,
                 col: def.span.col,
+                end_line: def.span.line,
+                end_col: def.span.col,
                 code: Some("E513".into()),
                 message: "unused implementation-local type".into(),
             })

@@ -44,6 +44,8 @@ pub(crate) fn violations(ast: &Ast, path: &str) -> Vec<Violation> {
                             path: path.into(),
                             line: span.line,
                             col: span.col,
+                            end_line: span.line,
+                            end_col: span.col,
                             code: Some("E302".into()),
                             message: "recursive type arguments must preserve declared parameters"
                                 .into(),

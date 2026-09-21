@@ -883,6 +883,12 @@ fn collect_row_vars(ty: &Ty, result: &mut BTreeSet<u32>) {
 }
 
 impl Scheme {
+    /// §58.3 / plan.md L2・Q2 の決着: whether the scheme still carries the `Error`
+    /// placeholder inference leaves behind when it fails. そのときは型を出さない。
+    pub(crate) fn has_error(&self) -> bool {
+        self.ty.has_error()
+    }
+
     pub(crate) fn resolved(&self, inference: &Inference) -> Self {
         let resolve = |id| {
             if self.variables.contains(&id) {

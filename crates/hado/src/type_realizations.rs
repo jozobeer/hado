@@ -128,6 +128,8 @@ fn realization_error(definition: &TypeDef, path: &str, code: &str, message: &str
         path: path.into(),
         line: definition.name_span.line,
         col: definition.name_span.col,
+        end_line: definition.name_span.line,
+        end_col: definition.name_span.col,
         code: Some(code.into()),
         message: message.into(),
     }

@@ -87,6 +87,8 @@ impl Contracts {
                     path: path.into(),
                     line: ty.span.line,
                     col: ty.span.col,
+                    end_line: ty.span.line,
+                    end_col: ty.span.col,
                     code: Some("E603".into()),
                     message: "contract type requires exactly one implementation".into(),
                 });

@@ -637,6 +637,8 @@ fn resolve_type_names(
                 path: path.into(),
                 line: ty.name_span.line,
                 col: ty.name_span.col,
+                end_line: ty.name_span.line,
+                end_col: ty.name_span.col,
                 code: Some("E204".into()),
                 message: format!("unknown type {name}"),
             });
@@ -696,6 +698,8 @@ fn resolve_effect_label(
                     path: path.into(),
                     line: ty.name_span.line,
                     col: ty.name_span.col,
+                    end_line: ty.name_span.line,
+                    end_col: ty.name_span.col,
                     code: Some("E204".into()),
                     message: format!("unknown effect {name}"),
                 });
@@ -727,12 +731,14 @@ fn entry_form(
     if inspection == crate::Inspection::Library && main.is_none() {
         return Ok(());
     }
-    let span = main.map_or(crate::parser::Span { line: 1, col: 1 }, |def| def.span);
+    let span = main.map_or(crate::parser::Span::point(1, 1), |def| def.span);
     Err(crate::parser::Diagnostic {
         related: None,
         path: path.into(),
         line: span.line,
         col: span.col,
+        end_line: span.line,
+        end_col: span.col,
         code: Some("E206".into()),
         message: "main must be a value definition".into(),
     })
@@ -845,6 +851,8 @@ fn register(
             path: path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some("E205".into()),
             message: format!("duplicate declaration {name}"),
         });
@@ -895,6 +903,8 @@ fn collect_cycle_violations(
                 path: path.into(),
                 line: def.span.line,
                 col: def.span.col,
+                end_line: def.span.line,
+                end_col: def.span.col,
                 code: Some(code.into()),
                 message: format!("{message}: {}", group.join(", ")),
             });

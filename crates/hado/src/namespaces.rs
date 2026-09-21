@@ -189,7 +189,7 @@ impl Resolver<'_> {
             .extend(
                 crate::names::BUILTIN_TYPES
                     .iter()
-                    .map(|name| ((*name).to_owned(), Span { line: 0, col: 0 })),
+                    .map(|name| ((*name).to_owned(), Span::point(0, 0))),
             );
         self.prelude.entry(Space::Type).or_default().extend(
             crate::names::BUILTIN_TYPES
@@ -210,11 +210,7 @@ impl Resolver<'_> {
         for (space, name, span) in declarations(item) {
             // §56: only the user's declarations carry a position; the prelude is
             // synthesized outside the user's source.
-            let span = if in_prelude {
-                Span { line: 0, col: 0 }
-            } else {
-                span
-            };
+            let span = if in_prelude { Span::point(0, 0) } else { span };
             self.symbols
                 .entry((directory.to_vec(), space))
                 .or_default()
@@ -361,6 +357,8 @@ impl Resolver<'_> {
             path: self.path.into(),
             line: span.line,
             col: span.col,
+            end_line: span.line,
+            end_col: span.col,
             code: Some(code.into()),
             message: message.into(),
         });
