@@ -2167,7 +2167,36 @@ hado test <file.hd>
 
 `hado check --format json <file.hd>`（`build` / `run` / `test` でも同じ）は、診断を 1 行に 1 つ、JSON で標準エラーに出す。既定は今までどおりの 1 行である。診断の順と印字先は既定と同じで、終了コードも変えない（第54節）。`--format` に `json` 以外を与えると用法の誤りで終了コード 2 とする。`fmt` と `dump-mono` は `--format` を受けない。
 
-1 行のフィールドは `path` `line` `col` `code` `message` `canonical` `related` の 7 つである。`canonical` は局所的な書き換え（第57節）の正準形で、無ければ `null` とする。`message` に `; canonical form: ...` は混ぜない。`code` はコードを持たない診断では `null`。`related` は関連位置（第56節）で、無ければ `null`、あれば `{"path": ..., "line": ..., "col": ..., "label": ...}` である。`label` は第56節のラベル（`first declared` など）で、無ければ `null` とする。
+1 行のフィールドは `path` `line` `col` `end_line` `end_col` `code` `message` `canonical` `related` の 9 つである。`canonical` は局所的な書き換え（第57節）の正準形で、無ければ `null` とする。`message` に `; canonical form: ...` は混ぜない。`code` はコードを持たない診断では `null`。`related` は関連位置（第56節）で、無ければ `null`、あれば `{"path": ..., "line": ..., "col": ..., "label": ...}` である。`label` は第56節のラベル（`first declared` など）で、無ければ `null` とする。
+
+`line` `col` は診断のアンカー（第56節のエラー表の列）で、1-based である。`end_line` `end_col` はその診断の書き換え範囲（第57節）の終端で、同じく 1-based の Unicode スカラの数として数え、終端は exclusive とする。書き換えの無い診断の終端はアンカーと同じ位置になる。範囲の始まりは常に `line` `col` と一致する。`end_col - col` は対象のスカラ数、`end_line - line` は対象の行数から 1 を引いた数である。
+
+診断は既定で、第56節の段階順で最初に当たる段階の先頭 1 件だけを出す。`--show-all` を付けると同じ段階の診断を全件、アンカー順（第50節のソース順、同じファイル内は行・列）に出す。字句と構文の致命、および型の致命は `--show-all` でも 1 件だけとする。`--print-type` はこの段階順と独立に、網羅性・冗長・契約の検査で止まっていても型を出す（第58.3節）。字句・構文・名前解決・型の致命で止まったときは型を出さない。
+
+## 58.5. エディタへの診断・hover・code action
+
+`hado lsp` は LSP を標準入出力で話すサーバで、`initialize` `initialized` `shutdown`
+`exit` の lifecycle と、`textDocument/didOpen` `didChange` `didClose` `hover`
+`codeAction` を受ける。`didChange` は全文変更（`TextDocumentSyncKind.Full`）とする。
+
+診断は第58.4節と同じ段階順と範囲で、その URI を入口にした解析の結果である。診断を
+持たない開いている文書にも空の配列を publish する。`hover` はカーソル下の最上位 `def`
+の型を第58.3節と同じ印字で返し、型が無いときは `null` を返す。`codeAction` は第57節の
+局所的な書き換えを返す。返した編集を本文に適用した結果は、同じ本文への `hado check
+--fix` の結果と一致する。`shutdown` は `null` を返し、その後の `exit` で終了する。
+
+開いている文書の本文はサーバが保持し、ディスクを読み直さない。古い版の解析結果は
+公開せず、古い版への要求にも終端の応答を返す。
+
+位置は 1-based の Unicode スカラの数（第58.4節）から、`initialize` で交渉した符号化の
+0-based の位置に直して返す。`params.capabilities.general.positionEncodings` の候補のうち
+`utf-8` `utf-16` `utf-32` のいずれかを選び、`result.capabilities.positionEncoding` に
+1 つの文字列として広告する。候補が無いときは LSP の既定どおり `utf-16` とする。
+
+`.hdi` の契約も `hado` として開き、診断と hover を返す（契約には第57節の書き換え対象の
+式が無いので code action は空の配列になる）。契約を単独で開いたときは、作業場所の根の
+下の `.hd` を入口の候補にする。契約の URI の診断は、その契約を読み込む候補の解析の
+合併から重複を除いたもので、候補の順序に依らない。
 
 # 付録
 
