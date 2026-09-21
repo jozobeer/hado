@@ -700,6 +700,42 @@ PROBE_TYPE = {
 }
 
 
+@check('show-all')
+def show_all(nvim, work):
+    # §58.4 / J2: `--show-all` は同じ段階の全件をアンカー順に返し、既定は先頭の
+    # 1 件だけ。同じ欠陥を 2 行で出してはならない（名前解決と推論が同じ E204 を
+    # 積むので、畳まないと同じ位置が 2 回出る）。
+    directory = make(work, 'showall')
+    # 独立な未束縛の名前を 2 つ置く。名前解決の段階で 2 件そろう。
+    text = 'def main = a1 + a2\n'
+    path = directory / 'names.hd'
+    write_text(path, text)
+    shown = run_hado(nvim.root, ['check', '--show-all', '--format', 'json', str(path)])
+    if shown.returncode not in (0, 1):
+        raise Failure('check --show-all exited %d: %s'
+                      % (shown.returncode, (shown.stderr or '')[-200:]))
+    # 診断は stderr に出る（stdout はプログラムの出力）。
+    rows = [json.loads(line) for line in shown.stderr.splitlines() if line.startswith('{')]
+    # 期待するアンカーは判定器が本文から数える。
+    expected = sorted(json.dumps(point_range_of(text, name, 'utf-8'), sort_keys=True)
+                      for name in ('a1', 'a2'))
+    got = sorted(json.dumps({'start': {'line': r['line'] - 1, 'character': r['col'] - 1},
+                             'end': {'line': r['end_line'] - 1, 'character': r['end_col'] - 1}},
+                            sort_keys=True)
+                 for r in rows)
+    if len(rows) != len(set(got)):
+        raise Failure('--show-all repeated an anchor: %r' % (got,))
+    if got != expected:
+        raise Failure('--show-all printed %r, want one row per unbound name %r'
+                      % (got, expected))
+    # 既定は先頭の 1 件だけ。
+    plain = run_hado(nvim.root, ['check', '--format', 'json', str(path)])
+    plain_rows = [json.loads(line) for line in plain.stderr.splitlines()
+                  if line.startswith('{')]
+    if len(plain_rows) != 1:
+        raise Failure('the default check printed %d rows, want 1' % len(plain_rows))
+
+
 @check('contract-hdi')
 def contract_hdi(nvim, work):
     # 契約だけを開く（隣の .hd が入口）。
