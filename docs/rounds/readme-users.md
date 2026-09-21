@@ -71,3 +71,14 @@ TALLY: 38/38 passed; red: none
 $ bash scripts/lint-docs.sh 2>&1 | tail -1
 PASSED: 10/10
 ```
+
+### 着地後の全走（2026-09-22）
+
+着地は PR #24（squash、`f215867`）で main に入った。PR の `gates` は core 層と `lint-docs.sh` を回し、最後の head `483e0c6` で緑（run 35658751942）。着地後の main の push では CI が full 層を回し、44 分 51 秒で `success`（run 35658801935）。`red: none`。
+
+```
+$ gh run list --branch main --limit 2
+completed	success	docs: README を利用者向けにし、開発者向けの節を CONTRIBUTING.md へ移す (#24)	ci	main	push	35658801935	44m51s	2026-09-21T21:43:20Z
+$ gh run view 35658801935 --log | grep TALLY
+TALLY: 3784/3784 passed; red: none
+```

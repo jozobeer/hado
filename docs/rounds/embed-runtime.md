@@ -119,3 +119,43 @@ TALLY: 38/38 passed; red: none
 $ time cargo test --offline -- --test-threads=32 2>&1 | grep -E "^test result|FAILED|panicked" | grep -v "0 failed"
 real	5m58.583s
 ```
+
+### 着地後の全走（2026-09-22）
+
+着地は PR #27（squash、`a3a2a25`）で main に入った。PR の `gates` は core 層で緑（head `b3239bb`、run 35659078033）。着地後の main の push では CI が full 層を回し、30 分 34 秒で `success`（run 35660081049）。`red: none`。決定 3 の README への `cargo install` の案内は、この記録と同じ PR で足した。
+
+```
+$ gh run list --branch main --limit 1
+completed	success	feat: ランタイムの静的ライブラリを hado に埋め込む（embed-runtime） (#27)	ci	main	push	35660081049	30m34s	2026-09-21T21:57:18Z
+$ gh run view 35660081049 --log | grep TALLY
+TALLY: 3788/3788 passed; red: none
+```
+
+着地後の main（`a3a2a25`）を新規 clone し、README の手順で build と install をしてから checkout を消し、別のディレクトリで走らせた。`hello.hd` は `docs/getting-started.md` の「失敗のレール」、`hello_test.hd` は `def main = if 1 + 1 == 2 => () | raise { message = "arithmetic" }`。
+
+```
+$ git clone git@github.com:jozobeer/hado.git src && cd src
+$ cargo fetch --locked
+$ cargo build --offline
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.85s
+$ cargo run --offline -q -- run tests/accept/create_user/main.hd
+ok
+$ cargo install --offline --path crates/hado --root ../root
+   Installed package `hado v0.1.0 (/tmp/claude-1000/-home-zyun-git-local-hado/9e879231-0b7a-468b-bd3a-244a2e3465ca/scratchpad/e2e/src/crates/hado)` (executable `hado`)
+$ ls -la ../root/bin/hado
+-rwxrwxr-x 1 zyun zyun 18464800 Sep 22 07:01 ../root/bin/hado
+$ cd .. && rm -rf src && mkdir app && cd app
+$ ../root/bin/hado check --print-type hello.hd
+String {Error}
+$ ../root/bin/hado run hello.hd
+ok
+$ ../root/bin/hado build hello.hd && ./hello
+ok
+$ ../root/bin/hado fmt --check hello.hd; echo exit=$?
+exit=0
+$ ../root/bin/hado test hello.hd
+test: hello_test.hd ok
+test: 1/1 passed
+$ ../root/bin/hado check --format json bad.hd
+{"path": "bad.hd", "line": 2, "col": 3, "end_line": 3, "end_col": 4, "code": "E501", "message": "binding x is returned unchanged at 3:3", "canonical": "\"hello\"", "related": null}
+```
