@@ -5,7 +5,7 @@
 # lsp-minimal: 固定した Neovim 0.12.5 の組み込み LSP client から README の設定の
 # `cmd`（`<checkout>/scripts/hado-lsp.sh`）で `hado lsp` を起こし、診断・hover・
 # code action・lifecycle・位置の符号化・契約の URI・version の追い越しを測る
-# （docs/issues/lsp-minimal.md の完了条件、docs/rounds/lsp-minimal.md の J5〜J10）。
+# （docs/rounds/lsp-minimal.md の完了条件と判定）。
 #
 # Neovim は scripts/treesitter-setup.sh が固定した版と checksum で取ってきた
 # 絶対パスを使う。PATH 上の同名ツールは見ない。`target/` を PATH に足さず、

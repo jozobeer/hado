@@ -9,7 +9,8 @@
 v0.5 の 3 本目（`docs/plan.md` 35 節の L1〜L4）。利用者は言語設計者本人で、エディタは
 Neovim 0.12.5。`hado check` の配管（`--format json`、`--print-type`）は既にあり、`lsp` の
 入口が無い。LSP にして初めて見える穴が 3 つある。診断が常に 1 件、位置が開始点だけ、
-診断で止まると型が無い。根拠は `docs/issues/lsp-minimal.md` の現象欄と、§56（段階順と
+診断で止まると型が無い。根拠は着手時の issue（`docs/issues/lsp-minimal.md`、着地で削除。
+履歴が持つ）の現象欄と、§56（段階順と
 1 件報告）、§58（CLI）、§58.3（型の印字）、§58.4（機械可読な診断）。
 
 ### ゴール
@@ -20,7 +21,7 @@ Neovim 0.12.5。`hado check` の配管（`--format json`、`--print-type`）は�
   （E1xx と E3xx の致命は 1 件のまま、既定と拒否コーパスの判定は不変）、`--format json` に
   終端の位置があり、網羅性・冗長・単相化で止まっていても `--print-type` と hover が型を
   返す。
-- `scripts/verify-lsp-minimal.sh` が `docs/issues/lsp-minimal.md` の完了条件を測って緑で、
+- `scripts/verify-lsp-minimal.sh` が issue の完了条件（着地で削除。履歴が持つ）を測って緑で、
   下の「判定」の変異で赤になる。
 - 仕様 §58 系と根の `README.md` に書かれ、main に着地し、CI の full 層が `red: none`。
 
@@ -106,6 +107,7 @@ Neovim 0.12.5。`hado check` の配管（`--format json`、`--print-type`）は�
 
 各行は「何を測って、どの値なら合格か」。現在値は着手時の実測。対照の詳細は
 `docs/issues/lsp-minimal.md` の完了条件が正で、着地で issue を消した後は git 履歴が持つ。
+以下では issue の完了条件を「J1〜J11」として参照する。
 
 - J1. `bash scripts/verify-lsp-minimal.sh` が `PASSED: N/N` で終了コード 0。N は検査の
   数で、直書きせず一覧から導く。現在値: 門番が無い。

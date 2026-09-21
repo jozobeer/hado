@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lsp-minimal の門番。Neovim 0.12.5 の組み込み LSP client から `hado lsp` を
 起こし、診断・hover・code action・lifecycle・位置の符号化・契約を測る
-（docs/issues/lsp-minimal.md の完了条件、docs/rounds/lsp-minimal.md の J5〜J10）。
+（docs/rounds/lsp-minimal.md の完了条件と判定）。
 
 期待値はこの判定器が本文から独立に数える。実装の出力を読んで期待値にはしない。
 コーパスのファイル名や行は埋め込まず、入力は作業ディレクトリに生成する。
