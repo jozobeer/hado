@@ -112,3 +112,10 @@ exit=0
 $ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
 TALLY: 38/38 passed; red: none
 ```
+
+並行リンクの衝突（中断の条件の 2 つ目）。`link_executable` を呼ぶ 15 本のテストと `build.rs` の作業ディレクトリを読んだ。各テストは目的名と pid（ループでは添字も）で別々の一時ディレクトリを作り、同じ stem `test.o` を繰り返すループ（`crates/hado/tests/r35_array.rs` の `polymorphic_allocation_specializes_and_slots_execute`）は直列で、書き出しはリンクごとに書いて消す。同じディレクトリで同時に走るリンクは無い。スレッド数を上げた再走でも赤は出なかった。
+
+```
+$ time cargo test --offline -- --test-threads=32 2>&1 | grep -E "^test result|FAILED|panicked" | grep -v "0 failed"
+real	5m58.583s
+```
