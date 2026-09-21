@@ -639,31 +639,9 @@ impl Server {
     /// and its diagnostics are the merge of the candidates that read it.
     fn analyze(&self) -> BTreeMap<String, Vec<Value>> {
         let overlay = self.overlay();
-        // A load refusal belongs to the analysis root of the entry that found
-        // it. The documents whose analysis uses that root are the entry itself
-        // (when it is open) and the open contracts that selected the entry as a
-        // candidate. A sibling `.hd` is not one of them: its own analysis root is
-        // its own directory, which can load cleanly.
-        let contracts: Vec<(PathBuf, PathBuf)> = self
-            .documents
-            .values()
-            .filter(|document| is_extension(&document.path, "hdi"))
-            .map(|document| (document.path.clone(), self.contract_root(&document.path)))
-            .collect();
         let mut collected: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
         for entry in self.entry_candidates() {
-            let mut recipients: Vec<PathBuf> = contracts
-                .iter()
-                .filter(|(_, root)| component_prefix(root, &entry))
-                .map(|(path, _)| path.clone())
-                .collect();
-            if self
-                .documents
-                .values()
-                .any(|document| document.path == entry)
-            {
-                recipients.push(entry.clone());
-            }
+            let recipients = self.refusal_recipients(&entry);
             for (path, diagnostic) in diagnostics_of(&entry, &overlay, &recipients) {
                 collected.entry(path).or_default().push(diagnostic);
             }
@@ -676,6 +654,23 @@ impl Server {
                     .map_or_else(Vec::new, |list| self.render(list, &document.text));
                 (uri.clone(), diagnostics)
             })
+            .collect()
+    }
+
+    /// The open documents a load refusal of `entry` belongs to: `entry` itself
+    /// (§58.5 analyzes a `.hd` with its own directory as the root, so a sibling
+    /// entry stays clean), and the contracts `entry` can read. A candidate reads
+    /// the contract only when the contract is under the root the candidate
+    /// walks, so a refusal of an unrelated nested project never lands on it.
+    fn refusal_recipients(&self, entry: &Path) -> Vec<PathBuf> {
+        let root = entry.parent().unwrap_or_else(|| Path::new("."));
+        self.documents
+            .values()
+            .filter(|document| {
+                document.path == entry
+                    || (is_extension(&document.path, "hdi") && walked_under(root, &document.path))
+            })
+            .map(|document| document.path.clone())
             .collect()
     }
 
@@ -903,6 +898,23 @@ fn component_prefix(prefix: &Path, path: &Path) -> bool {
     prefix
         .components()
         .all(|component| path_components.next() == Some(component))
+}
+
+/// Whether walking `root` the way `collect_sources` does would reach `document`:
+/// §50 skips a name that starts with `.`, and a directory that starts with `__`.
+fn walked_under(root: &Path, document: &Path) -> bool {
+    let Ok(relative) = document.strip_prefix(root) else {
+        return false;
+    };
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let name = component.as_os_str().as_encoded_bytes();
+        let is_file = components.peek().is_none();
+        if name.starts_with(b".") || (!is_file && name.starts_with(b"__")) {
+            return false;
+        }
+    }
+    true
 }
 
 /// The outermost ancestor of the contract that declares `library`, else the

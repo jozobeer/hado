@@ -144,42 +144,46 @@ fn a_contract_opened_alone_sees_the_refusal_of_its_candidates() {
 }
 
 #[test]
-fn a_contract_sees_a_refusal_of_a_candidate_in_a_subdirectory() {
-    // The contract's candidates are the `.hd` files under the workspace root,
-    // so a candidate in a subdirectory is one of them even though the failing
-    // directory is not an ancestor of the contract.
+fn a_contract_is_not_blamed_for_a_candidate_whose_root_does_not_contain_it() {
+    // §58.5 merges the candidates that read the contract. `app/main.hd` walks
+    // `app/`, so it can never read the sibling `api/store.hdi`; its refusal is
+    // about an unrelated nested project and must not surface on the contract.
     let contract = "module M\ndef f (x: Int): Int\n";
-    let root = workspace(&[("api/store.hdi", contract), ("a/x.hd", "def x = 1\n")]);
-    std::fs::create_dir_all(root.join("a/Lib")).unwrap();
+    let root = workspace(&[
+        ("api/store.hdi", contract),
+        ("app/main.hd", "def main = 1\n"),
+    ]);
+    std::fs::create_dir_all(root.join("app/Lib")).unwrap();
     let published = publishes_for(&root, &[("api/store.hdi", contract)]);
-    let messages = messages(&published["api/store.hdi"]);
     assert!(
-        messages.iter().any(|message| message.contains("Lib")),
-        "expected the subdirectory candidate's refusal, got {published:?}"
+        !messages(&published["api/store.hdi"])
+            .iter()
+            .any(|message| is_refusal(message)),
+        "an unrelated nested project must not refuse the contract: {published:?}"
     );
 }
 
 #[test]
 fn distinct_refusals_are_not_deduplicated() {
-    // Two candidates rooted at different directories refuse with different
-    // messages. §58.5 merges candidate results with only duplicates removed, so
-    // both refusals must survive even though both sit at line 1, column 1.
+    // Both candidates walk a root that contains the contract, and each refuses
+    // with a message relative to its own root. §58.5 merges candidate results
+    // with only duplicates removed, so both must survive even though both sit at
+    // line 1, column 1.
     let contract = "module M\ndef f (x: Int): Int\n";
     let root = workspace(&[
-        ("api/store.hdi", contract),
+        ("a/api/store.hdi", contract),
+        ("a/api/y.hd", "def y = 1\n"),
         ("a/x.hd", "def x = 1\n"),
-        ("b/y.hd", "def y = 1\n"),
     ]);
-    std::fs::create_dir_all(root.join("a/LibA")).unwrap();
-    std::fs::create_dir_all(root.join("b/LibB")).unwrap();
-    let published = publishes_for(&root, &[("api/store.hdi", contract)]);
-    let mut messages = messages(&published["api/store.hdi"]);
+    std::fs::create_dir_all(root.join("a/api/Lib")).unwrap();
+    let published = publishes_for(&root, &[("a/api/store.hdi", contract)]);
+    let mut messages = messages(&published["a/api/store.hdi"]);
     messages.sort();
     assert_eq!(
         messages,
         vec![
-            "invalid namespace directory: LibA".to_string(),
-            "invalid namespace directory: LibB".to_string(),
+            "invalid namespace directory: Lib".to_string(),
+            "invalid namespace directory: api/Lib".to_string(),
         ],
         "expected both distinct refusals, got {published:?}"
     );
