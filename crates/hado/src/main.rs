@@ -293,13 +293,16 @@ fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
                 if let Err(code) = print_type(checked, project, cli.type_name, input) {
                     return code;
                 }
-            } else if cli.type_name.is_some() {
-                // 型を出せない名前は「無い」と同じ扱いにする（終了コード 1）。
-                eprintln!(
-                    "check: no type for {} in {}",
-                    cli.type_name.unwrap_or_default(),
-                    input.display()
-                );
+            } else if let Some(name) = cli.type_name {
+                // §58.3: a name that is not there is `no definition named`; a
+                // name whose inference failed (Q2) is there but has no type to
+                // print. Both end with exit code 1.
+                let message = if checked.type_of(name).is_some() {
+                    "no type for"
+                } else {
+                    "no definition named"
+                };
+                eprintln!("check: {message} {name} in {}", input.display());
                 return ExitCode::from(1);
             }
         }

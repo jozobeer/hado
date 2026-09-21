@@ -221,6 +221,11 @@ builder が設計を決めたら、ここに決定と理由を書く。
   overlay（未保存の本文）を扱う LSP が、位置の裏のバイト列を disk から読み直せないため。
 - **D7. 差し当たり `fixes::fixes` は自分の解析から範囲を引く経路（`range_in`）を持つ。**
   LSP は overlay を解析するので、「パスを読み直して `fixes()` を呼ぶ」経路は使えない。
+- **D8. `has_type` と `type_of` は 1 つの探索（`Checked::scheme_of`）を共有する。**
+  着手時の `has_type` は最上位の `def` しか見ず、実装メンバ（`lib::Util.helper`）の
+  `--print-type` が `no type for` で落ちていた（`verify-r55.sh` の 55-e が赤）。同じ探索に
+  乗せて直し、無い名前は §58.3 の `no definition named`、推論が失敗した名前（Q2）だけが
+  `no type for` になる。
 
 ### 工程
 
@@ -409,4 +414,16 @@ BYTE-IDENTICAL
 ```
 $ cargo run --offline -q -- check --fix <E520 の入力>/main.hd; sed -n 1p <同>/main.hd
 def target (b: Bool) => if b => 1 | 0
+```
+
+### 実装メンバの `--print-type` の回帰（2026-09-21）
+
+`has_type` が最上位の `def` しか見ず、実装メンバの `--print-type` が落ちていた（D8）。
+
+```
+$ bash scripts/verify-r55.sh | tail -2         # 直す前
+NG: 55-e an implementation member is printed by name
+PASSED: 6/7
+$ bash scripts/verify-r55.sh | tail -1         # 直した後
+PASSED: 7/7
 ```

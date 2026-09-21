@@ -127,17 +127,14 @@ impl Checked {
     pub fn has_type(&self, name: Option<&str>) -> bool {
         match name {
             Some(name) => self
-                .definitions
-                .get(&crate::file_scopes::entry_name(name))
+                .scheme_of(name)
                 .is_some_and(|scheme| !scheme.has_error()),
             None => !self.main.has_error(),
         }
     }
 
     /// §58.3: the canonical print of the type of the definition named `name`,
-    /// as the source spells it. A name is looked up in the entry file's own
-    /// outer `def`s first (§50), then among the implementations' members
-    /// (`lib::Util.helper`, `List.map`). `None` means no such definition.
+    /// as the source spells it. `None` means no such definition.
     pub fn type_of(&self, name: &str) -> Option<String> {
         // §54: `main`'s effects are closed by its body and kept beside its type
         // rather than in its scheme, so the named print uses the same pair as
@@ -145,18 +142,23 @@ impl Checked {
         if name == "main" && self.definitions.contains_key("main") {
             return Some(format!("{}{}", self.main, self.effects.suffix()));
         }
+        self.scheme_of(name).map(types::Scheme::canonical)
+    }
+
+    /// The scheme behind a name: the entry file's own outer `def`s first (§50),
+    /// then the implementations' members (`lib::Util.helper`, `List.map`).
+    /// `has_type` and `type_of` share this lookup so that a name either has a
+    /// type or is reported missing, never both.
+    fn scheme_of(&self, name: &str) -> Option<&types::Scheme> {
         if let Some(scheme) = self.definitions.get(&crate::file_scopes::entry_name(name)) {
-            return Some(scheme.canonical());
+            return Some(scheme);
         }
         // §47, §51: a member `A.name` has the type its contract declares, which
         // is the one the source can use at that name. An implementation's own
         // type may be more polymorphic (E602 requires it to be), and its extra
         // definitions are not visible outside at all (E204).
         let (module, member) = name.rsplit_once('.')?;
-        self.modules
-            .get(module)?
-            .get(member)
-            .map(types::Scheme::canonical)
+        self.modules.get(module)?.get(member)
     }
 }
 
