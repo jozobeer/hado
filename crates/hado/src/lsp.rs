@@ -641,7 +641,8 @@ impl Server {
         let overlay = self.overlay();
         let mut collected: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
         for entry in self.entry_candidates() {
-            for (path, diagnostic) in diagnostics_of(&entry, &overlay) {
+            let recipients = self.refusal_recipients(&entry);
+            for (path, diagnostic) in diagnostics_of(&entry, &overlay, &recipients) {
                 collected.entry(path).or_default().push(diagnostic);
             }
         }
@@ -653,6 +654,23 @@ impl Server {
                     .map_or_else(Vec::new, |list| self.render(list, &document.text));
                 (uri.clone(), diagnostics)
             })
+            .collect()
+    }
+
+    /// The open documents a load refusal of `entry` belongs to: `entry` itself
+    /// (§58.5 analyzes a `.hd` with its own directory as the root, so a sibling
+    /// entry stays clean), and the contracts `entry` can read. A candidate reads
+    /// the contract only when the contract is under the root the candidate
+    /// walks, so a refusal of an unrelated nested project never lands on it.
+    fn refusal_recipients(&self, entry: &Path) -> Vec<PathBuf> {
+        let root = entry.parent().unwrap_or_else(|| Path::new("."));
+        self.documents
+            .values()
+            .filter(|document| {
+                document.path == entry
+                    || (is_extension(&document.path, "hdi") && walked_under(root, &document.path))
+            })
+            .map(|document| document.path.clone())
             .collect()
     }
 
@@ -747,13 +765,20 @@ impl Server {
         }
     }
 
-    /// Deduplicate by URI/line/column/code and order by the checker's stage
-    /// order, so a merge does not depend on which candidate was opened first.
+    /// Deduplicate by URI/line/column/code/message and order by the checker's
+    /// stage order, so a merge does not depend on which candidate was opened
+    /// first. The message is part of the identity: two load refusals of
+    /// different roots share line 1, column 1 and no code, but are distinct.
     fn render(&self, diagnostics: &[Diagnostic], text: &str) -> Vec<Value> {
         let mut ordered: Vec<&Diagnostic> = Vec::new();
         let mut seen = BTreeSet::new();
         for diagnostic in diagnostics {
-            let key = (diagnostic.line, diagnostic.col, diagnostic.code.clone());
+            let key = (
+                diagnostic.line,
+                diagnostic.col,
+                diagnostic.code.clone(),
+                diagnostic.message.clone(),
+            );
             if seen.insert(key) {
                 ordered.push(diagnostic);
             }
@@ -788,7 +813,11 @@ pub fn diagnostic_value(encoding: PositionEncoding, text: &str, error: &Diagnost
 /// The diagnostics one entry contributes, paired with the physical file they
 /// belong to. A load that fails with a positioned diagnostic still reports it:
 /// a syntax error is exactly the kind of thing the editor must show.
-fn diagnostics_of(entry: &Path, overlay: &project::Overlay) -> Vec<(PathBuf, Diagnostic)> {
+fn diagnostics_of(
+    entry: &Path,
+    overlay: &project::Overlay,
+    recipients: &[PathBuf],
+) -> Vec<(PathBuf, Diagnostic)> {
     match Project::load_with_overlay(entry, overlay) {
         Ok(project) => {
             let paths: HashMap<String, PathBuf> = project
@@ -812,7 +841,32 @@ fn diagnostics_of(entry: &Path, overlay: &project::Overlay) -> Vec<(PathBuf, Dia
             let root = entry.parent().unwrap_or_else(|| Path::new("."));
             vec![(normalize_path(&root.join(&error.path)), error)]
         }
-        Err(project::LoadError::Input(_)) => Vec::new(),
+        // §51: an invalid namespace directory is a load refusal, not an E-code.
+        // Dropping it here publishes an empty list, so the editor looks clean
+        // while `hado check` refuses. `recipients` is every open document whose
+        // analysis used this root (the caller decides; a `.hdi` opened on its
+        // own is not an entry, and would otherwise never see it).
+        Err(project::LoadError::Input(message)) => recipients
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    Diagnostic {
+                        related: None,
+                        path: path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                        line: 1,
+                        col: 1,
+                        end_line: 1,
+                        end_col: 1,
+                        code: None,
+                        message: message.clone(),
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
@@ -844,6 +898,23 @@ fn component_prefix(prefix: &Path, path: &Path) -> bool {
     prefix
         .components()
         .all(|component| path_components.next() == Some(component))
+}
+
+/// Whether walking `root` the way `collect_sources` does would reach `document`:
+/// §50 skips a name that starts with `.`, and a directory that starts with `__`.
+fn walked_under(root: &Path, document: &Path) -> bool {
+    let Ok(relative) = document.strip_prefix(root) else {
+        return false;
+    };
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let name = component.as_os_str().as_encoded_bytes();
+        let is_file = components.peek().is_none();
+        if name.starts_with(b".") || (!is_file && name.starts_with(b"__")) {
+            return false;
+        }
+    }
+    true
 }
 
 /// The outermost ancestor of the contract that declares `library`, else the
