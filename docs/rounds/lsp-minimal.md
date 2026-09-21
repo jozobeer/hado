@@ -483,3 +483,16 @@ Fn(Int, A => Store.T Option {B})
 $ cargo run --offline -q -- check --print-type=Store.find <implement Store as Store, shared type T = Int>/main.hd
 Fn(Int, A => Int Option {B})
 ```
+
+J8 の `library` 宣言だけの `.hd` と契約の 2 ファイル。契約だけを開いた hover と、その
+`.hd` を入口にした `--print-type` が同じ型を返す。値メンバ（§46 の `def A empty: A T`）は
+§58.3 のとおり本体の型と効果行で印字される。
+
+```
+$ python3 hover.py <library 1 行の lib.hd と store.hdi> store.hdi 2 4
+{"id": 2, "jsonrpc": "2.0", "result": {"contents": {"kind": "plaintext", "value": "Fn(Int => T {A})"}}}
+$ cargo run --offline -q -- check --print-type=M.good <同>/lib.hd
+Fn(Int => T {A})
+$ cargo run --offline -q -- check --print-type=Stack.empty <module Stack / type A T / def A empty: A T、実装 0>/main.hd
+A Stack.T {B}
+```
