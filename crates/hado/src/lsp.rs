@@ -812,7 +812,25 @@ fn diagnostics_of(entry: &Path, overlay: &project::Overlay) -> Vec<(PathBuf, Dia
             let root = entry.parent().unwrap_or_else(|| Path::new("."));
             vec![(normalize_path(&root.join(&error.path)), error)]
         }
-        Err(project::LoadError::Input(_)) => Vec::new(),
+        // §51: an invalid namespace directory is a load refusal, not an E-code.
+        // Dropping it here publishes an empty list, so the editor looks clean
+        // while `hado check` refuses. Surface the same message on the entry.
+        Err(project::LoadError::Input(message)) => vec![(
+            entry.to_path_buf(),
+            Diagnostic {
+                related: None,
+                path: entry
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| entry.to_string_lossy().into_owned()),
+                line: 1,
+                col: 1,
+                end_line: 1,
+                end_col: 1,
+                code: None,
+                message,
+            },
+        )],
     }
 }
 
