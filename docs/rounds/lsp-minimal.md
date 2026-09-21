@@ -611,14 +611,14 @@ $ cargo test --offline
 test result: ok. ... （69 本すべて ok、rc=0）
 ```
 
-層別。quick は 38/38、core は 600/600 で、どちらも `red: none`。
+層別。quick は 38/38、core は 601/601 で、どちらも `red: none`。
 
 ```
 $ bash scripts/run-gates.sh --tier quick <out>
 TALLY: 38/38 passed; red: none
 
 $ bash scripts/run-gates.sh --tier core <out>
-TALLY: 600/600 passed; red: none
+TALLY: 601/601 passed; red: none
 ```
 
 core を最初に回したときは `verify-cognitive-complexity` が赤だった。J2〜J4 と LSP で
