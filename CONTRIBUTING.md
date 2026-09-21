@@ -1,8 +1,8 @@
 # hado の開発に参加する
 
-コンパイラ・ランタイム・仕様を変える人の案内。言語を使う人の案内は [README.md](README.md)。
+コンパイラ・ランタイム・仕様を変更する開発者向けの案内。言語の利用方法は [README.md](README.md) を参照。
 
-守る規則（コーパスのロック、節番号、ラウンドと worktree、着地の手順）、文書を読む順、環境は [AGENTS.md](AGENTS.md)。
+守るべき規則（コーパスのロック、節番号、ラウンドと worktree、着地手順）や文書を読む順、開発環境は [AGENTS.md](AGENTS.md) を参照。
 
 ## 検証
 
@@ -18,13 +18,29 @@ cargo fmt --all --check                  # 整形。verify-rustfmt（quick）と
 cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（core）と同じ
 ```
 
-`run-gates.sh` は 1 回の全走のあいだ、同じ内容の門番と `cargo test` の実走を 1 度に畳む（`docs/plan.md` 32 節）。畳み込みは全走のログに「対象の実行」と「ok」の証拠があるときだけ効く（33 節）。層に門番を足すときは `--tier core 出力先 verify-r33` のように書く。門番を 1 本ずつ別のシェルで走らせると、畳み込みは各門番の入れ子の範囲でしか効かない。文書の整合は `scripts/lint-docs.sh` が持ち、full の最後に回る。Rust の整形と lint は `scripts/verify-rustfmt.sh`（quick）と `scripts/verify-clippy.sh`（core）が守る（`docs/rounds/rust-lint.md`）。
+### 門番の実行と畳み込み
 
-`--jobs N`（既定 1）は門番を N 並列で走らせる（34 節）。判定は変えず、直列と同じ `PASSED: n/N` を出す。既定が直列なのは再現性のためで、`--jobs` なしの挙動は 33 節と変わらない。共有ツリーを書き換える門番（m0・m1-corpus・m2・m3・gate-cache）は前段で 1 本ずつ完走させてから残りをファンアウトする。ゲートキャッシュの鍵は作業ツリーの内容なので、これらを並列に走らせると他の門番の結果が揺れるためである。前段の後とファンアウトの後で内容ハッシュを比べ、変わっていれば分類漏れとして赤にする。前段に赤があれば後段は直列へ落とす（赤い門番が probe を戻し切らずに終わったとき、鍵が揺れて入れ子が再走するのを避ける。赤は既に確定しているので判定は緩まない）。走行自身がログを書く出力先は内容ハッシュから外してあるので、`--jobs` の出力先は `target/` の中でもツリーの外でもよい。`HADO_GATE_TIMES` と `HADO_GATE_RUNS` も `target/` の中かツリーの外に置く。中断すると親は子孫ごとワーカーを止めてから走行スコープを消す。
+`run-gates.sh` は 1 回の全走中、重複する門番や `cargo test` の実走を 1 度に畳み込んで省略する（`docs/plan.md` 32 節）。畳み込みは、全走ログに「対象の実行」と「ok」の証拠がある場合のみ適用される（33 節）。門番を別々のシェルで個別に走らせた場合、畳み込みは各門番の入れ子範囲でのみ機能する。
+
+- 層に個別の門番を追加する場合は `--tier core 出力先 verify-r33` のように指定する。
+- 文書の整合性は `scripts/lint-docs.sh` が検証し、full 層の最後に実行される。
+- Rust の整形と lint は `scripts/verify-rustfmt.sh`（quick）と `scripts/verify-clippy.sh`（core）が検証する（`docs/rounds/rust-lint.md`）。
+
+### 並列実行（`--jobs N`）
+
+`--jobs N`（既定 1）は門番を N 並列で実行する（34 節）。合否判定は直列実行と同じで、直列と同一の `PASSED: n/N` を出力する。既定が直列なのは再現性のためであり、指定なしの挙動は 33 節と変わらない。
+
+- **2 段階実行**: 共有ツリーを書き換える門番（m0・m1-corpus・m2・m3・gate-cache）は前段で 1 本ずつ直列に完走させ、その後に残りの門番をファンアウト（並列実行）する。ゲートキャッシュの鍵が作業ツリーの内容であるため、これらを並列に走らせると他門番の結果が揺れるのを防ぐためである。
+- **整合性検証とフォールバック**: 前段終了後とファンアウト終了後に作業ツリーの内容ハッシュを比較し、変化があれば分類漏れとして失敗（赤）にする。前段に赤がある場合、後段は直列実行に切り替える（失敗した門番が probe を戻し切らずに終わった際、キャッシュ鍵の変動で入れ子門番が再走するのを防ぐ。赤は確定済みのため判定は緩まない）。
+- **出力先と中断**: ログ出力先は内容ハッシュの対象外のため、`--jobs` の出力先は `target/` 配下でもツリー外でもよい（`HADO_GATE_TIMES` と `HADO_GATE_RUNS` も同様）。実行中断時は、親プロセスが全子孫ワーカーを停止してから走行スコープを削除する。
 
 ## CI
 
-CI は GitHub Actions が回す（`.github/workflows/ci.yml`、`docs/rounds/ci.md`）。PR は core 層と `scripts/lint-docs.sh`、main への push は full 層。層の選択は `scripts/ci-run.sh` が持ち、`scripts/verify-ci.sh`（quick）が固定する。手動実行（workflow_dispatch）では層を選べる（既定 full）。依存は `cargo fetch --locked` で取得し、以後は `--offline` で回す。private リポジトリなので branch protection は使えず、CI は必須チェックにはできない。
+CI は GitHub Actions で実行する（`.github/workflows/ci.yml`、`docs/rounds/ci.md`）。
+
+- **実行層**: PR は core 層と `scripts/lint-docs.sh`、main への push は full 層を実行する。手動実行（workflow_dispatch）では層を選択できる（既定: full）。
+- **層の管理**: 層の選択は `scripts/ci-run.sh` が持ち、`scripts/verify-ci.sh`（quick）が整合性を固定する。
+- **依存と制約**: 依存関係は初回に `cargo fetch --locked` で取得し、以降は `--offline` で回す。private リポジトリのため branch protection は使えず、CI を必須チェックには設定できない。
 
 ## 構成
 
