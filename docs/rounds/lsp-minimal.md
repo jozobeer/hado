@@ -526,7 +526,7 @@ A Stack.T {B}
 
 ### 門番の実測（2026-09-21）
 
-`bash scripts/verify-lsp-minimal.sh` は 10 件を測り、3 回続けて緑で、実行時間は
+`bash scripts/verify-lsp-minimal.sh` は 11 件を測り、3 回続けて緑で、実行時間は
 6.4 秒・12.2 秒・6.4 秒だった（差は固定版の Neovim と tree-sitter の取得）。
 
 ```
@@ -538,10 +538,11 @@ OK: diagnostics-range-encoding
 OK: diagnostics-unsaved-change
 OK: hover-top-level-def
 OK: code-action-byte-identical
+OK: show-all
 OK: contract-hdi
 OK: root-selection
 OK: version-guard
-PASSED: 10/10
+PASSED: 11/11
 ```
 
 「判定」の 6 つの変異を実際に当てて、赤になることを確かめた。
@@ -605,7 +606,7 @@ $ bash scripts/corpus-lock.sh --check
 （差分なし）
 
 $ bash scripts/lint-docs.sh
-PASSED: 10/10
+PASSED: 11/11
 
 $ cargo test --offline
 test result: ok. ... （69 本すべて ok、rc=0）
@@ -624,3 +625,61 @@ TALLY: 601/601 passed; red: none
 core を最初に回したときは `verify-cognitive-complexity` が赤だった。J2〜J4 と LSP で
 足した分岐が `def_name_at`・`check_command`・`take_option` を閾値（7）の上へ押し出して
 いたので、3 つとも切り出して下へ戻した（`5de6ccf`）。
+
+### 着地後の全走（2026-09-21）
+
+着地は PR #19（squash、`26b0c3c`）で main に入った。PR の `gates` は core 層を回し、
+21 分 32 秒で緑（run 35575986680）。着地後の main の push では CI が full 層を回し、
+32 分 40 秒で `success`（run 35582189880）。`red: none`。
+
+```
+$ gh run list --branch main --limit 1
+completed  success  feat: hado lsp で診断・hover・code action を返す（lsp-minimal） (#19)
+  ci  main  push  35582189880  32m40s  2026-09-21T09:14:59Z
+
+$ git log --oneline origin/main -1
+26b0c3c feat: hado lsp で診断・hover・code action を返す（lsp-minimal） (#19)
+```
+
+着地の前に手元でも full 層を通した。直列（`--jobs 1`）で 3783/3783、`red: none`。
+
+```
+$ bash scripts/run-gates.sh --jobs 1 --tier full <out>
+TALLY: 3783/3783 passed; red: none
+```
+
+並列（既定の jobs）で先に回したときは `verify-gate-cache`・`verify-m1-corpus`・`verify-m7`
+の 3 本が赤になったが、3 本とも単独では緑で、`verify-m1-corpus` の検査 7 が開始時に
+`docs` と `scripts` を固定するためだった（同じ木を並列の門番が触る。AGENTS.md の
+「門番の走行中は木を触らない」）。CI は並列でも緑だった。
+
+### 審査の指摘への対応（2026-09-21）
+
+着地した PR #19 に、`--show-all` が同じ欠陥を 2 回出すという指摘（Codex、P2）が
+付いた。実測で再現した。
+
+```
+$ printf 'def main = undefinedName\n' > a.hd
+$ cargo run --offline -q -- check --show-all --format json a.hd
+{"path": "a.hd", "line": 1, "col": 12, ..., "code": "E204", "message": "unbound name undefinedName", ...}
+{"path": "a.hd", "line": 1, "col": 12, ..., "code": "E204", "message": "invalid name reference undefinedName", ...}
+```
+
+原因は `lib.rs` の `first_stage` に渡す前に、名前解決の `E204`（`resolve_with_prelude`
+の `err()` が 1 件）と推論が回復中に積む `E204` を連結していたこと。同じアンカーを
+指す同じコードは 1 件に畳むようにした（`dedup_by`）。
+
+指摘には 2 つ目の面もあった。名前解決は 1 件しか返さないので、未束縛の名前が 2 つ
+ある入力で `--show-all` が 3 件しか出していなかった。畳んだ後は 2 件が正しく出る。
+
+```
+$ printf 'def main = a1 + a2\n' > b.hd
+$ cargo run --offline -q -- check --show-all --format json b.hd   # 直した後
+1 12 E204 unbound name a1
+1 17 E204 unbound name a2
+```
+
+合わせて門番に `show-all` の検査を足した。同じアンカーが 2 回出ないこと、未束縛の
+名前ごとに 1 行出ること、既定が 1 件であることを測る。畳むのを外すとこの検査が赤に
+なることを実測した。`--show-all` はこのラウンドで入れた面なのに、どの門番も測って
+いなかったのが穴だった。
