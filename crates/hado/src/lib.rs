@@ -410,6 +410,13 @@ pub(crate) fn first_stage(mut errors: Vec<parser::Diagnostic>) -> Option<Vec<par
     let stage = errors.iter().map(diagnostic_order).map(|o| o.0).min()?;
     errors.retain(|error| diagnostic_order(error).0 == stage);
     errors.sort_by_key(diagnostic_order);
+    // 名前解決と推論は同じ欠陥を別々に報告する（未束縛の名前は E204 を 2 回積む）。
+    // 同じコードが同じアンカーを指すものは 1 件に畳む。畳まないと `--show-all` が
+    // 同じ位置の同じ欠陥を 2 行で出し、「同じ段階の全件」ではなくなる（J2）。
+    errors.dedup_by(|later, earlier| {
+        later.code == earlier.code && later.line == earlier.line && later.col == earlier.col
+    });
+
     // 字句・構文の致命（E1xx）と型の致命（E3xx）は 1 件だけ残す。どちらも
     // 「そこから先を読めない」種類なので、同じ段階の残りは同じ原因の繰り返しになる。
     if matches!(stage, 1) || errors.iter().all(is_fatal_type) {
