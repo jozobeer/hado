@@ -10,7 +10,7 @@ pub mod parser;
 pub mod project;
 pub mod types;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Check, specialize, and compile source to a native object file.
 pub fn compile_to_object(source: &str, obj_path: &Path) -> Result<(), String> {
@@ -29,22 +29,54 @@ pub fn compile_source_to_object(
     emit::compile_mono_to_object(&program, &checked, obj_path)
 }
 
-/// Absolute path of the static runtime library (`libhado_runtime.a`)
-/// built by `build.rs` from `runtime/`.
-pub fn runtime_lib_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("OUT_DIR")).join("libhado_runtime.a")
+/// The static libraries every guest links against, in link order: the C
+/// runtime built by `build.rs` from `runtime/` and the Float formatter.
+/// They are embedded rather than referenced by their `OUT_DIR` path so an
+/// installed `hado` keeps linking after its build directory is gone.
+const RUNTIME_ARCHIVES: [(&str, &[u8]); 2] = [
+    (
+        "libhado_runtime.a",
+        include_bytes!(concat!(env!("OUT_DIR"), "/libhado_runtime.a")),
+    ),
+    (
+        "libhado_float_format.a",
+        include_bytes!(concat!(env!("OUT_DIR"), "/libhado_float_format.a")),
+    ),
+];
+
+/// Write the embedded archives next to `obj_path`, prefixed with its stem so
+/// links of different objects in one directory do not share files.
+fn write_runtime_archives(obj_path: &Path) -> Result<Vec<PathBuf>, String> {
+    let dir = obj_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let stem = obj_path.file_stem().unwrap_or_default().to_string_lossy();
+    RUNTIME_ARCHIVES
+        .iter()
+        .map(|(name, bytes)| {
+            let path = dir.join(format!("{stem}.{name}"));
+            std::fs::write(&path, bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+            Ok(path)
+        })
+        .collect()
 }
 
 /// Link a guest object with the runtime static library and `-lgc`
 /// into an executable using the host `cc`.
-pub fn link_executable(
-    obj_path: &std::path::Path,
-    exe_path: &std::path::Path,
-) -> Result<(), String> {
+pub fn link_executable(obj_path: &Path, exe_path: &Path) -> Result<(), String> {
+    let archives = write_runtime_archives(obj_path)?;
+    let linked = run_cc(obj_path, &archives, exe_path);
+    for path in &archives {
+        let _ = std::fs::remove_file(path);
+    }
+    linked
+}
+
+fn run_cc(obj_path: &Path, archives: &[PathBuf], exe_path: &Path) -> Result<(), String> {
     let status = std::process::Command::new("cc")
         .arg(obj_path)
-        .arg(runtime_lib_path())
-        .arg(std::path::PathBuf::from(env!("OUT_DIR")).join("libhado_float_format.a"))
+        .args(archives)
         .arg("-Wl,--gc-sections")
         .arg("-lgc")
         .arg("-o")
