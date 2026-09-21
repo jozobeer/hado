@@ -44,7 +44,7 @@ ok
 `cargo run --offline -q -- <命令>` で呼び出し、バイナリの出力先には依存しない（[仕様 §58](docs/spec.md#58-実行と出力先)）。
 
 ```
-check [--print-type[=<名前>]] [--show-all] [--fix] <file>   検査。診断は stderr、終了コード 1
+check [--print-type[=<名前>]] [--show-all] [--fix] <file>   検査。診断は stderr へ出し、あれば終了コード 1、無ければ 0
 dump-mono <file>                                            単相化後のプログラムを印字
 build [-o <path>] [--fix] <file.hd>                         実行ファイルを入力の隣に置く
 run <file.hd> [-- <arg>...]                                 一時ディレクトリで作って実行し、隣に何も残さない
