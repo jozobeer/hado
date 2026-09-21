@@ -146,6 +146,40 @@ impl Project {
         self.parsed.inspection == crate::Inspection::Library
     }
 
+    /// §47: the name span the cursor is on, with the module that declares it.
+    /// A `.hdi` contract has no top-level `def`; its members live in `module M`
+    /// blocks as signature definitions, so both are searched.
+    fn name_span_at(
+        &self,
+        line: usize,
+        col: usize,
+    ) -> Option<(crate::parser::Span, Option<String>)> {
+        let contains =
+            |span: crate::parser::Span| span.line == line && span.col <= col && col < span.end_col;
+        for item in &self.parsed.ast.items {
+            match item {
+                crate::parser::Item::Def(def) if contains(def.name_span) => {
+                    return Some((def.name_span, None));
+                }
+                crate::parser::Item::ModuleSig(module) => {
+                    let member = module.items.iter().find_map(|inner| match inner {
+                        crate::parser::Item::SigDef(def) if contains(def.name_span) => {
+                            Some(def.name_span)
+                        }
+                        _ => None,
+                    });
+                    if let Some(span) = member {
+                        // §47, §51: a member is keyed `module.member` in
+                        // `Checked`, the name the rest of the program uses.
+                        return Some((span, Some(module.name.clone())));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     /// §58: the name of the top-level `def` whose name span contains the
     /// 1-based scalar position (`line`, `col`) of the file at `physical`, or
     /// `None` when the position is not on one. The span is compared in the
@@ -157,33 +191,7 @@ impl Project {
             .iter()
             .find(|file| file.physical.as_path() == physical)?;
         let line = line + file.offset;
-        let contains =
-            |span: crate::parser::Span| span.line == line && span.col <= col && col < span.end_col;
-        // §47: a `.hdi` contract has no top-level `def`; its members live in
-        // `module M` blocks as signature definitions, so both are searched.
-        let mut found: Option<(crate::parser::Span, Option<String>)> = None;
-        for item in &self.parsed.ast.items {
-            if let crate::parser::Item::Def(def) = item {
-                if contains(def.name_span) {
-                    found = Some((def.name_span, None));
-                    break;
-                }
-            }
-            if let crate::parser::Item::ModuleSig(module) = item {
-                if let Some(span) = module.items.iter().find_map(|inner| match inner {
-                    crate::parser::Item::SigDef(def) if contains(def.name_span) => {
-                        Some(def.name_span)
-                    }
-                    _ => None,
-                }) {
-                    // §47, §51: a member is keyed `module.member` in `Checked`,
-                    // because that is the name the rest of the program uses.
-                    found = Some((span, Some(module.name.clone())));
-                    break;
-                }
-            }
-        }
-        let (name_span, module) = found?;
+        let (name_span, module) = self.name_span_at(line, col)?;
         // §50: name resolution rewrites `def.name` to its internal `fileN$name`
         // spelling, so the name the user typed comes from the span the parser
         // recorded rather than from the rewritten field. `Checked` is keyed by

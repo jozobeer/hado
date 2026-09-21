@@ -124,16 +124,11 @@ fn take_option<'a>(
     rest: &'a [String],
     index: &mut usize,
 ) -> Result<bool, ExitCode> {
+    if cli.command == "check" && check_option(cli, arg)? {
+        return Ok(true);
+    }
     match arg {
-        "--print-type" if cli.command == "check" => cli.print = true,
-        // §58.3: `--print-type=<名前>` はその定義の型を出す。
-        value if cli.command == "check" && value.starts_with("--print-type=") => {
-            cli.print = true;
-            cli.type_name = Some(named_type(value)?);
-        }
         "--fix" if cli.command == "check" || cli.command == "build" => cli.fix = true,
-        // §58.4 / plan.md L1: 同じ段階の診断を全件、アンカー順に出す。
-        "--show-all" if cli.command == "check" => cli.show_all = true,
         // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
         "--format" if prints_diagnostics(cli.command) => {
             enable_json(rest, index)?;
@@ -142,6 +137,22 @@ fn take_option<'a>(
         "-o" | "--output" if cli.command == "build" => {
             cli.output = Some(value_after(rest, index)?);
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// `check` だけが受ける印。当たったかを返す。
+fn check_option<'a>(cli: &mut Cli<'a>, arg: &'a str) -> Result<bool, ExitCode> {
+    match arg {
+        "--print-type" => cli.print = true,
+        // §58.3: `--print-type=<名前>` はその定義の型を出す。
+        value if value.starts_with("--print-type=") => {
+            cli.print = true;
+            cli.type_name = Some(named_type(value)?);
+        }
+        // §58.4 / plan.md L1: 同じ段階の診断を全件、アンカー順に出す。
+        "--show-all" => cli.show_all = true,
         _ => return Ok(false),
     }
     Ok(true)
@@ -285,26 +296,9 @@ fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
     for error in shown {
         print_diagnostic(project, error);
     }
-    // §58.3 / L2: E4xx・E5xx・E6xx で止まっていても型を出す。型が無いのは
-    // 字句・構文・名前解決・型の致命で、推論が `Error` を残したときだけ（Q2 の決着）。
     if cli.print {
-        if let Some(checked) = &checked {
-            if checked.has_type(cli.type_name) {
-                if let Err(code) = print_type(checked, project, cli.type_name, input) {
-                    return code;
-                }
-            } else if let Some(name) = cli.type_name {
-                // §58.3: a name that is not there is `no definition named`; a
-                // name whose inference failed (Q2) is there but has no type to
-                // print.
-                let message = if checked.type_of(name).is_some() {
-                    "no type for"
-                } else {
-                    "no definition named"
-                };
-                eprintln!("check: {message} {name} in {}", input.display());
-                return ExitCode::from(1);
-            }
+        if let Err(code) = print_requested_type(cli, project, input, checked.as_ref()) {
+            return code;
         }
     }
     if errors.is_empty() {
@@ -312,6 +306,34 @@ fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
     } else {
         ExitCode::from(1)
     }
+}
+
+/// §58.3 / L2: E4xx・E5xx・E6xx で止まっていても型を出す。型が無いのは字句・
+/// 構文・名前解決・型の致命で、推論が `Error` を残したときだけ（Q2 の決着）。
+fn print_requested_type(
+    cli: &Cli<'_>,
+    project: &Project,
+    input: &Path,
+    checked: Option<&hado::Checked>,
+) -> Result<(), ExitCode> {
+    let Some(checked) = checked else {
+        return Ok(());
+    };
+    if checked.has_type(cli.type_name) {
+        return print_type(checked, project, cli.type_name, input);
+    }
+    let Some(name) = cli.type_name else {
+        return Ok(());
+    };
+    // §58.3: a name that is not there is `no definition named`; a name whose
+    // inference failed (Q2) is there but has no type to print.
+    let message = if checked.type_of(name).is_some() {
+        "no type for"
+    } else {
+        "no definition named"
+    };
+    eprintln!("check: {message} {name} in {}", input.display());
+    Err(ExitCode::from(1))
 }
 
 fn main() -> ExitCode {
