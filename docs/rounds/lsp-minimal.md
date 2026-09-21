@@ -496,3 +496,66 @@ Fn(Int => T {A})
 $ cargo run --offline -q -- check --print-type=Stack.empty <module Stack / type A T / def A empty: A T、実装 0>/main.hd
 A Stack.T {B}
 ```
+
+### 門番の実測（2026-09-21）
+
+`bash scripts/verify-lsp-minimal.sh` は 9 件を測り、3 回続けて緑で、実行時間は
+6.4 秒・12.2 秒・6.4 秒だった（差は固定版の Neovim と tree-sitter の取得）。
+
+```
+$ bash scripts/verify-lsp-minimal.sh
+OK: lifecycle-shutdown
+OK: capabilities
+OK: encoding-negotiation
+OK: diagnostics-range-encoding
+OK: diagnostics-unsaved-change
+OK: hover-top-level-def
+OK: code-action-byte-identical
+OK: contract-hdi
+OK: version-guard
+PASSED: 9/9
+```
+
+「判定」の 6 つの変異を実際に当てて、赤になることを確かめた。
+
+| 変異 | 結果 | 赤になった検査 |
+| --- | --- | --- |
+| 1. 公開の前の version の照合を外す | 赤にならない | （下に理由） |
+| 2. 空の diagnostics を送らない | 赤 | `diagnostics-unsaved-change`（PASSED: 8/9） |
+| 3. `end_col` を `col + byte 長` にする | 赤 | `encoding-negotiation` と `diagnostics-range-encoding`（7/9） |
+| 4. `positionEncoding` の advertisement を消す | 赤 | `capabilities` と符号化の 2 件（6/9） |
+| 5. `shutdown` に応答しない | 赤 | `lifecycle-shutdown`（8/9、timeout ではなく判定） |
+| 6. 契約の親だけを根にする | 赤にならない（門番では） | 単体テストで赤（下に理由） |
+
+変異 3 の実測。判定器が本文から数えた期待値は UTF-8 の 102-131 で、判定 J9 の
+数値と一致した。
+
+```
+NG: encoding-negotiation utf-8: no diagnostic with range
+  {'start': {'line': 0, 'character': 102}, 'end': {'line': 0, 'character': 131}};
+  got [{'start': 0, 'end': 0}, {'start': 102, 'end': 102}]
+```
+
+変異 5 の実測。応答が来ないことを timeout として扱うのではなく、期待した応答が
+来ないこととして落とす。
+
+```
+NG: lifecycle-shutdown probe error: timeout: shutdown response
+```
+
+変異 1 と 6 が門番で赤にならない理由。
+
+変異 1（版の照合）は、解析が 1 本の筋で直列に走り、`didChange` がまとまって
+届いたときは最新の本文だけで解析するので、古い版が新しい版より後に公開される
+経路が無い。照合を外しても観測できる差が出ない（`crates/hado/src/lsp.rs` の
+settle のループ）。門番は「ある版の後にそれより古い版が公開されない」ことを
+全公開列で確かめる形に強めたが、この実装では照合が到達しないので緑のままになる。
+判定 J6 の「完了順を入れ替えても」は、実装が直列化を選んだ以上この門番では
+弁別できない。
+
+変異 6（契約の根）は、根を渡さないと Neovim が client を起こさない（`clients=0`
+を実測）ので、client 経由では測れない。根の決定は純粋な関数なので、単体テスト
+`library_root_walks_up_to_the_directory_declaring_library`
+（`crates/hado/tests/lsp_protocol.rs`）で祖先を辿ることを固定した。このテストは
+変異 6 で赤になる。門番の `contract-hdi` は根を明示する 4 つの対照
+（契約だけ・入れ子・実装と同時・根を渡さない入れ子）を持ち、うち 3 つが緑になる。
