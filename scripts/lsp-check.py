@@ -161,7 +161,19 @@ vim.cmd('filetype on')
 vim.filetype.add({ extension = { hd = 'hado', hdi = 'hado' } })
 local cmd = readme_cmd()
 result.cmd = cmd
-vim.lsp.config('hado', { cmd = { cmd }, filetypes = { 'hado' } })
+-- HADO_LSP_FOLDERS に `:` 区切りで絶対パスを並べると、それを workspaceFolders
+-- として渡す（§58.5 の複数 folder と接頭辞の対照）。
+local folders = {}
+if vim.env.HADO_LSP_FOLDERS and vim.env.HADO_LSP_FOLDERS ~= '' then
+  for path in vim.gsplit(vim.env.HADO_LSP_FOLDERS, ':') do
+    folders[#folders + 1] = { uri = vim.uri_from_fname(path) }
+  end
+end
+result.folders = folders
+local config = { cmd = { cmd }, filetypes = { 'hado' } }
+-- 空の表を渡すと Neovim が落ちるので、指定があるときだけ足す。
+if #folders > 0 then config.workspace_folders = folders end
+vim.lsp.config('hado', config)
 vim.lsp.enable('hado')
 
 -- publishDiagnostics をそのまま記録する。既定の handler は vim.diagnostic に
@@ -712,6 +724,65 @@ def contract_hdi(nvim, work):
         value = (hover.get('contents') or {}).get('value')
         if not isinstance(value, str) or not value:
             raise Failure('%s: hover value is %r' % (label, value))
+
+
+@check('root-selection')
+def root_selection(nvim, work):
+    # §58.5: 契約だけを開いたとき、入口の候補は `workspaceFolders` のうち契約の
+    # パス構成要素が接頭辞になる最も深い根から採る。文字列の接頭辞で選ぶと
+    # `w/app` が `w/application` にも当たり、候補を採り違える。
+    directory = make(work, 'roots')
+    short = directory / 'w'
+    long = short / 'app'
+    application = short / 'application'
+    for path in (long, application):
+        path.mkdir(parents=True, exist_ok=True)
+    # 入口は契約の型を使う。契約が入口の解析に載ることで、契約の URI に
+    # 診断が付き、メンバの hover も引ける（§58.5）。
+    write_text(short / 'lib.hd',
+               'library\ndef use (x: application::T) => x\n')
+    # 深い方の根にも候補を置く。接頭辞の判定を誤るとこちらが入口になる。
+    write_text(long / 'only.hd', 'library\ndef lone (x: Int) => x\n')
+    contract = application / 'c.hdi'
+    write_text(contract, CONTRACT)
+
+    member = range_of(CONTRACT, 'good', 'utf-8')['start']
+    body = r'''
+local contract = work .. '/roots/w/application/c.hdi'
+local client = open(contract)
+local uri = vim.uri_from_fname(contract)
+wait_for(function()
+  local ps = publishes_for(uri)
+  return #ps > 0 and #ps[#ps].diagnostics > 0
+end, 30000, 'contract diagnostics')
+result.contract = contract
+result.member = { line = __HLINE__, character = __HCHAR__ }
+result.publishes = publishes_for(uri)
+result.hover = request(client, 'textDocument/hover', {
+  textDocument = { uri = uri },
+  position = result.member,
+}).result
+result.actions = request(client, 'textDocument/codeAction', {
+  textDocument = { uri = uri },
+  range = { start = result.member, ['end'] = result.member },
+  context = { diagnostics = {} },
+}).result
+'''.replace('__HLINE__', str(member['line'])).replace('__HCHAR__', str(member['character']))
+    result = nvim.run(body, env_extra={
+        'HADO_LSP_FOLDERS': '%s:%s' % (short.resolve(), long.resolve()),
+    })
+    # 契約の診断が出る（`w` の下の `lib.hd` が入口になった）。
+    expected = point_range_of(CONTRACT, 'Missing', 'utf-8')
+    if expected not in ranges(diags_of(result['publishes'])):
+        raise Failure('no diagnostic on the contract at %r; got %r'
+                      % (expected, ranges(diags_of(result['publishes']))))
+    if result.get('actions') != []:
+        raise Failure('the contract code action returned %r, want []'
+                      % (result.get('actions'),))
+    # 根が `w/app` になると、`w` の下の `lib.hd` は入口にならず候補が 0 に
+    # なるので、診断が出ない。診断が出たこと自体が根の選択を弁別している。
+    if len(result.get('folders') or []) != 2:
+        raise Failure('the folder list did not reach the server: %r' % (result.get('folders'),))
 
 
 @check('version-guard')

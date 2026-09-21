@@ -524,7 +524,7 @@ A Stack.T {B}
 
 ### 門番の実測（2026-09-21）
 
-`bash scripts/verify-lsp-minimal.sh` は 9 件を測り、3 回続けて緑で、実行時間は
+`bash scripts/verify-lsp-minimal.sh` は 10 件を測り、3 回続けて緑で、実行時間は
 6.4 秒・12.2 秒・6.4 秒だった（差は固定版の Neovim と tree-sitter の取得）。
 
 ```
@@ -537,8 +537,9 @@ OK: diagnostics-unsaved-change
 OK: hover-top-level-def
 OK: code-action-byte-identical
 OK: contract-hdi
+OK: root-selection
 OK: version-guard
-PASSED: 9/9
+PASSED: 10/10
 ```
 
 「判定」の 6 つの変異を実際に当てて、赤になることを確かめた。
@@ -551,6 +552,7 @@ PASSED: 9/9
 | 4. `positionEncoding` の advertisement を消す | 赤 | `capabilities` と符号化の 2 件（6/9） |
 | 5. `shutdown` に応答しない | 赤 | `lifecycle-shutdown`（8/9、timeout ではなく判定） |
 | 6. 契約の親だけを根にする | 赤にならない（門番では） | 単体テストで赤（下に理由） |
+| 7. `component_prefix` を文字列の接頭辞にする | 赤 | `root-selection`（9/10） |
 
 変異 3 の実測。判定器が本文から数えた期待値は UTF-8 の 102-131 で、判定 J9 の
 数値と一致した。
@@ -584,6 +586,12 @@ settle のループ）。門番は「ある版の後にそれより古い版が�
 （`crates/hado/tests/lsp_protocol.rs`）で祖先を辿ることを固定した。このテストは
 変異 6 で赤になる。門番の `contract-hdi` は根を明示する 4 つの対照
 （契約だけ・入れ子・実装と同時・根を渡さない入れ子）を持ち、うち 3 つが緑になる。
+
+変異 7（`component_prefix` を文字列の接頭辞にする）は `root-selection` で赤になる。
+`file:///work/w` と `file:///work/w/app` の 2 つの folder を渡し、`file:///work/w/application/c.hdi`
+の契約を単独で開いたとき、根が `w` になって `w` の下の `.hd` が入口になることを測る。
+文字列の接頭辞で選ぶ実装は `w/app` を選び、`w/application` の下を検索して候補 0 に
+なるので通らない（§58.5、issue の「folder の名前が接頭辞になる対照」）。
 
 ### 着地前の全走（2026-09-21）
 
