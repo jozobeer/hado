@@ -143,6 +143,23 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    /// §56・§58.4: 最初に当たる段階の診断を全件（アンカー順）と、型が得られたかどうかを
+    /// 返す。`--show-all` と `--print-type`、LSP の診断が同じ列を使う（plan.md L1・L2）。
+    pub fn check_all(
+        &self,
+        reject_user_main_effects: bool,
+    ) -> (Vec<Diagnostic>, Option<crate::Checked>) {
+        let (errors, checked) =
+            crate::check_parsed_all(&self.parsed, &self.files[0].path, reject_user_main_effects);
+        (
+            errors
+                .into_iter()
+                .map(|error| source_diagnostic(&self.files, error))
+                .collect(),
+            checked,
+        )
+    }
+
     pub fn dump_mono(&self) -> Result<String, Diagnostic> {
         crate::dump_parsed(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))

@@ -3,6 +3,15 @@ use crate::parser::{
 };
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
+    match check_ast_all(ast, path).into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// §56・§58.4（L1）: この段階の診断を**全件**、アンカー順に返す。`check_ast` は
+/// 従来どおり先頭の 1 件だけを返すので、既定の CLI と拒否コーパスの判定は変わらない。
+pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for span in &ast.long_condition_functions {
         diagnostics.push(Diagnostic {
@@ -44,14 +53,12 @@ pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
         diagnostics.push(error);
     }
     check_items(ast, &ast.items, &ast.items, None, path, &mut diagnostics);
-    match diagnostics
+    let mut diagnostics: Vec<_> = diagnostics
         .into_iter()
         .map(|error| arm_diagnostic(ast, error))
-        .min_by_key(crate::diagnostic_order)
-    {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+        .collect();
+    diagnostics.sort_by_key(crate::diagnostic_order);
+    diagnostics
 }
 
 pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {

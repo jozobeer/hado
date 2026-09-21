@@ -22,6 +22,8 @@ struct Cli<'a> {
     type_name: Option<&'a str>,
     fix: bool,
     check_only: bool,
+    /// §58.4 / plan.md L1: 同じ段階の診断を全件出す（既定は先頭の 1 件）。
+    show_all: bool,
     output: Option<&'a str>,
     path: Option<&'a str>,
     program_args: Vec<String>,
@@ -49,6 +51,7 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
         type_name: None,
         fix: false,
         check_only: false,
+        show_all: false,
         output: None,
         path: None,
         program_args: Vec::new(),
@@ -112,6 +115,8 @@ fn take_option<'a>(
             cli.type_name = Some(named_type(value)?);
         }
         "--fix" if cli.command == "check" || cli.command == "build" => cli.fix = true,
+        // §58.4 / plan.md L1: 同じ段階の診断を全件、アンカー順に出す。
+        "--show-all" if cli.command == "check" => cli.show_all = true,
         // §58.4: 診断を 1 行 1 つの JSON で出す。診断を出す命令だけが受ける。
         "--format" if prints_diagnostics(cli.command) => {
             enable_json(rest, index)?;
@@ -247,23 +252,42 @@ fn dump_mono(project: &Project) -> ExitCode {
 }
 
 fn check_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
-    let checked = match if cli.print {
-        project.check_for_print()
+    // `--print-type` keeps E706 so the printed main type keeps its effect row
+    // (`docs/spec.md` §58.3); the plain check rejects a user effect on `main`.
+    let (errors, checked) = project.check_all(!cli.print);
+    // §58.4 / L1: `--show-all` は同じ段階の全件、既定は先頭の 1 件だけ。
+    let shown = if cli.show_all {
+        errors.as_slice()
     } else {
-        project.check()
-    } {
-        Ok(checked) => checked,
-        Err(error) => {
-            print_diagnostic(project, &error);
-            return ExitCode::from(1);
-        }
+        &errors[..errors.len().min(1)]
     };
+    for error in shown {
+        print_diagnostic(project, error);
+    }
+    // §58.3 / L2: E4xx・E5xx・E6xx で止まっていても型を出す。型が無いのは
+    // 字句・構文・名前解決・型の致命で、推論が `Error` を残したときだけ（Q2 の決着）。
     if cli.print {
-        if let Err(code) = print_type(&checked, project, cli.type_name, input) {
-            return code;
+        if let Some(checked) = &checked {
+            if checked.has_type(cli.type_name) {
+                if let Err(code) = print_type(checked, project, cli.type_name, input) {
+                    return code;
+                }
+            } else if cli.type_name.is_some() {
+                // 型を出せない名前は「無い」と同じ扱いにする（終了コード 1）。
+                eprintln!(
+                    "check: no type for {} in {}",
+                    cli.type_name.unwrap_or_default(),
+                    input.display()
+                );
+                return ExitCode::from(1);
+            }
         }
     }
-    ExitCode::SUCCESS
+    if errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 fn main() -> ExitCode {

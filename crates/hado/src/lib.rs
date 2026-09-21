@@ -120,6 +120,19 @@ impl Checked {
         checked
     }
 
+    /// §58.3 / plan.md L2: whether a real type is available for `name`. Q2 の決着に
+    /// より、字句・構文・名前解決・型の致命で止まったときは `Checked` の中身が
+    /// `Ty::Error`（推論が失敗した印）になる。そのときは型を出さない。
+    pub fn has_type(&self, name: Option<&str>) -> bool {
+        match name {
+            Some(name) => self
+                .definitions
+                .get(&crate::file_scopes::entry_name(name))
+                .is_some_and(|scheme| !scheme.has_error()),
+            None => !self.main.has_error(),
+        }
+    }
+
     /// §58.3: the canonical print of the type of the definition named `name`,
     /// as the source spells it. A name is looked up in the entry file's own
     /// outer `def`s first (§50), then among the implementations' members
@@ -298,11 +311,38 @@ pub(crate) fn check_parsed_for_print(
     check_parsed_filtered(parsed, path, false)
 }
 
-fn check_parsed_filtered(
+/// §56・§58.4（L1）: 最初に当たる段階の診断を**全件**、アンカー順に返す。`checked` は
+/// 「型が得られたか」で、L2 により**型推論が途中で失敗したときだけ** `None` になる
+/// （E3xx の致命。E602 は推論が最後まで走るので型がある）。CLI の `--show-all` と LSP の
+/// diagnostics が同じ列を使う。
+pub(crate) fn check_parsed_all(
     parsed: &ParsedSource,
     path: &str,
     reject_user_main_effects: bool,
-) -> Result<Checked, parser::Diagnostic> {
+) -> (Vec<parser::Diagnostic>, Option<Checked>) {
+    check_parsed_filtered_all(parsed, path, reject_user_main_effects)
+}
+
+/// 診断を 1 件に絞る前の列と、型が得られたかどうか。`Err` は「その段階より前で
+/// 解析そのものが止まった」ことを表し、そのときは診断も型も無い。
+fn check_parsed_filtered_all(
+    parsed: &ParsedSource,
+    path: &str,
+    reject_user_main_effects: bool,
+) -> (Vec<parser::Diagnostic>, Option<Checked>) {
+    match check_parsed_stage(parsed, path, reject_user_main_effects) {
+        Ok((diagnostics, checked)) => (diagnostics, checked),
+        Err(error) => (vec![error], None),
+    }
+}
+
+/// 1 件に絞る前の段階の結果。`Err` は字句・構文・名前解決など、`Checked` を作る前に
+/// 止まった致命。
+fn check_parsed_stage(
+    parsed: &ParsedSource,
+    path: &str,
+    reject_user_main_effects: bool,
+) -> Result<(Vec<parser::Diagnostic>, Option<Checked>), parser::Diagnostic> {
     let ParsedSource {
         ast,
         inspection,
@@ -318,21 +358,23 @@ fn check_parsed_filtered(
         match infer::infer_with_diagnostics(ast, path, *trusted_start, *inspection, *prelude_items)
         {
             Ok(result) => result,
+            // §58.3 / L2: 名前解決の致命と型推論の致命では型が無い。E3xx はここへ来る。
             Err(error) => {
-                return Err(name_error
+                let errors: Vec<_> = name_error
                     .into_iter()
                     .chain(std::iter::once(error))
                     .chain(namespace_diagnostics.iter().cloned())
                     .map(adjust)
-                    .min_by_key(diagnostic_order)
-                    .unwrap())
+                    .collect();
+                // `errors` は必ず 1 件以上ある（`infer` の `Err` を積んでいる）。
+                return Ok((first_stage(errors).unwrap_or_default(), None));
             }
         };
     diagnostics.extend(name_error);
     diagnostics.extend(namespace_diagnostics.iter().cloned());
-    if let Err(error) = check::check_ast(ast, path) {
-        diagnostics.push(error);
-    }
+    // §58.4 / L1: この段階の診断は全件を積む。1 件に絞るのは `first_stage` の仕事で、
+    // `--show-all` と既定の差はそこだけで決まる。
+    diagnostics.extend(check::check_ast_all(ast, path));
     diagnostics.extend(dependencies::diagnostics(
         ast,
         &checked,
@@ -345,13 +387,55 @@ fn check_parsed_filtered(
     if !reject_user_main_effects {
         diagnostics.retain(|error| error.code.as_deref() != Some("E706"));
     }
-    match diagnostics
-        .into_iter()
-        .map(adjust)
-        .min_by_key(diagnostic_order)
-    {
-        Some(error) => Err(error),
-        None => Ok(checked),
+    let errors: Vec<_> = diagnostics.into_iter().map(adjust).collect();
+    // 推論は最後まで走ったので型がある。§58.3 / L2: E4xx・E5xx・E6xx では型を返す
+    // （Q2 の決着）。診断が空なら `check` は通ったということでもある。
+    Ok((first_stage(errors).unwrap_or_default(), Some(checked)))
+}
+
+/// §56: 最初に当たる段階の診断だけを、アンカー順（§50）で返す。E1xx と E3xx の致命は
+/// 1 件だけ（plan.md L1）。
+pub(crate) fn first_stage(mut errors: Vec<parser::Diagnostic>) -> Option<Vec<parser::Diagnostic>> {
+    let stage = errors.iter().map(diagnostic_order).map(|o| o.0).min()?;
+    errors.retain(|error| diagnostic_order(error).0 == stage);
+    errors.sort_by_key(diagnostic_order);
+    // 字句・構文の致命（E1xx）と型の致命（E3xx）は 1 件だけ残す。どちらも
+    // 「そこから先を読めない」種類なので、同じ段階の残りは同じ原因の繰り返しになる。
+    if matches!(stage, 1) || errors.iter().all(is_fatal_type) {
+        errors.truncate(1);
+    }
+    Some(errors)
+}
+
+/// E3xx: 型推論が途中で止まる致命（L2 で型を返さない段階）。
+fn is_fatal_type(error: &parser::Diagnostic) -> bool {
+    matches!(
+        error.code.as_deref().and_then(|c| c.as_bytes().get(1)),
+        Some(b'3')
+    )
+}
+
+fn check_parsed_filtered(
+    parsed: &ParsedSource,
+    path: &str,
+    reject_user_main_effects: bool,
+) -> Result<Checked, parser::Diagnostic> {
+    match check_parsed_stage(parsed, path, reject_user_main_effects) {
+        Ok((errors, checked)) => match (errors.into_iter().next(), checked) {
+            (Some(error), _) => Err(error),
+            (None, Some(checked)) => Ok(checked),
+            (None, None) => Err(parser::Diagnostic {
+                related: None,
+                path: path.into(),
+                line: 1,
+                col: 1,
+                end_line: 1,
+                end_col: 1,
+                code: None,
+                message: "no diagnostic".into(),
+            }),
+        },
+        Err(error) => Err(error),
     }
 }
 
