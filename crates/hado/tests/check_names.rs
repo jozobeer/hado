@@ -2,14 +2,18 @@ use hado::{check_source, types::Ty};
 
 #[test]
 fn intrinsics_are_only_callable_from_stdlib() {
-    for path in ["user.hd", "not_stdlib/a.hd", "stdlib_name/a.hd"] {
+    for path in [
+        "user.hd",
+        "not_stdlib/a.hd",
+        "stdlib_name/a.hd",
+        "/tmp/stdlib/string.hd",
+    ] {
         let error = check_source("def main = __string_length \"hi\"", path)
             .err()
             .unwrap();
-        assert_eq!(error.code.as_deref(), Some("E202"));
+        assert_eq!(error.code.as_deref(), Some("E202"), "{path}");
     }
-    let checked =
-        check_source("def main = __string_length \"hi\"", "/tmp/stdlib/string.hd").unwrap();
+    let checked = check_source("def main = __string_length \"hi\"", "stdlib/string.hd").unwrap();
     assert_eq!(checked.main, Ty::Int);
     for path in ["user.hd", "stdlib/string.hd"] {
         let error = check_source("def main = __string_length", path)
