@@ -118,8 +118,8 @@
 - `scripts/verify-m1-corpus.sh`: 検査 7 の `walk`・`tail`・`m0` の呼び直しを落とし、
   開始時の protected-files の照合だけを残した。検査 6 に r25-e（受理コーパスが `Ok(`/`Error(` を
   名指ししない）を足した。
-- `scripts/verify-m2.sh`: 検査 5（m0・m1-spec・m1-corpus の呼び直し）と検査 6（protected-files の
-  重複）を落とし、7・8 を 5・6 に詰めた（8 → 6 検査）。`protected.sha` の作成も落とした。
+- `scripts/verify-m2.sh`: 検査 5（m0・m1-spec・m1-corpus の呼び直し）を落とし、7・8 を 5・6 に
+  詰めた。protected-files の検査は審査の指摘で検査 7 として戻した（8 → 7 検査）。
 - `scripts/verify-m3.sh`: 検査 9（m0・m1-spec・m1-corpus・m2 の呼び直し）を落とし、
   `cargo test` の終了コードを検査 8 に含めた。10〜12 を 9〜11 に詰めた（12 → 11 検査）。
 - `scripts/verify-m6.sh`: 既定を受理コーパス全件の実走にし、`--with-prelude` を互換のため受ける。
@@ -146,6 +146,8 @@
 - `scripts/verify-r77.sh`: 77-e のうち docs と corpus lock を落とし、print-type だけを残した。
 - `scripts/verify-r81.sh`: 81-b（spec の断片）、81-d（accept の写しの `Void` → `Unit` 変異）、
   81-e（系譜・coverage・corpus lock・台帳）。
+- `docs/corpus.md`: `// needs: prelude` の行を、M6 が prelude を連結して全件を実走する形に直した
+  （審査の指摘。下の「審査の指摘と対応」）。
 - `scripts/lint-docs.sh`: verify-r42 の 42-a(2)・42-a(3)・42-a(4) を検査 11〜13 として移した
   （10 → 13 検査）。
 - `crates/hado/tests/r23_syntax.rs`: r44-a の残る 6 ケースを `once_and_again_are_the_operation_kinds`
@@ -153,6 +155,25 @@
   `keywords_cannot_be_names` が持つ）。
 - `docs/spec-trace.md`: 5 行目の `verify-r9.sh` の参照を、R9〜R28 の判定が
   `crates/hado/tests/` にあり m0 の全走が回すという記述に替えた。
+
+### 審査の指摘と対応
+
+PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
+
+- **M2 の protected-files の検査（2 件、`scripts/verify-m2.sh`）**: 落とす根拠を「m1-corpus 検査 7 と
+  重複」としていたが、m1-corpus は自分の走行の間しか見ず、run-gates の指紋照合は `--jobs > 1` の
+  並列の後段だけ、門番 1 本を直に回す手順では誰も見ない。指摘のとおりなので検査 7 として戻した。
+  戻した検査が赤を出せることは、走行中に `docs/corpus.md` を書き換えて
+  `NG: 7 protected-files-changed`（`PASSED: 6/7`）を確かめた。
+- **`// needs: prelude` の契約（`scripts/verify-m6.sh`）**: m6 の既定を全件にしたことで
+  `docs/corpus.md` の「M3〜M6 の判定から除外される」と食い違った。文書を「prelude を連結しない
+  M5 は付いた件を飛ばし、M6 は prelude を連結して全件を実走する」に直した。タグの付け忘れは
+  m1-corpus 検査 6 が赤にし、m6 は `tests/accept/*/main.hd` を実数から取るので、文書の文と実装は
+  どちらも門番が決める。
+- **移した 42-a(2) の版の一意性（`scripts/lint-docs.sh`）**: 移設で `versions == {'v0.4'}` の検査を
+  落としていた。見出しの版を正として、前付けの版がそれ 1 つだけである検査を戻した（`v0.4` の
+  直書きはしない）。前付けに `v0.3` を足す変異で `NG: the current spec is the only snapshot`
+  （`PASSED: 12/13`）を確かめた。
 
 ## 系譜
 
@@ -167,15 +188,18 @@
 ## 実測
 
 着手時の main は `f2a3c81`。すべてこの worktree（`CARGO_TARGET_DIR` は既定の `./target`）で
-回した。`--jobs` は既定の 1（直列）。
+回した。層別は `--jobs 1`（直列）と `--jobs 3` の両方で回し、下は審査の指摘を直した後の
+`--jobs 3` の結果。
 
 ```
 $ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
 TALLY: 38/38 passed; red: none
-$ bash scripts/run-gates.sh --tier core target/gates-core 2>&1 | tail -1
-TALLY: 636/636 passed; red: none
+$ bash scripts/run-gates.sh --tier core --jobs 3 target/gates-core 2>&1 | tail -1
+TALLY: 637/637 passed; red: none
 $ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
-TALLY: 3718/3718 passed; red: none
+TALLY: 3719/3719 passed; red: none
+$ bash scripts/verify-m2.sh 2>&1 | tail -1
+PASSED: 7/7
 $ bash scripts/verify-m7.sh 2>&1 | grep 'prelude inventory'
 prelude inventory: 58/58
 $ bash scripts/lint-docs.sh 2>&1 | tail -1
@@ -193,15 +217,14 @@ test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 m0 の全走は `OK: 2 cargo-test passed=746`（7/7）。r23_syntax の新しい 1 本を足した分だけ、
 test-prune の 745 から増えた。受理コーパスの全件実走は m6 の `PASSED: 111/111` の 1 回と
 m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`（inventory と cargo test）。
-full は m7 の編集前（`--jobs 1`）と編集後（`--jobs 3`）に 1 回ずつ回し、どちらも
-`3718/3718`・`red: none`。core の 636 は編集前の実測（m7 の `PASSED` は 2 のままで、
-inventory の中身だけが 48 → 58 に増えた）。
+full は m7 の編集前（`--jobs 1`）と、審査の指摘を直した後（`--jobs 3`）に回し、後者が
+`3719/3719`・`red: none`。
 
-門番は 83 → 64 本。全走の検査の合計は 3788 → 3718（test-prune の実測が 3788）。落とした
-検査は 108 件、m6 が既定で回すようになった受理コーパス 38 件が増えて、正味 −70。core 層は
-602 → 636（m6 の +38 と、m2 −2・m3 −1・m7 −1）。quick 層は 38 のまま。
+門番は 83 → 64 本。全走の検査の合計は 3788 → 3719（test-prune の実測が 3788）。落とした
+検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件が増えて、正味 −69。core 層は
+602 → 637（m6 の +38 と、m2 −1・m3 −1・m7 −1）。quick 層は 38 のまま。
 
-主な門番の検査数（前 → 後）: m2 8 → 6、m3 12 → 11、m6 73 → 111、m7 3 → 2、r33 73 → 72、
+主な門番の検査数（前 → 後）: m2 8 → 7、m3 12 → 11、m6 73 → 111、m7 3 → 2、r33 73 → 72、
 r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、r48 8 → 5、
 r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま（中身を print-type だけに
 替えた）、r81 5 → 2。
