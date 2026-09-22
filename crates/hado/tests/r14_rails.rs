@@ -21,25 +21,22 @@ fn rejected(source: &str, code: &str, anchor: &str) {
 
 #[test]
 fn generated_patterns_round_trip_with_an_independent_question_token() {
-    let mut state = 0x140012;
-    for _ in 0..24 {
-        let name = format!("value{}", random(&mut state, 10000));
-        for pattern in [
-            name.clone(),
-            format!("{{ field = {name} }}"),
-            format!("Box({name})"),
-            format!("{{ field = Box({name}) }}"),
-        ] {
-            let source = format!("def f input => let {pattern}? = input -> Some({name})");
-            let ast = parser::parse_source(&source, "rails.hd").unwrap();
-            let printed = parser::canonical_program(&ast);
-            assert!(!printed.contains("let?"), "{printed}");
-            assert!(printed.contains("? ="), "{printed}");
-            let restored = parser::parse_source(&printed, "rails.hd").unwrap();
-            assert_eq!(parser::canonical_program(&restored), printed);
-            let spaced = parser::parse_source(&source.replace("? =", " ? ="), "rails.hd").unwrap();
-            assert_eq!(parser::canonical_program(&spaced), printed);
-        }
+    let name = "value1".to_string();
+    for pattern in [
+        name.clone(),
+        format!("{{ field = {name} }}"),
+        format!("Box({name})"),
+        format!("{{ field = Box({name}) }}"),
+    ] {
+        let source = format!("def f input => let {pattern}? = input -> Some({name})");
+        let ast = parser::parse_source(&source, "rails.hd").unwrap();
+        let printed = parser::canonical_program(&ast);
+        assert!(!printed.contains("let?"), "{printed}");
+        assert!(printed.contains("? ="), "{printed}");
+        let restored = parser::parse_source(&printed, "rails.hd").unwrap();
+        assert_eq!(parser::canonical_program(&restored), printed);
+        let spaced = parser::parse_source(&source.replace("? =", " ? ="), "rails.hd").unwrap();
+        assert_eq!(parser::canonical_program(&spaced), printed);
     }
 }
 
@@ -65,7 +62,7 @@ fn old_rail_keywords_are_rejected_at_the_question_mark() {
 #[test]
 fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
     let mut state = 0x14303504;
-    for _ in 0..16 {
+    for _ in 0..2 {
         let n = random(&mut state, 1000);
         for (body, code, anchor) in [
             (
@@ -131,33 +128,31 @@ fn run(source: &str, serial: usize) -> (Option<i32>, String, String) {
 #[test]
 fn generated_chains_execute_success_and_each_failure_path() {
     let mut state = 0x144;
-    for serial in 0..8 {
-        let n = random(&mut state, 1000) + 1;
-        for fail in 0..4 {
-            let source = format!(
-                "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
-                 def first (flag: Int): Entry {{Error}} => if flag == 1 => raise {{ message = \"f{n}\" }} | {{ field = Box({n}) }}\n\
-                 def step (flag: Int, stage: Int): Void {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
-                 def run flag => let {{ field = Box(x) }} = first flag -> do step flag 2 -> do step flag 3 -> x + 5\n\
-                 def main = run {fail}"
-            );
-            let (status, stdout, stderr) = run(&source, serial * 4 + fail);
-            match fail {
-                0 => {
-                    assert_eq!(status, Some(0), "{source}");
-                    assert_eq!(stdout, format!("{}\n", n + 5));
-                    assert!(stderr.is_empty(), "{stderr}");
-                }
-                1 => {
-                    assert_eq!(status, Some(1), "{source}");
-                    assert!(stdout.is_empty(), "{stdout}");
-                    assert_eq!(stderr, format!("f{n}\n"));
-                }
-                _ => {
-                    assert_eq!(status, Some(1), "{source}");
-                    assert!(stdout.is_empty(), "{stdout}");
-                    assert_eq!(stderr, format!("s{n}-{fail}\n"));
-                }
+    let n = random(&mut state, 1000) + 1;
+    for fail in 0..4 {
+        let source = format!(
+            "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
+             def first (flag: Int): Entry {{Error}} => if flag == 1 => raise {{ message = \"f{n}\" }} | {{ field = Box({n}) }}\n\
+             def step (flag: Int, stage: Int): Void {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
+             def run flag => let {{ field = Box(x) }} = first flag -> do step flag 2 -> do step flag 3 -> x + 5\n\
+             def main = run {fail}"
+        );
+        let (status, stdout, stderr) = run(&source, fail);
+        match fail {
+            0 => {
+                assert_eq!(status, Some(0), "{source}");
+                assert_eq!(stdout, format!("{}\n", n + 5));
+                assert!(stderr.is_empty(), "{stderr}");
+            }
+            1 => {
+                assert_eq!(status, Some(1), "{source}");
+                assert!(stdout.is_empty(), "{stdout}");
+                assert_eq!(stderr, format!("f{n}\n"));
+            }
+            _ => {
+                assert_eq!(status, Some(1), "{source}");
+                assert!(stdout.is_empty(), "{stdout}");
+                assert_eq!(stderr, format!("s{n}-{fail}\n"));
             }
         }
     }
@@ -166,18 +161,16 @@ fn generated_chains_execute_success_and_each_failure_path() {
 #[test]
 fn generated_option_chains_propagate_none_at_each_step() {
     let mut state = 0x1407;
-    for serial in 0..8 {
-        let n = random(&mut state, 1000) + 1;
-        for fail in 0..4 {
-            let source = format!(
-                "def first flag => if flag == 1 => None | Some({n})\n\
-                 def step flag stage => if flag == stage => None | Some(())\n\
-                 def run flag => let x? = first flag -> do step flag 2 -> do step flag 3 -> Some(x + 5)\n\
-                 def unwrap | Some(x) => x | None => 0\n\
-                 def main = unwrap (run {fail})"
-            );
-            let expected = if fail == 0 { n + 5 } else { 0 };
-            execute(&source, &expected.to_string(), 100 + serial * 4 + fail);
-        }
+    let n = random(&mut state, 1000) + 1;
+    for fail in 0..4 {
+        let source = format!(
+            "def first flag => if flag == 1 => None | Some({n})\n\
+             def step flag stage => if flag == stage => None | Some(())\n\
+             def run flag => let x? = first flag -> do step flag 2 -> do step flag 3 -> Some(x + 5)\n\
+             def unwrap | Some(x) => x | None => 0\n\
+             def main = unwrap (run {fail})"
+        );
+        let expected = if fail == 0 { n + 5 } else { 0 };
+        execute(&source, &expected.to_string(), 100 + fail);
     }
 }

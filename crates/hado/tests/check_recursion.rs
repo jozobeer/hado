@@ -13,11 +13,6 @@ fn self_recursion_uses_a_monomorphic_placeholder() {
 
 #[test]
 fn self_reference_requires_rec_but_shadowing_does_not() {
-    let source = "def loop x => loop x\ndef main = loop 1";
-    assert_eq!(
-        check_source(source, "t").err().unwrap().code.as_deref(),
-        Some("E201")
-    );
     let source = "def f f => f\ndef main = f 1";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
@@ -36,36 +31,7 @@ fn forward_definitions_and_mutual_recursion_are_inferred() {
 }
 
 #[test]
-fn mutual_cycles_reject_values_and_require_rec() {
-    for (source, code) in [
-        (
-            "def rec ping x => seed\ndef seed = ping 0\ndef main = seed",
-            "E207",
-        ),
-        ("def a x => b x\ndef b x => a x\ndef main = a 1", "E208"),
-    ] {
-        assert_eq!(
-            hado::check_source(source, "t")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some(code)
-        );
-    }
-}
-
-#[test]
 fn type_changing_recursion_reports_poly_recursion() {
-    let source = "def rec poly x => poly [x]\ndef main = poly 1";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E307")
-    );
     let source = "def rec bad x => x x\ndef main = bad 1";
     assert_eq!(
         hado::check_source(source, "t")

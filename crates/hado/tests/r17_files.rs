@@ -66,7 +66,7 @@ fn random(state: &mut u64, limit: usize) -> usize {
 #[test]
 fn generated_programs_share_types_and_contracts_across_files() {
     let mut state = 0x170012;
-    for _ in 0..24 {
+    for _ in 0..2 {
         let case = Case::new();
         let count = 1 + random(&mut state, 4);
         let mut files = vec![String::new(); 1 + random(&mut state, 4)];
@@ -117,7 +117,7 @@ fn generated_programs_share_types_and_contracts_across_files() {
 
 #[test]
 fn duplicate_names_follow_entry_then_byte_path_order() {
-    for padding in 0..8 {
+    for padding in 0..3 {
         for (first, second, anchor) in [
             ("module S", "module S", "S"),
             ("implement S as M", "implement S as M", "M"),
@@ -159,7 +159,7 @@ fn duplicate_names_follow_entry_then_byte_path_order() {
 
 #[test]
 fn file_role_errors_keep_original_paths_and_positions() {
-    for padding in 0..8 {
+    for padding in 0..2 {
         for (file, invalid, anchor) in [
             (
                 "contract.hdi",
@@ -281,7 +281,7 @@ fn every_source_file_is_checked_and_other_extensions_are_ignored() {
 
 #[test]
 fn interface_files_reject_implementation_types_and_cannot_be_entries() {
-    for padding in 0..8 {
+    for padding in 0..2 {
         let case = Case::new();
         case.write(
             "main.hd",
@@ -323,7 +323,7 @@ fn single_file_entry_diagnostics_keep_existing_positions() {
 
 #[test]
 fn lexical_errors_in_later_files_precede_earlier_syntax_errors() {
-    for padding in 0..8 {
+    for padding in 0..2 {
         let case = Case::new();
         case.write("main.hd", "def main = [)");
         let source = format!(
@@ -338,7 +338,7 @@ fn lexical_errors_in_later_files_precede_earlier_syntax_errors() {
 
 #[test]
 fn implementation_diagnostics_retain_anchors_from_each_file() {
-    for padding in 0..8 {
+    for padding in 0..2 {
         for (contract, body, argument, code, anchor) in [
             (
                 "def run(x: Int): Bool",

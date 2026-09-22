@@ -53,7 +53,7 @@ impl Case {
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
-    fn reject(&self, command: &str, entry: &str, file: &str, code: &str, offset: usize) {
+    fn reject(&self, command: &str, entry: &str, file: &str, code: &str, offset: usize) -> String {
         let source = std::fs::read_to_string(self.0.join(file)).unwrap();
         let before = &source[..offset];
         let output = self.command(command, entry);
@@ -79,6 +79,7 @@ impl Case {
             "expected {prefix}\n{diagnostic}\n{source}"
         );
         assert_eq!(diagnostic.lines().count(), 1);
+        diagnostic
     }
 }
 impl Drop for Case {
@@ -196,40 +197,6 @@ fn generated_arities_and_applications_have_independent_arithmetic_results() {
     }
 }
 #[test]
-fn minimal_application_is_accepted() {
-    base().run("main.hd", 10);
-}
-#[test]
-fn application_types_are_distinct_even_with_identical_representations() {
-    let case = base();
-    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\nimplement Id as J\ntype T = Int\ndef make x => x + 3\ndef read x => x");
-    case.write(
-        "apply.hd",
-        "implement Box as A = Make(I)\nimplement Box as B = Make(J)",
-    );
-    reject_shifted(
-        &case,
-        "main.hd",
-        "def main = A.read (B.make 7)",
-        "E305",
-        "B.make 7",
-    );
-}
-#[test]
-fn both_distinct_application_types_can_be_consumed_by_their_own_members() {
-    let case = base();
-    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\nimplement Id as J\ntype T = Int\ndef make x => x + 3\ndef read x => x");
-    case.write(
-        "apply.hd",
-        "implement Box as A = Make(I)\nimplement Box as B = Make(J)",
-    );
-    case.write(
-        "main.hd",
-        "def main = A.read (A.make 7) + B.read (B.make 8)",
-    );
-    case.run("main.hd", 21);
-}
-#[test]
 fn application_header_requires_the_functors_contract() {
     let case = base();
     case.write(
@@ -252,13 +219,7 @@ fn application_argument_requires_its_position_contract() {
         &format!("{CONTRACTS}\nmodule Other\ndef flag: Bool"),
     );
     case.write("ids.hd", "implement Other as I\ndef flag = true");
-    reject_shifted(
-        &case,
-        "apply.hd",
-        "implement Box as A = Make(I)",
-        "E602",
-        "implement",
-    );
+    case.reject("check", "main.hd", "apply.hd", "E602", 0);
 }
 #[test]
 fn a_functor_cannot_be_an_application_argument() {
@@ -337,23 +298,6 @@ fn functor_members_are_not_directly_visible() {
     );
 }
 #[test]
-fn interface_files_cannot_contain_functor_definitions() {
-    let case = base();
-    case.write("functor.hd", "");
-    reject_shifted(&case, "functor.hdi", &functor(1), "E100", "implement");
-}
-#[test]
-fn application_headers_cannot_have_bodies() {
-    let case = base();
-    reject_shifted(
-        &case,
-        "apply.hd",
-        "implement Box as A = Make(I)\ndef extra = 1",
-        "E100",
-        "def extra",
-    );
-}
-#[test]
 fn contract_qualified_type_counts_the_application_but_not_the_functor() {
     let case = base();
     case.write(
@@ -379,19 +323,14 @@ fn an_application_result_can_be_passed_to_another_functor() {
 fn functor_body_must_satisfy_its_result_contract() {
     let case = base();
     let source = functor(1).replace("(P0.read value.slot0) * 1", "P0.read value.slot0 > 0");
-    reject_shifted(&case, "functor.hd", &source, "E602", "implement");
+    case.write("functor.hd", &source);
+    case.reject("check", "main.hd", "functor.hd", "E602", 0);
 }
 #[test]
 fn unused_application_is_rejected() {
     let case = base();
     case.write("main.hd", "def main = I.read (I.make 7)");
-    reject_shifted(
-        &case,
-        "apply.hd",
-        "implement Box as A = Make(I)",
-        "E513",
-        "implement",
-    );
+    case.reject("check", "main.hd", "apply.hd", "E513", 0);
 }
 #[test]
 fn two_application_results_make_contract_qualified_type_ambiguous() {
@@ -439,15 +378,13 @@ fn parameter_types_remain_opaque_even_when_actual_representations_support_the_op
         case.write("functor.hd", &source);
         case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
         case.write("main.hd", "def main = Applied.run 7");
-        for command in ["check", "build", "dump-mono"] {
-            let anchor = if code == "E601" {
-                source.find(".number")
-            } else {
-                source.find("Arg.make")
-            }
-            .unwrap();
-            case.reject(command, "main.hd", "functor.hd", code, anchor);
+        let anchor = if code == "E601" {
+            source.find(".number")
+        } else {
+            source.find("Arg.make")
         }
+        .unwrap();
+        case.reject("check", "main.hd", "functor.hd", code, anchor);
     }
 }
 
@@ -615,18 +552,15 @@ fn diagnostic_types_use_source_parameter_names() {
         ] {
             case.write(file, source);
         }
-        for command in ["check", "build", "dump-mono"] {
-            case.reject(
-                command,
-                "main.hd",
-                "functor.hd",
-                code,
-                functor.find("Arg.make").unwrap(),
-            );
-            let message = String::from_utf8(case.command(command, "main.hd").stderr).unwrap();
-            assert!(message.contains("Arg.T"), "{message}");
-            assert!(!message.contains('$'), "{message}");
-        }
+        let message = case.reject(
+            "check",
+            "main.hd",
+            "functor.hd",
+            code,
+            functor.find("Arg.make").unwrap(),
+        );
+        assert!(message.contains("Arg.T"), "{message}");
+        assert!(!message.contains('$'), "{message}");
         let source = [main, contracts, argument, &functor, application].join("\n");
         let message = match hado::check_source(&source, "single.hd") {
             Err(error) => error.to_string(),

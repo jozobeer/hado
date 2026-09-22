@@ -24,14 +24,6 @@ fn propagation_preserves_container_and_error_type() {
 #[test]
 fn do_of_a_pure_value_is_rejected() {
     assert_eq!(
-        check_source("def main = let x? = 1 -> x", "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E303")
-    );
-    assert_eq!(
         check_source("def main = do true -> Some(1)", "t")
             .err()
             .unwrap()

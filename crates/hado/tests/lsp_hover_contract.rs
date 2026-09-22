@@ -89,21 +89,6 @@ fn hover_on_contract(root: &Path, contract: &str, text: &str, line: u64, charact
 }
 
 #[test]
-fn hover_on_a_contract_opened_alone_prints_the_declared_type() {
-    let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n";
-    let root = workspace(&[
-        ("store.hdi", contract),
-        ("main.hd", "def use (x: T) => x\n"),
-    ]);
-    // `good` starts at column 4 of the third line.
-    let hover = hover_on_contract(&root, "store.hdi", contract, 2, 4);
-    assert_eq!(
-        hover,
-        json!({"contents": {"kind": "plaintext", "value": "Fn(Int => T {A})"}})
-    );
-}
-
-#[test]
 fn hover_on_a_nested_contract_uses_the_entry_under_the_root() {
     let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n";
     let root = workspace(&[
@@ -114,6 +99,17 @@ fn hover_on_a_nested_contract_uses_the_entry_under_the_root() {
     assert_eq!(
         hover,
         json!({"contents": {"kind": "plaintext", "value": "Fn(Int => api::T {A})"}})
+    );
+
+    // A contract at the root prints the same declared type without a path.
+    let flat = workspace(&[
+        ("store.hdi", contract),
+        ("main.hd", "def use (x: T) => x\n"),
+    ]);
+    let hover = hover_on_contract(&flat, "store.hdi", contract, 2, 4);
+    assert_eq!(
+        hover,
+        json!({"contents": {"kind": "plaintext", "value": "Fn(Int => T {A})"}})
     );
 }
 

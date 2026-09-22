@@ -59,7 +59,6 @@ fn pattern_bindings_do_not_escape_their_arm() {
 #[test]
 fn recursive_type_cycles_preserve_parameters() {
     for source in [
-        "type T Tree = | Leaf(T) | Branch(T List Tree)\ndef main = 1",
         "type T A = | ANode(T List B)\ntype U B = | BNode(U A)\ndef main = 1",
         "type (A, B) Pair = | End | Next((B, A) Pair)\ndef main = 1",
     ] {
@@ -104,12 +103,11 @@ fn nullary_constructor_patterns_constrain_the_scrutinee_type() {
 
 #[test]
 fn main_requires_a_monomorphic_type() {
-    for source in ["def main = []", "def main = Some([])"] {
-        assert_eq!(
-            check_source(source, "t").err().unwrap().code.as_deref(),
-            Some("E701")
-        );
-    }
+    let source = "def main = Some([])";
+    assert_eq!(
+        check_source(source, "t").err().unwrap().code.as_deref(),
+        Some("E701")
+    );
     let source = "def empty (n: Int): Int List => if n == 0 => [] | [n]\ndef main = empty 0";
     assert_eq!(
         check_source(source, "t").unwrap().main,

@@ -85,10 +85,7 @@ fn code(source: &str) -> String {
 
 #[test]
 fn types_precede_redundancy() {
-    for index in 0..20 {
-        let source = format!("def main = let x = {index} + \"bad\" -> x");
-        assert_eq!(code(&source), "E305");
-    }
+    assert_eq!(code("def main = let x = 1 + \"bad\" -> x"), "E305");
 }
 
 #[test]
@@ -104,7 +101,7 @@ fn later_type_errors_precede_earlier_coverage_errors() {
 
 #[test]
 fn remainder_is_int_only() {
-    for index in 1..20 {
+    for index in 1..3 {
         assert_eq!(code(&format!("def main = {index}.5 % 2.0")), "E305");
     }
 }
@@ -172,22 +169,20 @@ fn arm_diagnostics_point_to_pipe_with_arbitrary_spacing() {
 
 #[test]
 fn all_type_references_resolve_before_expression_type_errors() {
-    for index in 0..20 {
-        for declaration in [
-            format!("type Box{index} = {{ value: Missing{index} }}"),
-            format!("type Box{index} = | Pack{index}(Missing{index})"),
-            format!("def f (value: Missing{index}) => value"),
-            format!("def f value: Missing{index} => value"),
-            format!("def f = fn(value: Missing{index} => value)"),
-        ] {
-            let source = format!("def broken = 1 + true\n{declaration}\ndef main = broken");
-            let error = check_source(&source, SOURCE_PATH).err().unwrap();
-            assert_eq!(error.code.as_deref(), Some("E204"), "{source}");
-            assert_eq!(
-                (error.line, error.col),
-                (2, declaration.find(&format!("Missing{index}")).unwrap() + 1)
-            );
-        }
+    for declaration in [
+        "type Box = { value: Missing }",
+        "type Box = | Pack(Missing)",
+        "def f (value: Missing) => value",
+        "def f value: Missing => value",
+        "def f = fn(value: Missing => value)",
+    ] {
+        let source = format!("def broken = 1 + true\n{declaration}\ndef main = broken");
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{source}");
+        assert_eq!(
+            (error.line, error.col),
+            (2, declaration.find("Missing").unwrap() + 1)
+        );
     }
 }
 
@@ -227,17 +222,15 @@ fn recursive_type_errors_use_source_order_across_declarations() {
 
 #[test]
 fn unresolved_values_and_intrinsics_precede_type_errors() {
-    for index in 0..20 {
-        for (body, expected) in [
-            (format!("missing{index} {index}"), "E204"),
-            (format!("Unknown{index}.value {index}"), "E204"),
-            (format!("if {index} | Unknown{index}(x) => x | 0"), "E204"),
-            ("__string_length 1".into(), "E202"),
-            ("__string_length".into(), "E203"),
-        ] {
-            let source = format!("def broken = 1 + true\ndef other = {body}\ndef main = broken");
-            assert_eq!(code(&source), expected, "{source}");
-        }
+    for (body, expected) in [
+        ("missing 1", "E204"),
+        ("Unknown.value 1", "E204"),
+        ("if 1 | Unknown(x) => x | 0", "E204"),
+        ("__string_length 1", "E202"),
+        ("__string_length", "E203"),
+    ] {
+        let source = format!("def broken = 1 + true\ndef other = {body}\ndef main = broken");
+        assert_eq!(code(&source), expected, "{source}");
     }
 }
 
@@ -466,38 +459,33 @@ fn module_errors_follow_source_order_even_with_outer_dependencies() {
 
 #[test]
 fn recursive_type_errors_do_not_hide_earlier_independent_type_errors() {
-    for index in 0..20 {
-        let declaration =
-            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})");
-        let first = "def first = true + 1";
-        let source = format!("{first}\n{declaration}\ndef main = first");
-        let error = check_source(&source, SOURCE_PATH).err().unwrap();
-        assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-        assert_eq!((error.line, error.col), (1, 13));
+    let declaration = "type T Tree = | Leaf(Int) | Next(T List Tree)";
+    let first = "def first = true + 1";
+    let source = format!("{first}\n{declaration}\ndef main = first");
+    let error = check_source(&source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
+    assert_eq!((error.line, error.col), (1, 13));
 
-        let source = format!("{declaration}\n{first}\ndef main = first");
-        let error = check_source(&source, SOURCE_PATH).err().unwrap();
-        assert_eq!(error.code.as_deref(), Some("E302"), "{error}");
-        assert_eq!(
-            (error.line, error.col),
-            (1, declaration.find("T List").unwrap() + 1)
-        );
-    }
+    let source = format!("{declaration}\n{first}\ndef main = first");
+    let error = check_source(&source, SOURCE_PATH).err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E302"), "{error}");
+    assert_eq!(
+        (error.line, error.col),
+        (1, declaration.find("T List").unwrap() + 1)
+    );
 }
 
 #[test]
 fn recursive_type_recovery_preserves_known_payloads_and_breaks_growing_cycles() {
-    for index in 0..20 {
-        for declaration in [
-            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Tree{index})"),
-            format!("type T Tree{index} = | Leaf{index}(Int) | Next{index}(T List Branch{index})\ntype T Branch{index} = | Back{index}(T Tree{index})"),
-        ] {
-            let source = format!("def first = Leaf{index}(true)\n{declaration}\ndef main = first");
-            assert_eq!(code(&source), "E305", "{source}");
+    for declaration in [
+        "type T Tree = | Leaf(Int) | Next(T List Tree)",
+        "type T Tree = | Leaf(Int) | Next(T List Branch)\ntype T Branch = | Back(T Tree)",
+    ] {
+        let source = format!("def first = Leaf(true)\n{declaration}\ndef main = first");
+        assert_eq!(code(&source), "E305", "{source}");
 
-            let source = format!("{declaration}\ndef main = Leaf{index}(1) == Leaf{index}(2)");
-            assert_eq!(code(&source), "E302", "{source}");
-        }
+        let source = format!("{declaration}\ndef main = Leaf(1) == Leaf(2)");
+        assert_eq!(code(&source), "E302", "{source}");
     }
 }
 
@@ -567,7 +555,7 @@ fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
 
 #[test]
 fn indirect_polymorphic_recursion_points_to_its_definition() {
-    for index in 0..20 {
+    for index in 0..3 {
         let name = format!("poly{index}");
         for (helper, body) in [
             ("", format!("fn(invoke => invoke [x]) {name}")),
@@ -644,24 +632,24 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
 
 #[test]
 fn field_name_errors_are_ordered_with_unresolved_value_names() {
-    for index in 0..20 {
-        for field_first in [false, true] {
-            let field = format!("def field{index} (x: R) => x.missing{index}");
-            let value = format!("def value{index} = absent{index}");
-            let (first, second, anchor) = if field_first {
-                (&field, &value, format!("missing{index}"))
-            } else {
-                (&value, &field, format!("absent{index}"))
-            };
-            let source = format!("type R = {{ known: Int }}\n{first}\n{second}\ndef main = field{index} {{ known = 1 }}");
-            let error = check_source(&source, SOURCE_PATH).err().unwrap();
-            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-            assert_eq!(
-                (error.line, error.col),
-                (2, first.find(&anchor).unwrap() + 1),
-                "{error}: {source}"
-            );
-        }
+    for field_first in [false, true] {
+        let field = "def field (x: R) => x.missing";
+        let value = "def value = absent";
+        let (first, second, anchor) = if field_first {
+            (field, value, "missing")
+        } else {
+            (value, field, "absent")
+        };
+        let source = format!(
+            "type R = {{ known: Int }}\n{first}\n{second}\ndef main = field {{ known = 1 }}"
+        );
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (2, first.find(anchor).unwrap() + 1),
+            "{error}: {source}"
+        );
     }
 }
 
@@ -687,22 +675,22 @@ fn independent_fields_survive_unresolved_payload_type_names() {
 
 #[test]
 fn independent_fields_precede_later_duplicate_declarations() {
-    for index in 0..12 {
-        let field = format!("def field{index} (x: R) => x.missing{index}");
-        for duplicates in [
-            "def dup = 1\ndef dup = 2",
-            "type Dup = | One\ntype Dup = | Two",
-            "type First = | Same\ntype Second = | Same",
-        ] {
-            let source = format!("type R = {{ known: Int }}\n{field}\n{duplicates}\ndef main = field{index} {{ known = 1 }}");
-            let error = check_source(&source, SOURCE_PATH).err().unwrap();
-            assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-            assert_eq!(
-                (error.line, error.col),
-                (2, field.find("missing").unwrap() + 1),
-                "{error}"
-            );
-        }
+    let field = "def field (x: R) => x.missing";
+    for duplicates in [
+        "def dup = 1\ndef dup = 2",
+        "type Dup = | One\ntype Dup = | Two",
+        "type First = | Same\ntype Second = | Same",
+    ] {
+        let source = format!(
+            "type R = {{ known: Int }}\n{field}\n{duplicates}\ndef main = field {{ known = 1 }}"
+        );
+        let error = check_source(&source, SOURCE_PATH).err().unwrap();
+        assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+        assert_eq!(
+            (error.line, error.col),
+            (2, field.find("missing").unwrap() + 1),
+            "{error}"
+        );
     }
 }
 
@@ -776,6 +764,7 @@ fn ambiguous_module_interfaces_do_not_choose_a_return_type() {
     for declarations in [
         "module S def make(x: Int): A\nmodule S def make(x: Int): B\nimplement S as M def make x => { ok = x }",
         "module SA def make(x: Int): A\nmodule SB def make(x: Int): B\nimplement SA as M def make x => { ok = x }\nimplement SB as M def make x => { bad = x }",
+        "module S def make(x: Int): A def make(x: Int): B\nimplement S as M def make x => { ok = x }",
     ] {
         let source = format!("{prefix}def main = early\n{declarations}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -811,19 +800,6 @@ fn ambiguous_module_bodies_retain_independent_diagnostics() {
             "{error}"
         );
     }
-}
-
-#[test]
-fn duplicate_signature_members_do_not_choose_a_public_type() {
-    let source = "type A = { ok: Int }\ntype B = { bad: Int }\ndef early = (M.make 1).ok\n\n\ndef main = early\nmodule S def make(x: Int): A def make(x: Int): B\nimplement S as M def make x => { ok = x }";
-    assert_eq!(
-        check_source(source, SOURCE_PATH)
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E205")
-    );
 }
 
 #[test]

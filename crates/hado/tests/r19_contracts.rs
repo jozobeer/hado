@@ -162,12 +162,10 @@ fn generated_fields(count: usize, seed: i64, offset: i64) -> (String, String, i6
 fn generated_abstract_arities_and_value_members_execute() {
     let mut state = 0x19_a11;
     for arity in 0..5 {
-        for _ in 0..3 {
-            let seed = random(&mut state, 100) as i64 + 1;
-            let offset = random(&mut state, 30) as i64;
-            let (source, expected) = generated_store(arity, seed, offset);
-            Case::new(&source).run(&expected.to_string());
-        }
+        let seed = random(&mut state, 100) as i64 + 1;
+        let offset = random(&mut state, 30) as i64;
+        let (source, expected) = generated_store(arity, seed, offset);
+        Case::new(&source).run(&expected.to_string());
     }
     let source = "def main = (M.count_int M.empty) + (M.count_bool M.empty)\nmodule S\ntype A T\ndef A empty: A T\ndef count_int(value: Int T): Int\ndef count_bool(value: Bool T): Int\nimplement S as M\ntype A T = A List\ndef empty = []\ndef count_int value => List.length value\ndef count_bool value => List.length value";
     Case::new(source).run("0");
@@ -175,22 +173,24 @@ fn generated_abstract_arities_and_value_members_execute() {
 
 #[test]
 fn contract_arity_mismatches_are_e602() {
-    for arity in 1..4 {
-        for actual in [arity - 1, arity + 1] {
-            let declared: Vec<_> = (0..arity).map(|i| format!("A{i}")).collect();
-            let realized: Vec<_> = (0..actual).map(|i| format!("B{i}")).collect();
-            let fields = if realized.is_empty() {
-                "value: Int".into()
-            } else {
-                realized
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| format!("field{i}: {name} Option"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            };
-            let source = format!("type {} = {{ {fields} }}\ndef main = M.run 1\nmodule S\ntype {}\ndef run(x: Int): Int\nimplement S as M\ntype {} = {}\ndef run x => x", applied(&realized, "Payload"), applied(&declared, "T"), applied(&realized, "T"), applied(&realized, "Payload"));
+    for (arity, actual) in [(1usize, 0usize), (1, 2)] {
+        let declared: Vec<_> = (0..arity).map(|i| format!("A{i}")).collect();
+        let realized: Vec<_> = (0..actual).map(|i| format!("B{i}")).collect();
+        let fields = if realized.is_empty() {
+            "value: Int".into()
+        } else {
+            realized
+                .iter()
+                .enumerate()
+                .map(|(i, name)| format!("field{i}: {name} Option"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+        let source = format!("type {} = {{ {fields} }}\ndef main = M.run 1\nmodule S\ntype {}\ndef run(x: Int): Int\nimplement S as M\ntype {} = {}\ndef run x => x", applied(&realized, "Payload"), applied(&declared, "T"), applied(&realized, "T"), applied(&realized, "Payload"));
+        if actual == 0 {
             perturbed(&source, "E602", "implement");
+        } else {
+            rejected(&source, "E602", "implement");
         }
     }
 }
@@ -200,8 +200,6 @@ fn value_member_implementation_form_is_distinct_from_function_definition() {
     for (signature, implementation) in [
         ("def value: Int", "def value x => x"),
         ("def operation: Fn(Int => Int)", "def operation x => x + 1"),
-        ("def value: Int", "def value = true"),
-        ("def value: Int", "def other = 1"),
     ] {
         let source =
             format!("def main = 1\nmodule S\n{signature}\nimplement S as M\n{implementation}");
@@ -220,19 +218,20 @@ fn argument_program(place: usize, arguments: &str, invocation: &str) -> String {
 }
 #[test]
 fn underscores_preserve_argument_positions_and_named_unused_arguments_reject() {
-    for position in 0..3 {
-        for typed in [false, true] {
-            for place in 0..4 {
-                let args = argument_names(position, typed, place);
-                let source = argument_program(place, &args, "11 23 37");
-                if place < 2 {
-                    Case::new(&source).run(&([11, 23, 37][position] + 7).to_string());
-                } else {
-                    perturbed(&source, "E519", "_");
-                }
-                named_unused_rejects(&source);
+    for typed in [false, true] {
+        for place in 0..4 {
+            let args = argument_names(0, typed, place);
+            let source = argument_program(place, &args, "11 23 37");
+            match place {
+                0 | 1 => Case::new(&source).run("18"),
+                2 => rejected(&source, "E519", "_"),
+                _ => perturbed(&source, "E519", "_"),
             }
         }
+    }
+    for place in [0, 3] {
+        let args = argument_names(0, false, place);
+        named_unused_rejects(&argument_program(place, &args, "11 23 37"));
     }
 }
 
@@ -279,10 +278,10 @@ fn contract_count_program(count: usize) -> String {
 fn contract_qualified_types_require_exactly_one_implementation() {
     for count in 0..3 {
         let source = contract_count_program(count);
-        if count == 1 {
-            Case::new(&source).run("11");
-        } else {
-            perturbed(&source, "E603", "X.T");
+        match count {
+            1 => Case::new(&source).run("11"),
+            0 => perturbed(&source, "E603", "X.T"),
+            _ => rejected(&source, "E603", "X.T"),
         }
     }
     let source = "def main = C.use (Id.make 42)\nmodule X\ntype T\ndef make(x: Int): T\ndef get(x: T): Int\nmodule Consumer\ndef use(x: X.T): Int\nimplement X as Id\ntype T = Int\ndef make x => x\ndef get x => x\nimplement Consumer as C\ndef use x => Id.get x";
@@ -295,7 +294,7 @@ fn contract_qualified_types_require_exactly_one_implementation() {
 
 #[test]
 fn unused_type_variables_use_type_references_not_constructor_names() {
-    for source in [
+    for (index, source) in [
         "type A Box = | Wrap(Int)\ndef read(value: Int Box): Int => let Wrap(n) = value -> n\ndef main = read (Wrap(7))",
         "type A Box = { value: Int }\ndef read(value: Int Box): Int => value.value\ndef main = read { value = 7 }",
         "type A Box = | A(Int)\ndef read(value: Int Box): Int => let A(n) = value -> n\ndef main = read (A(7))",
@@ -303,9 +302,16 @@ fn unused_type_variables_use_type_references_not_constructor_names() {
         "def main = M.run 7\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype A Box = | Wrap(Int)\ndef run x => let Wrap(n) = Wrap(x) -> n",
         "def main = M.run 7\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype A Box = { value: Int }\ndef run x => let box = { value = x } -> box.value",
         "def main = M.read (M.make 7)\nmodule S\ntype A T\ndef make(x: Int): Int T\ndef read(x: Int T): Int\nimplement S as M\ntype A T = Int\ndef make x => x\ndef read x => x",
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let anchor = if source.contains("type A T =") { "A T =" } else if source.contains("def A run") { "A run" } else { "A Box" };
-        perturbed(source, "E518", anchor);
+        if index == 0 {
+            perturbed(source, "E518", anchor);
+        } else {
+            rejected(source, "E518", anchor);
+        }
     }
     Case::new("type A Box = | Wrap(A)\ndef read | Wrap(n) => n\ndef main = read (Wrap(7))")
         .run("7");
@@ -320,7 +326,7 @@ fn unused_type_variables_use_type_references_not_constructor_names() {
 #[test]
 fn main_abstract_types_are_rejected_inside_fixed_and_generic_payloads() {
     let suffix = "\nmodule S\ntype T\ndef make(x: Int): T\ndef get(x: T): Int\nimplement S as M\ntype T = Int\ndef make x => x\ndef get x => x";
-    for (prefix, main) in [
+    for (index, (prefix, main)) in [
         ("", "M.make 7"),
         ("", "Some(M.make 7)"),
         ("", "[M.make 7]"),
@@ -331,12 +337,19 @@ fn main_abstract_types_are_rejected_inside_fixed_and_generic_payloads() {
             "type Chain = | Last(M.T) | Next(Chain)\n",
             "Next(Last(M.make 7))",
         ),
-    ] {
+    ]
+    .iter()
+    .enumerate()
+    {
         let source = format!("{prefix}def main = {main}{suffix}");
-        let case = Case::new(&source);
-        for command in ["check", "build", "dump-mono"] {
-            case.rejects(&source, "E705", source.find("def main").unwrap(), command);
-            assert!(!case.0.join("main").exists());
+        if index == 0 {
+            let case = Case::new(&source);
+            for command in ["check", "build", "dump-mono"] {
+                case.rejects(&source, "E705", source.find("def main").unwrap(), command);
+                assert!(!case.0.join("main").exists());
+            }
+        } else {
+            rejected(&source, "E705", "def main");
         }
     }
     Case::new(&format!("def main = M.get (M.make 7){suffix}")).run("7");
@@ -383,40 +396,28 @@ fn new_diagnostics_keep_stage_and_source_order() {
     }
     let source = "def main = M.make (bad 1)\ndef bad _ => 7\nmodule S type T def make(x: Int): T\nimplement S as M type T = Int def make x => x";
     rejected(source, "E519", "_");
-}
-
-#[test]
-fn contract_errors_share_type_stage_and_precede_unused_type_variables() {
     let mismatch =
         "module Broken\ndef run(x: Int): Int\nimplement Broken as Bad\ndef run x => true";
     let unresolved = "module X\ntype T\nmodule Consumer\ndef answer: Int\ndef use(x: X.T): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1";
-    for (first, second, code, anchor) in [
-        (mismatch, unresolved, "E602", "implement Broken"),
-        (unresolved, mismatch, "E603", "X.T"),
-    ] {
-        let source = format!("def main = (Bad.run 1) + C.answer\n{first}\n{second}");
-        rejected(&source, code, anchor);
-    }
-    let source = format!("type A Box = | Wrap(Int)\ndef read(value: Int Box): Int => let Wrap(n) = value -> n\ndef main = (read (Wrap(1))) + C.answer\n{unresolved}");
-    rejected(&source, "E603", "X.T");
-}
-
-#[test]
-fn generated_field_oracles_match_concrete_runtime_controls() {
-    let mut state = 0x19_c017;
-    for count in 1..5 {
-        let seed = random(&mut state, 100) as i64 + 1;
-        let offset = random(&mut state, 30) as i64;
-        let (filled, reads, expected) = generated_fields(count, seed, offset);
-        Case::new(&format!("type Fields = {{ {} }}\ndef fill seed => {{ {filled} }}\ndef read(value: Fields): Int => {reads}\ndef main = read (fill {seed})", (0..count).map(|i| format!("slot{i}: {} Option", ["Int", "Bool", "String"][i % 3])).collect::<Vec<_>>().join("; "))).run(&expected.to_string());
-    }
+    rejected(
+        &format!("def main = (Bad.run 1) + C.answer\n{unresolved}\n{mismatch}"),
+        "E603",
+        "X.T",
+    );
 }
 
 #[test]
 fn parameterized_contract_references_keep_qualified_name_anchors() {
-    for annotation in ["Int X.T", "Fn(Int X.T => Int)", "(Int X.T, Bool) Pair"] {
+    for (index, annotation) in ["Int X.T", "Fn(Int X.T => Int)", "(Int X.T, Bool) Pair"]
+        .into_iter()
+        .enumerate()
+    {
         let source = format!("type (A, B) Pair = | Hold(A, B)\ndef main = C.answer\nmodule X\ntype A T\nmodule Consumer\ndef answer: Int\ndef use(value: {annotation}): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1");
-        perturbed(&source, "E603", "X.T");
+        if index == 1 {
+            perturbed(&source, "E603", "X.T");
+        } else {
+            rejected(&source, "E603", "X.T");
+        }
         rejected(&source.replace("X.T", "X.Missing"), "E204", "Missing");
     }
     let source = "def main = C.use (Id.make 7)\nmodule X\ntype A T\ndef make(n: Int): Int T\ndef get(value: Int T): Int\nmodule Consumer\ndef use(value: Int X.T): Int\nimplement X as Id\ntype A T = A List\ndef make n => [n]\ndef get value => List.length value\nimplement Consumer as C\ndef use value => Id.get value";

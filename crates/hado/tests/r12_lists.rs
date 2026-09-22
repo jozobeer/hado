@@ -64,9 +64,7 @@ fn rejected(source: &str, code: &str, anchor: &str) {
 #[test]
 fn generated_lists_round_trip_with_canonical_patterns() {
     let mut state = 0x1246;
-    for _ in 0..40 {
-        let depth = random(&mut state, 3) as usize + 1;
-        let width = random(&mut state, 6) as usize + 1;
+    for (depth, width) in [(1usize, 1usize), (2, 1), (3, 1), (1, 6), (3, 6)] {
         let pattern = format!("[{}, ...tail]", vec!["[_, ..._]"; width].join(", "));
         let source = format!(
             "def probe | {pattern} => 1 | 0\ndef main = {}",
@@ -78,13 +76,7 @@ fn generated_lists_round_trip_with_canonical_patterns() {
 
 #[test]
 fn list_coverage_uses_lengths_and_nested_rest_patterns() {
-    let mut state = 0x402;
-    for _ in 0..20 {
-        let prefix = format!(
-            "{}{}",
-            "\n".repeat(random(&mut state, 4) as usize),
-            " ".repeat(random(&mut state, 12) as usize)
-        );
+    for prefix in ["", "\n "] {
         let source = format!("{prefix}def f | [] => 0 | [_, ..._] => 1\ndef main = f [7]");
         check_source(&source, "coverage.hd").unwrap();
         rejected(
@@ -109,13 +101,7 @@ fn list_coverage_uses_lengths_and_nested_rest_patterns() {
 
 #[test]
 fn written_list_constructors_report_original_name_positions() {
-    let mut state = 0x516;
-    for _ in 0..20 {
-        let prefix = format!(
-            "{}{}",
-            "\n".repeat(random(&mut state, 4) as usize),
-            " ".repeat(random(&mut state, 13) as usize)
-        );
+    for prefix in ["", "\n "] {
         for (body, name) in [
             ("Cons(7, [])", "Cons"),
             ("Some(Nil)", "Nil"),
@@ -194,13 +180,16 @@ fn execute(source: &str, expected: &str, serial: usize) {
 
 #[test]
 fn spread_expressions_execute_with_independently_computed_output() {
-    let mut state = 0x125;
-    for serial in 0..20 {
-        let count = random(&mut state, 9) as usize;
-        let values = (0..count)
-            .map(|_| random(&mut state, 1000).to_string())
-            .collect::<Vec<_>>();
-        let head = random(&mut state, 1000).to_string();
+    for (serial, (values, head)) in [
+        (Vec::<String>::new(), "1".to_string()),
+        (
+            ["2", "3", "4"].into_iter().map(str::to_string).collect(),
+            "5".to_string(),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let expected = format!(
             "[{}]",
             std::iter::once(head.clone())

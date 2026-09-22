@@ -20,65 +20,6 @@ fn identity_binding_is_found_inside_nested_expressions() {
 }
 
 #[test]
-fn discarded_railway_binding_requires_do() {
-    let ast = parse_source("def main = let _? = Some(1) -> Some(2)", "t").unwrap();
-    assert_eq!(
-        check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-        Some("E504")
-    );
-    let ast = parse_source("def main = do Some(1) -> Some(2)", "t").unwrap();
-    check::check_ast(&ast, "t").unwrap();
-    let ast = parse_source("def main = let x? = Some(1) -> Some(x + 1)", "t").unwrap();
-    check::check_ast(&ast, "t").unwrap();
-}
-
-#[test]
-fn top_level_variable_patterns_are_rejected_but_nested_bindings_are_allowed() {
-    let ast = parse_source("def main = if Some(1) | x => x", "t").unwrap();
-    assert_eq!(
-        check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-        Some("E512")
-    );
-    let ast = parse_source("def main = if Some(1) | Some(x) => x | 0", "t").unwrap();
-    check::check_ast(&ast, "t").unwrap();
-}
-
-#[test]
-fn written_list_constructors_require_list_syntax() {
-    for source in [
-        "def main = Cons(1, Nil)",
-        "def main = Cons(1, [2])",
-        "def main = Cons(1, [])",
-        "def prepend xs => Cons(1, xs)",
-    ] {
-        let ast = parse_source(source, "t").unwrap();
-        assert_eq!(
-            check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-            Some("E510")
-        );
-    }
-    for source in ["def main = [1, 2]", "def prepend xs => [1, ...xs]"] {
-        check::check_ast(&parse_source(source, "t").unwrap(), "t").unwrap();
-    }
-}
-
-#[test]
-fn identical_boolean_branches_are_rejected_structurally() {
-    for source in [
-        "def main = if true => 1 | 1",
-        "def f x => if true => x + 1 | x + 1",
-    ] {
-        let ast = parse_source(source, "t").unwrap();
-        assert_eq!(
-            check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-            Some("E502")
-        );
-    }
-    let ast = parse_source("def main = if true => 1 | 2", "t").unwrap();
-    check::check_ast(&ast, "t").unwrap();
-}
-
-#[test]
 fn duplicate_patterns_point_to_the_previous_arm() {
     let ast = parse_source("def f x => if x\n| 1 => 10\n| 1 => 20\n| 0", "t").unwrap();
     let error = check::check_ast(&ast, "t").unwrap_err();
@@ -123,12 +64,20 @@ fn repeated_or_unreachable_conditions_are_rejected() {
 
 #[test]
 fn identical_branches_ignore_local_names_but_preserve_free_names() {
-    let ast = parse_source("def main = if true => fn(x => x + 1) | fn(y => y + 1)", "t").unwrap();
-    assert_eq!(
-        check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
-        Some("E502")
-    );
+    for source in [
+        "def main = if true => 1 | 1",
+        "def f x => if true => x + 1 | x + 1",
+        "def main = if true => fn(x => x + 1) | fn(y => y + 1)",
+    ] {
+        let ast = parse_source(source, "t").unwrap();
+        assert_eq!(
+            check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
+            Some("E502")
+        );
+    }
     let ast = parse_source("def main = if true => fn(x => x + a) | fn(y => y + b)", "t").unwrap();
+    check::check_ast(&ast, "t").unwrap();
+    let ast = parse_source("def main = if true => 1 | 2", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -235,21 +184,6 @@ fn broader_constructor_pattern_makes_later_arm_unreachable() {
 }
 
 #[test]
-fn catch_all_underscore_requires_fallback_syntax() {
-    let source = "def f | Some(v) => v | _ => 0\ndef main = f (Some(1))";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E503")
-    );
-    let source = "def f | Some(_) => 1 | 0\ndef main = f (Some(1))";
-    hado::check_source(source, "t").unwrap();
-}
-
-#[test]
 fn fallback_must_be_last_in_both_branch_forms() {
     for source in [
         "def main = if | 1 > 2 => 1 | 0 | 2 > 3 => 2",
@@ -289,24 +223,6 @@ fn unused_let_binding_respects_shadowing() {
     ] {
         hado::check_source(source, "t").unwrap();
     }
-}
-
-#[test]
-fn plain_let_cannot_discard_a_value() {
-    for source in [
-        "def main = let _ = 1 -> 2",
-        "def main = let _ = Some(1) -> Some(2)",
-    ] {
-        assert_eq!(
-            hado::check_source(source, "t")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some("E506")
-        );
-    }
-    hado::check_source("def main = do Some(1) -> Some(2)", "t").unwrap();
 }
 
 #[test]
@@ -437,31 +353,6 @@ fn boolean_patterns_must_cover_both_values_without_redundant_fallback() {
 }
 
 #[test]
-fn adt_branches_cover_constructor_alternatives() {
-    for (source, code) in [
-        ("def f | Some(v) => v\ndef main = f (Some(1))", "E402"),
-        (
-            "def f | Some(v) => v | None => 0 | 2\ndef main = f (Some(1))",
-            "E403",
-        ),
-    ] {
-        assert_eq!(
-            hado::check_source(source, "t")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some(code)
-        );
-    }
-    hado::check_source(
-        "def f | Some(v) => v | None => 0\ndef main = f (Some(1))",
-        "t",
-    )
-    .unwrap();
-}
-
-#[test]
 fn restricted_payload_does_not_hide_missing_constructor() {
     let source = "def f | Some(true) => 1\ndef main = f (Some(true))";
     assert_eq!(
@@ -564,24 +455,6 @@ fn nested_adt_coverage_tracks_inner_alternatives() {
         let source = format!("def f | {arms}\ndef main = f (Some(Some(1)))");
         let result = hado::check_source(&source, "t");
         match code {
-            Some(code) => assert_eq!(result.err().unwrap().code.as_deref(), Some(code)),
-            None => {
-                result.unwrap();
-            }
-        }
-    }
-}
-
-#[test]
-fn recursive_list_coverage_terminates_and_finds_missing_lengths() {
-    for (arms, expected) in [
-        ("[] => 0 | [_] => 1", Some("E402")),
-        ("[] => 0 | [_] => 1 | [_, _, ..._] => 2", None),
-        ("[] => 0 | [_, ..._] => 1 | 2", Some("E403")),
-    ] {
-        let source = format!("def length_class | {arms}\ndef main = length_class [1, 2, 3]");
-        let result = hado::check_source(&source, "t");
-        match expected {
             Some(code) => assert_eq!(result.err().unwrap().code.as_deref(), Some(code)),
             None => {
                 result.unwrap();

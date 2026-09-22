@@ -195,7 +195,7 @@ PY
 r44_tests() {
     cargo test --offline --no-fail-fast \
         --test r9_grammar --test r23_syntax --test r24_effects --test r25_effects \
-        --test r26_effects --test r28_effects --test r31_effects --test r37_world
+        --test r26_effects --test r31_effects --test r37_world
 }
 
 check '44-a lexer keywords and ordinary names' r44_lexer

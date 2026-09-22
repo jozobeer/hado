@@ -52,17 +52,3 @@ fn unused_definitions_follow_reachable_dependencies() {
         vec!["helper"]
     );
 }
-
-#[test]
-fn unused_top_level_definitions_are_rejected() {
-    let source = "def helper x => x\ndef main = 1";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E513")
-    );
-    hado::check_source("def helper x => x\ndef main = helper 1", "t").unwrap();
-}

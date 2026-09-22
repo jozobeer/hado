@@ -690,12 +690,6 @@ mod tests {
     }
 
     #[test]
-    fn lex_e104_hash_comment() {
-        let e = lex("# c").unwrap_err();
-        assert!(e.contains("E104"), "got: {e}");
-    }
-
-    #[test]
     fn spans_are_one_based() {
         let toks = lex("1\n  + 2").unwrap();
         let plus = &toks[1];

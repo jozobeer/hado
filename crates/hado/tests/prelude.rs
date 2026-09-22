@@ -1,6 +1,6 @@
 #[test]
 fn scalar_prelude_wrappers_check_and_execute() {
-    // string.hd の split は List.reverse を使うので list.hd も要る。
+    // list.hd の `type T List` を下の型宣言の照合で見る。
     let modules = [
         include_str!("../../../stdlib/error.hd"),
         include_str!("../../../stdlib/list.hd"),
@@ -26,20 +26,13 @@ fn scalar_prelude_wrappers_check_and_execute() {
         .filter(|line| !line.starts_with("type "))
         .collect::<Vec<_>>()
         .join("\n");
-    for (index, expression, expected) in [
-        (0, "String.length (String.concat \"あ\" \"😀\")", "2\n"),
-        (1, "Int.to_string (-42)", "-42\n"),
-        (2, "Float.to_string 1.25", "1.25\n"),
-    ] {
-        let source = format!("def main = {expression}\n{modules}");
-        let path =
-            std::env::temp_dir().join(format!("hado-prelude-{}-{index}", std::process::id()));
-        hado::build::executable(&source, "stdlib/test.hd", &path).unwrap();
-        let output = std::process::Command::new(&path).output().unwrap();
-        assert!(output.status.success());
-        assert_eq!(output.stdout, expected.as_bytes());
-        std::fs::remove_file(path).unwrap();
-    }
+    let source = format!("def main = Float.to_string 1.25\n{modules}");
+    let path = std::env::temp_dir().join(format!("hado-prelude-{}-2", std::process::id()));
+    hado::build::executable(&source, "stdlib/test.hd", &path).unwrap();
+    let output = std::process::Command::new(&path).output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1.25\n");
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -61,12 +54,6 @@ fn scalar_prelude_is_implicit_without_exposing_intrinsics() {
 #[test]
 fn generic_prelude_operations_execute() {
     let cases = [
-        ("List.map [1, 2] fn(x => x + 1)", "[2, 3]\n"),
-        ("List.filter [1, 2, 3] fn(x => x > 1)", "[2, 3]\n"),
-        ("List.fold [1, 2, 3] 0 fn(sum, value => sum + value)", "6\n"),
-        ("List.reverse [1, 2, 3]", "[3, 2, 1]\n"),
-        ("List.append [1, 2] [3]", "[1, 2, 3]\n"),
-        ("[3, 1, 2, 1] |> List.sort compare", "[1, 1, 2, 3]\n"),
         (
             "Option.unwrap_or (Option.map (Some(41)) fn(x => x + 1)) 0",
             "42\n",

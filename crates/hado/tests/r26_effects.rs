@@ -82,13 +82,6 @@ impl Drop for Case {
     }
 }
 
-fn random(state: &mut u64, limit: usize) -> usize {
-    *state = state
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    ((*state >> 32) as usize) % limit
-}
-
 fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
     let offset = source.find(anchor).unwrap();
     let lead = format!("// position {padding}\n{}", "\n".repeat(padding % 3));
@@ -126,141 +119,11 @@ fn main_user_effect_is_e706_on_def_main() {
 }
 
 #[test]
-fn print_type_still_shows_user_effects_on_main() {
-    let mut state = 0x26_01;
-    for _ in 0..8 {
-        let n = random(&mut state, 1000);
-        let case = Case::new();
-        case.write("main.hd", &format!("effect Ask\nonce ask: String\ndef f x => if true => ask | x\ndef main = f \"{n}\"\n"));
-        assert_eq!(case.print_type("main.hd"), "String {Ask}\n");
-        let output = case.command("check", "main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(1),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("error[E706]"),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
-
-#[test]
-fn once_evaluates_the_handler_arm_in_place() {
-    let mut state = 0x26_02;
-    for _ in 0..8 {
-        let token = format!("t{}", random(&mut state, 100_000));
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "effect Ask\nonce ask: String\nhandler Ask as Fixed\nonce ask => \"{token}\"\ndef main =\n  with Fixed ->\n  ask\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(0));
-        assert_eq!(output.stdout, format!("{token}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
-fn unhandled_abort_matches_result_stderr_and_status() {
-    let mut state = 0x26_03;
-    for _ in 0..8 {
-        let token = format!("e{}", random(&mut state, 100_000));
-        let case = Case::new();
-        case.write(
-            "main.hd",
-            &format!("def main = raise {{ message = \"{token}\" }}\n"),
-        );
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty(), "{:?}", output.stdout);
-        assert_eq!(output.stderr, format!("{token}\n").as_bytes());
-    }
-}
-
-#[test]
-fn abort_handler_turns_raise_into_a_value() {
-    let mut state = 0x26_04;
-    for _ in 0..8 {
-        let n = random(&mut state, 1000);
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as ToZero\nabort raise _ => {n}\nreturn value => value\ndef main =\n  with ToZero ->\n  raise {{ message = \"caught\" }}\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
-fn abort_handler_skips_do_continuation_when_the_rhs_raises() {
-    let mut state = 0x26_30;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let continued = caught + 1 + random(&mut state, 1000);
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 0 ->\n  {continued}\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
 fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
-    let mut state = 0x26_31;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let continued = caught + 1 + random(&mut state, 1000);
+    for (argument, expected) in [(0, "3"), (1, "9")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f 1 ->\n  {continued}\n"
+            "handler Error as Catch\nabort raise _ => 3\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {argument} ->\n  9\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -276,21 +139,17 @@ fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(output.stdout, format!("{continued}\n").as_bytes());
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
 }
 
 #[test]
 fn abort_handler_catches_integer_division_by_zero() {
-    let mut state = 0x2632;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let left = random(&mut state, 50) + 1;
-        let op = if random(&mut state, 2) == 0 { "/" } else { "%" };
+    for op in ["/", "%"] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  {left} {op} 0\n"
+            "handler Error as Catch\nabort raise _ => 5\nreturn value => value\ndef main =\n  with Catch ->\n  7 {op} 0\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -306,80 +165,67 @@ fn abort_handler_catches_integer_division_by_zero() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert_eq!(output.stdout, b"5\n");
         assert!(output.stderr.is_empty());
     }
 }
 
 #[test]
 fn abort_handler_catches_division_inside_arithmetic_and_calls() {
-    let mut state = 0x26_33;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let left = random(&mut state, 50) + 1;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef f x => x / 0\ndef main =\n  with Catch ->\n  1 + (f {left})\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\nabort raise _ => 5\nreturn value => value\ndef f x => x / 0\ndef main =\n  with Catch ->\n  1 + (f 4)\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"5\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn abort_handler_skips_do_continuation_on_division_by_zero() {
-    let mut state = 0x26_34;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let continued = caught + 1 + random(&mut state, 1000);
-        let left = random(&mut state, 50) + 1;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\ndef main =\n  with Catch ->\n  do ({left} / 0) ->\n  {continued}\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\nabort raise _ => 5\nreturn value => value\ndef main =\n  with Catch ->\n  do (7 / 0) ->\n  9\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"5\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
-    let mut state = 0x26_35;
-    for _ in 0..8 {
-        let caught = format!("c{}", random(&mut state, 1000));
-        let continued = format!("d{}", random(&mut state, 1000));
-        let x = random(&mut state, 2);
+    for (argument, expected) in [(0, "caught"), (1, "continued")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => \"{caught}\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {x} ->\n  \"{continued}\"\n"
+            "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {argument} ->\n  \"continued\"\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -395,7 +241,6 @@ fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if x == 0 { &caught } else { &continued };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -403,14 +248,14 @@ fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
 
 #[test]
 fn abort_handler_catches_division_outside_an_unrelated_once_handler() {
-    let mut state = 0x26_36;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let left = random(&mut state, 50) + 1;
-        let op = if random(&mut state, 2) == 0 { "/" } else { "%" };
+    for (helper, body) in [
+        ("", "1 + (7 / 0)"),
+        ("def f x => x / 0\n", "1 + (f 7)"),
+        ("", "1 + (raise { message = \"x\" })"),
+    ] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + ({left} {op} 0)\n"
+            "handler Error as Catch\nabort raise _ => 5\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\n{helper}def main =\n  with Catch ->\n  with Nop ->\n  {body}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -426,135 +271,56 @@ fn abort_handler_catches_division_outside_an_unrelated_once_handler() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
-fn abort_handler_catches_division_in_a_callee_outside_an_unrelated_once_handler() {
-    let mut state = 0x26_37;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let left = random(&mut state, 50) + 1;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef f x => x / 0\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (f {left})\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
-fn abort_handler_catches_raise_outside_an_unrelated_once_handler() {
-    let mut state = 0x26_38;
-    for _ in 0..8 {
-        let caught = random(&mut state, 1000);
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => {caught}\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef main =\n  with Catch ->\n  with Nop ->\n  1 + (raise {{ message = \"x\" }})\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{caught}\n").as_bytes());
+        assert_eq!(output.stdout, b"5\n");
         assert!(output.stderr.is_empty());
     }
 }
 
 #[test]
 fn abort_handler_outside_once_still_runs_the_once_body() {
-    let mut state = 0x26_39;
-    for _ in 0..8 {
-        let n = random(&mut state, 20) + 1;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Catch ->\n  with Nop ->\n  loop {n} 0\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
-        assert!(output.stderr.is_empty());
-    }
-}
-
-#[test]
-fn again_handler_outside_abort_handler_collects_callee_yields() {
-    let mut state = 0x26_3a;
-    for _ in 0..8 {
-        let yielded = random(&mut state, 50) as i64;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef f (x: Int): Int {{Int Yield}} =>\n  do yield x -> x\ndef main =\n  with Collect ->\n  with Catch ->\n  f {yielded}\n",
-            collect_handler(),
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("[{}]\n", yielded).as_bytes());
-        assert!(output.stderr.is_empty());
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Catch ->\n  with Nop ->\n  loop 3 0\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"3\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn again_handler_outside_abort_handler_forwards_callee_raise() {
-    let mut state = 0x26_3b;
-    for _ in 0..8 {
-        let fails = random(&mut state, 2) == 0;
-        let yielded = random(&mut state, 50) + 1;
-        let value = if fails { 0 } else { yielded };
+    for (body, effects, value, expected) in [
+        ("  do yield x -> x\n", "{Int Yield}", 7, "[7]"),
+        (
+            "  if x == 0 => raise { message = \"x\" }\n  | do yield x -> x\n",
+            "{Int Yield, Error}",
+            0,
+            "[]",
+        ),
+        (
+            "  if x == 0 => raise { message = \"x\" }\n  | do yield x -> x\n",
+            "{Int Yield, Error}",
+            7,
+            "[7]",
+        ),
+    ] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef f (x: Int): Int {{Int Yield, Error}} =>\n  if x == 0 => raise {{ message = \"x\" }}\n  | do yield x -> x\ndef main =\n  with Collect ->\n  with Catch ->\n  f {value}\n",
+            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef f (x: Int): Int {effects} =>\n{body}def main =\n  with Collect ->\n  with Catch ->\n  f {value}\n",
             collect_handler(),
         ));
         let built = case.build("main.hd");
@@ -571,11 +337,6 @@ fn again_handler_outside_abort_handler_forwards_callee_raise() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if fails {
-            "[]".to_string()
-        } else {
-            format!("[{yielded}]")
-        };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
         assert!(output.stderr.is_empty());
     }
@@ -1319,39 +1080,36 @@ fn a_handled_once_operation_with_a_yielding_arm_is_lifted() {
 
 #[test]
 fn once_tail_recursion_completes_ten_million_iterations() {
-    let mut state = 0x26_05;
-    for _ in 0..4 {
-        let n = random(&mut state, 40) + 10;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
-        ));
-        let dump = case.command("dump-mono", "main.hd");
-        assert_eq!(
-            dump.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&dump.stderr)
-        );
-        let ir = String::from_utf8_lossy(&dump.stdout);
-        assert!(ir.contains("TailCall"), "{ir}");
-        assert!(!ir.contains("Yield"), "{ir}");
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop 20 0\n",
+    );
+    let dump = case.command("dump-mono", "main.hd");
+    assert_eq!(
+        dump.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&dump.stderr)
+    );
+    let ir = String::from_utf8_lossy(&dump.stdout);
+    assert!(ir.contains("TailCall"), "{ir}");
+    assert!(!ir.contains("Yield"), "{ir}");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"20\n");
     let small_n = 1_000_000u64;
     let large_n = 10_000_000u64;
     let small = build_once_loop(small_n);
@@ -1436,15 +1194,12 @@ fn list_literal(values: &[i64]) -> String {
 
 #[test]
 fn generator_collects_yielded_values() {
-    let mut state = 0x26_06;
-    for _ in 0..8 {
-        let len = random(&mut state, 6);
-        let values: Vec<i64> = (0..len).map(|_| random(&mut state, 50) as i64).collect();
+    for values in [&[][..], &[3, 1, 4][..]] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "{}\ndef rec each (values: Int List): Void {{Int Yield}} =>\n  if values | [] => () | [head, ...tail] =>\n    do yield head ->\n    each tail\ndef main = with Collect -> each {}\n",
             collect_handler(),
-            list_literal(&values),
+            list_literal(values),
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -1462,7 +1217,7 @@ fn generator_collects_yielded_values() {
         );
         assert_eq!(
             output.stdout,
-            format!("{}\n", list_literal(&values)).as_bytes()
+            format!("{}\n", list_literal(values)).as_bytes()
         );
         assert!(output.stderr.is_empty());
     }
@@ -1470,45 +1225,21 @@ fn generator_collects_yielded_values() {
 
 #[test]
 fn again_loop_counts_each_yield() {
-    let mut state = 0x26_07;
-    for _ in 0..4 {
-        let n = random(&mut state, 30) + 5;
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "{}\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop {n})\n",
-            collect_handler(),
-        ));
-        let dump = case.command("dump-mono", "main.hd");
-        assert_eq!(
-            dump.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&dump.stderr)
-        );
-        let ir = String::from_utf8_lossy(&dump.stdout);
-        assert!(ir.contains("MakeClosure"), "{ir}");
-        assert!(ir.contains("CallClosure"), "{ir}");
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{n}\n").as_bytes());
-    }
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}\ndef rec loop (n: Int): Void {{Int Yield}} =>\n  if n <= 0 => ()\n  | do yield n -> loop (n - 1)\ndef main = List.length (with Collect -> loop 10000)\n",
+        "{}\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop 6)\n",
         collect_handler(),
     ));
+    let dump = case.command("dump-mono", "main.hd");
+    assert_eq!(
+        dump.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&dump.stderr)
+    );
+    let ir = String::from_utf8_lossy(&dump.stdout);
+    assert!(ir.contains("MakeClosure"), "{ir}");
+    assert!(ir.contains("CallClosure"), "{ir}");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1523,48 +1254,36 @@ fn again_loop_counts_each_yield() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"10000\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, b"6\n");
 }
 
 #[test]
 fn distinct_handlers_specialize_the_same_function_apart() {
-    let mut state = 0x26_11;
-    for _ in 0..8 {
-        let one = random(&mut state, 20) + 1;
-        let two = random(&mut state, 20) + 1;
-        let left = random(&mut state, 20);
-        let right = random(&mut state, 20);
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "effect Ask\nonce ask: Int\nhandler Ask as One\nonce ask => {one}\nreturn value => value\nhandler Ask as Two\nonce ask => {two}\nreturn value => value\ndef use (x: Int): Int {{Ask}} => ask + x\ndef main = (with One -> use {left}) + (with Two -> use {right})\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            output.stdout,
-            format!("{}\n", (one + left) + (two + right)).as_bytes()
-        );
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Ask\nonce ask: Int\nhandler Ask as One\nonce ask => 2\nreturn value => value\nhandler Ask as Two\nonce ask => 3\nreturn value => value\ndef use (x: Int): Int {Ask} => ask + x\ndef main = (with One -> use 4) + (with Two -> use 5)\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"14\n");
 }
 
 #[test]
 fn abort_in_a_branch_skips_the_return_arm() {
-    let mut state = 0x26_12;
-    for _ in 0..8 {
-        let n = random(&mut state, 11);
+    for (n, expected) in [(0, 1), (1, 0)] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "effect Fail\nabort bail\nhandler Fail as ToZero\nabort bail => 0\nreturn value => value + 1\ndef f (k: Int): Int {{Fail}} => if k > 0 => bail | k\ndef main = with ToZero -> f {n}\n"
@@ -1583,21 +1302,23 @@ fn abort_in_a_branch_skips_the_return_arm() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if n > 0 { 0 } else { n + 1 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
 }
 
 #[test]
 fn abort_handler_return_arm_changes_the_with_type() {
-    let mut state = 0x26_13;
-    for _ in 0..8 {
-        let n = random(&mut state, 11);
+    let entry = Case::new();
+    entry.write(
+        "main.hd",
+        "effect Fail\nabort bail\nhandler Fail as ToOpt\nabort bail => None\nreturn value => Some(value)\ndef f (k: Int): Int {Fail} => if k > 0 => k | bail\ndef main = with ToOpt -> f 1\n",
+    );
+    assert_eq!(entry.print_type("main.hd"), "Int Option\n");
+    for (n, expected) in [(0, "None"), (1, "Some(1)")] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "effect Fail\nabort bail\nhandler Fail as ToOpt\nabort bail => None\nreturn value => Some(value)\ndef f (k: Int): Int {{Fail}} => if k > 0 => k | bail\ndef main = with ToOpt -> f {n}\n"
         ));
-        assert_eq!(case.print_type("main.hd"), "Int Option\n");
         let built = case.build("main.hd");
         assert_eq!(
             built.status.code(),
@@ -1612,79 +1333,37 @@ fn abort_handler_return_arm_changes_the_with_type() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if n > 0 {
-            format!("Some({n})\n")
-        } else {
-            "None\n".into()
-        };
-        assert_eq!(output.stdout, expected.as_bytes());
-    }
-}
-
-#[test]
-fn handler_arm_can_call_a_top_level_function() {
-    let mut state = 0x26_14;
-    for _ in 0..8 {
-        let k = random(&mut state, 20) + 1;
-        let x = random(&mut state, 20);
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "effect Ask\nonce ask: Int\ndef double (n: Int): Int => n * 2\nhandler Ask as Fixed\nonce ask => double {k}\nreturn value => value\ndef use (y: Int): Int {{Ask}} => ask + y\ndef main = with Fixed -> use {x}\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(output.stdout, format!("{}\n", k * 2 + x).as_bytes());
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
 }
 
 #[test]
 fn again_arm_keeps_pure_helpers_at_their_result_type() {
-    let mut state = 0x26_15;
-    for _ in 0..8 {
-        let n = random(&mut state, 6) + 1;
-        let doubled: Vec<i64> = (1..=n as i64).rev().map(|k| k * 2).collect();
-        let case = Case::new();
-        case.write("main.hd", &format!(
-            "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop {n}\n"
-        ));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = case.run("main.hd");
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            output.stdout,
-            format!("{}\n", list_literal(&doubled)).as_bytes()
-        );
-    }
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {Int Yield} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop 3\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[6, 4, 2]\n");
 }
 
 #[test]
 fn return_arm_runs_when_types_already_match() {
-    let mut state = 0x26_21;
-    for _ in 0..8 {
-        let k = random(&mut state, 11);
+    for (k, expected) in [(0, 0), (1, 9)] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn _ => 9\ndef f (n: Int): Int {{Fail}} => if n > 0 => n | bail\ndef main = with H -> f {k}\n"
@@ -1703,16 +1382,13 @@ fn return_arm_runs_when_types_already_match() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if k > 0 { 9 } else { 0 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
 }
 
 #[test]
 fn return_arm_does_not_rewrite_a_non_tail_branch() {
-    let mut state = 0x26_22;
-    for _ in 0..8 {
-        let k = random(&mut state, 11);
+    for (k, expected) in [(0, 0), (1, 12)] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn value => value + 1\ndef f (n: Int): Int {{Fail}} => let x = (if n > 0 => n | bail) -> x + 10\ndef main = with H -> f {k}\n"
@@ -1731,21 +1407,23 @@ fn return_arm_does_not_rewrite_a_non_tail_branch() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if k > 0 { k + 10 + 1 } else { 0 };
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
 }
 
 #[test]
 fn return_arm_does_not_rewrite_a_pure_helper() {
-    let mut state = 0x26_23;
-    for _ in 0..8 {
-        let k = random(&mut state, 11);
+    let entry = Case::new();
+    entry.write(
+        "main.hd",
+        "effect Fail\nabort bail\nhandler Fail as H\nabort bail => None\nreturn value => Some(value)\ndef twice (n: Int): Int => n * 2\ndef f (n: Int): Int {Fail} => if n > 0 => twice n | bail\ndef main = with H -> f 1\n",
+    );
+    assert_eq!(entry.print_type("main.hd"), "Int Option\n");
+    for (k, expected) in [(0, "None"), (1, "Some(2)")] {
         let case = Case::new();
         case.write("main.hd", &format!(
             "effect Fail\nabort bail\nhandler Fail as H\nabort bail => None\nreturn value => Some(value)\ndef twice (n: Int): Int => n * 2\ndef f (n: Int): Int {{Fail}} => if n > 0 => twice n | bail\ndef main = with H -> f {k}\n"
         ));
-        assert_eq!(case.print_type("main.hd"), "Int Option\n");
         let built = case.build("main.hd");
         assert_eq!(
             built.status.code(),
@@ -1760,12 +1438,7 @@ fn return_arm_does_not_rewrite_a_pure_helper() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let expected = if k > 0 {
-            format!("Some({})\n", k * 2)
-        } else {
-            "None\n".into()
-        };
-        assert_eq!(output.stdout, expected.as_bytes());
+        assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
 }
 

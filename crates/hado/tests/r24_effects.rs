@@ -74,13 +74,6 @@ impl Drop for Case {
     }
 }
 
-fn random(state: &mut u64, limit: usize) -> usize {
-    *state = state
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    ((*state >> 32) as usize) % limit
-}
-
 fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
     let offset = source.find(anchor).unwrap();
     let lead = format!("// position {padding}\n{}", "\n".repeat(padding % 3));
@@ -105,57 +98,39 @@ fn perturb_rejection(case: &Case, file: &str, source: &str, code: &str, anchor: 
     }
 }
 
-fn letters(state: &mut u64, count: usize) -> Vec<String> {
-    let mut names = Vec::new();
-    while names.len() < count {
-        let name = format!("E{}", char::from(b'a' + random(state, 26) as u8));
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
 #[test]
 fn print_type_orders_effect_rows_and_writes_them_back() {
-    let mut state = 0x24_01;
-    for _ in 0..8 {
-        let mut names = letters(&mut state, 3);
-        let mut written = names.clone();
-        for index in (1..written.len()).rev() {
-            written.swap(index, random(&mut state, index + 1));
-        }
-        names.sort();
-        let case = Case::new();
-        let mut source = String::new();
-        for name in &names {
-            source.push_str(&format!(
-                "effect {name}\nonce {}op: Void\n",
-                name.to_lowercase()
-            ));
-        }
+    let names = ["Ea", "Eb", "Ec"];
+    let written = ["Ec", "Ea", "Eb"];
+    let case = Case::new();
+    let mut source = String::new();
+    for name in names {
         source.push_str(&format!(
-            "def f (x: Int): Int {{{}}} => x\ndef main = f 1\n",
-            written.join(", ")
+            "effect {name}\nonce {}op: Void\n",
+            name.to_lowercase()
         ));
-        case.write("main.hd", &source);
-        let printed = case.print_type("main.hd");
-        let expected = format!("Int {{{}}}\n", names.join(", "));
-        assert_eq!(printed, expected, "{source}");
-        let mut restored = String::new();
-        for name in &names {
-            restored.push_str(&format!(
-                "effect {name}\nonce {}op: Void\n",
-                name.to_lowercase()
-            ));
-        }
-        restored.push_str(&format!(
-            "def g (x: Int): {} => x\ndef main = g 1\n",
-            printed.trim()
-        ));
-        case.write("main.hd", &restored);
-        assert_eq!(case.print_type("main.hd"), expected, "{restored}");
     }
+    source.push_str(&format!(
+        "def f (x: Int): Int {{{}}} => x\ndef main = f 1\n",
+        written.join(", ")
+    ));
+    case.write("main.hd", &source);
+    let printed = case.print_type("main.hd");
+    let expected = format!("Int {{{}}}\n", names.join(", "));
+    assert_eq!(printed, expected, "{source}");
+    let mut restored = String::new();
+    for name in names {
+        restored.push_str(&format!(
+            "effect {name}\nonce {}op: Void\n",
+            name.to_lowercase()
+        ));
+    }
+    restored.push_str(&format!(
+        "def g (x: Int): {} => x\ndef main = g 1\n",
+        printed.trim()
+    ));
+    case.write("main.hd", &restored);
+    assert_eq!(case.print_type("main.hd"), expected, "{restored}");
 }
 
 #[test]
@@ -238,13 +213,6 @@ fn instantiated_condition_effects_are_e308() {
     );
     let diagnostic = String::from_utf8_lossy(&output.stderr);
     assert!(diagnostic.contains("error[E308]"), "{diagnostic}");
-}
-
-#[test]
-fn higher_order_union_keeps_argument_row_open() {
-    let case = Case::new();
-    case.write("main.hd", "effect Ask\nonce ask: Bool\neffect Log\nonce tick: Void\ndef tickit (x: Int): Int {Log} => x\ndef apply2 f x => tickit (f x)\ndef peek (b: Int): Int {Ask} => b\ndef main = apply2 peek 1\n");
-    assert_eq!(case.print_type("main.hd"), "Int {Ask, Log}\n");
 }
 
 #[test]

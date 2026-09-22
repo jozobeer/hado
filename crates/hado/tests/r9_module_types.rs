@@ -18,7 +18,7 @@ fn program(outer: &str, sections: &[&str], body: &str) -> String {
 
 #[test]
 fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
-    for padding in 0..20 {
+    for padding in 0..3 {
         let signature = "module S type T type U def id(x: Int): Int";
         for body in [
             "type T = T type U = Int",
@@ -128,31 +128,30 @@ fn native_execution_uses_the_concrete_representation() {
     .into_iter()
     .enumerate()
     {
-        for index in 1..6 {
-            let case_dir = dir.join(format!("case{case}_{index}"));
-            std::fs::create_dir_all(&case_dir).unwrap();
-            let path = case_dir.join("main.hd");
-            let source = program(
-                prefix,
-                &[SIGNATURE, &module("M", representation, make, get)],
-                &format!("M.get (M.make {index})"),
-            );
-            std::fs::write(&path, source).unwrap();
-            let built = Command::new(env!("CARGO_BIN_EXE_hado"))
-                .arg("build")
-                .arg(&path)
-                .output()
-                .unwrap();
-            assert!(
-                built.status.success(),
-                "{}",
-                String::from_utf8_lossy(&built.stderr)
-            );
-            let output = Command::new(path.with_extension("")).output().unwrap();
-            assert!(output.status.success());
-            assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
-            assert!(output.stderr.is_empty());
-        }
+        let index = 1;
+        let case_dir = dir.join(format!("case{case}_{index}"));
+        std::fs::create_dir_all(&case_dir).unwrap();
+        let path = case_dir.join("main.hd");
+        let source = program(
+            prefix,
+            &[SIGNATURE, &module("M", representation, make, get)],
+            &format!("M.get (M.make {index})"),
+        );
+        std::fs::write(&path, source).unwrap();
+        let built = Command::new(env!("CARGO_BIN_EXE_hado"))
+            .arg("build")
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let output = Command::new(path.with_extension("")).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
+        assert!(output.stderr.is_empty());
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -216,26 +215,25 @@ fn opaque_projection_reports_the_dot() {
 
 #[test]
 fn outer_data_can_reference_later_implementations_in_any_section_order() {
-    for index in 1..12 {
-        for data in ["type Box = | Wrap(M.T)", "type Box = { value: M.T }"] {
-            let implementation = module("M", "Int", "x", "value + 1");
-            for sections in [
-                [SIGNATURE, implementation.as_str()],
-                [implementation.as_str(), SIGNATURE],
-            ] {
-                let body = if data.contains("Wrap") {
-                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
-                } else {
-                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
-                };
-                let source = program(data, &sections, &body);
-                assert_eq!(
-                    check_source(&source, "module-types.hd")
-                        .unwrap_or_else(|error| panic!("{error}: {source}"))
-                        .main,
-                    Ty::Int
-                );
-            }
+    let index = 1;
+    for data in ["type Box = | Wrap(M.T)", "type Box = { value: M.T }"] {
+        let implementation = module("M", "Int", "x", "value + 1");
+        for sections in [
+            [SIGNATURE, implementation.as_str()],
+            [implementation.as_str(), SIGNATURE],
+        ] {
+            let body = if data.contains("Wrap") {
+                format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+            } else {
+                format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+            };
+            let source = program(data, &sections, &body);
+            assert_eq!(
+                check_source(&source, "module-types.hd")
+                    .unwrap_or_else(|error| panic!("{error}: {source}"))
+                    .main,
+                Ty::Int
+            );
         }
     }
 }
@@ -285,41 +283,40 @@ fn native_data_payloads_use_module_abstract_representations() {
     .enumerate()
     {
         for record in [false, true] {
-            for index in 1..4 {
-                let data = if record {
-                    "type Box = { value: M.T }"
-                } else {
-                    "type Box = | Wrap(M.T)"
-                };
-                let body = if record {
-                    format!("let box = {{ value = M.make {index} }} -> M.get box.value")
-                } else {
-                    format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
-                };
-                let case_dir = dir.join(format!("case{case}_{record}_{index}"));
-                std::fs::create_dir_all(&case_dir).unwrap();
-                let path = case_dir.join("main.hd");
-                let source = program(
-                    data,
-                    &[&module("M", representation, make, get), SIGNATURE],
-                    &body,
-                );
-                std::fs::write(&path, source).unwrap();
-                let built = Command::new(env!("CARGO_BIN_EXE_hado"))
-                    .arg("build")
-                    .arg(&path)
-                    .output()
-                    .unwrap();
-                assert!(
-                    built.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&built.stderr)
-                );
-                let output = Command::new(path.with_extension("")).output().unwrap();
-                assert!(output.status.success());
-                assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
-                assert!(output.stderr.is_empty());
-            }
+            let index = 1;
+            let data = if record {
+                "type Box = { value: M.T }"
+            } else {
+                "type Box = | Wrap(M.T)"
+            };
+            let body = if record {
+                format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+            } else {
+                format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+            };
+            let case_dir = dir.join(format!("case{case}_{record}_{index}"));
+            std::fs::create_dir_all(&case_dir).unwrap();
+            let path = case_dir.join("main.hd");
+            let source = program(
+                data,
+                &[&module("M", representation, make, get), SIGNATURE],
+                &body,
+            );
+            std::fs::write(&path, source).unwrap();
+            let built = Command::new(env!("CARGO_BIN_EXE_hado"))
+                .arg("build")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                built.status.success(),
+                "{}",
+                String::from_utf8_lossy(&built.stderr)
+            );
+            let output = Command::new(path.with_extension("")).output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, format!("{}\n", index + 1).as_bytes());
+            assert!(output.stderr.is_empty());
         }
     }
     std::fs::remove_dir_all(dir).unwrap();

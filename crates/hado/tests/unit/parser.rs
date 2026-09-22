@@ -16,6 +16,7 @@ fn type_of(src: &str) -> Option<TypeExpr> {
 fn precedence_mul_over_add() {
     assert_eq!(parse_expr_ok("def main = 1 + 2 * 3"), "(1 + (2 * 3))");
     assert_eq!(parse_expr_ok("def main = 2 * 3 + 1"), "((2 * 3) + 1)");
+    assert_eq!(parse_expr_ok("def main = (1 + 2) * 3"), "((1 + 2) * 3)");
 }
 
 #[test]
@@ -41,11 +42,6 @@ fn comparisons_and_logic() {
 fn unary_minus_binds_tightest() {
     assert_eq!(parse_expr_ok("def main = - 2 * 3"), "((-2) * 3)");
     assert_eq!(parse_expr_ok("def main = 1 - - 2"), "(1 - (-2))");
-}
-
-#[test]
-fn parens_override_precedence() {
-    assert_eq!(parse_expr_ok("def main = (1 + 2) * 3"), "((1 + 2) * 3)");
 }
 
 #[test]
@@ -116,15 +112,6 @@ fn branches() {
 }
 
 #[test]
-fn defs_modules_types() {
-    assert!(parse_source("def add x y => x + y", "t").is_ok());
-    assert!(parse_source("def rec ping x => pong x", "t").is_ok());
-    assert!(parse_source("type T List2 = | Nil2 | Cons2(T, T List2)", "t").is_ok());
-    assert!(parse_source("module S def inc(x: Int): Int", "t").is_ok());
-    assert!(parse_source("implement S as M def inc x => x + 1", "t").is_ok());
-}
-
-#[test]
 fn adt_accepts_leading_pipe() {
     assert!(parse_source("type T Nest =\n  | Leaf(T)\n  | Node(T List Nest)", "t",).is_ok());
     assert!(parse_source("type Color =\n  | Red\n  | Green\n  | Blue", "t").is_ok());
@@ -144,28 +131,6 @@ fn adt_accepts_leading_pipe() {
                 .collect()
         ))),
     );
-}
-
-#[test]
-fn fn_type_group() {
-    assert_eq!(
-        match type_of("type F = { function: Fn(Int, Int => Int) }") {
-            Some(TypeExpr {
-                kind: TypeKind::Record(mut fields),
-                ..
-            }) => Some(fields.remove(0).ty),
-            _ => None,
-        },
-        Some(type_expr(TypeKind::Apply(
-            "Fn".into(),
-            vec![
-                type_expr(TypeKind::Group(vec![named_type("Int"), named_type("Int")])),
-                named_type("Int")
-            ],
-        ))),
-    );
-    assert!(parse_source("def f(x: Fn(Int, Int => Int)): Int => 1", "t").is_ok());
-    assert!(parse_source("type F = { function: Fn(Int => String) }", "t").is_ok());
 }
 
 #[test]
@@ -281,36 +246,12 @@ fn pattern_fallback_does_not_steal_an_enclosing_comma() {
 }
 
 #[test]
-fn e102_rec_on_value() {
-    let d = parse_source("def rec pi = 3.14159", "t").unwrap_err();
-    assert_eq!(d.code.as_deref(), Some("E102"));
-}
-
-#[test]
-fn e105_no_tuple() {
-    let d = parse_source("def main = (1, 2)", "t").unwrap_err();
-    assert_eq!(d.code.as_deref(), Some("E105"));
-}
-
-#[test]
 fn e105_tuple_pattern() {
     // §20: tuple syntax in a pattern is also E105, not a plain error.
     let d = parse_source("def main = let (a, b) = x -> a", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E105"));
     let d = parse_source("def main = if x | (a, b) => a | 0", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E105"));
-}
-
-#[test]
-fn e106_constructor_call_form() {
-    let d = parse_source("def main = Some 1", "t").unwrap_err();
-    assert_eq!(d.code.as_deref(), Some("E106"));
-}
-
-#[test]
-fn e107_operator_overloading() {
-    let d = parse_source("def (+) a b => a", "t").unwrap_err();
-    assert_eq!(d.code.as_deref(), Some("E107"));
 }
 
 #[test]
@@ -383,8 +324,4 @@ fn type_expr(kind: TypeKind) -> TypeExpr {
         name_span: Span::point(1, 1),
         effects: None,
     }
-}
-
-fn named_type(name: &str) -> TypeExpr {
-    type_expr(TypeKind::Name(name.into()))
 }

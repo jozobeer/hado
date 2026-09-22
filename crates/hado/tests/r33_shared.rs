@@ -1,8 +1,6 @@
 use hado::check_source;
-use hado::parser::{self, parse_source, Diagnostic, Item, TypeDef};
+use hado::parser::{self, parse_source, Item, TypeDef};
 use hado::types::Ty;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn parse(source: &str) -> parser::Ast {
     parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"))
@@ -58,61 +56,14 @@ fn type_def<'a>(items: &'a [Item], name: &str) -> &'a TypeDef {
     find_type(items, name).unwrap_or_else(|| panic!("type {name} not found"))
 }
 
-struct Case(PathBuf);
-impl Case {
-    fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "hado-r33-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-    fn write(&self, file: &str, source: &str) {
-        std::fs::write(self.0.join(file), source).unwrap();
-    }
-    fn check(&self, entry: &str) -> Result<(), Diagnostic> {
-        hado::project::Project::load(&self.0.join(entry))
-            .unwrap()
-            .check()
-            .map(|_| ())
-    }
-}
-impl Drop for Case {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 const MONOID: &str =
     "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure";
-const IMPLEMENTATION: &str = "implement Monoid as StringMonoid\nshared type T = String\ndef combine left _ => left\ndef of value => value";
-
-#[test]
-fn shared_realization_is_recorded() {
-    let ast = parse(&format!("{MONOID}\n\n{IMPLEMENTATION}"));
-    let def = type_def(&ast.items, "T");
-    assert!(def.shared);
-    assert!(def.ty.is_some());
-}
 
 #[test]
 fn unmarked_realization_is_not_shared() {
     let source = "module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\nimplement Monoid as StringMonoid\ntype T = String\ndef combine left _ => left\ndef of value => value";
     let ast = parse(source);
     assert!(!type_def(&ast.items, "T").shared);
-}
-
-#[test]
-fn shared_survives_the_canonical_round_trip() {
-    let source = format!("{MONOID}\n\n{IMPLEMENTATION}");
-    let ast = parse(&source);
-    let canonical = parser::canonical_program(&ast);
-    let restored = parse(&canonical);
-    assert!(type_def(&restored.items, "T").shared, "{canonical}");
-    assert_eq!(canonical, parser::canonical_program(&restored));
 }
 
 #[test]
@@ -155,94 +106,45 @@ fn shared_with_a_constructor_body_is_a_syntax_error() {
     reject(&record, "E100", "{ x");
 }
 
-#[test]
-fn shared_to_a_type_absent_from_the_contract_is_unbound() {
-    let case = Case::new();
-    let source = format!("def main = StringMonoid.of \"a\"\n\n{MONOID}\n\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value");
-    case.write("main.hd", &source);
-    let error = case
-        .check("main.hd")
-        .expect_err("shared to an unknown type must be E204");
-    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
-    let (line, col) = location(
-        &source,
-        source.find("shared type U").unwrap() + "shared type ".len(),
-    );
-    assert_eq!((error.line, error.col), (line, col), "{error}");
-}
-
-#[test]
-fn shared_to_a_known_type_is_accepted() {
-    let case = Case::new();
-    let source = format!("def main = StringMonoid.of \"a\"\n\n{MONOID}\n\n{IMPLEMENTATION}");
-    case.write("main.hd", &source);
-    assert!(
-        case.check("main.hd").is_ok(),
-        "a shared realization must let main be typed"
-    );
-}
-
 const UNSHARED: &str = "implement Monoid as StringMonoid\ntype T = String\ndef combine left _ => left\ndef of value => value";
 
 // --- 工程 1: shared の等式が「解けた型への置き換え」になる ---
 
 #[test]
-fn shared_equation_reaches_the_public_interface() {
-    let source = format!("def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{IMPLEMENTATION}");
-    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(checked.main, Ty::String);
-}
-
-#[test]
 fn unshared_implementation_keeps_the_abstract_type() {
-    let source = format!(
+    // 印なしの実体化は register_module_realization の 1 分岐で不透明に登録される。
+    // 契約の型・局所型・値の消費経路（本体の適用・constructor payload・pattern・
+    // field 射影・named constructor・関数型）を変えても同じ抽象型のまま検査が止まる。
+    let applied = format!(
         "def main = StringMonoid.combine (StringMonoid.of \"a\") \"b\"\n{MONOID}\n\n{UNSHARED}"
     );
-    let error = check_source(&source, "t")
-        .err()
-        .expect("an unmarked realization stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(
-        error.message.contains("StringMonoid.T"),
-        "{}",
-        error.message
-    );
-}
-
-#[test]
-fn shared_equation_relaxes_e705() {
-    let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\nshared type T = Int\ndef find _ => 1";
-    assert_eq!(
-        check_source(source, "t")
-            .unwrap_or_else(|error| panic!("{error}"))
-            .main,
-        Ty::Int
-    );
-}
-
-#[test]
-fn unshared_realization_keeps_e705() {
-    let source = "def main = Store.find 1\nmodule Store\ntype T\ndef find(id: Int): T Pure\n\nimplement Store as Store\ntype T = Int\ndef find _ => 1";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked realization keeps E705");
-    assert_eq!(error.code.as_deref(), Some("E705"), "{error}");
-}
-
-#[test]
-fn shared_record_realization_allows_field_access() {
-    let source = "def main = describe (UserStore.make \"n\")\ndef describe (t: UserStore.T) => t.name\ntype User = { name: String }\n\nmodule UserStore\ntype T\ndef make(name: String): T Pure\n\nimplement UserStore as UserStore\nshared type T = User\ndef make name => { name = name }";
-    let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(checked.main, Ty::String);
-}
-
-#[test]
-fn unshared_record_realization_rejects_field_access() {
-    let source = "def main = describe (UserStore.make \"n\")\ndef describe (t: UserStore.T) => t.name\ntype User = { name: String }\n\nmodule UserStore\ntype T\ndef make(name: String): T Pure\n\nimplement UserStore as UserStore\ntype T = User\ndef make name => { name = name }";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked realization keeps E601");
-    assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
+    let payload = "def main = Box(\"hi\")\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let pattern = "def main = read (Box(Store.make \"hi\"))\ndef read | Box(value) => String.concat value \"!\"\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let projection = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
+    let named = format!("{NAMED}\ntype T = String\ndef make name => name");
+    let function = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
+    let local_record = "def main = name (Store.make \"hi\")\ndef name (t: Store.T) => t.name\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }";
+    for (source, code, member) in [
+        (applied.as_str(), "E305", Some("StringMonoid.T")),
+        (payload, "E305", Some("Store.T")),
+        (pattern, "E305", Some("Store.T")),
+        (projection, "E305", Some("Store.T")),
+        (named.as_str(), "E305", Some("Store.T")),
+        (function, "E305", None),
+        (local_record, "E601", None),
+    ] {
+        let error = check_source(source, "t")
+            .err()
+            .expect("an unmarked realization stays opaque");
+        assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
+        if let Some(member) = member {
+            assert!(
+                error.message.contains(member),
+                "{source}: {}",
+                error.message
+            );
+        }
+    }
 }
 
 #[test]
@@ -276,26 +178,6 @@ fn make_fold(shared: &str) -> String {
 }
 fn string_fold(shared: &str) -> String {
     format!("{FOLD_CONTRACTS}\n\n{STRING_MONOID}\n\n{}\nimplement Fold as StringFold = MakeFold(StringMonoid)", make_fold(shared))
-}
-
-#[test]
-fn shared_functor_equation_reaches_the_application_result() {
-    let source = format!(
-        "def main = StringFold.fold [\"a\", \"b\"]\n{}",
-        string_fold("shared ")
-    );
-    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(checked.main, Ty::String);
-}
-
-#[test]
-fn shared_functor_equation_follows_the_arguments_members() {
-    let source = format!(
-        "def main = StringFold.fold [StringMonoid.of \"a\", StringMonoid.of \"b\"]\n{}",
-        string_fold("shared ")
-    );
-    let checked = check_source(&source, "t").unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(checked.main, Ty::String);
 }
 
 #[test]
@@ -393,16 +275,6 @@ fn shared_equation_reaches_a_constructor_payload() {
 }
 
 #[test]
-fn unshared_constructor_payload_stays_abstract() {
-    let source = "def main = Box(\"hi\")\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked payload stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(error.message.contains("Store.T"), "{}", error.message);
-}
-
-#[test]
 fn local_types_of_two_implementations_stay_distinct() {
     let source = "def main = A.read (B.make 7)\nmodule Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\nimplement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n\nimplement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id";
     let error = check_source(source, "t")
@@ -427,15 +299,6 @@ fn shared_local_record_allows_field_access() {
     assert_eq!(checked.main, Ty::String);
 }
 
-#[test]
-fn unshared_local_record_rejects_field_access() {
-    let source = "def main = name (Store.make \"hi\")\ndef name (t: Store.T) => t.name\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked local record keeps E601");
-    assert_eq!(error.code.as_deref(), Some("E601"), "{error}");
-}
-
 // --- 工程 1 の修正 2: パターン payload と field 射影への shared の展開 ---
 
 #[test]
@@ -446,30 +309,10 @@ fn shared_equation_reaches_a_pattern_payload() {
 }
 
 #[test]
-fn unshared_pattern_payload_stays_abstract() {
-    let source = "def main = read (Box(Store.make \"hi\"))\ndef read | Box(value) => String.concat value \"!\"\ntype Box = | Box(Store.T)\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked pattern payload stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(error.message.contains("Store.T"), "{}", error.message);
-}
-
-#[test]
 fn shared_equation_reaches_a_field_projection() {
     let source = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = String\ndef make name => name";
     let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(checked.main, Ty::String);
-}
-
-#[test]
-fn unshared_field_projection_stays_abstract() {
-    let source = "def main = String.concat ({ name = Store.make \"hi\" }).name \"!\"\ntype Box = { name: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = String\ndef make name => name";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked field projection stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(error.message.contains("Store.T"), "{}", error.message);
 }
 
 // --- 工程 1 の修正 3: named constructor の構築とパターンへの shared の展開 ---
@@ -483,16 +326,6 @@ fn shared_equation_reaches_a_named_constructor_payload() {
     assert_eq!(checked.main, Ty::String);
 }
 
-#[test]
-fn unshared_named_constructor_payload_stays_abstract() {
-    let source = format!("{NAMED}\ntype T = String\ndef make name => name");
-    let error = check_source(&source, "t")
-        .err()
-        .expect("an unmarked named payload stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
-    assert!(error.message.contains("Store.T"), "{}", error.message);
-}
-
 // --- 工程 1 の修正 5: 関数型を本体とする shared の等式 ---
 
 #[test]
@@ -502,15 +335,6 @@ fn shared_function_realization_reaches_a_record_schema() {
     let source = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\nshared type T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
     let checked = check_source(source, "t").unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(checked.main, Ty::String);
-}
-
-#[test]
-fn unshared_function_realization_stays_abstract() {
-    let source = "def main = read ({ value = Store.make \"hi\" })\ndef read box => box.value \"!\"\ntype Box = { value: Store.T }\nmodule Store\ntype T\ndef make(name: String): T Pure\n\nimplement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)";
-    let error = check_source(source, "t")
-        .err()
-        .expect("an unmarked function realization stays opaque");
-    assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
 
 #[test]

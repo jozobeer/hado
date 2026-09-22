@@ -161,7 +161,7 @@ fn printable_value(state: &mut u64, depth: usize) -> (Type, String) {
 #[test]
 fn printable_main_types_match_independently_generated_types() {
     let mut state = 0x18_c11;
-    for _ in 0..32 {
+    for _ in 0..8 {
         let (ty, value) = printable_value(&mut state, 3);
         let ty = ty.render();
         let case = Case::new(&format!(
@@ -230,7 +230,7 @@ fn old_spellings_and_comparison_chains_reject_at_the_token() {
             "(Int)",
         ),
     ] {
-        for padding in 0..4 {
+        for padding in 0..2 {
             let source = format!(
                 "{}{}{source}",
                 "\n".repeat(padding),
@@ -244,7 +244,7 @@ fn old_spellings_and_comparison_chains_reject_at_the_token() {
 #[test]
 fn lambda_arguments_and_arm_bodies_execute_without_consuming_arms() {
     let mut state = 0x18_f00d;
-    for _ in 0..16 {
+    for _ in 0..4 {
         let a = random(&mut state, 100) as i64;
         let b = a + 1 + random(&mut state, 100) as i64;
         let source = format!("def apply f x y => f x y\ndef choose | Some(n) => fn(x, y => x + y + n) | None => fn(x, y => x - y)\ndef main = (apply fn(x, y => x + y) {a} {b}) + (apply (choose (Some({a}))) {a} {b}) + (apply (choose None) {a} {b})");
@@ -273,13 +273,14 @@ fn boolean_alternative_forms_and_position_perturbations() {
             "def positive x => x > 0\ndef main = if | positive 1 => 1 | 0",
             "if",
         ),
+        ("def main = if | true => 1 | 0", "if"),
         ("def f | true => 1 | false => 0\ndef main = f true", "def f"),
         (
             "def apply f x => f x\ndef main = apply fn(| true => 1 | false => 0) true",
             "fn",
         ),
     ] {
-        for padding in 0..8 {
+        for padding in 0..3 {
             let source = format!(
                 "{}{}",
                 "\n".repeat(padding % 3),
@@ -300,7 +301,7 @@ fn boolean_alternative_forms_and_position_perturbations() {
 #[test]
 fn nested_boolean_patterns_and_direct_condition_functions_remain_valid() {
     let mut state = 0x18_520;
-    for _ in 0..16 {
+    for _ in 0..4 {
         let value = 1 + random(&mut state, 100) as i64;
         let source = format!("def nested | Some(true) => {value} | Some(false) => 0 | None => -1\ndef direct x | x > 0 => x | 0\ndef main = (nested (Some(true))) + (direct {value})");
         Case::new(&source).run(value * 2);

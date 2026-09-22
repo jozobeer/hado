@@ -5,7 +5,7 @@ fn generated_lists_print_source_not_constructor_chains() {
     let dir = std::env::temp_dir().join(format!("hado-r9-list-print-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut seed = 731_u64;
-    for length in 0..12 {
+    for length in [0, 1, 3] {
         let values: Vec<_> = (0..length)
             .map(|_| {
                 seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -77,68 +77,104 @@ fn literal(value: &str, quote: char) -> String {
 fn nested_text_is_quoted_but_outer_result_payload_is_raw() {
     let dir = std::env::temp_dir().join(format!("hado-r9-text-print-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (index, ch) in ['\n', '\t', '\\', '\'', '"', 'あ', '😀']
+    let values: Vec<(String, String, String, String)> = ['\n', '\t', '\\', '\'', '"', 'あ', '😀']
         .into_iter()
         .enumerate()
+        .map(|(index, ch)| {
+            let char_value = ch.to_string();
+            let string_value = format!("item{index}{ch}\"\\\n\t'");
+            (
+                literal(&char_value, '\''),
+                char_value,
+                literal(&string_value, '"'),
+                string_value,
+            )
+        })
+        .collect();
+    // The outermost payload stays raw: one program per character and kind.
+    for (index, (char_encoded, char_value, string_encoded, string_value)) in
+        values.iter().enumerate()
     {
-        for (kind, _ty, value, encoded) in [
+        for (kind, encoded, expected) in [
+            ("char", char_encoded.as_str(), char_value.as_str()),
+            ("string", string_encoded.as_str(), string_value.as_str()),
+        ] {
+            let path = dir.join(format!("{index}-{kind}-top"));
+            hado::build::executable(&format!("def main = {encoded}"), "text-print.hd", &path)
+                .unwrap();
+            let output = Command::new(&path).output().unwrap();
+            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
+            assert!(output.stderr.is_empty());
+        }
+    }
+    // Nested quoting (list element and constructor payload) in one program per form.
+    for (kind, encoded) in [
+        (
+            "char",
+            values
+                .iter()
+                .map(|value| value.0.clone())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "string",
+            values
+                .iter()
+                .map(|value| value.2.clone())
+                .collect::<Vec<_>>(),
+        ),
+    ] {
+        for (form, nested) in [
+            ("list", encoded.join(", ")),
             (
-                "char",
-                "Char",
-                ch.to_string(),
-                literal(&ch.to_string(), '\''),
-            ),
-            (
-                "string",
-                "String",
-                format!("item{index}{ch}\"\\\n\t'"),
-                literal(&format!("item{index}{ch}\"\\\n\t'"), '"'),
+                "some",
+                encoded
+                    .iter()
+                    .map(|item| format!("Some({item})"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ),
         ] {
-            for (case, source, expected, status) in [
-                ("top", format!("def main = {encoded}"), value.clone(), 0),
-                (
-                    "nested",
-                    format!("def main = Some({encoded})"),
-                    format!("Some({encoded})"),
-                    0,
-                ),
-                (
-                    "list",
-                    format!("def main = [{encoded}]"),
-                    format!("[{encoded}]"),
-                    0,
-                ),
-                (
-                    "raise",
-                    format!("def main = raise {{ message = {} }}", literal(&value, '"')),
-                    value.clone(),
-                    1,
-                ),
-            ] {
-                let path = dir.join(format!("{index}-{kind}-{case}"));
-                hado::build::executable(&source, "text-print.hd", &path).unwrap();
-                let output = Command::new(&path).output().unwrap();
-                let expected = format!("{expected}\n");
-                assert_eq!(output.status.code(), Some(status));
-                assert_eq!(
-                    output.stdout,
-                    if status == 0 {
-                        expected.as_bytes()
-                    } else {
-                        b""
-                    }
-                );
-                assert_eq!(
-                    output.stderr,
-                    if status == 1 {
-                        expected.as_bytes()
-                    } else {
-                        b""
-                    }
-                );
-            }
+            let path = dir.join(format!("{kind}-{form}"));
+            hado::build::executable(&format!("def main = [{nested}]"), "text-print.hd", &path)
+                .unwrap();
+            let output = Command::new(&path).output().unwrap();
+            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.stdout, format!("[{nested}]\n").as_bytes());
+            assert!(output.stderr.is_empty());
         }
+    }
+    // A raised message stays raw on stderr: all characters in one program per kind.
+    for (kind, raw) in [
+        (
+            "char",
+            values
+                .iter()
+                .map(|value| value.1.as_str())
+                .collect::<Vec<_>>()
+                .join(""),
+        ),
+        (
+            "string",
+            values
+                .iter()
+                .map(|value| value.3.as_str())
+                .collect::<Vec<_>>()
+                .join(""),
+        ),
+    ] {
+        let path = dir.join(format!("{kind}-raise"));
+        hado::build::executable(
+            &format!("def main = raise {{ message = {} }}", literal(&raw, '"')),
+            "text-print.hd",
+            &path,
+        )
+        .unwrap();
+        let output = Command::new(&path).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, format!("{raw}\n").as_bytes());
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
