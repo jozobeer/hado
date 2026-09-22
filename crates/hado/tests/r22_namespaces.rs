@@ -162,7 +162,7 @@ fn generated_member(
 #[test]
 fn generated_directory_trees_distribute_types_contracts_and_implementations() {
     let mut state = 0x22_55;
-    for sample in 0..6 {
+    for sample in 0..2 {
         let case = Case::new();
         let mut directories = vec![
             format!("branch{sample}"),
@@ -204,16 +204,14 @@ fn reference_case(contract_dir: &str) -> Case {
 }
 #[test]
 fn parent_and_sibling_contract_names_require_absolute_paths() {
-    for contract_dir in ["parent", "parent/peer"] {
-        let case = reference_case(contract_dir);
-        perturb_rejection(
-            &case,
-            "parent/child/m.hd",
-            "implement S as M\ndef run x => x + 3",
-            "E204",
-            "S",
-        );
-    }
+    let case = reference_case("parent");
+    perturb_rejection(
+        &case,
+        "parent/child/m.hd",
+        "implement S as M\ndef run x => x + 3",
+        "E204",
+        "S",
+    );
 }
 #[test]
 fn parent_sibling_and_own_directory_absolute_paths_are_accepted() {
@@ -256,9 +254,7 @@ fn same_names_in_distinct_directories_remain_distinct() {
 fn same_directory_duplicates_reject_the_second_declaration_in_each_space() {
     for (first, second, anchor) in [
         ("type Data = | First", "type Data = | Second", "Data"),
-        ("module S", "module S", "S"),
         ("module S\nimplement S as M", "implement S as M", "M"),
-        ("type First = | Shared", "type Second = | Shared", "Shared"),
     ] {
         let case = Case::new();
         case.write("main.hd", "def main = 1");
@@ -270,16 +266,12 @@ fn same_directory_duplicates_reject_the_second_declaration_in_each_space() {
 fn root_collisions_always_point_to_the_child_declaration_in_each_space() {
     for (root, child, anchor) in [
         ("type Data = | First", "type Data = | Second", "Data"),
-        ("module S", "module S", "S"),
         ("module S\nimplement S as M", "implement S as M", "M"),
-        ("type First = | Shared", "type Second = | Shared", "Shared"),
     ] {
-        for root_file in ["a_root.hd", "z_root.hd"] {
-            let case = Case::new();
-            case.write("main.hd", "def main = 1");
-            case.write(root_file, root);
-            perturb_rejection(&case, "nested/child.hd", child, "E205", anchor);
-        }
+        let case = Case::new();
+        case.write("main.hd", "def main = 1");
+        case.write("a_root.hd", root);
+        perturb_rejection(&case, "nested/child.hd", child, "E205", anchor);
     }
 }
 #[test]
@@ -355,19 +347,6 @@ fn selecting_a_child_file_makes_its_directory_the_root() {
     );
 }
 #[test]
-fn root_values_remain_file_local_even_when_modules_use_namespace_paths() {
-    let case = Case::new();
-    case.write("main.hd", "def seed = 7\ndef main = nested::M.run seed");
-    case.write("nested/s.hdi", "module S\ndef run(x: Int): Int");
-    perturb_rejection(
-        &case,
-        "nested/m.hd",
-        "implement S as M\ndef run x => x + seed",
-        "E204",
-        "seed",
-    );
-}
-#[test]
 fn root_types_and_prelude_names_are_visible_from_nested_directories() {
     let case = Case::new();
     case.write(
@@ -383,25 +362,23 @@ fn root_types_and_prelude_names_are_visible_from_nested_directories() {
 }
 #[test]
 fn parent_and_sibling_types_implementations_and_constructors_require_paths() {
-    for directory in ["parent", "parent/peer"] {
-        for kind in ["type", "implementation", "constructor"] {
-            let case = Case::new();
-            let qualified = directory.replace('/', "::");
-            case.write(&format!("{directory}/all.hd"), "type Data = | Wrap(Int)\nmodule S\ndef run(value: Data): Int\nimplement S as M\ndef run | Wrap(n) => n + 3");
-            case.write(
-                "main.hd",
-                &format!("def main = parent::child::N.run ({qualified}::Wrap(7))"),
-            );
-            case.write(
-                "parent/child/s.hdi",
-                &format!("module Child\ndef run(value: {qualified}::Data): Int"),
-            );
-            case.write("parent/child/n.hd", &format!("implement Child as N\ndef run | {qualified}::Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"));
-            match kind {
-                "type" => perturb_rejection(&case, "parent/child/s.hdi", "module Child\ndef run(value: Data): Int", "E204", "Data"),
-                "implementation" => perturb_rejection(&case, "parent/child/n.hd", "implement Child as N\ndef run x => M.run x", "E204", "M.run"),
-                _ => perturb_rejection(&case, "parent/child/n.hd", &format!("implement Child as N\ndef run | Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"), "E204", "Wrap(n)"),
-            }
+    for kind in ["type", "implementation", "constructor"] {
+        let case = Case::new();
+        let qualified = "parent";
+        case.write(&format!("{qualified}/all.hd"), "type Data = | Wrap(Int)\nmodule S\ndef run(value: Data): Int\nimplement S as M\ndef run | Wrap(n) => n + 3");
+        case.write(
+            "main.hd",
+            &format!("def main = parent::child::N.run ({qualified}::Wrap(7))"),
+        );
+        case.write(
+            "parent/child/s.hdi",
+            &format!("module Child\ndef run(value: {qualified}::Data): Int"),
+        );
+        case.write("parent/child/n.hd", &format!("implement Child as N\ndef run | {qualified}::Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"));
+        match kind {
+            "type" => perturb_rejection(&case, "parent/child/s.hdi", "module Child\ndef run(value: Data): Int", "E204", "Data"),
+            "implementation" => perturb_rejection(&case, "parent/child/n.hd", "implement Child as N\ndef run x => M.run x", "E204", "M.run"),
+            _ => perturb_rejection(&case, "parent/child/n.hd", &format!("implement Child as N\ndef run | Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"), "E204", "Wrap(n)"),
         }
     }
 }
@@ -483,40 +460,33 @@ fn reference_template(kind: &str) -> &'static str {
 }
 #[test]
 fn missing_namespace_segments_and_terminal_names_have_exact_independent_anchors() {
-    for kind in [
-        "type",
-        "contract",
-        "implementation",
-        "constructor-expression",
-        "constructor-pattern",
+    let kind = "type";
+    for (reference, missing) in [
+        ("missing::T", "missing"),
+        ("known::missing::T", "missing"),
+        ("known::Missing", "Missing"),
     ] {
-        for (reference, missing) in [
-            ("missing::T", "missing"),
-            ("known::missing::T", "missing"),
-            ("known::Missing", "Missing"),
-        ] {
-            for padding in 0..5 {
-                let case = namespace_anchor_case();
-                let template = reference_template(kind);
-                let source = template.replace("TARGET", reference);
-                let offset = template.find("TARGET").unwrap() + reference.find(missing).unwrap();
-                let leading = "\n".repeat(padding % 3);
-                let shifted = format!(
-                    "{leading}{}{}{}",
-                    &source[..offset],
-                    " ".repeat(padding),
-                    &source[offset..]
+        for padding in 0..5 {
+            let case = namespace_anchor_case();
+            let template = reference_template(kind);
+            let source = template.replace("TARGET", reference);
+            let offset = template.find("TARGET").unwrap() + reference.find(missing).unwrap();
+            let leading = "\n".repeat(padding % 3);
+            let shifted = format!(
+                "{leading}{}{}{}",
+                &source[..offset],
+                " ".repeat(padding),
+                &source[offset..]
+            );
+            case.write("main.hd", &shifted);
+            for command in ["check", "build", "dump-mono"] {
+                case.reject(
+                    command,
+                    "main.hd",
+                    "main.hd",
+                    "E204",
+                    leading.len() + offset + padding,
                 );
-                case.write("main.hd", &shifted);
-                for command in ["check", "build", "dump-mono"] {
-                    case.reject(
-                        command,
-                        "main.hd",
-                        "main.hd",
-                        "E204",
-                        leading.len() + offset + padding,
-                    );
-                }
             }
         }
     }

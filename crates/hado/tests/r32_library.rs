@@ -88,10 +88,7 @@ fn check_accepts_library_while_build_reports_entry_error() {
 fn library_is_accepted_and_recorded() {
     let ast = parse("library");
     assert_eq!(ast.library.map(|span| (span.line, span.col)), Some((1, 1)));
-}
-
-#[test]
-fn library_span_is_the_first_declaration() {
+    // The span is the declaration, not the start of the file.
     let ast = parse("// header\n\nlibrary\n");
     assert_eq!(ast.library.map(|span| (span.line, span.col)), Some((3, 1)));
 }

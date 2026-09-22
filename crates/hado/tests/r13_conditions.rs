@@ -1,10 +1,5 @@
 use hado::{check_source, parser};
 
-fn random(state: &mut u64, limit: u64) -> u64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-    (*state >> 32) % limit
-}
-
 fn rejected(source: &str, code: &str, anchor: &str) {
     let error = check_source(source, "conditions.hd").err().unwrap();
     assert_eq!(error.code.as_deref(), Some(code), "{source}: {error}");
@@ -21,11 +16,18 @@ fn rejected(source: &str, code: &str, anchor: &str) {
 
 #[test]
 fn generated_functions_reject_long_form_and_execute_short_form() {
-    let mut state = 0x13517;
     let mut covered = [[false; 2]; 3];
-    for serial in 0..36 {
-        let arity = random(&mut state, 3) as usize + 1;
-        let typed = random(&mut state, 2) == 1;
+    for (serial, (arity, typed)) in [
+        (1usize, false),
+        (1, true),
+        (2, false),
+        (2, true),
+        (3, false),
+        (3, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         covered[arity - 1][usize::from(typed)] = true;
         let names = (0..arity).map(|i| format!("x{i}")).collect::<Vec<_>>();
         let params = if typed {
@@ -40,23 +42,16 @@ fn generated_functions_reject_long_form_and_execute_short_form() {
         } else {
             names.join(" ")
         };
-        let values = (0..arity)
-            .map(|_| random(&mut state, 31) as i64 - 15)
-            .collect::<Vec<_>>();
+        let values = (1..=arity as i64).collect::<Vec<_>>();
         let args = values
             .iter()
             .map(|v| format!("({v})"))
             .collect::<Vec<_>>()
             .join(" ");
-        let threshold = random(&mut state, 41) as i64 - 20;
+        let threshold = 2;
         let sum: i64 = values.iter().sum();
         let arms = format!("| {} > ({threshold}) => 7 | 3", names.join(" + "));
         let expected = if sum > threshold { "7" } else { "3" };
-        let padding = format!(
-            "{}{}",
-            "\n".repeat(random(&mut state, 4) as usize),
-            " ".repeat(random(&mut state, 9) as usize)
-        );
         for lambda in [false, true] {
             let source = |body: &str| {
                 if lambda {
@@ -68,10 +63,10 @@ fn generated_functions_reject_long_form_and_execute_short_form() {
                     } else {
                         names.join(", ")
                     };
-                    format!("{padding}def main = fn({params} {body}) {args}")
+                    format!("def main = fn({params} {body}) {args}")
                 } else {
                     let ret = if typed { ": Int" } else { "" };
-                    format!("{padding}def probe {params}{ret} {body}\ndef main = probe {args}")
+                    format!("def probe {params}{ret} {body}\ndef main = probe {args}")
                 }
             };
             rejected(

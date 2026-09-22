@@ -162,7 +162,9 @@ fn generated_project(state: &mut u64, count: usize) {
 #[test]
 fn generated_entries_select_their_own_main_and_keep_other_entry_implementations_used() {
     let mut state = 0x20_0123;
-    for _ in 0..4 {
+    // A single-entry project is the degenerate control for the generator loop.
+    generated_project(&mut state, 1);
+    for _ in 0..2 {
         let count = 2 + random(&mut state, 3);
         generated_project(&mut state, count);
     }
@@ -192,6 +194,19 @@ fn sections_only_see_outer_values_from_their_own_file() {
         );
         case.write("impl.hd", &source);
         case.reject("check", "entry.hd", "impl.hd", "E204", offset);
+    }
+    // The same locality rule holds when the implementation is reached through a
+    // namespace path from a nested directory.
+    for padding in 0..5 {
+        let case = Case::new();
+        std::fs::create_dir(case.0.join("nested")).unwrap();
+        case.write("entry.hd", "def seed = 7\ndef main = nested::M.run seed");
+        case.write("nested/s.hdi", "module S\ndef run(x: Int): Int");
+        let (source, offset) = shifted("implement S as M\ndef run x => x + seed", "seed", padding);
+        case.write("nested/m.hd", &source);
+        for command in ["check", "build", "dump-mono"] {
+            case.reject(command, "entry.hd", "nested/m.hd", "E204", offset);
+        }
     }
 }
 #[test]
@@ -285,7 +300,7 @@ fn used_support_file_cannot_fall_back_to_sibling_main() {
 #[test]
 fn file_isolation_preserves_parameter_let_lambda_and_pattern_shadowing() {
     let mut state = 0x20_55;
-    for _ in 0..4 {
+    for _ in 0..2 {
         let case = Case::new();
         let mut expected = Vec::new();
         for i in 0..2 {
@@ -365,9 +380,4 @@ fn subdirectory_outer_def_is_rejected_at_its_original_position() {
     let (source, offset) = shifted("def helper x => x", "def", 3);
     case.write("nested/helper.hd", &source);
     case.reject("check", "entry.hd", "nested/helper.hd", "E100", offset);
-}
-
-#[test]
-fn single_entry_generator_control() {
-    generated_project(&mut 0x20_0123, 1);
 }

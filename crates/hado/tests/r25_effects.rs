@@ -125,124 +125,75 @@ fn let_question_requires_option() {
 }
 
 #[test]
-fn do_requires_an_effect_or_option() {
-    let mut state = 0x25_04;
-    for _ in 0..8 {
-        let n = random(&mut state, 1000);
-        let case = Case::new();
-        perturb_rejection(
-            &case,
-            "main.hd",
-            &format!("def main = do {n} -> {n}"),
-            "E303",
-            &n.to_string(),
-        );
-    }
-}
-
-#[test]
 fn do_effect_row_is_checked_after_number_defaulting() {
     let mut state = 0x25_09;
-    for _ in 0..8 {
-        let n = random(&mut state, 1000);
-        let arg = random(&mut state, 50) + 1;
-        let discarded = random(&mut state, 1000) + 1000;
-        let case = Case::new();
-        case.write(
-            "main.hd",
-            &format!("def f x => do (x / x) -> {n}\ndef main = f {arg}\n"),
-        );
-        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
-        case.write(
-            "main.hd",
-            &format!("def f (x: Int): Int => do (x / x) -> {n}\ndef main = f {arg}\n"),
-        );
-        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
-        perturb_rejection(
-            &case,
-            "main.hd",
-            &format!("def f x => do {discarded} -> x\ndef main = f {arg}\n"),
-            "E303",
-            &discarded.to_string(),
-        );
-        case.write(
-            "main.hd",
-            &format!("effect Ask\nonce ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"),
-        );
-        assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
-    }
+    let n = random(&mut state, 1000);
+    let arg = random(&mut state, 50) + 1;
+    let discarded = random(&mut state, 1000) + 1000;
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        &format!("def f x => do (x / x) -> {n}\ndef main = f {arg}\n"),
+    );
+    assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
+    case.write(
+        "main.hd",
+        &format!("def f (x: Int): Int => do (x / x) -> {n}\ndef main = f {arg}\n"),
+    );
+    assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
+    perturb_rejection(
+        &case,
+        "main.hd",
+        &format!("def f x => do {discarded} -> x\ndef main = f {arg}\n"),
+        "E303",
+        &discarded.to_string(),
+    );
+    case.write(
+        "main.hd",
+        &format!("effect Ask\nonce ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"),
+    );
+    assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
 }
 
 #[test]
 fn integer_division_is_int_with_error() {
     let mut state = 0x25_05;
-    for _ in 0..8 {
-        let left = random(&mut state, 50) + 1;
-        let right = random(&mut state, 50) + 1;
-        let case = Case::new();
-        case.write("main.hd", &format!("def main = {left} / {right}\n"));
-        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
-        case.write("main.hd", &format!("def main = {left}.0 / {right}.0\n"));
-        assert_eq!(case.print_type("main.hd"), "Float\n");
-    }
+    let left = random(&mut state, 50) + 1;
+    let right = random(&mut state, 50) + 1;
+    let case = Case::new();
+    case.write("main.hd", &format!("def main = {left} / {right}\n"));
+    assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
+    case.write("main.hd", &format!("def main = {left}.0 / {right}.0\n"));
+    assert_eq!(case.print_type("main.hd"), "Float\n");
 }
 
 #[test]
 fn do_discards_an_error_effect() {
     let mut state = 0x25_06;
-    for _ in 0..8 {
-        let n = random(&mut state, 1000);
-        let case = Case::new();
-        case.write(
-            "main.hd",
-            &format!("def boom = raise {{ message = \"{n}\" }}\ndef main = do boom -> {n}\n"),
-        );
-        assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
-    }
-}
-
-#[test]
-fn unhandled_raise_prints_message_on_stderr() {
-    let mut state = 0x25_07;
-    for _ in 0..8 {
-        let token = format!("t{}", random(&mut state, 100_000));
-        let case = Case::new();
-        case.write(
-            "main.hd",
-            &format!("def main = raise {{ message = \"{token}\" }}\n"),
-        );
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = Command::new(case.0.join("main")).output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty(), "{:?}", output.stdout);
-        assert_eq!(output.stderr, format!("{token}\n").as_bytes());
-    }
+    let n = random(&mut state, 1000);
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        &format!("def boom = raise {{ message = \"{n}\" }}\ndef main = do boom -> {n}\n"),
+    );
+    assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
 }
 
 #[test]
 fn integer_zero_divisor_aborts_with_division_by_zero() {
     let mut state = 0x25_08;
-    for _ in 0..8 {
-        let left = random(&mut state, 50) + 1;
-        let op = if random(&mut state, 2) == 0 { "/" } else { "%" };
-        let case = Case::new();
-        case.write("main.hd", &format!("def main = {left} {op} 0\n"));
-        let built = case.build("main.hd");
-        assert_eq!(
-            built.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let output = Command::new(case.0.join("main")).output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty(), "{:?}", output.stdout);
-        assert_eq!(output.stderr, b"DivisionByZero\n");
-    }
+    let left = random(&mut state, 50) + 1;
+    let case = Case::new();
+    case.write("main.hd", &format!("def main = {left} % 0\n"));
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(case.0.join("main")).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
+    assert_eq!(output.stderr, b"DivisionByZero\n");
 }

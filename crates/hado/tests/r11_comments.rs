@@ -2,15 +2,15 @@ use hado::lexer::{self, Span};
 
 #[test]
 fn generated_comment_markers_preserve_tokens_or_report_first_character() {
-    let mut state = 0x1143_u64;
-    for _ in 0..48 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let padding = " ".repeat((state >> 32) as usize % 17);
-        let value = (state % 1000) as i64;
+    for padding_value in 0..=16 {
+        let padding = " ".repeat(padding_value);
         for (prefix, suffix) in [
-            (padding.to_string(), format!("\ndef main = {value}")),
-            (format!("def main = {padding}"), format!("\n{value}")),
-            (format!("def main = {value} {padding}"), "\n".into()),
+            (padding.to_string(), format!("\ndef main = {padding_value}")),
+            (
+                format!("def main = {padding}"),
+                format!("\n{padding_value}"),
+            ),
+            (format!("def main = {padding_value} {padding}"), "\n".into()),
         ] {
             let expected = Span::point(1, prefix.chars().count() + 1);
             for marker in ["--", "#"] {

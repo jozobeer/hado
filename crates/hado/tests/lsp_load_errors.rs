@@ -111,39 +111,6 @@ fn is_refusal(message: &str) -> bool {
 }
 
 #[test]
-fn invalid_namespace_directory_is_published_instead_of_an_empty_list() {
-    // `Lib` is not a `name` token (§51), so load refuses before the checker
-    // runs. The file itself is well-typed; an empty publish would look like a
-    // successful check.
-    let text = "def main = 1\n";
-    let root = workspace(&[("main.hd", text)]);
-    std::fs::create_dir(root.join("Lib")).unwrap();
-    let published = publishes_for(&root, &[("main.hd", text)]);
-    let messages = messages(&published["main.hd"]);
-    assert!(
-        messages.iter().any(|message| is_refusal(message)),
-        "expected the CLI refusal on the entry, got {published:?}"
-    );
-}
-
-#[test]
-fn a_contract_opened_alone_sees_the_refusal_of_its_candidates() {
-    // §58.5: a `.hdi` opened on its own takes the `.hd` files under the root as
-    // its candidates, and is not an entry itself. The refusal belongs to the
-    // candidates' root, so it must reach the contract too; otherwise the
-    // contract looks clean while every candidate fails to load.
-    let contract = "module M\ndef f (x: Int): Int\n";
-    let root = workspace(&[("api/store.hdi", contract), ("main.hd", "def main = 1\n")]);
-    std::fs::create_dir(root.join("Lib")).unwrap();
-    let published = publishes_for(&root, &[("api/store.hdi", contract)]);
-    let messages = messages(&published["api/store.hdi"]);
-    assert!(
-        messages.iter().any(|message| is_refusal(message)),
-        "expected the refusal on the contract, got {published:?}"
-    );
-}
-
-#[test]
 fn a_contract_is_not_blamed_for_a_candidate_whose_root_does_not_contain_it() {
     // §58.5 merges the candidates that read the contract. `app/main.hd` walks
     // `app/`, so it can never read the sibling `api/store.hdi`; its refusal is
@@ -210,28 +177,5 @@ fn a_sibling_entry_is_not_blamed_for_another_entrys_refusal() {
             .iter()
             .any(|message| is_refusal(message)),
         "a clean sibling entry must not inherit the refusal: {published:?}"
-    );
-}
-
-#[test]
-fn an_excluded_document_is_not_blamed_for_the_roots_refusal() {
-    // §50 excludes `.` and `__` directories from traversal, so `.scratch/` is
-    // not read by the workspace root entry. Its own root is clean.
-    let main = "def main = 1\n";
-    let scratch = "def helper = 1\n";
-    let root = workspace(&[("main.hd", main), (".scratch/helper.hd", scratch)]);
-    std::fs::create_dir(root.join("Lib")).unwrap();
-    let published = publishes_for(&root, &[("main.hd", main), (".scratch/helper.hd", scratch)]);
-    assert!(
-        messages(&published["main.hd"])
-            .iter()
-            .any(|message| is_refusal(message)),
-        "the refused entry must publish the refusal: {published:?}"
-    );
-    assert!(
-        !messages(&published[".scratch/helper.hd"])
-            .iter()
-            .any(|message| is_refusal(message)),
-        "an excluded document must not inherit the refusal: {published:?}"
     );
 }

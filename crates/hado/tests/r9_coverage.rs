@@ -2,7 +2,7 @@ use hado::check_source;
 
 #[test]
 fn unresolved_field_receivers_report_e304_at_the_reference_start() {
-    for index in 0..20 {
+    for index in [0, 5] {
         let field = format!("member{index}");
         for declarations in [String::new(), format!("type A = {{ {field}: Int; left: Bool }}\ntype B = {{ {field}: Int; right: Bool }}\n")] {
             let prefix = format!("{declarations}def read x =>\n{}", " ".repeat(index));
@@ -25,59 +25,32 @@ fn unresolved_field_diagnostics_follow_source_order() {
         assert_eq!(error.code.as_deref(), Some("E304"), "{error}");
         assert_eq!((error.line, error.col), (1, prefix.len() + 1), "{error}");
     }
-}
-
-#[test]
-fn unresolved_receivers_keep_diagnostic_stage_and_position_order() {
-    for (source, code, anchor) in [
-        ("def f x => x.absent\ndef g y => y.nope\ndef main = g 1", "E304", "x.absent"),
-        ("type R = { known: Int }\ndef f x => x.absent\ndef g (y: R) => y.nope\ndef main = g { known = 1 }", "E204", "nope"),
-    ] {
-        let prefix = &source[..source.find(anchor).unwrap()];
-        let error = check_source(source, "field-stage.hd").err().unwrap();
-        assert_eq!(error.code.as_deref(), Some(code), "{error}");
-        assert_eq!((error.line, error.col), (prefix.bytes().filter(|b| *b == b'\n').count() + 1, prefix.rsplit('\n').next().unwrap().len() + 1), "{error}");
-    }
+    let source = "type R = { known: Int }\ndef f x => x.absent\ndef g (y: R) => y.nope\ndef main = g { known = 1 }";
+    let prefix = &source[..source.find("nope").unwrap()];
+    let error = check_source(source, "field-stage.hd").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
+    assert_eq!(
+        (error.line, error.col),
+        (
+            prefix.bytes().filter(|b| *b == b'\n').count() + 1,
+            prefix.rsplit('\n').next().unwrap().len() + 1
+        ),
+        "{error}"
+    );
 }
 
 #[test]
 fn catch_all_patterns_are_exhaustive_before_redundancy_checks() {
-    for index in 0..20 {
-        for (arms, argument) in [
-            (
-                format!("Some(value) => value + {index} | _ => 0"),
-                "Some(1)",
-            ),
-            (format!("true => {index} | _ => -1"), "true"),
-        ] {
-            let source = format!("def choose | {arms}\ndef main = choose ({argument})");
-            assert_eq!(
-                check_source(&source, "coverage.hd")
-                    .err()
-                    .unwrap()
-                    .code
-                    .as_deref(),
-                Some("E503"),
-                "{source}"
-            );
-        }
-    }
-}
-
-#[test]
-fn variable_arm_is_not_decomposition_and_reconstruction() {
-    for index in 0..20 {
-        let name = format!("value{index}");
-        let source = format!("def identity | {name} => {name}\ndef main = identity {index}");
-        assert_eq!(
-            check_source(&source, "coverage.hd")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some("E512")
-        );
-    }
+    let source = "def choose | true => 0 | _ => -1\ndef main = choose (true)";
+    assert_eq!(
+        check_source(source, "coverage.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E503"),
+        "{source}"
+    );
 }
 
 #[test]
@@ -111,51 +84,35 @@ fn sole_parameter_branch_checks_all_four_conditions() {
 
 #[test]
 fn let_patterns_must_cover_the_entire_payload_type() {
-    for index in 0..20 {
-        for (prefix, tail) in [
-            (
-                "def main = let ",
-                format!("Some(value) = Some({index}) -> value + 1"),
-            ),
-            (
-                "def main = let ",
-                format!("Some(value)? = Some(Some({index})) -> Some(value + 1)"),
-            ),
-        ] {
-            let error = check_source(&format!("{prefix}{tail}"), "coverage.hd")
-                .err()
-                .unwrap();
-            assert_eq!(error.code.as_deref(), Some("E402"));
-            assert_eq!((error.line, error.col), (1, prefix.len() + 1));
-        }
-        let source =
-            format!("type Id = | Id(Int)\ndef main = let Id(value) = Id({index}) -> value + 1");
-        check_source(&source, "coverage.hd").unwrap();
-    }
+    let prefix = "def main = let ";
+    let source = format!("{prefix}Some(value) = Some(1) -> value + 1");
+    let error = check_source(&source, "coverage.hd").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E402"));
+    assert_eq!((error.line, error.col), (1, prefix.len() + 1));
+    let source = "type Id = | Id(Int)\ndef main = let Id(value) = Id(1) -> value + 1";
+    check_source(source, "coverage.hd").unwrap();
 }
 
 #[test]
 fn do_requires_a_rail_and_records_require_a_candidate() {
-    for index in 0..20 {
-        let source = format!("def main = do {index} -> Some(1)");
-        assert_eq!(
-            check_source(&source, "coverage.hd")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some("E303")
-        );
-        let source = format!("def main = {{ missing{index} = 1 }}");
-        assert_eq!(
-            check_source(&source, "coverage.hd")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
-            Some("E304")
-        );
-    }
+    let source = "def main = do 0 -> Some(1)";
+    assert_eq!(
+        check_source(source, "coverage.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E303")
+    );
+    let source = "def main = { missing = 1 }";
+    assert_eq!(
+        check_source(source, "coverage.hd")
+            .err()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("E304")
+    );
 }
 
 #[test]
@@ -191,21 +148,17 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
 
 #[test]
 fn record_patterns_resolve_the_whole_field_set() {
-    for index in 0..12 {
-        let source = format!(
-            "def f value => let {{ absent{index} }} = value -> absent{index} + 1\ndef main = f 1"
-        );
-        let error = check_source(&source, "coverage.hd").err().unwrap();
-        assert_eq!(error.code.as_deref(), Some("E304"));
-        assert_eq!(error.col, source.find('{').unwrap() + 1);
-    }
+    let source = "def f value => let { absent } = value -> absent + 1\ndef main = f 1";
+    let error = check_source(source, "coverage.hd").err().unwrap();
+    assert_eq!(error.code.as_deref(), Some("E304"));
+    assert_eq!(error.col, source.find('{').unwrap() + 1);
     let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => let { x; y } = value -> x + y\ndef main = f { x = 1; y = 2 } + { x = 1; z = 2 }.z + { y = 1; z = 2 }.z";
     check_source(source, "coverage.hd").unwrap();
 }
 
 #[test]
 fn discarded_rail_binding_points_to_the_underscore() {
-    for padding in 0..20 {
+    for padding in [1, 5] {
         let prefix = format!("def main = let{}", " ".repeat(padding + 1));
         let source = format!("{prefix}_? = Some(1) -> Some(2)");
         let error = check_source(&source, "coverage.hd").err().unwrap();

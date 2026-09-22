@@ -9,10 +9,6 @@ fn mono_types_reject_variables_at_any_depth() {
     ] {
         assert!(Type::try_from(&ty).is_err());
     }
-}
-
-#[test]
-fn mono_types_preserve_concrete_data_and_closure_signatures() {
     let ty = Ty::fn_of(vec![Ty::Adt("List".into(), vec![Ty::Bool])], Ty::Int);
     assert_eq!(
         Type::try_from(&ty).unwrap(),
@@ -480,6 +476,11 @@ fn polymorphic_named_values_use_the_reference_type() {
 fn constructor_values_lower_to_typed_construction() {
     let output = hado::dump_mono("def main = Some(3)", "t").unwrap();
     assert!(output.contains("Construct { constructor: \"Some\", fields: [Constant(Int(3))], result: Data(\"Option\", [Int]) }"));
+    let output = hado::dump_mono("def main = Some(42)", "t").unwrap();
+    assert!(
+        output.contains("constructor: \"Some\", fields: [Constant(Int(42))]"),
+        "{output}"
+    );
 }
 
 #[test]
@@ -627,18 +628,6 @@ fn constructor_switch_binds_payload_only_inside_matching_arm() {
 }
 
 #[test]
-fn nested_nullary_patterns_check_both_tags() {
-    let source = "def classify | Some(None) => 1 | 0\ndef main = classify (Some(Some(3)))";
-    let output = hado::dump_mono(source, "t").unwrap();
-    assert_eq!(output.matches("Switch {").count(), 2);
-    assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
-    assert_eq!(
-        output.matches("fallback: Some(Constant(Int(0)))").count(),
-        2
-    );
-}
-
-#[test]
 fn repeated_constructor_arms_fall_through_in_source_order() {
     let source =
         "def classify | Some(None) => 1 | Some(_) => 2 | 0\ndef main = classify (Some(Some(3)))";
@@ -660,7 +649,20 @@ fn constructor_payload_literals_test_before_falling_through() {
 }
 
 #[test]
-fn deep_constructor_patterns_guard_payload_bindings() {
+fn exhaustive_nested_constructor_patterns_need_no_source_fallback() {
+    let source = "def extract | Some(None) => 0 | Some(Some(x)) => x | None => -1\ndef main = extract (Some(Some(3)))";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert_eq!(output.matches("Switch {").count(), 3);
+    assert!(output.contains("constructor: \"Some\", index: 0, result: Int"));
+    assert!(output.contains("fallback: None, result: Int"));
+    let source = "def classify | Some(None) => 1 | 0\ndef main = classify (Some(Some(3)))";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert_eq!(output.matches("Switch {").count(), 2);
+    assert!(output.contains("arms: [(\"None\", Constant(Int(1)))]"));
+    assert_eq!(
+        output.matches("fallback: Some(Constant(Int(0)))").count(),
+        2
+    );
     let source =
         "def extract | Some(Some(Some(x))) => x + 1 | 0\ndef main = extract (Some(Some(Some(3))))";
     let output = hado::dump_mono(source, "t").unwrap();
@@ -670,15 +672,6 @@ fn deep_constructor_patterns_guard_payload_bindings() {
         3
     );
     assert!(output.contains("result: Int }, body: Binary { op: Add"));
-}
-
-#[test]
-fn exhaustive_nested_constructor_patterns_need_no_source_fallback() {
-    let source = "def extract | Some(None) => 0 | Some(Some(x)) => x | None => -1\ndef main = extract (Some(Some(3)))";
-    let output = hado::dump_mono(source, "t").unwrap();
-    assert_eq!(output.matches("Switch {").count(), 3);
-    assert!(output.contains("constructor: \"Some\", index: 0, result: Int"));
-    assert!(output.contains("fallback: None, result: Int"));
 }
 
 #[test]
@@ -762,10 +755,6 @@ fn divergent_mutual_recursion_uses_the_call_site_result_type() {
         2
     );
     assert!(output.contains("otherwise: Constant(Bool(false))"));
-}
-
-#[test]
-fn divergent_function_values_keep_the_inferred_result_type() {
     let source = "def rec loop x => loop x\ndef main = let f = loop -> false && f 0";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0), signature: Signature { parameters: [Int], result: Bool } }"));
@@ -863,28 +852,6 @@ fn integer_compare_is_synthesized_as_an_ir_function() {
 }
 
 #[test]
-fn scalar_compare_derivations_have_distinct_signatures() {
-    for (source, name, ty) in [
-        ("def main = compare false true", "compare_Bool", Type::Bool),
-        ("def main = compare 'a' 'b'", "compare_Char", Type::Char),
-        ("def main = compare () ()", "compare_Void", Type::Void),
-    ] {
-        let checked = hado::check_source(source, "t").unwrap();
-        let ast = hado::parser::parse_source(source, "t").unwrap();
-        let program = hado::mono::lower_program(&ast, &checked).unwrap();
-        let function = program.functions.iter().find(|f| f.name == name).unwrap();
-        assert_eq!(function.signature.parameters, vec![ty.clone(), ty.clone()]);
-        assert_eq!(function.signature.result, Type::Int);
-        if ty == Type::Void {
-            assert_eq!(
-                function.body,
-                hado::mono::Expression::Constant(hado::mono::Constant::Int(0))
-            );
-        }
-    }
-}
-
-#[test]
 fn scalar_compare_cache_reuses_only_matching_types() {
     let source = "def main = compare 1 2 + compare false true + compare 3 4 + compare 'a' 'b'";
     let checked = hado::check_source(source, "t").unwrap();
@@ -906,6 +873,24 @@ fn scalar_compare_cache_reuses_only_matching_types() {
     }
     let ids: std::collections::HashSet<_> = program.functions.iter().map(|f| f.id.0).collect();
     assert_eq!(ids.len(), 3);
+    for (source, name, ty) in [
+        ("def main = compare false true", "compare_Bool", Type::Bool),
+        ("def main = compare 'a' 'b'", "compare_Char", Type::Char),
+        ("def main = compare () ()", "compare_Void", Type::Void),
+    ] {
+        let checked = hado::check_source(source, "t").unwrap();
+        let ast = hado::parser::parse_source(source, "t").unwrap();
+        let program = hado::mono::lower_program(&ast, &checked).unwrap();
+        let function = program.functions.iter().find(|f| f.name == name).unwrap();
+        assert_eq!(function.signature.parameters, vec![ty.clone(), ty.clone()]);
+        assert_eq!(function.signature.result, Type::Int);
+        if ty == Type::Void {
+            assert_eq!(
+                function.body,
+                hado::mono::Expression::Constant(hado::mono::Constant::Int(0))
+            );
+        }
+    }
 }
 
 #[test]
@@ -921,10 +906,6 @@ fn integer_printer_is_an_ordinary_function_with_external_body() {
             ..
         }
     ));
-}
-
-#[test]
-fn dump_mono_includes_the_generated_main_printer() {
     let output = hado::dump_mono("def main = 42", "t").unwrap();
     assert!(output.contains("name: \"print_Int\""));
     assert!(output.contains("CallRuntime { function: PrintInt"));
@@ -958,14 +939,4 @@ fn aggregate_equality_reuses_scalar_derivations() {
     let source = "type Pair = | Pair(Int, Int)\ndef main = Pair(1, 2) == Pair(1, 2)";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("name: \"eq_Int\"").count(), 1, "{output}");
-}
-
-#[test]
-fn parenthesized_constructor_calls_lower_with_payload_types() {
-    let source = "def main = Some(42)";
-    let output = hado::dump_mono(source, "t").unwrap();
-    assert!(
-        output.contains("constructor: \"Some\", fields: [Constant(Int(42))]"),
-        "{output}"
-    );
 }

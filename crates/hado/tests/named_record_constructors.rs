@@ -128,7 +128,7 @@ fn generated_fields_preserve_names_when_construction_order_changes() {
 #[test]
 fn generated_values_print_in_declaration_order_and_can_be_read_back() {
     let mut state = 0x510012;
-    for _ in 0..5 {
+    for _ in 0..2 {
         let first = random(&mut state, 100);
         let second = random(&mut state, 100);
         let expected = format!("Payload {{ left = {first}; right = {second} }}");

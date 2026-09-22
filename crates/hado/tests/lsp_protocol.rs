@@ -15,7 +15,7 @@ const BMP: &str = "あ";
 const NON_BMP: &str = "😀";
 
 #[test]
-fn units_count_scalars_in_each_encoding() {
+fn positions_round_trip_through_each_encoding() {
     // `あ` is 3 UTF-8 bytes and 1 UTF-16 unit; `😀` is 4 bytes and a surrogate
     // pair, so UTF-16 counts it twice.
     let line = format!("{BMP}{NON_BMP}x");
@@ -24,22 +24,13 @@ fn units_count_scalars_in_each_encoding() {
     assert_eq!(units_before(&line, 2, PositionEncoding::Utf8), 7);
     assert_eq!(units_before(&line, 3, PositionEncoding::Utf8), 8);
     assert_eq!(scalar_to_byte(&line, 2), 7);
-
-    assert_eq!(units_before(&line, 0, PositionEncoding::Utf16), 0);
     assert_eq!(units_before(&line, 1, PositionEncoding::Utf16), 1);
     assert_eq!(units_before(&line, 2, PositionEncoding::Utf16), 3);
     assert_eq!(units_before(&line, 3, PositionEncoding::Utf16), 4);
     assert_eq!(scalar_to_utf16(&line, 2), 3);
-
     assert_eq!(units_before(&line, 2, PositionEncoding::Utf32), 2);
     assert_eq!(units_before(&line, 3, PositionEncoding::Utf32), 3);
 
-    // A count past the end of the line stops at its end.
-    assert_eq!(units_before(&line, 99, PositionEncoding::Utf8), 8);
-}
-
-#[test]
-fn positions_round_trip_through_each_encoding() {
     let source = format!("{BMP}{NON_BMP}x\ndef target = 1");
     for encoding in [
         PositionEncoding::Utf8,

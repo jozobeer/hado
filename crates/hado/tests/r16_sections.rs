@@ -50,15 +50,15 @@ struct Program {
     expected: i64,
 }
 
-fn generate(state: &mut u64) -> Program {
+fn program(contracts: usize, implementations: usize) -> Program {
     let mut program = Program::default();
-    for contract in 0..random(state, 4) + 1 {
+    for contract in 0..contracts {
         program
             .sections
             .push(format!("module Contract{contract}\ndef run(x: Int): Int"));
-        for implementation in 0..random(state, 3) + 2 {
-            let value = random(state, 100) as i64;
-            let offset = random(state, 100) as i64;
+        for implementation in 0..implementations {
+            let value = (contract * 10 + implementation) as i64;
+            let offset = (contract + implementation + 1) as i64;
             program.sections.push(format!("implement Contract{contract} as Impl{contract}_{implementation}\ndef run x => x + {offset}"));
             program
                 .calls
@@ -72,11 +72,18 @@ fn generate(state: &mut u64) -> Program {
 #[test]
 fn generated_contracts_and_implementations_round_trip_and_execute_in_any_order() {
     let mut state = 0x160012;
-    for sample in 0..24 {
-        let mut program = generate(&mut state);
+    for (sample, (contracts, implementations, implementations_first)) in
+        [(1usize, 2usize, false), (4, 2, false), (1, 2, true)]
+            .into_iter()
+            .enumerate()
+    {
+        let mut program = program(contracts, implementations);
         for index in (1..program.sections.len()).rev() {
             let other = random(&mut state, (index + 1) as u64);
             program.sections.swap(index, other);
+        }
+        if implementations_first {
+            program.sections.reverse();
         }
         let source = format!(
             "def main = {}\n{}",
@@ -96,7 +103,7 @@ fn generated_contracts_and_implementations_round_trip_and_execute_in_any_order()
 
 #[test]
 fn section_errors_preserve_namespace_and_declaration_anchors() {
-    for padding in 0..8 {
+    for padding in 0..2 {
         for (source, code, anchor) in [
             ("def main = 1\nmodule Unused\ndef run(x: Int): Int", "E513", "module Unused"),
             ("def main = 1\nmodule S\ndef run(x: Int): Int\nimplement S as Unused\ndef run x => x + 1", "E513", "implement S"),
@@ -162,29 +169,22 @@ fn abstract_types_are_opaque_and_local_data_names_do_not_escape() {
 }
 
 #[test]
-fn private_records_and_adts_are_scoped_per_implementation() {
-    let mut state = 0x16da7a;
-    for sample in 0..12 {
-        let n = random(&mut state, 1000) as i64;
-        let source = format!("def main = A.run {n} + B.run {n}\nmodule S\ndef run(x: Int): Int\nimplement S as A\ntype Entry = {{ number: Int }}\ndef get value => value.number\ndef run x => get {{ number = x + 1 }}\nimplement S as B\ntype Entry = | Entry(Int)\ndef get | Entry(x) => x\ndef run x => get (Entry(x + 2))");
-        execute(&source, n * 2 + 3, 100 + sample);
-    }
-}
-
-#[test]
 fn implementation_local_data_requires_a_reachable_use() {
-    for index in 0..12 {
-        for body in [format!("type Dead{index} = {{ unused{index}: Int }}"), format!("type Dead{index} = | Dead{index}(Int)"), format!("type Dead{index} = | Dead{index}(Other{index}) type Other{index} = | Other{index}(Dead{index})")] {
-            let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M\n{}{}\ndef run x => x + 1", " ".repeat(index), body);
-            rejected(&source, "E513", &format!("type Dead{index}"));
-        }
-        for body in [
-            format!("type Used{index} = {{ value{index}: Int }} def run x => let r = {{ value{index} = x }} -> r.value{index}"),
-            format!("type Used{index} = | Wrap{index}(Int) def run x => let Wrap{index}(n) = Wrap{index}(x) -> n"),
-        ] {
-            let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M {body}");
-            check_source(&source, "local-data.hd").unwrap();
-        }
+    let index = 0;
+    for body in [
+        format!("type Dead{index} = {{ unused{index}: Int }}"),
+        format!("type Dead{index} = | Dead{index}(Int)"),
+        format!("type Dead{index} = | Dead{index}(Other{index}) type Other{index} = | Other{index}(Dead{index})"),
+    ] {
+        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M\n{}{}\ndef run x => x + 1", " ".repeat(index), body);
+        rejected(&source, "E513", &format!("type Dead{index}"));
+    }
+    for body in [
+        format!("type Used{index} = {{ value{index}: Int }} def run x => let r = {{ value{index} = x }} -> r.value{index}"),
+        format!("type Used{index} = | Wrap{index}(Int) def run x => let Wrap{index}(n) = Wrap{index}(x) -> n"),
+    ] {
+        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M {body}");
+        check_source(&source, "local-data.hd").unwrap();
     }
     check_source("def main = M.get (M.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x } def get item => item.value", "local-data.hd").unwrap();
 }

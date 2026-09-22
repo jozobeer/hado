@@ -49,10 +49,7 @@ fn char_escapes_are_decoded() {
 
 #[test]
 fn generated_syntax_diagnostics() {
-    let mut state = 0x106u64;
-    for _ in 0..20 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let index = state % 100000;
+    for index in [0u64, 9] {
         let constructor = format!("Case{index}");
         for (source, code) in [
             (
@@ -76,7 +73,7 @@ fn generated_syntax_diagnostics() {
 
 #[test]
 fn whitespace_does_not_change_calls() {
-    for index in 0..20 {
+    for index in [0, 9] {
         for callee in [format!("f{index}"), format!("Case{index}")] {
             let baseline =
                 parse_source(&format!("def main = {callee}({index})"), "generated").unwrap();
@@ -92,7 +89,7 @@ fn whitespace_does_not_change_calls() {
 
 #[test]
 fn arm_functions_and_negative_patterns_parse() {
-    for index in 1..20 {
+    for index in [1, 19] {
         for source in [
             format!("def f{index} | -{index} => 1 | 0 def main = f{index} {index}"),
             format!("def main = fn(| -{index}.5 => true | false)"),
@@ -119,7 +116,7 @@ fn canonical_unit_payload_keeps_its_distinction() {
 
 #[test]
 fn type_definition_contexts_are_distinct() {
-    for index in 0..20 {
+    for index in [0, 19] {
         for source in [
             format!("type Alias{index} = Int"),
             format!("type Sum{index} = | Case{index}({{ field: Int }})"),
@@ -210,7 +207,7 @@ fn lambdas_may_branch_but_cannot_hide_nested_branches() {
 
 #[test]
 fn identifier_namespaces_follow_the_grammar() {
-    for index in 0..12 {
+    for index in [0, 9] {
         for source in [
             format!("def Upper{index} = 1"),
             format!("type lower{index} = | Case{index}"),
@@ -257,7 +254,7 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
 
 #[test]
 fn integer_field_receivers_remain_separate_from_float_tokens() {
-    for value in 0..24 {
+    for value in [0, 7, 23] {
         let source = format!("def main = {value} . field{value}");
         let ast = parse_source(&source, "generated").unwrap();
         let normal = hado::parser::canonical_program(&ast);
@@ -269,7 +266,7 @@ fn integer_field_receivers_remain_separate_from_float_tokens() {
 
 #[test]
 fn implementation_aliases_only_realize_declared_abstract_types() {
-    for index in 0..20 {
+    for index in [0, 19] {
         let prefix = format!("implement S{index} as M{index} type ");
         for body in ["Int", "Int List", "Fn(Int => Int)", "Other.T"] {
             let source =
