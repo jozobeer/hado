@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: core
-# M2 acceptance checks 1..6 (see docs/plan.md, M2). Run from the repository root.
+# M2 acceptance checks 1..7 (see docs/plan.md, M2). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,13 +10,14 @@ cd "$ROOT"
 . scripts/lib/gate-cache.sh
 
 ok=0
-total=6
+total=7
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
 TMPD="$(mktemp -d)"
 tar -cf "$TMPD/corpus.tar" tests/accept tests/reject
 find tests/accept tests/reject tests/library crates/hado/tests/corpus.rs -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/corpus.sha"
+find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 
 # Any exit path restores the corpus and drops probe files.
 cleanup() {
@@ -235,6 +236,15 @@ if [ -z "$c6_reasons" ]; then
     pass 6 "glue"
 else
     fail 6 "glue:$c6_reasons"
+fi
+
+# --- check 7: verification preserves documentation, runtime, and scripts ---
+# m1-corpus の検査 7 は自分の走行の間しか見ない。単体で門番を回す手順（AGENTS.md）と
+# 直列の全走（--jobs 1）では、M2 の前後を覆うものが他に無いので、ここでも固定する。
+if sha256sum --status -c "$TMPD/protected.sha"; then
+    pass 7 "protected-files-unchanged"
+else
+    fail 7 "protected-files-changed"
 fi
 
 echo "PASSED: $ok/$total"

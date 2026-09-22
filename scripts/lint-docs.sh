@@ -739,10 +739,16 @@ PYEOF
 doc_current_only() {
     python3 - <<'PY'
 from pathlib import Path
+import re
 
 assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
 front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
 assert 'spec-map' not in front, 'the front matter mentions spec-map'
+# 前付けの版は見出しの版だけ。過去の版は git tag が持つ（42-a(2) の検査）。
+current = re.search(r'v[0-9]+(?:\.[0-9]+)+', front.splitlines()[0])
+assert current, 'no version in the spec heading'
+versions = set(re.findall(r'v[0-9]+(?:\.[0-9]+)+', front))
+assert versions == {current.group(0)}, (sorted(versions), current.group(0))
 bad = []
 for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md']:
     if 'spec-map' in Path(rel).read_text():
@@ -751,7 +757,7 @@ for path in sorted(Path('scripts').glob('verify-*.sh')):
     if 'spec-map' in path.read_text():
         bad.append(str(path))
 assert not bad, bad
-print('current only: no spec-map in the live documents or gates')
+print(f'current only: version {current.group(0)}, no spec-map in the live documents or gates')
 PY
 }
 
