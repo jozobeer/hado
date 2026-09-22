@@ -14,6 +14,8 @@
   開ける必要がある。
 - CI に要るものは Rust（Cranelift 0.135 が 1.95 以上を要求）、`cc`、`libgc-dev`、`flock`
   （`--jobs` > 1）、`python3` と `python3-yaml`（門番がワークフローを YAML として読む）。
+- runner は private のあいだ自前の Linux x86_64（決定 9）。上の道具立ては runner 側にも要り、
+  `runtime dependencies` の段が `sudo apt-get` を使うので利用者に passwordless sudo があること。
 
 ### 決定
 
@@ -35,6 +37,12 @@
    群は `${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}`、
    `cancel-in-progress` は PR のときだけ true。
 8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7 を機械で固定する。
+9. runner は private のあいだ自前の Linux x86_64（`runs-on: [self-hosted, linux, x64]`）にする。
+   org は Free プランで、private の Actions は org 共有の 2000 分/月と spending limit に当たる。
+   2026-09-22 に job が起動しなくなった（`The job was not started because recent account payments
+   have failed or your spending limit needs to be increased`）ので、standard runner の無料枠に
+   依存しない形にした。public にしたら standard runner が無料になるので `ubuntu-latest` に戻す。
+   門番はどちらの形も受け、Linux x86_64 であることだけを固定する（決定 8 の一部）。
 
 ### 期待値の根拠
 
@@ -220,3 +228,36 @@ or workflow will take its place.」とある。**指摘は事実として正し�
 === group-shared-for-all ===
 NG: the workflow parses and is wired for the decisions PASSED: 7/8
 ```
+
+### 自前 runner への切り替え（2026-09-22、決定 9）
+
+PR #31 の CI が起動しなくなった。run 35714886302・35731399675 はどちらも 0 step・数秒で
+`failure` になり、check-run の注記が原因を示している。
+
+```
+The job was not started because recent account payments have failed or your spending
+limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
+org は Free プラン（`gh api /orgs/jozobeer --jq .plan.name` → `free`）で、private の Actions は
+org 共有の 2000 分/月を使う（このリポジトリの PR の core は 1 回 12〜20 分）。standard runner の
+無料枠に依存しないよう、runner を自前の Linux x86_64 に切り替えた（決定 9）。public にしたら
+`ubuntu-latest` に戻す。門番は両方の形を受ける。
+
+```
+$ bash scripts/verify-ci.sh
+OK: a pull_request runs at least the core tier
+...
+OK: the workflow parses and is wired for the decisions
+PASSED: 8/8
+
+# 否定的対照（runs-on を 1 箇所ずつ壊す）
+=== self-hosted-linux-only ===  runs-on: ['self-hosted', 'linux'] (the gates need Linux x86_64)   PASSED: 7/8
+=== self-hosted-windows ===     runs-on: ['self-hosted', 'windows', 'x64'] (the gates need Linux x86_64) PASSED: 7/8
+=== macos-latest ===            runs-on: 'macos-latest' (the gates need Linux x86_64)             PASSED: 7/8
+=== ubuntu-latest ===           PASSED: 8/8（public に戻すときの形）
+```
+
+自前 runner の実走（`ci-run:` の行・`TALLY:`・所要）は、runner を登録して最初の走行が緑に
+なった時点でここへ追記する。runner の登録は repo の Settings → Actions → Runners で行い、
+既定のラベル（`self-hosted`・`linux`・`x64`）を外さないこと。

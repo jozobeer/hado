@@ -35,7 +35,10 @@ env:
 
 jobs:
   gates:
-    runs-on: ubuntu-latest
+    # private のあいだは org の Free 枠（2000 分/月）と spending limit に当たるので、
+    # 自前の Linux x86_64 runner で回す（docs/rounds/ci.md の決定 9）。public にしたら
+    # standard runner が無料になるので ubuntu-latest に戻す（門番はどちらも受ける）。
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

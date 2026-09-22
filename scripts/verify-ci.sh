@@ -11,7 +11,7 @@
 #      回さずに落ちる。
 #   c. ワークフローの配線。YAML として読み、入口を呼び、依存の取得・libgc-dev・
 #      キャッシュ・打ち切り・失敗ログを持つ。層と門番の一覧をワークフローに
-#      書かない。
+#      書かない。runner は Linux x86_64（standard か、既定のラベルを持つ自前）。
 #
 # 判定 a・b は合成木で測る。scripts/ci-run.sh と scripts/lib/gate-tiers.sh だけを
 # 写し、run-gates と lint-docs を「受けた引数を記録する stub」に置き換える。
@@ -260,8 +260,12 @@ jobs = doc.get('jobs')
 if not isinstance(jobs, dict) or len(jobs) != 1:
     fail('jobs must be exactly one')
 job = next(iter(jobs.values()))
-if job.get('runs-on') != 'ubuntu-latest':
-    fail(f'runs-on: {job.get("runs-on")!r} (the gates need Linux x86_64)')
+# 門番は Linux x86_64 を要る（libgc-dev・Cranelift）。GitHub の standard runner か、
+# 既定のラベルを持つ自前の Linux x86_64 runner のどちらでもよい（docs/rounds/ci.md の決定 9）。
+runs_on = job.get('runs-on')
+self_hosted = isinstance(runs_on, list) and {'self-hosted', 'linux', 'x64'} <= set(runs_on)
+if runs_on != 'ubuntu-latest' and not self_hosted:
+    fail(f'runs-on: {runs_on!r} (the gates need Linux x86_64)')
 if not isinstance(job.get('timeout-minutes'), int):
     fail('no timeout-minutes')
 

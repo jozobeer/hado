@@ -76,6 +76,9 @@
   r44 の 6 ケースの `crates/hado/tests/r23_syntax.rs` への移設。審査の 2 回目で lint-docs に
   検査 14（門番と文書の関係）を足した。
 - `docs/spec-trace.md` の参照の付け替え（削った検査を指していた検査名を含む）。
+- 本ラウンドの着地に要る基盤の変更として、CI の runner を自前の Linux x86_64 へ切り替えた
+  （`.github/workflows/ci.yml`・`scripts/verify-ci.sh`・`docs/rounds/ci.md` の決定 9。private の
+  org が Free 枠で job を起動できなくなったため）。
 - `docs/rounds/prune-gates.md`: 本ファイル。
 
 ### 工程
