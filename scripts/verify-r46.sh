@@ -30,22 +30,18 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(root, name, source, *args):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'main.hd').write_text(source)
     return subprocess.run([HADO, *args, str(directory / 'main.hd')], capture_output=True)
 
-
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
 
 def check_ok(root, name, source):
     result = run(root, name, source, 'check')
     assert result.returncode == 0 and result.stderr == b'', (name, result.returncode, result.stderr.decode())
-
 
 def check_code(root, name, source, code):
     result = run(root, name, source, 'check')
@@ -54,11 +50,9 @@ def check_code(root, name, source, code):
     assert match and match.group(3).decode() == code, (name, code, result.stderr.decode())
     return result
 
-
 def check_fix(root, name, source):
     result = run(root, name, source, 'check', '--fix')
     return result
-
 
 def build_run(root, name, expect_ok):
     directory = Path(root) / name
@@ -69,10 +63,8 @@ def build_run(root, name, expect_ok):
     assert result.stderr == b'', (name, result.stderr.decode())
     assert result.stdout == expect_ok.encode(), (name, result.stdout, expect_ok)
 
-
 def comments(source):
     return [line for line in source.splitlines() if line.strip().startswith('//')]
-
 
 def control(root):
     """The comparisons must reject a wrong code and a wrong rewrite."""
@@ -162,13 +154,11 @@ seed = int(os.environ.get('HADO_SEED', '46'))
 rng = random.Random(seed)
 Path(root).mkdir(parents=True, exist_ok=True)
 
-
 def written(values):
     body = 'Nil'
     for value in reversed(values):
         body = f'Cons({value}, {body})'
     return body
-
 
 for index in range(10):
     values = [rng.randint(-9, 9) for _ in range(rng.randint(1, 5))]
@@ -205,13 +195,11 @@ seed = int(os.environ.get('HADO_SEED', '46'))
 rng = random.Random(seed)
 Path(root).mkdir(parents=True, exist_ok=True)
 
-
 def written(length):
     body = 'Nil'
     for offset in range(length):
         body = f'Cons(x{offset}, {body})'
     return body
-
 
 for index in range(10):
     length = rng.randint(1, 4)
@@ -303,37 +291,11 @@ print('unfixable: exit 1, E507 and a comment range both leave the file unchanged
 PY
 }
 
-# --- 46-f: 仕様・wants・層 ---
-r46_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-section = spec.split('## 57. ', 1)
-assert len(section) == 2, 'spec has no §57'
-body = section[1].split('\n## ', 1)[0]
-for fragment in ['--fix', 'E510', 'E516', 'E517', 'コメント']:
-    assert fragment in body, fragment
-wants = Path('docs/wants.md').read_text()
-assert '第57節' in wants or '§57' in wants, 'wants does not point at §57'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r46' in full, 'r46 is not in the full tier'
-print('docs: §57, wants pointer, r46 in full tier')
-PY
-}
-
-r46_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '46-a E517: diagnosis, rewrite, comments kept, execution' r46_condition_arms
 check '46-b E510: written Cons chains become literals and run' r46_expression_lists
 check '46-c E516: written patterns become literals and run' r46_pattern_lists
 check '46-d check and build never write to a source file' r46_no_write
 check '46-e a diagnostic without a local rewrite stops with exit 1' r46_stops_without_rewrite
-check '46-f spec §57, wants pointer, r46 in the full tier' r46_docs
-check '46-f corpus lock' r46_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

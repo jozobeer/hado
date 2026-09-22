@@ -735,6 +735,89 @@ for path in sorted(root.glob('*.md')):
 PYEOF
 }
 
+# --- 検査 11: 現行の snapshot だけを持つ（verify-r42.sh の 42-a(2) を移した） ---
+doc_current_only() {
+    python3 - <<'PY'
+from pathlib import Path
+
+assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
+front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
+assert 'spec-map' not in front, 'the front matter mentions spec-map'
+bad = []
+for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md']:
+    if 'spec-map' in Path(rel).read_text():
+        bad.append(rel)
+for path in sorted(Path('scripts').glob('verify-*.sh')):
+    if 'spec-map' in path.read_text():
+        bad.append(str(path))
+assert not bad, bad
+print('current only: no spec-map in the live documents or gates')
+PY
+}
+
+# --- 検査 12: コーパスのタグが §56 の表の節と一致し、全て実在の節を指す（42-a(3)） ---
+doc_corpus_tags() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+appendix = set(re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M))
+tag_re = re.compile(r'^// spec: (§\d+(?:\.\d+)?|付録[A-Z])$', re.M)
+
+def exists(tag):
+    if tag.startswith('§'):
+        return tag[1:] in headings
+    return tag in appendix
+
+table_text = spec.split('## 56. エラーコード', 1)[1]
+table = dict(re.findall(r'^\| (E[1-7]\d\d) \|[^|]*\| (§\d+(?:\.\d+)?|付録[A-Z]) \|', table_text, flags=re.M))
+reject_dirs = [path for path in Path('tests/reject').iterdir() if path.is_dir()]
+assert len(table) == len(reject_dirs), (len(table), len(reject_dirs))
+bad = []
+for path in sorted(Path('tests').rglob('main.hd')):
+    text = path.read_text()
+    tag = tag_re.search(text)
+    if not tag:
+        bad.append(f'{path}:no-spec-tag')
+        continue
+    if not exists(tag.group(1)):
+        bad.append(f'{path}:missing-heading-{tag.group(1)}')
+    error = re.search(r'^// error: (E[1-7]\d\d)$', text, flags=re.M)
+    if error and table.get(error.group(1)) != tag.group(1):
+        bad.append(f'{path}:{error.group(1)}-table-{table.get(error.group(1))}-tag-{tag.group(1)}')
+for path in sorted(Path('tests/library').rglob('*')):
+    if path.suffix in ('.hd', '.hdi'):
+        tag = tag_re.search(path.read_text())
+        if tag and not exists(tag.group(1)):
+            bad.append(f'{path}:missing-heading-{tag.group(1)}')
+assert not bad, bad[:10]
+print(f'codes: {len(table)}, corpus tags resolve and match')
+PY
+}
+
+# --- 検査 13: 現行の文書の §参照と付録参照が全て実在を指す（42-a(4)） ---
+doc_spec_refs() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+letters = {name[-1] for name in re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M)}
+bad = []
+for rel in ['docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md', 'docs/bug.md', 'docs/wants.md']:
+    text = Path(rel).read_text()
+    missing = sorted({n for n in re.findall(r'§(\d+(?:\.\d+)?)', text)} - headings)
+    missing += sorted({a for a in re.findall(r'付録([A-Z])', text)} - letters)
+    if missing:
+        bad.append(f'{rel}:{missing}')
+assert not bad, bad
+print('live document references resolve')
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -745,6 +828,9 @@ check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 check 'each issue cause points at a path and an identifier' doc_issue_causes
 check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
 check 'each issue document has the required name, priority and sections' doc_issue_names
+check 'the current spec is the only snapshot (no spec-map)' doc_current_only
+check 'corpus tags match the §56 table and resolve' doc_corpus_tags
+check 'section and appendix references in the live documents resolve' doc_spec_refs
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

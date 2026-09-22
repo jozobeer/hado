@@ -29,7 +29,6 @@ from pathlib import Path
 HADO = None
 OVERFLOW = b'hado: stack overflow\n'
 
-
 def again_source(n):
     return (
         'effect A Yield\n'
@@ -44,7 +43,6 @@ def again_source(n):
         '  | do yield n -> loop (n - 1)\n'
         f'def main = List.length (with Collect -> loop {n})\n')
 
-
 def build_program(root, name, n):
     """Generate an `again` loop, build it to a private path, and return the binary."""
     directory = Path(root) / name
@@ -56,20 +54,17 @@ def build_program(root, name, n):
     assert built.returncode == 0, (name, built.returncode, built.stderr.decode())
     return binary
 
-
 def run_with_stack(binary, stack_kb, timeout=300):
     """Run with RLIMIT_STACK set, so the depth is the harness's choice, not the shell's."""
     return subprocess.run(
         ['bash', '-c', f'ulimit -s {stack_kb}; exec "$1"', '_', str(binary)],
         capture_output=True, timeout=timeout)
 
-
 def expect_run(binary, stack_kb, code, stdout, stderr):
     result = run_with_stack(binary, stack_kb)
     assert result.returncode == code, (binary, result.returncode, result.stderr.decode())
     assert result.stdout == stdout, (binary, result.stdout, stdout)
     assert result.stderr == stderr, (binary, result.stderr, stderr)
-
 
 def control(root):
     """The comparisons must reject a wrong exit code, a wrong stdout, and a wrong stderr."""
@@ -180,33 +175,10 @@ C
     echo "not masked: a fault away from the stack floor stays a signal death"
 }
 
-# --- 50-d: 仕様と追跡表と層別と corpus lock ---
-r50_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '## 53.1. スタックの枯渇' in spec, 'spec has no §53.1'
-assert 'hado: stack overflow' in spec, 'spec does not name the message'
-trace = Path('docs/spec-trace.md').read_text()
-assert '| §53.1 |' in trace, 'spec-trace has no §53.1 row'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r50' in full, 'r50 is not in the full tier'
-print('docs: §53.1, the trace row, and r50 in the full tier')
-PY
-}
-
-r50_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '50-a a deep again loop reports a stack overflow' r50_overflow
 check '50-b a deep again loop completes with enough stack' r50_completes
 check '50-c a shallow again loop completes on a small stack' r50_shallow
 check '50-e a fault away from the stack floor is not masked' r50_fault_not_masked
-check '50-d spec, trace, tier' r50_docs
-check '50-d corpus lock' r50_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

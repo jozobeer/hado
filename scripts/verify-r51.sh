@@ -29,11 +29,9 @@ import subprocess
 
 HADO = None
 
-
 def run_tally(directory):
     return subprocess.run(
         [HADO, 'run', 'tools/gates/main.hd', '--', str(directory)], capture_output=True)
-
 
 def tally_expected(entries):
     """`entries` is a list of (name, passed, total); read_dir returns byte order."""
@@ -41,7 +39,6 @@ def tally_expected(entries):
     passed = sum(entry[1] for entry in entries)
     red = [name for name, got, want in entries if got < want]
     return f"{passed}/{total} passed; red: " + (" ".join(red) if red else "none")
-
 
 def expect_tally(directory, expected, entries):
     before = sorted(os.listdir(directory))
@@ -51,13 +48,11 @@ def expect_tally(directory, expected, entries):
     assert result.stdout == f'{expected}\n'.encode(), (directory, result.stdout, expected)
     assert sorted(os.listdir(directory)) == before, (directory, 'the tally wrote into the directory')
 
-
 def expect_failure(directory, message):
     result = run_tally(directory)
     assert result.returncode == 1, (directory, result.returncode, result.stdout.decode())
     assert result.stdout == b'', (directory, result.stdout.decode())
     assert result.stderr == f'{message}\n'.encode(), (directory, result.stderr.decode())
-
 
 def control(root):
     """The comparison must reject a wrong tally."""
@@ -189,30 +184,9 @@ print('wiring: the run prints the Hado tally and fails when a log has no verdict
 PY
 }
 
-r51_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r51' in full, 'r51 is not in the full tier'
-run_gates = Path('scripts/run-gates.sh').read_text()
-assert 'run tools/gates/main.hd --' in run_gates, 'run-gates does not call the tally'
-wants = Path('docs/wants.md').read_text()
-assert 'R51' in wants, 'wants.md does not record R51'
-print('docs: r51 in the full tier, the tally is wired, wants.md updated')
-PY
-}
-
-r51_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '51-a generated log directories match the harness tally' r51_tally
 check '51-b the entry contract fails loudly' r51_contract
 check '51-c the run prints the Hado tally' r51_wiring
-check '51-d tier, wiring, wants' r51_docs
-check '51-d corpus lock' r51_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

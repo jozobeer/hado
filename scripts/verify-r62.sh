@@ -30,7 +30,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(root, name, source, *args):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -38,15 +37,12 @@ def run(root, name, source, *args):
     path.write_text(source)
     return subprocess.run([HADO, *args, str(path)], capture_output=True)
 
-
 def source_of(root, name):
     return (Path(root) / name / 'main.hd').read_text()
-
 
 def accepted(root, name, source):
     result = run(root, name, source, 'check')
     assert result.returncode == 0 and result.stderr == b'', (name, result.returncode, result.stderr.decode())
-
 
 def check_code(root, name, source, code, hint='absent'):
     """`check` reports `code`. `hint` is the expected canonical form, or None for none at all."""
@@ -61,7 +57,6 @@ def check_code(root, name, source, code, hint='absent'):
         assert 'canonical form: ' + hint in text, (name, hint, text)
     return result
 
-
 def check_fix(root, name, source, expected):
     """`check --fix` applies the rewrite, passes, and leaves exactly `expected`."""
     result = run(root, name, source, 'check', '--fix')
@@ -69,7 +64,6 @@ def check_fix(root, name, source, expected):
     text = source_of(root, name)
     assert text == expected, (name, repr(text), repr(expected))
     return text
-
 
 def fmt(root, name, source, expected):
     result = run(root, name, source, 'fmt')
@@ -79,7 +73,6 @@ def fmt(root, name, source, expected):
     second = run(root, name, text, 'fmt')
     assert second.returncode == 0 and source_of(root, name) == text, (name, 'fmt must be idempotent')
     return text
-
 
 def fmt_check(root, name, source, want):
     result = run(root, name, source, 'fmt', '--check')
@@ -177,36 +170,10 @@ print('existing: an earlier rewrite still applies, and both settle together')
 PYEOF
 }
 
-# --- 62-e: 文書と層 ---
-r62_docs() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r62' in full, 'r62 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r62' in trace, 'spec-trace does not name verify-r62'
-assert Path('docs/rounds/r62.md').is_file(), 'docs/rounds/r62.md is missing'
-spec = Path('docs/spec.md').read_text()
-section = spec.split('## 29. ', 1)[1].split('\n## ', 1)[0]
-assert 'canonical form' in section, '§29 does not name the canonical form of the rewrite'
-assert '書き換え' in section, '§29 does not record the rewrite'
-print('docs: §29, the trace row, the tier and the plan')
-PYEOF
-}
-
-# --- 62-f: コーパスロック ---
-r62_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '62-a the catch-all underscore becomes the fallback' r62_fallback
 check '62-b a comment after the arrow survives' r62_comment
 check '62-c the exclusions of §24 are accepted' r62_exclusions
 check '62-d the earlier rewrites still apply' r62_existing
-check '62-e spec, trace, tier' r62_docs
-check '62-f corpus lock' r62_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

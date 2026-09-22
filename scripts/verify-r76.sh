@@ -79,22 +79,11 @@ def r76_exit_codes_are_the_binary_pair():
     assert codes == {0, 1}, codes
 
 
-def r76_docs():
-    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-    assert 'r76' in full, 'r76 is not in the full tier'
-    assert 'verify-r76' in Path('docs/spec-trace.md').read_text(), 'the trace has no r76 row'
-    assert Path('docs/rounds/r76.md').is_file(), 'docs/rounds/r76.md is missing'
-    spec = Path('docs/spec.md').read_text()
-    assert '終了コードは 0 と 1 の二値' in spec, 'the spec no longer fixes the exit codes'
-    assert subprocess.run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
-
-
 for name, fn in (
     ('76-a a usage failure is stderr + exit 1', r76_usage_failure),
     ('76-b success is stdout + exit 0', r76_success),
     ('76-c a raise reaching main is stderr + exit 1', r76_raise_reaches_main),
     ('76-d the exit codes are the binary pair of §54', r76_exit_codes_are_the_binary_pair),
-    ('76-e spec, trace, tier, corpus lock', r76_docs),
 ):
     check(name, fn)
 

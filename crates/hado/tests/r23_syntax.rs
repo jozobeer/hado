@@ -193,6 +193,29 @@ fn keywords_cannot_be_names() {
 }
 
 #[test]
+fn once_and_again_are_the_operation_kinds() {
+    for source in [
+        "effect Ask\nonce ask: String\nhandler Ask as H\nonce ask => \"x\"\ndef main = with H -> ask\n",
+        "effect A Y\nagain y(value: Int): Void\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> do y 1 -> 0\n",
+        "effect A Y\nagain y(value: Int): Void\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n",
+    ] {
+        parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
+    }
+    for source in [
+        "effect E reply x: Int\ndef main = 0\n",
+        "effect E capture x: Int\ndef main = 0\n",
+    ] {
+        let error = parse_source(source, "generated.hd").expect_err(source);
+        assert_eq!(error.code.as_deref(), Some("E100"), "{error}\n{source}");
+    }
+    parse_source(
+        "def reply = 1\ndef capture = 2\ndef main = reply + capture\n",
+        "generated.hd",
+    )
+    .unwrap();
+}
+
+#[test]
 fn with_is_not_an_arm_body() {
     let source = "def main = if true => with H -> 1 | 2";
     reject(source, "E100", source.find("with").unwrap());

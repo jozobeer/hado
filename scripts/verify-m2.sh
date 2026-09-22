@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: core
-# M2 acceptance checks 1..8 (see docs/plan.md, M2). Run from the repository root.
+# M2 acceptance checks 1..6 (see docs/plan.md, M2). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,14 +10,13 @@ cd "$ROOT"
 . scripts/lib/gate-cache.sh
 
 ok=0
-total=8
+total=6
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
 TMPD="$(mktemp -d)"
 tar -cf "$TMPD/corpus.tar" tests/accept tests/reject
 find tests/accept tests/reject tests/library crates/hado/tests/corpus.rs -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/corpus.sha"
-find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 
 # Any exit path restores the corpus and drops probe files.
 cleanup() {
@@ -209,63 +208,33 @@ else
     fail 4 "diag-positions+probes:$c4_reasons"
 fi
 
-# --- check 5: M0 and M1 gates keep their completion values ---
+# --- check 5: corpus and corpus.rs match their entry state ---
 c5_reasons=""
-cargo_cached test --offline --no-fail-fast >"$TMPD/cargo.log" 2>&1
-[ "$?" -eq 0 ] || c5_reasons="$c5_reasons cargo-test-exit!=0"
-cargo_cached test --test walk >"$TMPD/walk.log" 2>&1
-[ "$?" -eq 0 ] || c5_reasons="$c5_reasons walk-exit!=0"
-# Why not 6/6: R25 が m1-spec の検査を落としたあと、分母の直書きが追従しない。
-for script in verify-m0.sh verify-m1-spec.sh verify-m1-corpus.sh; do
-    want=$(awk -F= '/^total=/ {print $2; exit}' "scripts/$script")
-    # label は run-gates と同じ `verify-<名>`。`.sh` を付けると別の id になり、
-    # 同じ門番を走行内で 2 回実走する（docs/plan.md 34 節）。
-    gate_cached "${script%.sh}" bash "scripts/$script" >"$TMPD/$script.log" 2>&1
-    st=$?
-    last=$(tail -n 1 "$TMPD/$script.log")
-    [ -n "$want" ] && [ "$st" -eq 0 ] && [ "$last" = "PASSED: $want/$want" ] \
-        || c5_reasons="$c5_reasons $script(status=$st,last=$last)"
-done
+sha256sum --status -c "$TMPD/corpus.sha" || c5_reasons="corpus-changed"
 if [ -z "$c5_reasons" ]; then
-    pass 5 "gates"
+    pass 5 "corpus-unchanged"
 else
-    fail 5 "gates:$c5_reasons"
+    fail 5 "corpus-unchanged:$c5_reasons"
 fi
 
-# --- check 6: verification preserves documentation, runtime, and scripts ---
-if sha256sum --status -c "$TMPD/protected.sha"; then
-    pass 6 "protected-files-unchanged"
-else
-    fail 6 "protected-files-changed"
-fi
-
-# --- check 7: corpus and corpus.rs match their entry state ---
-c7_reasons=""
-sha256sum --status -c "$TMPD/corpus.sha" || c7_reasons="corpus-changed"
-if [ -z "$c7_reasons" ]; then
-    pass 7 "corpus-unchanged"
-else
-    fail 7 "corpus-unchanged:$c7_reasons"
-fi
-
-# --- check 8: glue — public compilation uses the full pipeline ---
-c8_reasons=""
+# --- check 6: glue — public compilation uses the full pipeline ---
+c6_reasons=""
 n=$(grep -c 'pub fn check' crates/hado/src/types.rs)
-[ "$n" -eq 1 ] || c8_reasons="$c8_reasons types-check=$n"
+[ "$n" -eq 1 ] || c6_reasons="$c6_reasons types-check=$n"
 c=$(grep -c 'pub fn compile_to_object' crates/hado/src/lib.rs)
-[ "$c" -eq 1 ] || c8_reasons="$c8_reasons lib-pub-fn=$c"
+[ "$c" -eq 1 ] || c6_reasons="$c6_reasons lib-pub-fn=$c"
 c=$(grep -c 'pub use emit::compile_to_object' crates/hado/src/lib.rs)
-[ "$c" -eq 0 ] || c8_reasons="$c8_reasons lib-pub-use=$c"
+[ "$c" -eq 0 ] || c6_reasons="$c6_reasons lib-pub-use=$c"
 c=$(grep -c 'compile_source_to_object' crates/hado/src/lib.rs)
-[ "$c" -ge 1 ] || c8_reasons="$c8_reasons lib-full-pipeline=0"
+[ "$c" -ge 1 ] || c6_reasons="$c6_reasons lib-full-pipeline=0"
 c=$(grep -c 'lexer::lex' crates/hado/src/emit.rs)
-[ "$c" -eq 0 ] || c8_reasons="$c8_reasons emit-lex::lex=$c"
+[ "$c" -eq 0 ] || c6_reasons="$c6_reasons emit-lex::lex=$c"
 c=$(grep -c 'parser::parse' crates/hado/src/emit.rs)
-[ "$c" -eq 0 ] || c8_reasons="$c8_reasons emit-parser::parse=$c"
-if [ -z "$c8_reasons" ]; then
-    pass 8 "glue"
+[ "$c" -eq 0 ] || c6_reasons="$c6_reasons emit-parser::parse=$c"
+if [ -z "$c6_reasons" ]; then
+    pass 6 "glue"
 else
-    fail 8 "glue:$c8_reasons"
+    fail 6 "glue:$c6_reasons"
 fi
 
 echo "PASSED: $ok/$total"

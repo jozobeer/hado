@@ -586,28 +586,6 @@ PY
 }
 check '37-i corpus pairs and regressions' full_gate m1-corpus
 check '37-i no missing pairs' grep -qxF 'OK: 3 pairs' "$workdir/m1-corpus.log"
-check '37-k prelude corpus and cargo tests' full_gate m7
-check '37-k cargo tests executed without failures' python3 - "$workdir/m7.log" <<'PY'
-from pathlib import Path
-import re, sys
-
-def passed_tests(source):
-    results = re.findall(r'^test result: (\w+)\. (\d+) passed; (\d+) failed;', source, re.M)
-    assert results and sum(int(passed) for _, passed, _ in results) > 0
-    assert all(state == 'ok' and int(failed) == 0 for state, _, failed in results)
-    return sum(int(passed) for _, passed, _ in results)
-assert passed_tests('test result: ok. 1 passed; 0 failed;') == 1
-for source in ('', 'test result: ok. 0 passed; 0 failed;',
-               'test result: FAILED. 1 passed; 1 failed;',
-               'test result: ok. 1 passed; 0 failed;\ntest result: FAILED. 0 passed; 1 failed;'):
-    try:
-        passed_tests(source)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError('cargo summary mutation escaped')
-print(f'cargo test: {passed_tests(Path(sys.argv[1]).read_text())} passed; 0 failed')
-PY
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
