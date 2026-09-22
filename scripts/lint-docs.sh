@@ -7,6 +7,8 @@
 # 移した元:
 #   verify-m1-spec.sh の検査 1（見出し）・2（新設節）・4（対応表）・5（条件列の逐語）
 #   verify-r38.sh の 38-c の逐語 regex・38-e の版文字列と ledger 節
+#   verify-r68.sh などの「spec, trace, tier, corpus lock」のうち、spec-trace と
+#   ラウンドの記録の関係（検査 14）
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -824,6 +826,55 @@ print('live document references resolve')
 PY
 }
 
+# --- 検査 14: 門番と文書の関係（spec-trace の門番と検査名、ラウンドの記録） ---
+# 旧 verify-r*.sh の「spec, trace, tier」検査のうち、文書の関係だけを一般化して引き取る
+# （68-e・70-e などの round 側の検査を落とした分。門番自身の検査は門番に残る）。
+doc_gate_relationships() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+bad = []
+text = Path('docs/spec-trace.md').read_text()
+# spec-trace が名指しする門番は実在する。
+for ref in sorted(set(re.findall(r'verify-[a-z0-9-]+', text))):
+    if not Path('scripts', ref + '.sh').is_file():
+        bad.append(f'{ref}:missing')
+# `verify-<名>.sh`（<検査名>） の検査名は、その門番の中にある。
+for line in text.splitlines():
+    for gate, listing in re.findall(r'(verify-[a-z0-9-]+)\.sh`?（([^）]*)）', line):
+        path = Path('scripts', gate + '.sh')
+        if not path.is_file():
+            continue
+        body = path.read_text()
+        for number, first, last in re.findall(r'([0-9]+)-([a-z])(?:〜[0-9]+-([a-z]))?', listing):
+            letters = [chr(c) for c in range(ord(first), ord(last) + 1)] if last else [first]
+            for letter in letters:
+                if f'{number}-{letter}' not in body:
+                    bad.append(f'{gate}:{number}-{letter}')
+assert not bad, sorted(set(bad))
+
+# verify-rN.sh は自分のラウンドの記録を持つ（r10-r13 のような範囲の記録でもよい）。
+stems = [path.stem for path in Path('docs/rounds').glob('*.md')]
+missing = []
+for path in sorted(Path('scripts').glob('verify-r*.sh')):
+    number = re.fullmatch(r'verify-r(\d+)', path.stem)
+    if not number:
+        continue
+    n = int(number.group(1))
+    if (Path('docs/rounds') / f'r{n}.md').is_file():
+        continue
+    if any(
+        (found := re.fullmatch(r'r(\d+)-r(\d+)', stem)) and int(found.group(1)) <= n <= int(found.group(2))
+        for stem in stems
+    ):
+        continue
+    missing.append(path.stem)
+assert not missing, missing
+print('gate relationships: spec-trace names resolve and round gates have records')
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -837,6 +888,7 @@ check 'each issue document has the required name, priority and sections' doc_iss
 check 'the current spec is the only snapshot (no spec-map)' doc_current_only
 check 'corpus tags match the §56 table and resolve' doc_corpus_tags
 check 'section and appendix references in the live documents resolve' doc_spec_refs
+check 'spec-trace gate names and check names resolve, and round gates have records' doc_gate_relationships
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

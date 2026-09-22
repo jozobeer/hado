@@ -1,3 +1,4 @@
+use hado::check_source;
 use hado::parser::{self, parse_source};
 
 fn spec() -> &'static str {
@@ -200,6 +201,7 @@ fn once_and_again_are_the_operation_kinds() {
         "effect A Y\nagain y(value: Int): Void\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
+        check_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
     for source in [
         "effect E reply x: Int\ndef main = 0\n",
@@ -208,7 +210,8 @@ fn once_and_again_are_the_operation_kinds() {
         let error = parse_source(source, "generated.hd").expect_err(source);
         assert_eq!(error.code.as_deref(), Some("E100"), "{error}\n{source}");
     }
-    parse_source(
+    // 旧綴りは予約語ではなくただの名前。名前解決と型検査まで通ることを見る（r44 の移送元）。
+    check_source(
         "def reply = 1\ndef capture = 2\ndef main = reply + capture\n",
         "generated.hd",
     )

@@ -50,6 +50,17 @@ for module, members in required.items():
         ok = len(re.findall(r"\bdef\s+(?:rec\s+)?(?:[A-Z]\w*\s+|\([A-Z]\w*(?:\s*,\s*[A-Z]\w*)+\)\s+)?" + re.escape(member) + r"\b", source)) >= 2
         passed += ok
         print(f"{'OK' if ok else 'NG'}: {module}.{member} declaration and definition")
+# §55 の関数集合のブロックに、R43 で足した 9 つの member が載っている（旧 verify-r43 の
+# 43-a(1)）。ブロックから名前を落とすと上の走査が静かに縮むので、ここで名前を固定する。
+r43_members = {"List": ["head", "nth", "take", "drop"],
+               "String": ["join", "trim"],
+               "Int": ["abs", "min", "max"]}
+for module, names in r43_members.items():
+    for name in names:
+        total += 1
+        ok = name in required.get(module, [])
+        passed += bool(ok)
+        print(f"{'OK' if ok else 'NG'}: {module}.{name} in the §55 function set")
 # §55 の署名と stdlib の署名が一致する（旧 verify-r43 の 43-a をここへ移した）。
 section_text = "\n".join(section)
 signatures = {
