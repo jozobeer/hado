@@ -94,7 +94,7 @@ R3・R5・R6 で繰り返し見つかった（`docs/ledger.md`）。コーパス
 ### corpus-lock
 
 コーパスは既定でロックされ、実装の工程では触らない。`tests/corpus.sha256` に受理・拒否・`stdlib/` のチェックサムを置き、
-`verify-m3.sh` チェック 10 がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
+`verify-m3.sh` チェック 9（core）と `parallel-rounds` の d がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
 lock は `find tests/accept tests/reject tests/library -type f \( -name '*.hd' -o -name '*.hdi' \)` が列挙する全ファイルと `stdlib/*.hd` を対象にする。サブディレクトリも含め、行数は対象の実数と一致させる。
 `corpus.rs` は判定器なので lock に含めず、チェック 8 の暗記排除（コーパスのファイル名と 20 文字以上の行が現れない）で守る。
 スクリプト実行の前後で比べる形は、実行の外で書き換えられたコーパスを見逃す（R6 で判明）。

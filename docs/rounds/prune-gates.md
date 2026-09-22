@@ -21,15 +21,19 @@
   `corpus_counts` が「拒否の `// error:` の集合 == spec の表のコード集合」「1 コード 1 本」を
   同じ走行で測る（m0）。r23-b・r24-f・r25-b・r26-d・r44-c 前半はこれと重複する。
   r25-e（accept に `Ok(`/`Error(` が無い）だけが r9〜r28 で唯一の固有検査なので、m1-corpus へ移す。
-- **C. 門番ごとの corpus lock 照合。** `sha256sum -c tests/corpus.sha256` を m3 の検査 9（core）と
-  parallel-rounds-d が持ち、run-gates の安定性ガードが走行中の改変を見る。r43-g・r45〜r65 の
-  `corpus lock`・r68〜r81 の混合検査は重複する。
+- **C. 門番ごとの corpus lock 照合。** `sha256sum -c tests/corpus.sha256` を m3 の検査 9（core）、
+  r36-g・r37-i・r38、parallel-rounds-d が持ち、run-gates の安定性ガードが走行中の改変を見る。
+  r43-g・r45〜r65 の `corpus lock`・r68〜r81 の混合検査は重複する（審査の 2 回目で
+  「門番 1 本と直列の全走の後段が薄くなる」と指摘されたが、lock の持ち主は `docs/corpus.md` の
+  m3 で、残る照合と `corpus-lock.sh --check` で足りると判断した。下の「審査の指摘と対応」）。
 - **D. 文書の逐語固定と層の自己確認。** 「`spec §NN` に断片がある」「wants が §NN を指す」
-  「spec-trace に行がある」「`rN` in the full tier」を測る検査は、処理系ではなく文書を固定する。
+  「spec-trace に行がある」（検査 14 が一般化して持つ）「`rN` in the full tier」を測る検査は、
+  処理系ではなく文書を固定する。
   `docs/plan.md` 33 節「文章固定検査の棚卸し」が削除・移動を認めている。層の自己確認は
   gate-cache の層分割検査（各門番の `# tier:` が一意で 3 層が全門番を覆う）が持つ。
   文書の構造は `scripts/lint-docs.sh` の検査 1・2・5・6 が持つ。r49-b（bug.md）と verify-r42 全体も
-  ここに含め、r42 のうち lint-docs が持たない検査は lint-docs へ移す。
+  ここに含め、r42 のうち lint-docs が持たない検査は lint-docs へ移す。spec-trace の門番と検査名、
+  `verify-rN.sh` とラウンドの記録の関係は lint-docs の検査 14 が持つ（審査の 2 回目で追加）。
 - **E. 受理コーパスの全件実走の重なり。** m6（core）は m7 の `--with-prelude` と重なり、r67 は
   `crates/hado/tests/corpus.rs` より緩い照合で、`build -o` は run_cli.rs と r48-e が測る。
   r44-c 後半・r25-a の `cargo test --test corpus` も m0 と重なる。
@@ -39,7 +43,8 @@
   移して門番を消す。r43-a の署名照合は m7 の prelude inventory へ移す。
 - **G. 他の門番の結果を読み返す検査。** m2-5・m3-9・r36-h・r37-k・m1-corpus-7 の m0/walk/tail
   呼び直し。同じ走行の m0・m1・m3 が既に測っている。m2-6 と m1-corpus-7 の protected-files は
-  同じ検査なので m1-corpus 側に 1 つ残す。
+  見る区間が違う（m1-corpus は自分の走行の中、m2 は M2 の前後）ので、審査の 1 回目で m2 側も
+  戻した（下の「審査の指摘と対応」）。
 
 ### 決定
 
@@ -68,8 +73,9 @@
 - 残る門番からの、corpus lock・文書固定・層自己確認・他門番の読み返し・`cargo test` ラッパーの
   検査の削除。
 - r25-e の m1-corpus への移設、r43-a の m7 への統合、r42 の 3 検査の lint-docs への移設、
-  r44 の 6 ケースの `crates/hado/tests/r23_syntax.rs` への移設。
-- `docs/spec-trace.md` の参照の付け替え。
+  r44 の 6 ケースの `crates/hado/tests/r23_syntax.rs` への移設。審査の 2 回目で lint-docs に
+  検査 14（門番と文書の関係）を足した。
+- `docs/spec-trace.md` の参照の付け替え（削った検査を指していた検査名を含む）。
 - `docs/rounds/prune-gates.md`: 本ファイル。
 
 ### 工程
@@ -124,7 +130,8 @@
   `cargo test` の終了コードを検査 8 に含めた。10〜12 を 9〜11 に詰めた（12 → 11 検査）。
 - `scripts/verify-m6.sh`: 既定を受理コーパス全件の実走にし、`--with-prelude` を互換のため受ける。
 - `scripts/verify-m7.sh`: m6 の呼び出しを落とし、43-a の署名照合（§55 と stdlib の `def` 行の
-  一致）を prelude inventory に足した。門番の `PASSED` は 2 のままで、inventory は 48 → 58 件。
+  一致）を prelude inventory に足した。門番の `PASSED` は 2 のままで、inventory は 48 → 67 件
+  （うち 9 件は審査の指摘で戻した 43-a(1) の関数集合の member）。
 - `scripts/verify-r33.sh`: 33-j（`r9_grammar` と `r23_syntax` の cargo test）。
 - `scripts/verify-r36.sh`: 36-h（m7 のログの cargo test 集計と m4・m5・m6 の呼び直し）。
 - `scripts/verify-r37.sh`: 37-k（m7 の呼び直しと m7 のログの cargo test 集計）。
@@ -148,15 +155,18 @@
   81-e（系譜・coverage・corpus lock・台帳）。
 - `docs/corpus.md`: `// needs: prelude` の行を、M6 が prelude を連結して全件を実走する形に直した
   （審査の指摘。下の「審査の指摘と対応」）。
-- `scripts/lint-docs.sh`: verify-r42 の 42-a(2)・42-a(3)・42-a(4) を検査 11〜13 として移した
-  （10 → 13 検査）。
+- `scripts/lint-docs.sh`: verify-r42 の 42-a(2)・42-a(3)・42-a(4) を検査 11〜13 として移した。
+  審査の指摘で、spec-trace の門番と検査名、`verify-rN.sh` とラウンドの記録の関係を検査 14 に
+  足した（10 → 14 検査）。
 - `crates/hado/tests/r23_syntax.rs`: r44-a の残る 6 ケースを `once_and_again_are_the_operation_kinds`
   として移した（r44 の `once-is-reserved`・`again-is-reserved` の 2 ケースは
-  `keywords_cannot_be_names` が持つ）。
+  `keywords_cannot_be_names` が持つ）。審査の指摘で、受理ケースは `parse_source` だけでなく
+  `hado::check_source` も通す。
 - `docs/spec-trace.md`: 5 行目の `verify-r9.sh` の参照を、R9〜R28 の判定が
-  `crates/hado/tests/` にあり m0 の全走が回すという記述に替えた。
+  `crates/hado/tests/` にあり m0 の全走が回すという記述に替えた。あわせて、削った検査を
+  指したままだった門番の検査名（45-e、68-e〜76-e、81-e）を現行に直した。
 
-### 審査の指摘と対応
+### 審査の指摘と対応（1 回目）
 
 PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
 
@@ -175,6 +185,28 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   直書きはしない）。前付けに `v0.3` を足す変異で `NG: the current spec is the only snapshot`
   （`PASSED: 12/13`）を確かめた。
 
+### 審査の指摘と対応（2 回目）
+
+`0194fe1` への Codex 審査で 4 件（P2）が付いた。3 件を直し、1 件は記録して対応しない。
+
+- **r23_syntax への移設（`crates/hado/tests/r23_syntax.rs`）**: 直した。旧 verify-r44 の受理ケースは
+  `hado check` の実走だったので、`parse_source` だけでなく `hado::check_source` も通す。移設した
+  ケースの `reply + capture` に型の食い違いを混ぜると E305 で赤になる（`check_source` が
+  字句と構文の先まで見ている）。
+- **m7 の 43-a(1)（`scripts/verify-m7.sh`）**: 直した。§55 の関数集合のブロックに、R43 で足した
+  List・String・Int の 9 つの member が載っていることを名指しで固定した。ブロックから `head` を
+  落とす変異で `NG: List.head in the §55 function set`（在庫 65/66）を確かめた。
+- **spec-trace とラウンドの記録（`docs/spec-trace.md`、`scripts/lint-docs.sh`）**: 直した。削った検査を
+  指したままだった spec-trace の検査名（45-e、68-e〜76-e、81-e）を現行に直し、lint-docs に検査 14 を
+  足して「spec-trace が名指しする門番と検査名が実在する」「`verify-rN.sh` がラウンドの記録を持つ
+  （`r10-r13` のような範囲の記録でもよい）」を機械で判定する。変異（`68-e` を戻す・実在しない門番を
+  書く・`docs/rounds/r68.md` を外す）の 3 つで赤を確かめた。
+- **門番ごとの corpus lock（`scripts/verify-r70.sh` など）**: 対応しない（記録）。lock の持ち主は
+  `docs/corpus.md` の「`verify-m3.sh` チェック 9 がそれと照合する」で、全走では r36-g・r37-i・r38 と
+  parallel-rounds-d も照合する。門番 1 本を直に回すときの照合は記録された `corpus-lock.sh --check` が
+  持つ。r45 以降だけが持っていた写しを落としたのは、r11〜r43 と同じ形に揃えたもの。直列の全走の
+  後段と門番 1 本に残る隙間は、実行全体の指紋を直列にも広げる別の変更の領分。
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -182,13 +214,13 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
 | （門番運用） | 門番は製品の欠陥を見逃さない範囲で最小に保つ | 工程 | 成功 | 本ファイルの実測 |
 | （門番運用） | 同じ内容を同じ走行で 2 度測らない | 工程 | 成功 | `scripts/lib/gate-cache.sh`・`verify-gate-cache.sh` |
 | （門番運用） | 層の所属は各門番の `# tier:` が唯一の正で、3 層が全門番を覆う | 工程 | 成功 | `verify-gate-cache.sh` の層分割検査 |
-| （門番運用） | コーパスの lock は m3 の検査 9 と parallel-rounds-d が照合する | 工程 | 成功 | `verify-m3.sh`・`verify-parallel-rounds.sh` |
+| （門番運用） | コーパスの lock は m3 の検査 9、r36-g、r37-i、r38、parallel-rounds-d が照合する | 工程 | 成功 | `verify-m3.sh`・`verify-r36.sh`・`verify-r37.sh`・`verify-r38.sh`・`verify-parallel-rounds.sh` |
 | （門番運用） | 文書の構造は lint-docs が持ち、逐語の断片は門番に置かない | 工程 | 成功 | `scripts/lint-docs.sh` |
 
 ## 実測
 
 着手時の main は `f2a3c81`。すべてこの worktree（`CARGO_TARGET_DIR` は既定の `./target`）で
-回した。層別は `--jobs 1`（直列）と `--jobs 3` の両方で回し、下は審査の指摘を直した後の
+回した。層別は `--jobs 1`（直列）と `--jobs 3` の両方で回し、下は審査の 2 回目まで直した後の
 `--jobs 3` の結果。
 
 ```
@@ -197,13 +229,13 @@ TALLY: 38/38 passed; red: none
 $ bash scripts/run-gates.sh --tier core --jobs 3 target/gates-core 2>&1 | tail -1
 TALLY: 637/637 passed; red: none
 $ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
-TALLY: 3719/3719 passed; red: none
+TALLY: 3720/3720 passed; red: none
 $ bash scripts/verify-m2.sh 2>&1 | tail -1
 PASSED: 7/7
 $ bash scripts/verify-m7.sh 2>&1 | grep 'prelude inventory'
-prelude inventory: 58/58
+prelude inventory: 67/67
 $ bash scripts/lint-docs.sh 2>&1 | tail -1
-PASSED: 13/13
+PASSED: 14/14
 $ bash scripts/corpus-lock.sh --check; echo exit=$?
 exit=0
 $ cargo fmt --all --check; echo exit=$?
@@ -217,12 +249,14 @@ test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 m0 の全走は `OK: 2 cargo-test passed=746`（7/7）。r23_syntax の新しい 1 本を足した分だけ、
 test-prune の 745 から増えた。受理コーパスの全件実走は m6 の `PASSED: 111/111` の 1 回と
 m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`（inventory と cargo test）。
-full は m7 の編集前（`--jobs 1`）と、審査の指摘を直した後（`--jobs 3`）に回し、後者が
-`3719/3719`・`red: none`。
+m7 の inventory は門番 1 件の中身なので、層の合計は増えない（48 → 67 は内訳）。
+full は m7 の編集前（`--jobs 1`）と、審査の 2 回目まで直した後（`--jobs 3`）に回し、後者が
+`3720/3720`・`red: none`。
 
-門番は 83 → 64 本。全走の検査の合計は 3788 → 3719（test-prune の実測が 3788）。落とした
-検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件が増えて、正味 −69。core 層は
-602 → 637（m6 の +38 と、m2 −1・m3 −1・m7 −1）。quick 層は 38 のまま。
+門番は 83 → 64 本。全走の検査の合計は 3788 → 3720（test-prune の実測が 3788）。落とした
+検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件と lint-docs の検査 1 件が
+増えて、正味 −68。core 層は 602 → 637（m6 の +38 と、m2 −1・m3 −1・m7 −1）。quick 層は
+38 のまま。
 
 主な門番の検査数（前 → 後）: m2 8 → 7、m3 12 → 11、m6 73 → 111、m7 3 → 2、r33 73 → 72、
 r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、r48 8 → 5、
