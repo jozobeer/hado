@@ -21,7 +21,7 @@
   `corpus_counts` が「拒否の `// error:` の集合 == spec の表のコード集合」「1 コード 1 本」を
   同じ走行で測る（m0）。r23-b・r24-f・r25-b・r26-d・r44-c 前半はこれと重複する。
   r25-e（accept に `Ok(`/`Error(` が無い）だけが r9〜r28 で唯一の固有検査なので、m1-corpus へ移す。
-- **C. 門番ごとの corpus lock 照合。** `sha256sum -c tests/corpus.sha256` を m3 の検査 10（core）と
+- **C. 門番ごとの corpus lock 照合。** `sha256sum -c tests/corpus.sha256` を m3 の検査 9（core）と
   parallel-rounds-d が持ち、run-gates の安定性ガードが走行中の改変を見る。r43-g・r45〜r65 の
   `corpus lock`・r68〜r81 の混合検査は重複する。
 - **D. 文書の逐語固定と層の自己確認。** 「`spec §NN` に断片がある」「wants が §NN を指す」
@@ -36,7 +36,7 @@
 - **F. テストや stdlib の原文を grep する検査。** r44-e（r9_grammar.rs の綴り）・r44-d（accept の
   綴りを戻す）・r44-a の 2 ケース（`def once` 等）・r81-d・r43-a。保証は r9_grammar 自身、
   44-a の残り、r23_syntax の予約語テスト、81-a が持つ。r44 の残る 6 ケースは r23_syntax.rs へ
-  移して門番を消す。r43-a は §55 の `def` 行を m7 が表として読む形に統合する。
+  移して門番を消す。r43-a の署名照合は m7 の prelude inventory へ移す。
 - **G. 他の門番の結果を読み返す検査。** m2-5・m3-9・r36-h・r37-k・m1-corpus-7 の m0/walk/tail
   呼び直し。同じ走行の m0・m1・m3 が既に測っている。m2-6 と m1-corpus-7 の protected-files は
   同じ検査なので m1-corpus 側に 1 つ残す。
@@ -123,11 +123,12 @@
 - `scripts/verify-m3.sh`: 検査 9（m0・m1-spec・m1-corpus・m2 の呼び直し）を落とし、
   `cargo test` の終了コードを検査 8 に含めた。10〜12 を 9〜11 に詰めた（12 → 11 検査）。
 - `scripts/verify-m6.sh`: 既定を受理コーパス全件の実走にし、`--with-prelude` を互換のため受ける。
-- `scripts/verify-m7.sh`: m6 の呼び出しを落とした（3 → 2 検査）。
+- `scripts/verify-m7.sh`: m6 の呼び出しを落とし、43-a の署名照合（§55 と stdlib の `def` 行の
+  一致）を prelude inventory に足した。門番の `PASSED` は 2 のままで、inventory は 48 → 58 件。
 - `scripts/verify-r33.sh`: 33-j（`r9_grammar` と `r23_syntax` の cargo test）。
 - `scripts/verify-r36.sh`: 36-h（m7 のログの cargo test 集計と m4・m5・m6 の呼び直し）。
 - `scripts/verify-r37.sh`: 37-k（m7 の呼び直しと m7 のログの cargo test 集計）。
-- `scripts/verify-r43.sh`: 43-a（§55 と stdlib の member 一致）と 43-g の corpus lock。
+- `scripts/verify-r43.sh`: 43-g の corpus lock。43-a（§55 と stdlib の署名一致）は m7 へ移した。
 - `scripts/verify-r45.sh`: 45-e（§30・付録C・E125 行・§26.1 の逐語と `r9_grammar` の cargo test）と
   45-f の corpus lock。
 - `scripts/verify-r46.sh`: 46-f（§57・wants・full tier）と corpus lock。
@@ -164,4 +165,55 @@
 | （門番運用） | 文書の構造は lint-docs が持ち、逐語の断片は門番に置かない | 工程 | 成功 | `scripts/lint-docs.sh` |
 
 ## 実測
+
+着手時の main は `f2a3c81`。すべてこの worktree（`CARGO_TARGET_DIR` は既定の `./target`）で
+回した。`--jobs` は既定の 1（直列）。
+
+```
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
+TALLY: 38/38 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core 2>&1 | tail -1
+TALLY: 636/636 passed; red: none
+$ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
+TALLY: 3718/3718 passed; red: none
+$ bash scripts/verify-m7.sh 2>&1 | grep 'prelude inventory'
+prelude inventory: 58/58
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 13/13
+$ bash scripts/corpus-lock.sh --check; echo exit=$?
+exit=0
+$ cargo fmt --all --check; echo exit=$?
+exit=0
+$ cargo clippy --offline --all-targets -- -D warnings 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+clippy exit=0
+$ cargo test --offline --test r23_syntax 2>&1 | tail -3
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+m0 の全走は `OK: 2 cargo-test passed=746`（7/7）。r23_syntax の新しい 1 本を足した分だけ、
+test-prune の 745 から増えた。受理コーパスの全件実走は m6 の `PASSED: 111/111` の 1 回と
+m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`（inventory と cargo test）。
+full は m7 の編集前（`--jobs 1`）と編集後（`--jobs 3`）に 1 回ずつ回し、どちらも
+`3718/3718`・`red: none`。core の 636 は編集前の実測（m7 の `PASSED` は 2 のままで、
+inventory の中身だけが 48 → 58 に増えた）。
+
+門番は 83 → 64 本。全走の検査の合計は 3788 → 3718（test-prune の実測が 3788）。落とした
+検査は 108 件、m6 が既定で回すようになった受理コーパス 38 件が増えて、正味 −70。core 層は
+602 → 636（m6 の +38 と、m2 −2・m3 −1・m7 −1）。quick 層は 38 のまま。
+
+主な門番の検査数（前 → 後）: m2 8 → 6、m3 12 → 11、m6 73 → 111、m7 3 → 2、r33 73 → 72、
+r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、r48 8 → 5、
+r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま（中身を print-type だけに
+替えた）、r81 5 → 2。
+
+門番ごとの秒（編集前の `--jobs 1` の全走、`target/gate-times.tsv` の上位）: r34 214、m0 186、
+r35 183、r36 76、m1-corpus 67、embed-runtime 67、m2 65、r37 54、r43 42。合計 1239 秒で、
+wall は約 20 分。critical path は r34・m0・r35 で変わらず、削減は wall にはほとんど出ない
+（編集の費用が実益である）。
+
+静的照合: `tests/accept`・`tests/reject`・`stdlib/`・`tests/corpus.sha256` の差分は空。
+`crates/hado/tests/r23_syntax.rs` だけを足した。門番の名指しの参照で消した門番を指すものは
+残っていない（`docs/ledger.md` と `docs/plan.md` の履歴の記述は凍結なので触らない）。
+`docs/spec-trace.md` の 5 行目だけを、R9〜R28 の判定が `crates/hado/tests/` にあり m0 が回す
+という記述に替えた。
 
