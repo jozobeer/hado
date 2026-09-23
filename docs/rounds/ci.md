@@ -36,13 +36,19 @@
    false でも pending は新しい走行に置き換わる（GitHub の仕様、下の「審査の指摘と対応」）。
    群は `${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}`、
    `cancel-in-progress` は PR のときだけ true。
-8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7 を機械で固定する。
+8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7・9・10 を機械で固定する。
 9. runner は private のあいだ自前の Linux x86_64（`runs-on: [self-hosted, linux, x64]`）にする。
    org は Free プランで、private の Actions は org 共有の 2000 分/月と spending limit に当たる。
    2026-09-22 に job が起動しなくなった（`The job was not started because recent account payments
    have failed or your spending limit needs to be increased`）ので、standard runner の無料枠に
    依存しない形にした。public にしたら standard runner が無料になるので `ubuntu-latest` に戻す。
    門番はどちらの形も受け、Linux x86_64 であることだけを固定する（決定 8 の一部）。
+   ホストを汚さないため、runner は Docker のコンテナの中で動かす（`~/runner/hado-ci-runner.sh`。
+   リポジトリの外の運用で、start / stop / status / logs を持つ）。コンテナは公式イメージ
+   `ghcr.io/actions/actions-runner` を使い、起動時に登録、停止時に登録解除する。
+10. ワークフローは `cargo fetch` より前に `$HOME/.cargo/bin` を `GITHUB_PATH` へ足す段を持つ。
+    標準の runner イメージは cargo が PATH にあり、自前の runner は `~/.cargo` に置くため、
+    どちらでも同じ段で通る（無いときだけ足す）。image を焼き直さずに済む。
 
 ### 期待値の根拠
 
@@ -261,3 +267,18 @@ PASSED: 8/8
 自前 runner の実走（`ci-run:` の行・`TALLY:`・所要）は、runner を登録して最初の走行が緑に
 なった時点でここへ追記する。runner の登録は repo の Settings → Actions → Runners で行い、
 既定のラベル（`self-hosted`・`linux`・`x64`）を外さないこと。
+
+#### コンテナ runner での実走（2026-09-23）
+
+`~/runner/hado-ci-runner.sh start` で Docker のコンテナ runner（`hado-ci-docker`）を立て、
+workflow_dispatch（tier=core）で 3 回測った。1 回目は runner が job を拾い、`runtime
+dependencies`（コンテナ内の `sudo apt-get`）が通った。2 回目は `fetch dependencies` が
+`cargo: command not found`（127）で落ち、決定 10 の PATH の段を足した。
+
+```
+$ gh workflow run ci.yml --ref prune-gates -f tier=core   # 決定 10 の反映後
+（下の「緑の走行」に追記する）
+```
+
+`runs-on: [self-hosted, linux, x64]` の下で `sudo apt-get update && install` が通ること、
+`cargo` が PATH に無いことを、走行のログで確かめた。

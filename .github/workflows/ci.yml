@@ -62,6 +62,14 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
+      # 自前の runner は ~/.cargo に Rust を置くので、PATH を通す。standard runner の
+      # イメージは元から通っているため、無いときだけ足す（docs/rounds/ci.md の決定 10）。
+      - name: cargo on PATH
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
       - name: fetch dependencies
         env:
           CARGO_NET_OFFLINE: "false"
