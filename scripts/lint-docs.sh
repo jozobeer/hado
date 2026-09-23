@@ -68,18 +68,30 @@ integers = [number for number in body if len(number) == 1]
 assert [number[0] for number in integers] == list(range(1, len(integers) + 1)), integers
 assert appendix == [f'付録{chr(ord("A") + i)}' for i in range(len(appendix))], appendix
 assert appendix, 'no appendix section'
+# 付録の節は `# 付録` の部の下にある（旧 verify-r42 の 42-b が持っていた構造の検査）。
+assert re.search(r'^# 付録$', spec, flags=re.M), 'no appendix part heading'
+# 文法の概形は付録C にある（節番号は増やしても動かさないので、位置を名指しで固定する）。
+assert re.search(r'^## 付録C 文法の概形$', spec, flags=re.M), '文法の概形 is not 付録C'
 PY
 }
 
 # --- 検査 2: 節は部の下にあり、部の見出しに節番号は無い ---
 doc_parts() {
-    local reasons="" seen=0 line
+    local reasons="" seen=0 appendix_part=0 line
     while IFS= read -r line; do
         if printf '%s' "$line" | grep -qE '^# [0-9]+\.'; then
             reasons="$reasons numbered-part"
         fi
         if printf '%s' "$line" | grep -qE '^## ([0-9]+(\.[0-9]+)?\.|付録[A-Z] )'; then
             [ "$seen" -eq 1 ] || reasons="$reasons section-before-part"
+        fi
+        # 付録の節の前には `# 付録` の部が要る（`seen` は最初の部で 1 になったきりなので、
+        # 部の見出しそのものが消えても素通りする。旧 verify-r42 の 42-b の検査）。
+        if [ "$line" = '# 付録' ]; then
+            appendix_part=1
+        fi
+        if printf '%s' "$line" | grep -qE '^## 付録[A-Z] '; then
+            [ "${appendix_part:-0}" -eq 1 ] || reasons="$reasons appendix-section-before-part"
         fi
         if printf '%s' "$line" | grep -qE '^# '; then
             seen=1
@@ -238,10 +250,16 @@ doc_condition_column() {
 
 # --- 検査 5: 版（spec と spec-coverage が同じ版を名乗る） ---
 doc_version() {
-    local sv cv
+    local sv cv n
     sv=$(head -n 1 "$SPEC" | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -n 1)
     cv=$(head -n 1 "$COV" | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -n 1)
-    [ -n "$sv" ] && [ "$sv" = "$cv" ]
+    [ -n "$sv" ] && [ "$sv" = "$cv" ] || return 1
+    # 版は文書から導かず、1 か所で名指しで固定する（旧 verify-r42 の spec_version が
+    # 持っていた検査。導出にすると、前付けと見出しを揃えて書き換えるだけで素通りする）。
+    [ "$sv" = 'v0.4' ] || return 1
+    # 前付けの中の版はその 1 つだけ（過去の版は git tag が持つ）。
+    n=$(sed -n '1,/^## 規範性/p' "$SPEC" | grep -oE 'v[0-9]+(\.[0-9]+)+' | grep -cvx "$sv" || true)
+    [ "$n" -eq 0 ]
 }
 
 # --- 検査 6: # round: を持つ門番にラウンドファイルと実測がある ---
@@ -746,11 +764,6 @@ import re
 assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
 front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
 assert 'spec-map' not in front, 'the front matter mentions spec-map'
-# 前付けの版は見出しの版だけ。過去の版は git tag が持つ（42-a(2) の検査）。
-current = re.search(r'v[0-9]+(?:\.[0-9]+)+', front.splitlines()[0])
-assert current, 'no version in the spec heading'
-versions = set(re.findall(r'v[0-9]+(?:\.[0-9]+)+', front))
-assert versions == {current.group(0)}, (sorted(versions), current.group(0))
 bad = []
 for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md']:
     if 'spec-map' in Path(rel).read_text():
@@ -759,7 +772,7 @@ for path in sorted(Path('scripts').glob('verify-*.sh')):
     if 'spec-map' in path.read_text():
         bad.append(str(path))
 assert not bad, bad
-print(f'current only: version {current.group(0)}, no spec-map in the live documents or gates')
+print('current only: no spec-map in the live documents or gates')
 PY
 }
 
@@ -854,6 +867,27 @@ for line in text.splitlines():
                     bad.append(f'{gate}:{number}-{letter}')
 assert not bad, sorted(set(bad))
 
+# 逆向き: spec-trace の「固定するもの」が門番を名指ししている節は、その行を残す。行ごと
+# 消すと「固定するもの」が消えるのに前向きの照合だけでは緑のままになる（旧 verify-r68 などの
+# 68-e が持っていた関係、審査の指摘）。表に行を持たない門番（R29〜R31・R38・R49・R51・
+# R11〜R26 など。spec-trace は「R38 の判定器」やテストの名前で指す）は最初から対象外。
+trace_gate_rows = [
+    'verify-r32.sh', 'verify-r33.sh', 'verify-r34.sh', 'verify-r35.sh', 'verify-r36.sh',
+    'verify-r37.sh', 'verify-r43.sh', 'verify-r45.sh', 'verify-r46.sh', 'verify-r47.sh',
+    'verify-r48.sh', 'verify-r50.sh', 'verify-r52.sh', 'verify-r53.sh', 'verify-r54.sh',
+    'verify-r55.sh', 'verify-r56.sh', 'verify-r57.sh', 'verify-r58.sh', 'verify-r59.sh',
+    'verify-r60.sh', 'verify-r61.sh', 'verify-r62.sh', 'verify-r63.sh', 'verify-r64.sh',
+    'verify-r65.sh', 'verify-r68.sh', 'verify-r69.sh', 'verify-r70.sh', 'verify-r71.sh',
+    'verify-r72.sh', 'verify-r73.sh', 'verify-r74.sh', 'verify-r75.sh', 'verify-r76.sh',
+    'verify-r77.sh', 'verify-r81.sh',
+]
+trace_rows = Path('docs/spec-trace.md').read_text()
+unlisted = [
+    name for name in trace_gate_rows
+    if Path('scripts', name).is_file() and not re.search(rf'\b{re.escape(name)}\b', trace_rows)
+]
+assert not unlisted, unlisted
+
 # verify-rN.sh は自分のラウンドの記録を持つ（r10-r13 のような範囲の記録でもよい）。
 stems = [path.stem for path in Path('docs/rounds').glob('*.md')]
 missing = []
@@ -875,6 +909,30 @@ print('gate relationships: spec-trace names resolve and round gates have records
 PY
 }
 
+# --- 検査 15: 仕様の型名は Void で、綴りを保つ（旧 verify-r81.sh の r81_spec を移した） ---
+# 旧い型名 Unit が仕様に戻っても、振る舞いの検査（81-a / 81-c）は緑のままになる。仕様本文の
+# 綴りそのものを固定する（審査の指摘）。
+doc_type_spelling() {
+    python3 - <<'PY'
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+assert 'Unit' not in spec, 'old type name remains in docs/spec.md'
+for needle in (
+    '\nVoid\n',
+    'Void は `()` とする。',
+    'Void は i64 の 0 とする。',
+    '| Void | 入れ子では `()` |',
+    'Void は何も出さない',
+    'void            := "()"',
+    'bool | void',
+    'once log(contents: String): Void {Error}',
+):
+    assert needle in spec, needle
+assert '`()`' in spec
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -889,6 +947,7 @@ check 'the current spec is the only snapshot (no spec-map)' doc_current_only
 check 'corpus tags match the §56 table and resolve' doc_corpus_tags
 check 'section and appendix references in the live documents resolve' doc_spec_refs
 check 'spec-trace gate names and check names resolve, and round gates have records' doc_gate_relationships
+check 'the spec keeps the Void type name and its spelling' doc_type_spelling
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
