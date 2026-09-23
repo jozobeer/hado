@@ -853,18 +853,36 @@ text = Path('docs/spec-trace.md').read_text()
 for ref in sorted(set(re.findall(r'verify-[a-z0-9-]+', text))):
     if not Path('scripts', ref + '.sh').is_file():
         bad.append(f'{ref}:missing')
-# `verify-<名>.sh`（<検査名>） の検査名は、その門番の中にある。
+# `verify-<名>.sh`（<検査名>） の検査名は、その門番が登録した検査の中にある。本文のどこかに
+# 現れればよいとすると、`check` の呼び出しを消して節のコメントだけ残したときに素通りする
+# ので、ラベルを引数として渡している箇所（`check '...'`・`('...', fn)`・
+# `helper '...'`）だけを見る（審査の指摘）。
+comment_only = re.compile(r'^\s*#')
 for line in text.splitlines():
     for gate, listing in re.findall(r'(verify-[a-z0-9-]+)\.sh`?（([^）]*)）', line):
         path = Path('scripts', gate + '.sh')
         if not path.is_file():
             continue
-        body = path.read_text()
+        labels = [
+            label for body_line in path.read_text().splitlines()
+            if not comment_only.match(body_line)
+            for label in re.findall(r"'([^']*)'|\"([^\"]*)\"", body_line)
+            for label in ([label[0] or label[1]] if isinstance(label, tuple) else [label])
+        ]
         for number, first, last in re.findall(r'([0-9]+)-([a-z])(?:〜[0-9]+-([a-z]))?', listing):
             letters = [chr(c) for c in range(ord(first), ord(last) + 1)] if last else [first]
             for letter in letters:
-                if f'{number}-{letter}' not in body:
-                    bad.append(f'{gate}:{number}-{letter}')
+                needle = f'{number}-{letter}'
+                # 動的に組むラベル（`70-$([ ... ] && echo b || echo c)`）は、字句の
+                # `NN-` の後ろが式なので、本文にその形があれば登録済みと見る。
+                dynamic = bool(re.search(
+                    rf'{number}-\$\(', path.read_text()
+                ))
+                if not dynamic and not any(
+                    re.search(rf'(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])', label)
+                    for label in labels
+                ):
+                    bad.append(f'{gate}:{needle}')
 assert not bad, sorted(set(bad))
 
 # 逆向き: spec-trace の「固定するもの」が門番を名指ししている節は、その行を残す。行ごと
@@ -882,10 +900,14 @@ trace_gate_rows = [
     'verify-r77.sh', 'verify-r81.sh',
 ]
 trace_rows = Path('docs/spec-trace.md').read_text()
-unlisted = [
-    name for name in trace_gate_rows
-    if Path('scripts', name).is_file() and not re.search(rf'\b{re.escape(name)}\b', trace_rows)
-]
+# 門番そのものが消えても、前向きの照合は参照が無いので素通りし、ここもファイルが無いので
+# 飛ばしていた。一覧は「その門番と spec-trace の行が実在する」の契約として扱う。
+unlisted = []
+for name in trace_gate_rows:
+    if not Path('scripts', name).is_file():
+        unlisted.append(f'{name}:absent')
+    elif not re.search(rf'\b{re.escape(name)}\b', trace_rows):
+        unlisted.append(f'{name}:unlisted')
 assert not unlisted, unlisted
 
 # verify-rN.sh は自分のラウンドの記録を持つ（r10-r13 のような範囲の記録でもよい）。
