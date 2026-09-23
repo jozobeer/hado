@@ -246,6 +246,30 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   外すかが要る。4 案（PR だけ standard に戻す / PR では `apt` の段を回さない / Environment の承認を
   挟む / いまのまま）を PR のスレッドに上げ、推奨は「いまのまま着地させ、public の時点で切り替える」。
 
+### 審査の指摘と対応（4 回目）
+
+`badac66` への Codex 審査で 3 件（P2）が付いた。いずれも 3 回目で入れた検査の詰めが甘かった箇所で、
+3 件とも直した。
+
+- **削除した門番の対象の数え漏れ（`scripts/verify-m0.sh` 検査 8）**: 直した。3 回目で固定した 16 本は
+  各ラウンドの専用ラッパー（`verify-r13.sh` など）だけを見ており、`verify-record-constructors.sh` が
+  守っていた `named_record_constructors`・`named_record_order` と、`verify-r9.sh` が守っていた
+  `r9_*` の 10 本を数えていなかった。16 → 26 本にした。変異（`r9_order.rs` を消す）で
+  `absent-r9_order` の赤を確かめた。
+- **節のコメントを検査名と数える（`scripts/lint-docs.sh` 検査 14）**: 直した。本文のどこかに
+  `45-b` があればよいとしていたので、`check '45-b ...'` を消しても `# --- 45-b:` のコメントが
+  残れば素通りしていた。ラベルを引数として渡している箇所だけを見る。`70-$([ ... ] && echo b ||
+  echo c)` のように動的に組むラベルは、字句の `NN-$(` があるときだけ例外にする。変異（呼び出しを
+  消してコメントを残す）で `verify-r45:45-b` の赤を確かめた。
+- **一覧の門番の実在（`scripts/lint-docs.sh` 検査 14）**: 直した。`is_file()` で飛ばしていたので、
+  門番と spec-trace の行を同時に消すと、前向きの照合（参照が無い）もここも往復の記録を数える
+  ところも素通りしていた。一覧を「その門番と行が実在する」の契約にし、欠けているときは
+  `absent` / `unlisted` として赤にする。変異（`verify-r68.sh` と r68 の行を同時に消す）で
+  `verify-r68.sh:absent` の赤を確かめた。
+
+3 回目と 4 回目の指摘は 8 件で、往復の予算（3 往復）を超えている。5 回目が来たときは、
+残った指摘を `docs/issues/` に切り出して打ち切る（打ち切りの判断は人がする）。
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -289,7 +313,8 @@ $ cargo test --offline --test r23_syntax 2>&1 | tail -3
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
-m0 の全走は `OK: 2 cargo-test passed=746`（8/8。検査 8 は審査の 3 回目で足した）。r23_syntax の
+m0 の全走は `OK: 2 cargo-test passed=746`（8/8。検査 8 は審査の 3 回目で足し、4 回目で
+対象を 26 本に広げた）。r23_syntax の
 新しい 1 本を足した分だけ、test-prune の 745 から増えた。受理コーパスの全件実走は m6 の
 `PASSED: 111/111` の 1 回と m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`
 （inventory と cargo test）。m7 の inventory は門番 1 件の中身なので、層の合計は増えない
