@@ -34,6 +34,12 @@
   文書の構造は `scripts/lint-docs.sh` の検査 1・2・5・6 が持つ。r49-b（bug.md）と verify-r42 全体も
   ここに含め、r42 のうち lint-docs が持たない検査は lint-docs へ移す。spec-trace の門番と検査名、
   `verify-rN.sh` とラウンドの記録の関係は lint-docs の検査 14 が持つ（審査の 2 回目で追加）。
+  **審査の 6 回目でこの群の判断の 2 つが誤りと分かった**（`docs/issues/dropped-spec-contracts.md`）。
+  仕様本文の断片を消しても緑のまま（`scripts/verify-r50.sh` の `r50_overflow` は実行時しか
+  見ない）で、層の自己確認も字種と一意性しか見ないので門番の層が黙って変わっても赤にならない
+  （`scripts/verify-r52.sh` の `# tier: full` を `quick` にすると `--print-tier full` から r52 が
+  消えるのに `scripts/verify-gate-cache.sh` は `PASSED: 26/26`）。「wants が §NN を指す」のほうは、
+  `docs/wants.md` が昇格で消えるメモなので契約ではない（審査の 6 回目で人の指摘）。
 - **E. 受理コーパスの全件実走の重なり。** m6（core）は m7 の `--with-prelude` と重なり、r67 は
   `crates/hado/tests/corpus.rs` より緩い照合で、`build -o` は run_cli.rs と r48-e が測る。
   r44-c 後半・r25-a の `cargo test --test corpus` も m0 と重なる。
@@ -301,12 +307,23 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   `echo c`）だけを候補にした。変異（70-a を消す・70-d を消す）で赤、70-b/70-c の動的な式を
   残したままでは緑を確かめた。
 - **削った門番が持っていた仕様本文の契約（`docs/issues/dropped-spec-contracts.md` に切り出し）**:
-  切り出す。指摘のとおりで、これはこの PR の見落としである。門番を削るときに「trace・tier・
-  wants は既存の門番が引き受ける」と判断したが、tier は `verify-gate-cache.sh`、trace の門番名と
-  ラウンドの記録は検査 14 が引き受ける一方、**仕様本文の綴りと `docs/wants.md` の参照には
-  引き受け手が無い**。落ちた doc 系の検査は 30 本で、仕様本文を消しても緑のままになることを
-  実測した（§53.1 の `hado: stack overflow` を消して `lint-docs` 16/16・`verify-r50` 4/4）。
-  規範文の針を 1 つの検査にまとめる案を推奨として issue に切り出し、PR 本文に切り出し先を書く。
+  切り出す。指摘のとおりで、これはこの PR の見落としである。落ちた `NN-x spec, trace, tier,
+  wants` の 4 つの対象を 1 つずつ実測で振り分けた（推測で「引き受け手がある」と判断しない）。
+  - **仕様本文の綴り**: 引き受け手が無い。§53.1 の `hado: stack overflow` を消して `lint-docs`
+    16/16・`verify-r50` 4/4 のまま。落ちた検査のうち仕様本文の針を持っていたのは 25 本。
+  - **門番ごとの層の所属**: 引き受け手が無い。`verify-r52.sh` の `# tier: full` を `quick` に
+    すると `--print-tier full` から r52 が消えるのに `verify-gate-cache.sh` は `PASSED: 26/26`。
+    `tier_list_case` は字種と一意性しか見ない。
+  - **`docs/spec-trace.md` の門番名と § 行**: 検査 14 が引き受ける。§58.1 の行を消すと
+    `PASSED: 15/16`。
+  - **`docs/wants.md` の参照**: 契約ではない（人の指摘）。`docs/wants.md` は
+    `# やりたいことメモ` で「以下は未決定」と書いており、`docs/issues.md` が「根拠と完了条件が
+    揃った項目を `docs/issues/` へ移し、`docs/wants.md` からは消す」と定める。`'R52' in wants`
+    は昇格のたびに赤になるので、落としたままでよい。**下の「適用した判定」の群 D が「wants が
+    §NN を指す」を文書の逐語固定として扱っていたが、これは契約ではなかった。**
+
+  規範文の針と層の所属を 1 つの検査にまとめる案を推奨として issue に切り出し、PR 本文に
+  切り出し先を書く。
 
 6 回目の 1 件目は自分の検査の欠陥なので直した。2 件目は削りの効果そのものに関わるので、
 **着地の前に人が決める**（仕様本文の契約を戻すか、削りの主張を狭めるか）。
