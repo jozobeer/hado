@@ -210,6 +210,42 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   持つ。r45 以降だけが持っていた写しを落としたのは、r11〜r43 と同じ形に揃えたもの。直列の全走の
   後段と門番 1 本に残る隙間は、実行全体の指紋を直列にも広げる別の変更の領分。
 
+### 審査の指摘と対応（3 回目）
+
+`93d0b4e` への Codex 審査で 6 件（P2 が 5、P1 の security が 1）が付いた。5 件は門番に取り込み、
+1 件は人が決める判断として上げた。
+
+機械で決まる整合の 5 件は、いずれも「削った検査が持っていた関係を、置き換えた検査が
+前向きにしか見ていない」という同じ形だった。削除前の門番が守っていた組を名指しで固定する。
+
+- **spec-trace の行の削除（`scripts/lint-docs.sh` 検査 14）**: 直した。前向きの照合（名指しされた
+  門番と検査名が実在する）だけでは、表の行ごと消すのが素通りしていた。表が `verify-rN.sh` の形で
+  門番を名指ししている節は、行を消したら赤にする。表に行を持たない門番（R29〜R31・R38・R49・R51。
+  spec-trace は「R38 の判定器」の形で指す）は対象外。変異（r68・r81・r45 の行を消す）で赤を確かめた。
+- **付録の部の見出し（`scripts/lint-docs.sh` 検査 1・2）**: 直した。`doc_parts` の `seen` は最初の部で
+  1 になったきりなので、`# 付録` の部の見出しが消えても素通りしていた。部の見出しの実在と、文法の
+  概形が付録C にあることを固定する。変異（`# 付録` を消す・付録C の見出しを変える）で赤を確かめた。
+- **版の固定（`scripts/lint-docs.sh` 検査 5）**: 直した。旧 42-d の `spec_version` は `v0.4` を名指しで
+  要求していたが、置き換えた検査は文書から導いた版を比べるだけだった。前付けと見出しを揃えて
+  書き換えると素通りする。`v0.4` を名指しで固定し、前付けの中の版がその 1 つだけであることも見る。
+  変異（全部 `v0.5` にする）で赤を確かめた。
+- **専用テストターゲットの実在（`scripts/verify-m0.sh` 検査 8）**: 直した。`cargo test` は対象ごと
+  消えても残りを走らせて緑になる（`r13_conditions.rs` を退避しても exit 0 を実測）。削除したラッパー
+  門番が守っていた 16 の組（r9_grammar・r13_conditions・r14_rails・r16_sections・r17_files・
+  r18_spelling・r19_contracts・r20_entries・r21_functors・r22_namespaces・r23_syntax・r24_effects・
+  r25_effects・r26_effects・r31_effects・r37_world）を固定し、実在と 1 件以上の実行を要求する。
+  名前をディスクから導くと、消えた対象が期待からも消えて素通りするので固定が要る。変異（対象を
+  消す・中身を空にする）で `absent-` と `empty-` の赤を確かめた。
+- **仕様の型名（`scripts/lint-docs.sh` 検査 15）**: 直した。旧 verify-r81 の `r81_spec` を移した。
+  仕様本文に `Unit` が無いことと `Void` の綴り 8 か所を固定する。振る舞いの検査（81-a / 81-c）だけでは、
+  仕様に `Unit` が戻っても緑になる。変異（`Unit` を戻す・綴りを変える）で赤を確かめた。
+- **PR を sudo の通る自前 runner で走らせること（`.github/workflows/ci.yml`）**: 人が決める。PR を
+  出せる人は `scripts/ci-run.sh` を書き換えられるので、門番が走る前に runner の root を取れる。
+  `contents: read` は GitHub の token しか絞らない。いま登録した runner は 1 台で、PR を出せるのは
+  共同作業者だけなので実害は出ていないが、public にする時点で `ubuntu-latest` に戻すか `sudo` を
+  外すかが要る。4 案（PR だけ standard に戻す / PR では `apt` の段を回さない / Environment の承認を
+  挟む / いまのまま）を PR のスレッドに上げ、推奨は「いまのまま着地させ、public の時点で切り替える」。
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -223,22 +259,26 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
 ## 実測
 
 着手時の main は `f2a3c81`。すべてこの worktree（`CARGO_TARGET_DIR` は既定の `./target`）で
-回した。層別は `--jobs 1`（直列）と `--jobs 3` の両方で回し、下は審査の 2 回目まで直した後の
+回した。層別は `--jobs 1`（直列）と `--jobs 3` の両方で回し、下は審査の 3 回目まで直した後の
 `--jobs 3` の結果。
 
 ```
 $ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
 TALLY: 38/38 passed; red: none
 $ bash scripts/run-gates.sh --tier core --jobs 3 target/gates-core 2>&1 | tail -1
-TALLY: 637/637 passed; red: none
+TALLY: 638/638 passed; red: none
 $ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
 TALLY: 3720/3720 passed; red: none
+$ bash scripts/verify-m0.sh 2>&1 | tail -1
+PASSED: 8/8
 $ bash scripts/verify-m2.sh 2>&1 | tail -1
 PASSED: 7/7
+$ bash scripts/verify-m3.sh 2>&1 | tail -1
+PASSED: 11/11
 $ bash scripts/verify-m7.sh 2>&1 | grep 'prelude inventory'
 prelude inventory: 67/67
 $ bash scripts/lint-docs.sh 2>&1 | tail -1
-PASSED: 14/14
+PASSED: 15/15
 $ bash scripts/corpus-lock.sh --check; echo exit=$?
 exit=0
 $ cargo fmt --all --check; echo exit=$?
@@ -249,22 +289,23 @@ $ cargo test --offline --test r23_syntax 2>&1 | tail -3
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
-m0 の全走は `OK: 2 cargo-test passed=746`（7/7）。r23_syntax の新しい 1 本を足した分だけ、
-test-prune の 745 から増えた。受理コーパスの全件実走は m6 の `PASSED: 111/111` の 1 回と
-m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`（inventory と cargo test）。
-m7 の inventory は門番 1 件の中身なので、層の合計は増えない（48 → 67 は内訳）。
-full は m7 の編集前（`--jobs 1`）と、審査の 2 回目まで直した後（`--jobs 3`）に回し、後者が
-`3720/3720`・`red: none`。
+m0 の全走は `OK: 2 cargo-test passed=746`（8/8。検査 8 は審査の 3 回目で足した）。r23_syntax の
+新しい 1 本を足した分だけ、test-prune の 745 から増えた。受理コーパスの全件実走は m6 の
+`PASSED: 111/111` の 1 回と m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`
+（inventory と cargo test）。m7 の inventory は門番 1 件の中身なので、層の合計は増えない
+（48 → 67 は内訳）。full は m7 の編集前（`--jobs 1`）と、審査の 2 回目まで直した後（`--jobs 3`）に
+回し、後者が `3720/3720`・`red: none`。core は 637 → 638（m0 の検査 8）。文書層は 14 → 15
+（検査 15）。
 
 門番は 83 → 64 本。全走の検査の合計は 3788 → 3720（test-prune の実測が 3788）。落とした
 検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件と lint-docs の検査 1 件が
-増えて、正味 −68。core 層は 602 → 637（m6 の +38 と、m2 −1・m3 −1・m7 −1）。quick 層は
-38 のまま。
+増えて、正味 −68。core 層は 602 → 638（m6 の +38 と、m2 −1・m3 −1・m7 −1 と、審査の
+3 回目で足した m0 の検査 8）。quick 層は 38 のまま。
 
-主な門番の検査数（前 → 後）: m2 8 → 7、m3 12 → 11、m6 73 → 111、m7 3 → 2、r33 73 → 72、
-r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、r48 8 → 5、
-r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま（中身を print-type だけに
-替えた）、r81 5 → 2。
+主な門番の検査数（前 → 後）: m0 7 → 8、m2 8 → 7、m3 12 → 11、m6 73 → 111、m7 3 → 2、
+r33 73 → 72、r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、
+r48 8 → 5、r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま（中身を print-type
+だけに替えた）、r81 5 → 2。文書層は 10 → 15。
 
 門番ごとの秒（編集前の `--jobs 1` の全走、`target/gate-times.tsv` の上位）: r34 214、m0 186、
 r35 183、r36 76、m1-corpus 67、embed-runtime 67、m2 65、r37 54、r43 42。合計 1239 秒で、
