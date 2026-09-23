@@ -955,6 +955,27 @@ assert '`()`' in spec
 PY
 }
 
+# --- 検査 16: 仕様が効果操作を once / again と綴る（旧 verify-r44.sh の 44-b を移した） ---
+# 移設した r23_syntax は綴りをコンパイラの入力としてしか見ないので、仕様本文だけを書き換える
+# 退行（`once` をキーワードの文から落とす、`reply` を戻す）は緑のままになる（審査の指摘）。
+doc_effect_keywords() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+assert not re.search(r'\breply\b', spec), 'reply remains in docs/spec.md'
+assert not re.search(r'\bcapture\b', spec), 'capture remains in docs/spec.md'
+needles = [
+    '| `once` |', '| `again` |', 'once ask: String', 'again yield value =>',
+    'once log(contents: String): Void {Error}', '`once` `abort` `again`',
+    'op_kind         := "once" | "abort" | "again"',
+]
+missing = [needle for needle in needles if needle not in spec]
+assert not missing, missing
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -970,6 +991,7 @@ check 'corpus tags match the §56 table and resolve' doc_corpus_tags
 check 'section and appendix references in the live documents resolve' doc_spec_refs
 check 'spec-trace gate names and check names resolve, and round gates have records' doc_gate_relationships
 check 'the spec keeps the Void type name and its spelling' doc_type_spelling
+check 'the spec spells the effect operations once / again' doc_effect_keywords
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
