@@ -13,7 +13,11 @@
 - ローカルのコマンドは `--offline` が前提（`AGENTS.md`）。CI では依存の取得の段だけ network を
   開ける必要がある。
 - CI に要るものは Rust（Cranelift 0.135 が 1.95 以上を要求）、`cc`、`libgc-dev`、`flock`
-  （`--jobs` > 1）、`python3` と `python3-yaml`（門番がワークフローを YAML として読む）。
+  （`--jobs` > 1）、`python3` と `python3-yaml`（門番がワークフローを YAML として読む）、
+  `rustfmt` と `clippy`（門番 verify-rustfmt・verify-clippy・verify-cognitive-complexity）、
+  GNU `time`（`crates/hado/tests/r26_effects.rs` が `/usr/bin/time -v` で最大 RSS を測る）。
+  最後の 3 つは standard runner の image には入っているので、自己ホストの runner では
+  前提を揃える（決定 11）。
 - runner は private のあいだ自前の Linux x86_64（決定 9）。上の道具立ては runner 側にも要り、
   `runtime dependencies` の段が `sudo apt-get` を使うので利用者に passwordless sudo があること。
 
@@ -49,6 +53,11 @@
 10. ワークフローは `cargo fetch` より前に `$HOME/.cargo/bin` を `GITHUB_PATH` へ足す段を持つ。
     標準の runner イメージは cargo が PATH にあり、自前の runner は `~/.cargo` に置くため、
     どちらでも同じ段で通る（無いときだけ足す）。image を焼き直さずに済む。
+11. 自前の runner は `rustfmt`・`clippy`・GNU `time` を入れてから登録する。standard runner の
+    image には最初から入っており、門番（verify-rustfmt・verify-clippy・
+    verify-cognitive-complexity）と `r26_effects.rs` の最大 RSS の測定がこれを使う。
+    ワークフローの `runtime dependencies` は `libgc-dev` と `python3-yaml` だけを持つ
+    （standard runner を前提にする決定 4 のまま。自己ホストの前提は runner 側で揃える）。
 
 ### 期待値の根拠
 
@@ -271,14 +280,42 @@ PASSED: 8/8
 #### コンテナ runner での実走（2026-09-23）
 
 `~/runner/hado-ci-runner.sh start` で Docker のコンテナ runner（`hado-ci-docker`）を立て、
-workflow_dispatch（tier=core）で 3 回測った。1 回目は runner が job を拾い、`runtime
+workflow_dispatch（tier=core）で測った。1 回目は runner が job を拾い、`runtime
 dependencies`（コンテナ内の `sudo apt-get`）が通った。2 回目は `fetch dependencies` が
-`cargo: command not found`（127）で落ち、決定 10 の PATH の段を足した。
+`cargo: command not found`（127）で落ち、決定 10 の PATH の段を足した。3 回目（PR の core）は
+門番まで届き、赤は環境の道具不足だけだった。
 
 ```
-$ gh workflow run ci.yml --ref prune-gates -f tier=core   # 決定 10 の反映後
-（下の「緑の走行」に追記する）
+TALLY: 629/637 passed; red: verify-clippy verify-cognitive-complexity verify-m0
+      verify-m3 verify-m7 verify-rustfmt
 ```
+
+| 赤 | ログ | 原因 |
+|---|---|---|
+| verify-clippy・verify-cognitive-complexity | `'cargo-clippy' is not installed for the toolchain 'stable'` | コンテナに clippy が無い |
+| verify-rustfmt | `'cargo-fmt' is not installed for the toolchain 'stable'` | コンテナに rustfmt が無い |
+| verify-m0・verify-m3・verify-m7 | `r26_effects.rs:1164` が `Os { code: 2, NotFound }` | `/usr/bin/time`（GNU time）が無い |
+
+6 本とも環境の道具不足で、判定条件そのものの赤ではない（決定 11 で runner 側に
+`clippy`・`rustfmt`・`time` を入れ、コールドビルドでも core 層が 15 分で完走することを
+確かめた）。`rustfmt 1.9.0-stable`・`clippy 0.1.98`・`time (GNU Time)` がコンテナに入り、
+`Listening for Jobs` まで進むことをログで確認した。
+
+決定 11 の反映後（コンテナを作り直して再走。run 35811354380、途中の `workflow_dispatch`）。
+
+```
+$ gh workflow run ci.yml --ref prune-gates -f tier=core
+$ gh api /repos/jozobeer/hado/actions/runs/35811354380/jobs --jq '.jobs[]|{runner_name,conclusion}'
+{"runner_name":"hado-ci-docker","conclusion":"success"}
+
+ci-run: event=workflow_dispatch ref=refs/heads/prune-gates tier=core jobs=12 out=target/ci-gates
+TALLY: 637/637 passed; red: none
+PASSED: 14/14
+```
+
+コンテナの runner で core 層が緑、文書層も緑。コールドビルドで 7 分 23 秒（02:41:29 →
+02:48:52。standard runner の実測は 12〜20 分なので、こちらの方が速い）。`target/` を
+キャッシュしていないので、この時間は毎回かかる。
 
 `runs-on: [self-hosted, linux, x64]` の下で `sudo apt-get update && install` が通ること、
-`cargo` が PATH に無いことを、走行のログで確かめた。
+`cargo` が PATH に無いこと（決定 10 の段で通ること）を、走行のログで確かめた。
