@@ -863,22 +863,25 @@ for line in text.splitlines():
         path = Path('scripts', gate + '.sh')
         if not path.is_file():
             continue
+        body = path.read_text()
         labels = [
-            label for body_line in path.read_text().splitlines()
+            label for body_line in body.splitlines()
             if not comment_only.match(body_line)
             for label in re.findall(r"'([^']*)'|\"([^\"]*)\"", body_line)
             for label in ([label[0] or label[1]] if isinstance(label, tuple) else [label])
         ]
+        # 動的に組むラベル（`70-$([ ... ] && echo b || echo c)`）は、式が作る文字だけを
+        # 候補にする。番号だけで例外にすると、その番号の別の検査を消しても素通りする。
+        dynamic = {}
+        for number, expr in re.findall(r'([0-9]+)-\$\((.*?)\)', body, re.S):
+            dynamic.setdefault(number, set()).update(re.findall(r'echo\s+([a-z])\b', expr))
         for number, first, last in re.findall(r'([0-9]+)-([a-z])(?:〜[0-9]+-([a-z]))?', listing):
             letters = [chr(c) for c in range(ord(first), ord(last) + 1)] if last else [first]
             for letter in letters:
                 needle = f'{number}-{letter}'
-                # 動的に組むラベル（`70-$([ ... ] && echo b || echo c)`）は、字句の
-                # `NN-` の後ろが式なので、本文にその形があれば登録済みと見る。
-                dynamic = bool(re.search(
-                    rf'{number}-\$\(', path.read_text()
-                ))
-                if not dynamic and not any(
+                if letter in dynamic.get(number, ()):
+                    continue
+                if not any(
                     re.search(rf'(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])', label)
                     for label in labels
                 ):
