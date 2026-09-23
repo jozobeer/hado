@@ -58,6 +58,14 @@
     verify-cognitive-complexity）と `r26_effects.rs` の最大 RSS の測定がこれを使う。
     ワークフローの `runtime dependencies` は `libgc-dev` と `python3-yaml` だけを持つ
     （standard runner を前提にする決定 4 のまま。自己ホストの前提は runner 側で揃える）。
+12. PR を sudo の通る自前 runner で走らせることを、private のあいだは許容する（2026-09-23 の
+    判断）。PR を出せる人は `scripts/ci-run.sh` を書き換えられるので、門番が走る前に runner の
+    root を取れる。`permissions: contents: read` は GitHub の token しか絞らない。
+    private のあいだは PR を出せるのが共同作業者だけなので信頼境界が実質的に成立し、登録した
+    runner は 1 台でコンテナの中なので host の root には届かない。public にして誰でも PR を
+    出せるようになった時点で `runs-on` を `ubuntu-latest` に戻す（standard runner が無料になり、
+    門番はどちらの形も受ける）。`sudo` を外す案・承認を挟む案は採らない（前者は PR のコードが
+    runner の中で走り続け、後者は PR ごとに人の手が要る）。
 
 ### 期待値の根拠
 

@@ -37,7 +37,9 @@ jobs:
   gates:
     # private のあいだは org の Free 枠（2000 分/月）と spending limit に当たるので、
     # 自前の Linux x86_64 runner で回す（docs/rounds/ci.md の決定 9）。public にしたら
-    # standard runner が無料になるので ubuntu-latest に戻す（門番はどちらも受ける）。
+    # standard runner が無料になるので ubuntu-latest に戻す（決定 12。誰でも PR を出せる
+    # ようになると、PR のコードが sudo の通る runner で走るのを許容できなくなる）。
+    # 門番はどちらの形も受ける。
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 60
     steps:
