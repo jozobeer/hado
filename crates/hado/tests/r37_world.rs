@@ -212,6 +212,11 @@ int32_t hado_entry(void) {
     assert(value->length == 4 && memcmp(value->bytes, "tail", 4) == 0);
     key.bytes[0] = 'Z';
     assert(hado_env_has((const HadoString *)&key) == 0);
+    struct { size_t length; unsigned char bytes[10]; } embedded = {9, "R37_KEY!X"};
+    embedded.bytes[7] = 0;
+    assert(hado_env_has((const HadoString *)&embedded) == 0);
+    value = hado_env_get((const HadoString *)&embedded);
+    assert(value->length == 0);
     return 0;
 }
 "#,
@@ -303,6 +308,16 @@ int32_t hado_entry(void) {
     assert(written->length == 8 && memcmp(written->bytes, "replaced", 8) == 0);
     assert(bytes->length == 4 && memcmp(bytes->bytes, "data", 4) == 0);
     assert(hado_io_read_dir((const HadoString *)&path) == 3);
+    struct { size_t length; unsigned char bytes[16]; } keep = {4, "keep"};
+    assert(hado_io_write_file((const HadoString *)&keep, bytes_from_c_string("original")) == 0);
+    struct { size_t length; unsigned char bytes[16]; } poisoned = {6, "keep!x"};
+    poisoned.bytes[4] = 0;
+    assert(hado_io_write_file((const HadoString *)&poisoned, bytes_from_c_string("pwned")) == 4);
+    assert(hado_io_read_file((const HadoString *)&keep) == 0);
+    HadoString *untouched = hado_io_take_bytes(0);
+    assert(untouched->length == 8 && memcmp(untouched->bytes, "original", 8) == 0);
+    assert(hado_io_read_file((const HadoString *)&poisoned) == 4);
+    assert(hado_io_read_dir((const HadoString *)&poisoned) == 4);
     return 0;
 }
 "#,
@@ -332,4 +347,26 @@ int32_t hado_entry(void) {
         output.stdout.is_empty() && output.stderr.is_empty(),
         "{output:?}"
     );
+}
+
+#[test]
+fn write_file_does_not_truncate_a_path_at_an_embedded_nul() {
+    let case = Case::new(
+        r#"def main =
+  do write_file "keep" (Bytes.of_string "original") ->
+  do write_file (Bytes.to_string (Bytes.of_list [107, 101, 101, 112, 0, 120])) (Bytes.of_string "overwritten") ->
+  0
+"#,
+    );
+    let built = case.command(&["build"]);
+    assert_eq!(built.status.code(), Some(0), "{built:?}");
+    assert!(built.stderr.is_empty(), "{built:?}");
+    let output = Command::new(case.0.join("main"))
+        .current_dir(&case.0)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert_eq!(output.stderr, b"IoFailure\n", "{output:?}");
+    assert_eq!(std::fs::read(case.0.join("keep")).unwrap(), b"original");
 }
