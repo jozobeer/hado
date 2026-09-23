@@ -10,7 +10,7 @@ cd "$ROOT"
 . scripts/lib/gate-cache.sh
 
 ok=0
-total=7
+total=8
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -245,6 +245,23 @@ if sha256sum --status -c "$TMPD/protected.sha"; then
     pass 7 "protected-files-unchanged"
 else
     fail 7 "protected-files-changed"
+fi
+
+# --- check 8: the whole test suite passes, including the associativity probe ---
+# docs/corpus.md: 式木の往復は結合性を見ない（描画側が括弧を必ず付ける）ので、
+# `parser::tests::left_assoc_add_and_mul` がそれを固定し、この門番が `cargo test` 全体を
+# 見ることで捕まえる。単体で m2 を回す手順では m0 が走らないので、ここで見ないと
+# 無括弧の連鎖の退行が誰にも見えない（審査の指摘）。全走では cargo_cached が m0 の
+# 同じ実走に畳むので、費用は増えない。
+c8_reasons=""
+cargo_cached test --offline --no-fail-fast >"$TMPD/cargo.log" 2>&1
+[ "$?" -eq 0 ] || c8_reasons="$c8_reasons cargo-test-exit!=0"
+grep -Eq '^test parser::tests::left_assoc_add_and_mul \.\.\. ok$' "$TMPD/cargo.log" \
+    || c8_reasons="$c8_reasons associativity-probe-not-run"
+if [ -z "$c8_reasons" ]; then
+    pass 8 "cargo-test+assoc"
+else
+    fail 8 "cargo-test+assoc:$c8_reasons"
 fi
 
 echo "PASSED: $ok/$total"

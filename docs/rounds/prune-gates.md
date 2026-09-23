@@ -128,7 +128,10 @@
   開始時の protected-files の照合だけを残した。検査 6 に r25-e（受理コーパスが `Ok(`/`Error(` を
   名指ししない）を足した。
 - `scripts/verify-m2.sh`: 検査 5（m0・m1-spec・m1-corpus の呼び直し）を落とし、7・8 を 5・6 に
-  詰めた。protected-files の検査は審査の指摘で検査 7 として戻した（8 → 7 検査）。
+  詰めた。protected-files の検査は審査の指摘で検査 7 として戻し、`cargo test` 全体
+  （`docs/corpus.md` が名指しする結合性の探針 `parser::tests::left_assoc_add_and_mul` を含む）も
+  検査 8 として戻した（8 → 8 検査）。検査 5 の呼び直しの側だけが冗長で、全走では
+  `cargo_cached` が m0 の同じ実走に畳まれる。
 - `scripts/verify-m3.sh`: 検査 9（m0・m1-spec・m1-corpus・m2 の呼び直し）を落とし、
   `cargo test` の終了コードを検査 8 に含めた。10〜12 を 9〜11 に詰めた（12 → 11 検査）。
 - `scripts/verify-m6.sh`: 既定を受理コーパス全件の実走にし、`--with-prelude` を互換のため受ける。
@@ -308,6 +311,25 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
 6 回目の 1 件目は自分の検査の欠陥なので直した。2 件目は削りの効果そのものに関わるので、
 **着地の前に人が決める**（仕様本文の契約を戻すか、削りの主張を狭めるか）。
 
+### 審査の指摘と対応（7 回目）
+
+`a1db857` への Codex 審査で 1 件（P2）が付いた。直した。
+
+- **m2 の結合性の探針（`scripts/verify-m2.sh` 検査 8）**: 直した。m2 は `cargo test --test
+  parse_corpus` しか回さなくなっており、`parser::tests::left_assoc_add_and_mul` を含む全体を
+  見ていなかった。`docs/corpus.md` は「式木の往復は結合性を見ない（描画側が括弧を必ず付ける）
+  ので、`parser::tests::left_assoc_add_and_mul` が固定し、`verify-m2.sh` が `cargo test` 全体を
+  見ることで捕まえる」と書いており、**この PR がその記述を偽にしていた**（`docs/corpus.md` の
+  当該の文はこの PR で変えていない）。全走では m0 が同じ `cargo test` を回すので気づきにくいが、
+  AGENTS.md の「門番は小さく回す」に従って m2 を単体で回す手順では誰も見ていない。検査 8 として
+  全体の実走と、`parser::tests::left_assoc_add_and_mul ... ok` の行を戻した。全走では
+  `cargo_cached` が m0 の実走に畳むので費用は増えない。変異（テスト名を変える・期待値を壊す）で
+  `associativity-probe-not-run` と `cargo-test-exit!=0` の赤を確かめた。
+
+m2 は 8 → 8 検査に戻り、core は 639/639。削りの正味は −68 → −63 になった（m2 の −1 が消え、
+文書層が +6 になったため）。削りの判断そのものは、呼び直しの側（検査 5）だけを冗長と見る形で
+保っている。
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -328,13 +350,13 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
 $ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
 TALLY: 38/38 passed; red: none
 $ bash scripts/run-gates.sh --tier core --jobs 3 target/gates-core 2>&1 | tail -1
-TALLY: 638/638 passed; red: none
+TALLY: 639/639 passed; red: none
 $ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
 TALLY: 3720/3720 passed; red: none
 $ bash scripts/verify-m0.sh 2>&1 | tail -1
 PASSED: 8/8
 $ bash scripts/verify-m2.sh 2>&1 | tail -1
-PASSED: 7/7
+PASSED: 8/8
 $ bash scripts/verify-m3.sh 2>&1 | tail -1
 PASSED: 11/11
 $ bash scripts/verify-m7.sh 2>&1 | grep 'prelude inventory'
@@ -357,18 +379,18 @@ m0 の全走は `OK: 2 cargo-test passed=746`（8/8。検査 8 は審査の 3 �
 `PASSED: 111/111` の 1 回と m0 の `cargo test`（`corpus.rs`）の 1 回で、m7 は `PASSED: 2/2`
 （inventory と cargo test）。m7 の inventory は門番 1 件の中身なので、層の合計は増えない
 （48 → 67 は内訳）。full は m7 の編集前（`--jobs 1`）と、審査の 2 回目まで直した後（`--jobs 3`）に
-回し、後者が `3720/3720`・`red: none`。core は 637 → 638（m0 の検査 8）。文書層は 14 → 16
+回し、後者が `3720/3720`・`red: none`。core は 602 → 639（m6 の +38 と、審査で戻した m0 の検査 8・m2 の検査 8）。文書層は 14 → 16
 （検査 15・16）。
 
 門番は 83 → 64 本。全走の検査の合計は 3788 → 3720（test-prune の実測が 3788）。落とした
-検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件と lint-docs の検査 1 件が
-増えて、正味 −68。core 層は 602 → 638（m6 の +38 と、m2 −1・m3 −1・m7 −1 と、審査の
-3 回目で足した m0 の検査 8）。quick 層は 38 のまま。
+検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件と lint-docs の検査 6 件が
+増えて、正味 −63。core 層は 602 → 639（m6 の +38 と、審査で戻した m0 の検査 8・m2 の検査 8）。
+quick 層は 38 のまま。
 
-主な門番の検査数（前 → 後）: m0 7 → 8、m2 8 → 7、m3 12 → 11、m6 73 → 111、m7 3 → 2、
-r33 73 → 72、r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、r47 7 → 4、
-r48 8 → 5、r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま（中身を print-type
-だけに替えた）、r81 5 → 2。文書層は 10 → 16。
+主な門番の検査数（前 → 後）: m0 7 → 8、m2 8 → 8（審査で戻した）、m3 12 → 11、m6 73 → 111、
+m7 3 → 2、r33 73 → 72、r36 388 → 384、r37 262 → 260、r43 12 → 10、r45 8 → 5、r46 7 → 5、
+r47 7 → 4、r48 8 → 5、r49 6 → 2、r50〜r65 は各 −2、r68〜r76 は各 −1、r77 は 5 のまま
+（中身を print-type だけに替えた）、r81 5 → 2。文書層は 10 → 16。
 
 門番ごとの秒（編集前の `--jobs 1` の全走、`target/gate-times.tsv` の上位）: r34 214、m0 186、
 r35 183、r36 76、m1-corpus 67、embed-runtime 67、m2 65、r37 54、r43 42。合計 1239 秒で、
