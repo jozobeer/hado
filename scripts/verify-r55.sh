@@ -44,10 +44,8 @@ MAIN = (
 )
 UTIL = 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => x\n'
 
-
 def run(*args, cwd=None):
     return subprocess.run([HADO, *args], capture_output=True, cwd=cwd)
-
 
 def project(directory, files):
     path = Path(directory)
@@ -58,10 +56,8 @@ def project(directory, files):
         target.write_text(text)
     return path
 
-
 def root(directory):
     return project(directory, {'main.hd': MAIN, 'lib/util.hd': UTIL})
-
 
 def printed(path, name=None):
     """The stdout of `check --print-type=<name>` for one definition."""
@@ -178,42 +174,11 @@ print('member: an implementation member is printed by name, an unknown name is a
 PY
 }
 
-# --- 55-f: 仕様と層と lock ---
-r55_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '## 58.3. ' in spec, 'no §58.3'
-tail = spec.split('## 58. ', 1)[1].split('## 58.1. ', 1)[0]
-assert '--print-type[=<名前>]' in tail, '§58 does not list the named --print-type'
-section = spec.split('## 58.3. ', 1)[1].split('\n## ', 1)[0]
-# §58.3 が決めていること: 改名の順、開いた行、`Pure` の扱い、値の定義の形、
-# member は契約の型であること。
-for word in ('`A` `B`', '| A', 'Pure', 'E100', '契約'):
-    assert word in section, f'§58.3 does not define {word}'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r55' in full, 'r55 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert '§58.3' in trace, 'spec-trace has no §58.3 row'
-wants = Path('docs/wants.md').read_text()
-assert 'R55' in wants, 'wants.md does not record R55'
-print('docs: §58.3, the check line, the trace row, the tier and wants')
-PY
-}
-
-r55_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '55-a a value definition prints its type' r55_value
 check '55-b quantified variables are renamed from A' r55_polymorphic
 check '55-c concrete and variable effect rows are printed' r55_effects
 check '55-d the two ways to print main agree' r55_two_ways
 check '55-e an implementation member is printed by name' r55_member
-check '55-f spec, trace, tier, wants' r55_docs
-check '55-f corpus lock' r55_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

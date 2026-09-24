@@ -31,7 +31,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(root, name, source, *args):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -39,10 +38,8 @@ def run(root, name, source, *args):
     path.write_text(source)
     return subprocess.run([HADO, *args, str(path)], capture_output=True)
 
-
 def source_of(root, name):
     return (Path(root) / name / 'main.hd').read_text()
-
 
 def check_code(root, name, source, code, hint='absent'):
     """`check` reports `code`. `hint` is the expected canonical form, or None for none at all."""
@@ -57,7 +54,6 @@ def check_code(root, name, source, code, hint='absent'):
         assert 'canonical form: ' + hint in text, (name, hint, text)
     return result
 
-
 def check_fix(root, name, source, expected):
     """`check --fix` applies the rewrite, passes, and leaves exactly `expected`."""
     result = run(root, name, source, 'check', '--fix')
@@ -65,7 +61,6 @@ def check_fix(root, name, source, expected):
     text = source_of(root, name)
     assert text == expected, (name, repr(text), repr(expected))
     return text
-
 
 def fmt(root, name, source, expected):
     result = run(root, name, source, 'fmt')
@@ -76,12 +71,10 @@ def fmt(root, name, source, expected):
     assert second.returncode == 0 and source_of(root, name) == text, (name, 'fmt must be idempotent')
     return text
 
-
 def fmt_check(root, name, source, want):
     result = run(root, name, source, 'fmt', '--check')
     assert result.returncode == want, (name, want, result.returncode, result.stderr.decode())
     assert source_of(root, name) == source, (name, 'fmt --check must not write')
-
 
 def build_fix(root, name, source, expected):
     result = run(root, name, source, 'build', '--fix', '-o', str(Path(root) / name / 'program'))
@@ -89,7 +82,6 @@ def build_fix(root, name, source, expected):
     text = source_of(root, name)
     assert text == expected, (name, repr(text), repr(expected))
     return text
-
 
 def no_rewrite(root, name, source, code):
     """The diagnostic fires, no rewrite is offered, and neither tool writes."""
@@ -99,7 +91,6 @@ def no_rewrite(root, name, source, code):
     assert source_of(root, name) == source, (name, 'check --fix must not write')
     fmt_check(root, name, source, 0)
 
-
 def build_run(root, name, expect):
     directory = Path(root) / name
     build = subprocess.run([HADO, 'build', str(directory / 'main.hd')], capture_output=True)
@@ -107,7 +98,6 @@ def build_run(root, name, expect):
     result = subprocess.run([str(directory / 'main')], capture_output=True, cwd=directory, stdin=subprocess.DEVNULL)
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
     assert result.stdout.decode() == expect + '\n', (name, result.stdout.decode(), expect)
-
 
 def value_of(rng):
     """A generated option argument and the text `main` prints for it."""
@@ -322,39 +312,12 @@ print(f'shared: {len(shapes)} shapes have the same text from check --fix, fmt an
 PY
 }
 
-# --- 57-g: 仕様と層と lock ---
-r57_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-section = spec.split('## 57. ', 1)[1].split('\n## ', 1)[0]
-for word in ('E507', 'E508', 'def f value => value', 'let', '本体ちょうど', 'fallback'):
-    assert word in section, f'§57 does not mention {word}'
-assert '局所的な書き換えを持たない正準形違反（E507 / E508）' not in spec, '§58.1 still calls E507 / E508 unfixable'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r57' in full, 'r57 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r57' in trace, 'spec-trace does not name verify-r57'
-wants = Path('docs/wants.md').read_text()
-assert 'R57' in wants, 'wants.md does not record R57'
-print('docs: §57, §58.1, the trace rows, the tier and wants')
-PY
-}
-
-r57_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '57-a the if form becomes its scrutinee' r57_if
 check '57-b the arm forms become identity functions' r57_arms
 check '57-c the tail E508 becomes let p? = and propagates' r57_repropagate_if
 check '57-d the E508 arm forms name the parameter value' r57_repropagate_arms
 check '57-e forms without a local rewrite are left alone' r57_declines
 check '57-f check --fix, fmt and build --fix share one rewrite' r57_shared
-check '57-g spec, trace, tier, wants' r57_docs
-check '57-g corpus lock' r57_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

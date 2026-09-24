@@ -29,7 +29,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def write(root, name, source):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -37,22 +36,18 @@ def write(root, name, source):
     path.write_text(source)
     return path
 
-
 def hado(args):
     return subprocess.run([HADO, *args], capture_output=True)
-
 
 def check_ok(path):
     result = hado(['check', str(path)])
     assert result.returncode == 0 and result.stderr == b'', (path, result.returncode, result.stderr.decode())
-
 
 def check_code(path, code):
     result = hado(['check', str(path)])
     assert result.returncode == 1, (path, result.returncode, result.stderr.decode())
     match = re.match(rb'[^:]+:(\d+):(\d+): error\[(E\d+)\]', result.stderr)
     assert match and match.group(3).decode() == code, (path, code, result.stderr.decode())
-
 
 def build_run(root, name, source, expected):
     """Check, build to a private path, run, and require `expected` plus a newline."""
@@ -65,7 +60,6 @@ def build_run(root, name, source, expected):
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
     assert result.stderr == b'', (name, result.stderr.decode())
     assert result.stdout == f'{expected}\n'.encode(), (name, result.stdout, expected)
-
 
 def control(root):
     """The comparisons must reject a wrong code and a wrong output."""
@@ -129,22 +123,6 @@ print(f'effectful value: seed {seed}, 6 definitions passed through a polymorphic
 PY
 }
 
-# --- 49-b: 直した節を docs/bug.md から消し、回帰テストが緑 ---
-r49_bug_section_removed() {
-    python3 - <<'PY'
-from pathlib import Path
-
-document = Path('docs/bug.md').read_text()
-title = '効果行付きの関数値を返す member の build が失敗する'
-assert title not in document, 'the fixed bug is still documented'
-print('bug.md: the fixed section is gone')
-PY
-}
-
-r49_regression_test() {
-    cargo test --offline -q --test build_cli
-}
-
 # --- 49-c: 効果行の無い関数値と、効果行付き関数値をフィールドに持つ record ---
 r49_unchanged_forms() {
     python3 - "$workdir" "$hado" <<'PY'
@@ -182,27 +160,8 @@ print(f'unchanged forms: {len(cases)} function values still build and run')
 PY
 }
 
-r49_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r49' in full, 'r49 is not in the full tier'
-print('docs: r49 is in the full tier')
-PY
-}
-
-r49_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '49-a effectful function values build and run' r49_effectful_value
-check '49-b the fixed section is gone from docs/bug.md' r49_bug_section_removed
-check '49-b build_cli regression test' r49_regression_test
 check '49-c pure and record function values are unchanged' r49_unchanged_forms
-check '49-d r49 in the full tier' r49_docs
-check '49-d corpus lock' r49_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

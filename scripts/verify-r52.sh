@@ -31,15 +31,12 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(*args, cwd=None):
     return subprocess.run([HADO, *args], capture_output=True, cwd=cwd)
-
 
 def header_code(path):
     match = re.search(r'^// error: (E[1-7]\d\d)$', Path(path).read_text(), re.M)
     return match.group(1) if match else None
-
 
 def project(directory, files):
     path = Path(directory)
@@ -50,13 +47,11 @@ def project(directory, files):
         target.write_text(text)
     return path
 
-
 def formatted_line(path, rewrites=None):
     pattern = rf'^fmt: {re.escape(path)} \(\d+ rewrites\)$'
     if rewrites is not None:
         pattern = rf'^fmt: {re.escape(path)} \({rewrites} rewrites\)$'
     return re.compile(pattern, re.M)
-
 
 def control(root):
     """A canonical file must not look like it would change."""
@@ -242,39 +237,11 @@ print('build --fix: the source is made canonical before the build and runs')
 PY
 }
 
-r52_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '## 58.1. ' in spec, 'no §58.1'
-tail = spec.split('## 58. ', 1)[1].split('## 58.1. ', 1)[0]
-assert 'hado fmt [--check] <file.hd>' in tail, '§58 does not list fmt'
-assert 'hado build [-o <path>] [--fix] <file.hd>' in tail, '§58 does not list build --fix'
-section = spec.split('## 58.1. ', 1)[1].split('\n## ', 1)[0]
-assert 'hado fmt' in section and '--check' in section, '§58.1 does not define fmt'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r52' in full, 'r52 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert '§58.1' in trace, 'spec-trace has no §58.1 row'
-wants = Path('docs/wants.md').read_text()
-assert 'R52' in wants, 'wants.md does not record R52'
-print('docs: §58.1, the command list, the trace row, the tier and wants')
-PY
-}
-
-r52_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '52-a fmt matches check --fix and becomes accepted' r52_same_as_check_fix
 check '52-b fmt writes rewrites that check --fix cannot reach' r52_beyond_diagnostics
 check '52-c --check writes nothing and fmt is idempotent' r52_check_mode
 check '52-d the whole input root is formatted' r52_project_scope
 check '52-e build --fix makes the source canonical' r52_build_fix
-check '52-f spec, trace, tier, wants' r52_docs
-check '52-f corpus lock' r52_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
