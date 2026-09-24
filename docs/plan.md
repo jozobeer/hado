@@ -1288,3 +1288,20 @@ slug `prelude-tail-recursion`、`highlight-treesitter`、`lsp-minimal` を次の
 | L3 | サーバの形 | `hado lsp` サブコマンド。JSON-RPC は `serde_json` で書く。機能は診断・hover（最上位の `def`）・正準形への code action の 3 つ。補完は入れない | §58 |
 | L4 | 診断の位置 | `--format json` に終端の位置を足す | §58.4 |
 | H1 | ハイライト | Neovim 用の手書き tree-sitter 文法を `editors/tree-sitter-hado/` に置く。受理コーパスと stdlib が `ERROR` 無しで読めることを門番にする。付録C からの生成は形が固まってから | 付録C |
+
+## 36. 仕様の機械可読部分を spec/ に出す（2026-09-23）
+
+仕様の規範内容のうち、機械が読む部分を `docs/spec.md` の Markdown から出す。正本は `spec/` に置き、`docs/spec.md` の表とフェンスは生成物にする（`scripts/spec-lock.sh`。`scripts/corpus-lock.sh` と同じ形）。
+
+動機は 2 つある。同じ事実が 4 か所（`docs/spec.md` §56 の表・`crates/hado/src/*.rs` の `"Exxx"`・corpus の `// spec:`・`docs/spec-trace.md` の行）に写されており、正本が無いので「仕様は X と言っている」を文字列の実在（針）でしか表せない。33 節が 2026-09-14 に棚卸しを決めた文章固定検査がこれである。針は指摘の形が無限に作れるので、`scripts/lint-docs.sh` に検査が積み上がる（1000 行・16 検査・検査ごとに専用の正規表現）。
+
+| 段 | 内容 | 状態 |
+|---|---|---|
+| 1 | エラーコード表と文法。`spec/errors.toml`・`spec/grammar.ebnf` を正本にし、§56 の表と付録C のフェンスを生成する | 済み（`docs/rounds/spec-model.md`） |
+| 2 | 追跡表。`docs/spec-trace.md`・`docs/spec-coverage.md` をデータにし、Markdown を生成する | 未着手 |
+| 3 | `scripts/lint-docs.sh` を 1 つのパーサと宣言的な規則に割る。散文の針を隔離する | 未着手 |
+| 4 | 実測を生成物にする（`docs/issues/lint-docs-hardening.md` の案 A） | 未着手 |
+
+第 1 段で、`docs/spec.md` §56 の表の 5 行が壊れていたことが分かった（セルの `` `|` `` を逃がしていない。GFM はコードスパンの中でも `|` の escape を求める）。正本が無いので誰も気づいていなかった。H1（tree-sitter 文法）の「付録C からの生成」は、付録C が `spec/grammar.ebnf` の生成物になったので読み先が定まった。
+
+第 2 段は、追跡表の消費者が人間だけでなく `scripts/lint-docs.sh`（検査 3・12・14）と `scripts/verify-m1-corpus.sh` であることを確かめてから決める。人間のための記録なら Markdown のまま残し、機械が読む部分だけをデータにする。
