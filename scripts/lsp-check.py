@@ -199,7 +199,7 @@ end
 
 -- README の cmd（scripts/hado-lsp.sh → cargo run）は exec で `hado lsp` に置き換わる。
 -- それまでの時間は並走する門番と取り合う cargo の build lock 待ちなので、サーバの
--- 応答の予算（30 秒）に入れず、起動器の見張り（HADO_LSP_LAUNCH_MS）で待つ。
+-- 応答の予算（30 秒）に入れない。
 local function launched()
   for _, pid in ipairs(vim.api.nvim_get_proc_children(vim.fn.getpid())) do
     local proc = vim.api.nvim_get_proc(pid)
