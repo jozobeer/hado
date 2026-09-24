@@ -1507,3 +1507,31 @@ fn an_operation_in_a_nested_handler_arm_does_not_reach_the_entered_handler() {
     assert_eq!(output.stdout, b"0\n");
     assert!(output.stderr.is_empty());
 }
+
+#[test]
+fn once_handler_arm_must_match_the_operation_result_type() {
+    let source = "effect Ask\nonce ask: Int\nhandler Ask as H\nonce ask => \"hello\"\nreturn value => value\ndef main = with H -> ask\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    case.reject(
+        "check",
+        "main.hd",
+        "main.hd",
+        "E305",
+        source.find("\"hello\"").unwrap(),
+    );
+}
+
+#[test]
+fn once_handler_arm_must_bind_every_operation_parameter() {
+    let source = "effect Ask\nonce ask(name: String): Int\nhandler Ask as H\nonce ask => 1\nreturn value => value\ndef main = with H -> ask \"x\"\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    case.reject(
+        "check",
+        "main.hd",
+        "main.hd",
+        "E301",
+        source.find("once ask =>").unwrap() + "once ".len(),
+    );
+}
