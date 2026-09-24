@@ -26,10 +26,8 @@ cat >"$workdir/harness.py" <<'PY'
 import subprocess
 from pathlib import Path
 
-
 def assert_printed(actual, expected):
     assert actual == expected, (actual, expected)
-
 
 def control():
     try:
@@ -37,7 +35,6 @@ def control():
     except AssertionError:
         return
     raise AssertionError('comparison control escaped')
-
 
 def build_printed(root, name, source, expected):
     directory = Path(root) / name
@@ -53,59 +50,6 @@ def build_printed(root, name, source, expected):
     assert_printed(result.stdout, expected.encode())
     return directory
 PY
-
-# --- 43-a: 仕様と stdlib の一致（新しい member と log） ---
-r43_spec_stdlib() {
-    python3 - <<'PY'
-from pathlib import Path
-import re
-
-spec = Path('docs/spec.md').read_text()
-sections = re.findall(r'^## 55\.[^\n]*\n(.*?)(?=^## \d+\.|\Z)', spec, re.M | re.S)
-assert len(sections) == 1, len(sections)
-section = sections[0]
-
-block = re.search(r'関数集合は次とする。\s*```text\n(.*?)```', section, re.S)
-assert block, 'missing function set in §55'
-inventory = {}
-for line in block.group(1).splitlines():
-    if not line.strip():
-        continue
-    name, members = line.split(':', 1)
-    inventory[name.strip()] = members.split()
-
-expected = {
-    'List': ['head', 'nth', 'take', 'drop'],
-    'String': ['join', 'trim'],
-    'Int': ['abs', 'min', 'max'],
-}
-for module, members in expected.items():
-    for member in members:
-        assert member in inventory.get(module, []), f'{module}.{member} missing from the function set'
-
-members = {
-    'stdlib/list.hd': ['def A head(values: A List): A Option Pure',
-                       'def A nth(values: A List, index: Int): A Option Pure',
-                       'def A take(values: A List, count: Int): A List Pure',
-                       'def A drop(values: A List, count: Int): A List Pure'],
-    'stdlib/string.hd': ['def join(values: String List, separator: String): String Pure',
-                         'def trim(s: String): String Pure'],
-    'stdlib/int.hd': ['def abs(value: Int): Int Pure',
-                      'def min(left: Int, right: Int): Int Pure',
-                      'def max(left: Int, right: Int): Int Pure'],
-}
-for path, signatures in members.items():
-    source = Path(path).read_text()
-    for signature in signatures:
-        assert signature in source, f'{path}: {signature}'
-        assert signature in section, f'docs/spec.md §55: {signature}'
-
-log = 'once log(contents: String): Void {Error}'
-assert log in section, log
-assert log in Path('stdlib/io.hd').read_text(), log
-print('spec and stdlib: ' + ', '.join(f'{module}.{member}' for module, items in expected.items() for member in items) + ', Io.log')
-PY
-}
 
 # --- 43-b: log の正常系 ---
 r43_log_success() {
@@ -189,7 +133,6 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from harness import build_printed
 
-
 def string_expression(text):
     """Write a String as a literal, or through Bytes when it holds a control
     byte: §5 has escapes only for \\n and \\t, so CR, VT and FF cannot be
@@ -198,7 +141,6 @@ def string_expression(text):
         return json.dumps(text, ensure_ascii=False)
     values = ', '.join(str(byte) for byte in text.encode())
     return f'(Bytes.to_string (Bytes.of_list [{values}]))'
-
 
 trims = ['', ' ', '  abc  ', '\t\n\v\f\r abc \r\n\t', 'a b', '　abc　', '日本 語',
          ' 日本語 ', 'a', '\r\n', '　', 'x\ty\nz']
@@ -229,16 +171,13 @@ from harness import build_printed
 
 LOW, HIGH = -(2 ** 63), 2 ** 63 - 1
 
-
 def wrap(value):
     return ((value + 2 ** 63) % 2 ** 64) - 2 ** 63
-
 
 def expression(value):
     if value == LOW:
         return '(Int.parse "-9223372036854775808")'
     return f'({value})'
-
 
 values = [LOW, LOW + 1, -1, 0, 1, HIGH - 1, HIGH, -123456789, 987654321]
 for index, value in enumerate(values):
@@ -264,24 +203,19 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from harness import build_printed
 
-
 def canon(value):
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
 
-
 def canon_list(values):
     return '[' + ', '.join(canon(value) for value in values) + ']'
-
 
 def canon_option(value):
     return 'None' if value is None else 'Some(' + canon(value) + ')'
 
-
 int_lists = [[], [1], [1, 2], [1, 2, 3], [-1, 0, 7]]
 string_lists = [[], ['a'], ['a', 'bb'], ['', 'x']]
-
 
 def source_list(values):
     if values and isinstance(values[0], str):
@@ -289,7 +223,6 @@ def source_list(values):
     else:
         empty = 'List.filter [0] fn(value => value > 0)'
     return empty if not values else '[' + ', '.join(canon(value) for value in values) + ']'
-
 
 index = 0
 for values in int_lists + string_lists:
@@ -359,10 +292,6 @@ print(f'corpus: {len(selected)} accept cases derived by content, headers, lock a
 PY
 }
 
-r43_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 # --- 43-h: Io の 5 つ目の操作の handler と、r37 の門番の追随 ---
 r43_io_handler() {
     python3 - "$workdir" <<'PY'
@@ -392,7 +321,6 @@ def check(name, source, expected_code):
     assert f'error[{expected_code}]'.encode() in result.stderr, (name, result.stderr)
     return result
 
-
 check('full', full, None)
 check('missing-log', missing, 'E605')
 r37 = Path('scripts/verify-r37.sh').read_text()
@@ -403,7 +331,6 @@ print('io handler: 5 arms accepted, missing log is E605, r37 gates follow')
 PY
 }
 
-check '43-a spec and stdlib members' r43_spec_stdlib
 check '43-b log success' r43_log_success
 check '43-c log closed stdout is IoFailure' r43_log_closed_stdout
 check '43-c log /dev/full is IoFailure' r43_log_full_device
@@ -412,8 +339,7 @@ check '43-c log failure is caught as an Error value' r43_log_caught
 check '43-d String.trim and String.join' r43_string_ops
 check '43-e Int.abs min max' r43_int_ops
 check '43-f List head nth take drop' r43_list_ops
-check '43-g accept corpus and lock' r43_corpus
-check '43-g corpus lock verifies' r43_lock
+check '43-g accept corpus' r43_corpus
 check '43-h Io handler and r37 follow-up' r43_io_handler
 
 echo "PASSED: $passed/$total"

@@ -1,3 +1,4 @@
+use hado::check_source;
 use hado::parser::{self, parse_source};
 
 fn spec() -> &'static str {
@@ -190,6 +191,31 @@ fn keywords_cannot_be_names() {
         let error = parse_source(&source, "generated.hd").expect_err(&source);
         assert_eq!(error.code.as_deref(), Some("E100"), "{keyword}: {error}");
     }
+}
+
+#[test]
+fn once_and_again_are_the_operation_kinds() {
+    for source in [
+        "effect Ask\nonce ask: String\nhandler Ask as H\nonce ask => \"x\"\ndef main = with H -> ask\n",
+        "effect A Y\nagain y(value: Int): Void\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> do y 1 -> 0\n",
+        "effect A Y\nagain y(value: Int): Void\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n",
+    ] {
+        parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
+        check_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
+    }
+    for source in [
+        "effect E reply x: Int\ndef main = 0\n",
+        "effect E capture x: Int\ndef main = 0\n",
+    ] {
+        let error = parse_source(source, "generated.hd").expect_err(source);
+        assert_eq!(error.code.as_deref(), Some("E100"), "{error}\n{source}");
+    }
+    // 旧綴りは予約語ではなくただの名前。名前解決と型検査まで通ることを見る（r44 の移送元）。
+    check_source(
+        "def reply = 1\ndef capture = 2\ndef main = reply + capture\n",
+        "generated.hd",
+    )
+    .unwrap();
 }
 
 #[test]

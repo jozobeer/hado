@@ -295,8 +295,12 @@ else
     fail 5 "corpus-enumeration:$c5_reasons"
 fi
 
-# --- check 6: header conventions and // needs: prelude ---
+# --- check 6: header conventions, // needs: prelude, and the accept vocabulary ---
 c6_reasons=""
+# 受理コーパスは Result の constructor を名指ししない（§54 で失敗は raise が表す）。
+# 元は verify-r25.sh の検査 25-e。r9〜r28 で唯一の固有検査だったのでここへ移した。
+result_hits=$(grep -REl 'Ok\(|Error\(' tests/accept --include='*.hd' --include='*.hdi' || true)
+[ -z "$result_hits" ] || c6_reasons="$c6_reasons result-constructors:$(printf '%s' "$result_hits" | tr '\n' ',')"
 prelude_members() {
     python3 - "$1" <<'PY'
 from pathlib import Path
@@ -361,30 +365,18 @@ for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
     esac
 done
 if [ -z "$c6_reasons" ]; then
-    pass 6 "headers"
+    pass 6 "headers-and-vocabulary"
 else
     fail 6 "headers:$c6_reasons"
 fi
 
-# --- check 7: existing tests green, compiler body untouched ---
-c7_reasons=""
-cargo_cached test --test walk >"$TMPD/walk.log" 2>&1
-[ "$?" -eq 0 ] || c7_reasons="$c7_reasons walk-exit!=0"
-cargo_cached test --test tail >"$TMPD/tail.log" 2>&1
-[ "$?" -eq 0 ] || c7_reasons="$c7_reasons tail-exit!=0"
-gate_cached verify-m0 bash scripts/verify-m0.sh >"$TMPD/m0.log" 2>&1
-m0_status=$?
-m0_last=$(tail -n 1 "$TMPD/m0.log")
-if [ "$m0_status" -ne 0 ] || [ "$m0_last" != "PASSED: 7/7" ]; then
-    c7_reasons="$c7_reasons verify-m0(status=$m0_status,last=$m0_last)"
-fi
-if ! sha256sum --status -c "$TMPD/protected.sha"; then
-    c7_reasons="$c7_reasons protected-files-changed-during-verification"
-fi
-if [ -z "$c7_reasons" ]; then
-    pass 7 "no-regressions"
+# --- check 7: verification preserves documentation, runtime, and scripts ---
+# 旧検査は walk / tail / m0 を呼び直していたが、同じ層の m0 が同じ走行で測るので
+# 落とした（docs/rounds/prune-gates.md 群 G）。残るのは開始時の固定の照合だけ。
+if sha256sum --status -c "$TMPD/protected.sha"; then
+    pass 7 "protected-files-unchanged"
 else
-    fail 7 "no-regressions:$c7_reasons"
+    fail 7 "protected-files-changed-during-verification"
 fi
 
 echo "PASSED: $ok/$total"

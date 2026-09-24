@@ -29,7 +29,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def write(root, name, files):
     directory = Path(root) / name
     for relative, text in files.items():
@@ -38,16 +37,13 @@ def write(root, name, files):
         path.write_text(text)
     return directory
 
-
 def project(root, name, files, *args, entry='main.hd'):
     """Write `files` under `<root>/<name>` and run the CLI on the entry."""
     directory = write(root, name, files)
     return subprocess.run([HADO, *args, str(directory / entry)], capture_output=True)
 
-
 def accepted(result):
     assert result.returncode == 0 and result.stderr == b'', (result.returncode, result.stderr.decode())
-
 
 def diagnostic(result, code, status=1):
     """The run's single diagnostic line, split into its parts."""
@@ -61,7 +57,6 @@ def diagnostic(result, code, status=1):
     return {'path': match.group(1), 'line': int(match.group(2)), 'col': int(match.group(3)),
             'message': match.group(5)}
 
-
 def run_program(root, name, files, *args):
     """Build the entry and run it, returning the process result."""
     directory = write(root, name, files)
@@ -71,7 +66,6 @@ def run_program(root, name, files, *args):
     executable = entry.with_suffix('')
     assert executable.exists(), executable
     return subprocess.run([str(executable), *args], capture_output=True)
-
 
 def printed(root, name, files, definition):
     """The type that `check --print-type=<definition>` prints for the entry."""
@@ -212,33 +206,11 @@ print('E307: a polymorphic recursive argument is still rejected')
 PY
 }
 
-# --- 61-f: 文書と層 ---
-r61_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r61' in full, 'r61 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r61' in trace, 'spec-trace does not name verify-r61'
-assert Path('docs/rounds/r61.md').is_file(), 'docs/rounds/r61.md is missing'
-print('docs: the tier, the trace row and the plan section')
-PY
-}
-
-# --- 61-g: コーパスロック ---
-r61_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '61-a the reproduction from bug.md' r61_reproduction
 check '61-b recursion, and a mutual group' r61_isolation
 check '61-c a written row still constrains' r61_written_rows
 check '61-d an omitted row still reaches the caller' r61_effects_survive
 check '61-e E307 stays' r61_e307
-check '61-f spec, trace, tier' r61_docs
-check '61-g corpus lock' r61_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

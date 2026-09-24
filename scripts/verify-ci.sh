@@ -11,7 +11,8 @@
 #      回さずに落ちる。
 #   c. ワークフローの配線。YAML として読み、入口を呼び、依存の取得・libgc-dev・
 #      キャッシュ・打ち切り・失敗ログを持つ。層と門番の一覧をワークフローに
-#      書かない。
+#      書かない。runner は Linux x86_64（standard か、既定のラベルを持つ自前）で、
+#      cargo の PATH は取得より前に通す。
 #
 # 判定 a・b は合成木で測る。scripts/ci-run.sh と scripts/lib/gate-tiers.sh だけを
 # 写し、run-gates と lint-docs を「受けた引数を記録する stub」に置き換える。
@@ -260,8 +261,15 @@ jobs = doc.get('jobs')
 if not isinstance(jobs, dict) or len(jobs) != 1:
     fail('jobs must be exactly one')
 job = next(iter(jobs.values()))
-if job.get('runs-on') != 'ubuntu-latest':
-    fail(f'runs-on: {job.get("runs-on")!r} (the gates need Linux x86_64)')
+# 門番は Linux x86_64 を要る（libgc-dev・Cranelift）。GitHub の standard runner か、
+# 既定のラベルを持つ自前の Linux x86_64 runner のどちらでもよい（docs/rounds/ci.md の決定 9）。
+# 自前の側はラベルを**厳密に**比べる。GitHub は全てのラベルを持つ runner を要るので、
+# 余分なラベルを足すと job が誰にも拾われなくなる（`windows` を足しても subset では緑になる。
+# 審査の指摘）。ラベルを増やすときは docs/rounds/ci.md の決定とここを同時に直す。
+runs_on = job.get('runs-on')
+self_hosted = isinstance(runs_on, list) and set(runs_on) == {'self-hosted', 'linux', 'x64'}
+if runs_on != 'ubuntu-latest' and not self_hosted:
+    fail(f'runs-on: {runs_on!r} (the gates need Linux x86_64)')
 if not isinstance(job.get('timeout-minutes'), int):
     fail('no timeout-minutes')
 
@@ -291,6 +299,15 @@ if len(fetch) != 1 or fetch[0] >= entry_index:
 fetch_env = steps[fetch[0]].get('env')
 if not isinstance(fetch_env, dict) or str(fetch_env.get('CARGO_NET_OFFLINE')).lower() != 'false':
     fail('the fetch step does not open the network')
+
+# cargo は runner の PATH に無いことがある（自前の runner は ~/.cargo に置く）ので、
+# fetch より前に PATH を通す段を持つ（docs/rounds/ci.md の決定 10）。
+path_steps = [
+    i for i, step in enumerate(steps)
+    if 'GITHUB_PATH' in run_text(step) and '.cargo/bin' in run_text(step)
+]
+if len(path_steps) != 1 or path_steps[0] >= fetch[0]:
+    fail(f'the .cargo/bin PATH step must run exactly once, before the fetch: {path_steps!r}')
 
 if not any('libgc-dev' in run_text(step) for step in steps):
     fail('libgc-dev is not installed')

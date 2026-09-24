@@ -6,15 +6,16 @@ cargo build --offline --bin hado
 hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 python3 - "$hado_target_dir/debug/hado" "$@" <<'PY'
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
 compiler = str(Path(sys.argv[1]).resolve())
-include_prelude = sys.argv[2:] == ["--with-prelude"]
-if sys.argv[2:] and not include_prelude:
+# prelude は R32 以降すべての build に連結されるので、受理コーパスを全件実走する。
+# 旧 `--with-prelude` は m7 が「全件」を選ぶための印だった。m7 の呼び出しを消し、
+# 既定を全件にした（docs/rounds/prune-gates.md 群 E）。
+if sys.argv[2:] not in ([], ["--with-prelude"]):
     sys.exit("usage: verify-m6.sh [--with-prelude]")
 passed = total = 0
 
@@ -37,8 +38,6 @@ def verify(name, copied, stdout, stderr=b"", status=0):
 with tempfile.TemporaryDirectory(prefix="hado-m6-") as temporary:
     for source in sorted(Path("tests/accept").glob("*/main.hd")):
         text = source.read_text()
-        if not include_prelude and re.search(r"^// needs: prelude\s*$", text, re.M):
-            continue
         total += 1
         headers = [(line.startswith("// expect-error:"), line.split(":", 1)[1].strip())
                    for line in text.splitlines()

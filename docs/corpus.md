@@ -16,7 +16,7 @@
 | `// expect: <文字列>` | 受理のみ | 実行したときの stdout（trim 後）。値が空なら stdout は空（§54 の最上位 Void） |
 | `// expect-error: <文字列>` | 受理のみ | `main` が `Error(e)` を返す受理。stdout は空、stderr が `<文字列>`（trim 後）、終了コードは 1。`// expect:` と排他 |
 | `// item: <項目名>` | 任意 | `docs/plan.md` 2.2、9.2、11.2、13.2、18.4、24.2 の項目名。`docs/spec-coverage.md` と文字列一致 |
-| `// needs: prelude` | 受理のみ | prelude の関数を使う。M3〜M6 の判定から除外される |
+| `// needs: prelude` | 受理のみ | prelude の関数を使う。prelude の member を使う受理にはこのタグが要る（M1-corpus が赤にする）。prelude を連結しない M5 は付いた件を飛ばし、M6 は prelude を連結して全件を実走する |
 | `// short-circuit:` | 受理のみ | 短絡評価の検証用。値は短絡する演算子。評価されない側に停止しない再帰を置く |
 
 節を増やすときは既存の番号を動かさない。本文の新しい節は直前に置きたい節の直後に小数で入れ（例 `§N.M`）、整数は本文の末尾にだけ足す。付録は `付録A` から順に足し、本文の番号を使わない。`// spec:` はこの表記をそのまま使う。
@@ -94,7 +94,7 @@ R3・R5・R6 で繰り返し見つかった（`docs/ledger.md`）。コーパス
 ### corpus-lock
 
 コーパスは既定でロックされ、実装の工程では触らない。`tests/corpus.sha256` に受理・拒否・`stdlib/` のチェックサムを置き、
-`verify-m3.sh` チェック 10 がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
+`verify-m3.sh` チェック 9（core）と `parallel-rounds` の d がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
 lock は `find tests/accept tests/reject tests/library -type f \( -name '*.hd' -o -name '*.hdi' \)` が列挙する全ファイルと `stdlib/*.hd` を対象にする。サブディレクトリも含め、行数は対象の実数と一致させる。
 `corpus.rs` は判定器なので lock に含めず、チェック 8 の暗記排除（コーパスのファイル名と 20 文字以上の行が現れない）で守る。
 スクリプト実行の前後で比べる形は、実行の外で書き換えられたコーパスを見逃す（R6 で判明）。

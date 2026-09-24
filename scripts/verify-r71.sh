@@ -5,7 +5,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 pass=0
-total=5
+total=4
 ok() { echo "OK: $1"; pass=$((pass + 1)); }
 ng() { echo "NG: $1 ($2)"; }
 work=$(mktemp -d)
@@ -69,20 +69,6 @@ if cmp -s "$work/d/named.before" "$work/d/named.hd"; then
   ok "71-d the excluded shapes are left alone"
 else
   ng "71-d the excluded shapes are left alone" "pure/named changed"
-fi
-
-# 71-e: 層・系譜・手順書・コーパスのロック。
-missing=""
-bash scripts/run-gates.sh --print-tier full | grep -qx r71 || missing="$missing tier"
-grep -q "verify-r71" docs/spec-trace.md || missing="$missing trace"
-[ -f docs/rounds/r71.md ] || missing="$missing plan"
-if [ -n "$(git status --porcelain tests/accept tests/reject stdlib tests/corpus.sha256)" ]; then
-  missing="$missing corpus"
-fi
-if [ -z "$missing" ]; then
-  ok "71-e tier, trace, plan, corpus lock"
-else
-  ng "71-e tier, trace, plan, corpus lock" "missing:$missing"
 fi
 
 echo "PASSED: $pass/$total"

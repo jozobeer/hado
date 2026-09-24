@@ -1068,12 +1068,8 @@ cp tools/gates/main.hd "$workdir/33k-neg/main.hd"
 sed -i 's/^shared type T = Tally$/type T = Tally/' "$workdir/33k-neg/report/report.hd"
 expect_code_one_of '33-k (4) 負の対照: shared を消した写しは E601 か E705' "$workdir/33k-neg/main.hd" E601 E705
 
-# 33-j: 構文の往復と生成。r9_grammar が shared を生成して往復し、keywords は緑のまま。
-grammar_and_keywords() {
-    cargo test --offline -q --test r9_grammar >/dev/null 2>&1 || return 1
-    cargo test --offline -q --test r23_syntax >/dev/null 2>&1 || return 1
-}
-check '33-j (r9_grammar と r23_syntax が緑)' grammar_and_keywords
+# 33-j（r9_grammar と r23_syntax の緑）は m0 の全走が同じ二進を回すので落とした
+# （docs/rounds/prune-gates.md 群 A）。
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
