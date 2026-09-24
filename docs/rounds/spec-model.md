@@ -131,4 +131,16 @@ $ bash scripts/run-gates.sh --tier core --jobs 4 target/core-gates | tail -1
 TALLY: 604/604 passed; red: none
 ```
 
-quick 層は 38 → 40、core 層は 602 → 604（新しい門番の 2 検査）。門番は 83 → 84 本。
+```
+$ bash scripts/run-gates.sh --tier full --jobs 4 target/full-gates | tail -1
+TALLY: 3790/3790 passed; red: none
+```
+
+quick 層は 38 → 40、core 層は 602 → 604、全走は 3788 → 3790（新しい門番の 2 検査）。
+門番は 83 → 84 本。
+
+### CI
+
+PR #34 は main から切ったので、ワークフローはまだ `runs-on: ubuntu-latest` である。org の
+Free 枠の支払いで job が始まらず（steps 0 で 2 秒）、赤になる。PR #31 が self-hosted へ
+切り替えるので、#31 の着地後に main を取り込むと回る。
