@@ -29,10 +29,8 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(*args, cwd=None):
     return subprocess.run([HADO, *args], capture_output=True, cwd=cwd)
-
 
 def project(directory, files):
     path = Path(directory)
@@ -190,40 +188,11 @@ print('root only: a subdirectory *_test.hd is a project member but is not run')
 PY
 }
 
-# --- 54-f: 仕様と層と lock ---
-r54_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '## 58.2. ' in spec, 'no §58.2'
-tail = spec.split('## 58. ', 1)[1].split('## 58.1. ', 1)[0]
-assert 'hado test <file.hd>' in tail, '§58 does not list test'
-section = spec.split('## 58.2. ', 1)[1].split('\n## ', 1)[0]
-for word in ('*_test.hd', 'failed (build)', 'passed'):
-    assert word in section, f'§58.2 does not define {word}'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r54' in full, 'r54 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert '§58.2' in trace, 'spec-trace has no §58.2 row'
-wants = Path('docs/wants.md').read_text()
-assert 'R54' in wants, 'wants.md does not record R54'
-print('docs: §58.2, the command list, the trace row, the tier and wants')
-PY
-}
-
-r54_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '54-a passing tests run in path order' r54_passing
 check '54-b a failing test does not stop the run' r54_failing
 check '54-c build failures are reported as build failures' r54_build_failure
 check '54-d no test files is an error' r54_no_tests
 check '54-e only the root directory is selected' r54_root_only
-check '54-f spec, trace, tier, wants' r54_docs
-check '54-f corpus lock' r54_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

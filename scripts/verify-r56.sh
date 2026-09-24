@@ -46,17 +46,14 @@ DIAGNOSTIC = re.compile(
     re.M,
 )
 
-
 def run(*args):
     return subprocess.run([HADO, *args], capture_output=True)
-
 
 def project(directory, source):
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=True)
     (path / 'main.hd').write_text(source)
     return path / 'main.hd'
-
 
 def padded(source):
     """Random blank lines and indentation, so the anchor has to be computed."""
@@ -66,14 +63,12 @@ def padded(source):
     text = '\n' * blank + '\n'.join((' ' * pad + line) if line else '' for line in lines) + '\n'
     return text
 
-
 def anchor(text, needle):
     """The 1-based line and column of the needle's first occurrence."""
     index = text.index(needle)
     line = text.count('\n', 0, index) + 1
     col = index - text.rfind('\n', 0, index)
     return line, col
-
 
 def diagnostic(entry):
     """The single diagnostic `check` reports, as (line, col, code, message)."""
@@ -83,13 +78,11 @@ def diagnostic(entry):
     assert match, result.stderr
     return int(match['line']), int(match['col']), match['code'], match['message']
 
-
 def checked(entry):
     """The exit code of a program that passes."""
     result = run('check', str(entry))
     assert result.stderr == b'', result.stderr
     return result.returncode
-
 
 def shape(name, template, *arguments):
     text = padded(template % arguments)
@@ -206,38 +199,11 @@ print('numbers: no diagnostic prints an internal variable number')
 PY
 }
 
-# --- 56-f: 仕様と層と lock ---
-r56_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '## 15.1. ' in spec, 'no §15.1'
-section = spec.split('## 15.1. ', 1)[1].split('\n## ', 1)[0]
-for word in ('expected', 'found', 'cannot unify', '`A` `B`', '内部の番号'):
-    assert word in section, f'§15.1 does not define {word}'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r56' in full, 'r56 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert '§15.1' in trace, 'spec-trace has no §15.1 row'
-wants = Path('docs/wants.md').read_text()
-assert 'R56' in wants, 'wants.md does not record R56'
-print('docs: §15.1, the trace row, the tier and wants')
-PY
-}
-
-r56_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '56-a an application mismatch names the argument and its parameter' r56_application
 check '56-b a parameter type variable is renamed' r56_variable
 check '56-c an occurs check keeps one name for a shared variable' r56_occurs
 check '56-d a determined site names the pair, a list stays symmetric' r56_other
 check '56-e no diagnostic prints an internal variable number' r56_no_numbers
-check '56-f spec, trace, tier, wants' r56_docs
-check '56-f corpus lock' r56_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

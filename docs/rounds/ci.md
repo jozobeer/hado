@@ -13,7 +13,13 @@
 - ローカルのコマンドは `--offline` が前提（`AGENTS.md`）。CI では依存の取得の段だけ network を
   開ける必要がある。
 - CI に要るものは Rust（Cranelift 0.135 が 1.95 以上を要求）、`cc`、`libgc-dev`、`flock`
-  （`--jobs` > 1）、`python3` と `python3-yaml`（門番がワークフローを YAML として読む）。
+  （`--jobs` > 1）、`python3` と `python3-yaml`（門番がワークフローを YAML として読む）、
+  `rustfmt` と `clippy`（門番 verify-rustfmt・verify-clippy・verify-cognitive-complexity）、
+  GNU `time`（`crates/hado/tests/r26_effects.rs` が `/usr/bin/time -v` で最大 RSS を測る）。
+  最後の 3 つは standard runner の image には入っているので、自己ホストの runner では
+  前提を揃える（決定 11）。
+- runner は private のあいだ自前の Linux x86_64（決定 9）。上の道具立ては runner 側にも要り、
+  `runtime dependencies` の段が `sudo apt-get` を使うので利用者に passwordless sudo があること。
 
 ### 決定
 
@@ -34,7 +40,32 @@
    false でも pending は新しい走行に置き換わる（GitHub の仕様、下の「審査の指摘と対応」）。
    群は `${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}`、
    `cancel-in-progress` は PR のときだけ true。
-8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7 を機械で固定する。
+8. 門番 `scripts/verify-ci.sh`（quick、network を使わない）が決定 1〜7・9・10 を機械で固定する。
+9. runner は private のあいだ自前の Linux x86_64（`runs-on: [self-hosted, linux, x64]`）にする。
+   org は Free プランで、private の Actions は org 共有の 2000 分/月と spending limit に当たる。
+   2026-09-22 に job が起動しなくなった（`The job was not started because recent account payments
+   have failed or your spending limit needs to be increased`）ので、standard runner の無料枠に
+   依存しない形にした。public にしたら standard runner が無料になるので `ubuntu-latest` に戻す。
+   門番はどちらの形も受け、Linux x86_64 であることだけを固定する（決定 8 の一部）。
+   ホストを汚さないため、runner は Docker のコンテナの中で動かす（`~/runner/hado-ci-runner.sh`。
+   リポジトリの外の運用で、start / stop / status / logs を持つ）。コンテナは公式イメージ
+   `ghcr.io/actions/actions-runner` を使い、起動時に登録、停止時に登録解除する。
+10. ワークフローは `cargo fetch` より前に `$HOME/.cargo/bin` を `GITHUB_PATH` へ足す段を持つ。
+    標準の runner イメージは cargo が PATH にあり、自前の runner は `~/.cargo` に置くため、
+    どちらでも同じ段で通る（無いときだけ足す）。image を焼き直さずに済む。
+11. 自前の runner は `rustfmt`・`clippy`・GNU `time` を入れてから登録する。standard runner の
+    image には最初から入っており、門番（verify-rustfmt・verify-clippy・
+    verify-cognitive-complexity）と `r26_effects.rs` の最大 RSS の測定がこれを使う。
+    ワークフローの `runtime dependencies` は `libgc-dev` と `python3-yaml` だけを持つ
+    （standard runner を前提にする決定 4 のまま。自己ホストの前提は runner 側で揃える）。
+12. PR を sudo の通る自前 runner で走らせることを、private のあいだは許容する（2026-09-23 の
+    判断）。PR を出せる人は `scripts/ci-run.sh` を書き換えられるので、門番が走る前に runner の
+    root を取れる。`permissions: contents: read` は GitHub の token しか絞らない。
+    private のあいだは PR を出せるのが共同作業者だけなので信頼境界が実質的に成立し、登録した
+    runner は 1 台でコンテナの中なので host の root には届かない。public にして誰でも PR を
+    出せるようになった時点で `runs-on` を `ubuntu-latest` に戻す（standard runner が無料になり、
+    門番はどちらの形も受ける）。`sudo` を外す案・承認を挟む案は採らない（前者は PR のコードが
+    runner の中で走り続け、後者は PR ごとに人の手が要る）。
 
 ### 期待値の根拠
 
@@ -220,3 +251,79 @@ or workflow will take its place.」とある。**指摘は事実として正し�
 === group-shared-for-all ===
 NG: the workflow parses and is wired for the decisions PASSED: 7/8
 ```
+
+### 自前 runner への切り替え（2026-09-22、決定 9）
+
+PR #31 の CI が起動しなくなった。run 35714886302・35731399675 はどちらも 0 step・数秒で
+`failure` になり、check-run の注記が原因を示している。
+
+```
+The job was not started because recent account payments have failed or your spending
+limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
+org は Free プラン（`gh api /orgs/jozobeer --jq .plan.name` → `free`）で、private の Actions は
+org 共有の 2000 分/月を使う（このリポジトリの PR の core は 1 回 12〜20 分）。standard runner の
+無料枠に依存しないよう、runner を自前の Linux x86_64 に切り替えた（決定 9）。public にしたら
+`ubuntu-latest` に戻す。門番は両方の形を受ける。
+
+```
+$ bash scripts/verify-ci.sh
+OK: a pull_request runs at least the core tier
+...
+OK: the workflow parses and is wired for the decisions
+PASSED: 8/8
+
+# 否定的対照（runs-on を 1 箇所ずつ壊す）
+=== self-hosted-linux-only ===  runs-on: ['self-hosted', 'linux'] (the gates need Linux x86_64)   PASSED: 7/8
+=== self-hosted-windows ===     runs-on: ['self-hosted', 'windows', 'x64'] (the gates need Linux x86_64) PASSED: 7/8
+=== macos-latest ===            runs-on: 'macos-latest' (the gates need Linux x86_64)             PASSED: 7/8
+=== ubuntu-latest ===           PASSED: 8/8（public に戻すときの形）
+```
+
+自前 runner の実走（`ci-run:` の行・`TALLY:`・所要）は、runner を登録して最初の走行が緑に
+なった時点でここへ追記する。runner の登録は repo の Settings → Actions → Runners で行い、
+既定のラベル（`self-hosted`・`linux`・`x64`）を外さないこと。
+
+#### コンテナ runner での実走（2026-09-23）
+
+`~/runner/hado-ci-runner.sh start` で Docker のコンテナ runner（`hado-ci-docker`）を立て、
+workflow_dispatch（tier=core）で測った。1 回目は runner が job を拾い、`runtime
+dependencies`（コンテナ内の `sudo apt-get`）が通った。2 回目は `fetch dependencies` が
+`cargo: command not found`（127）で落ち、決定 10 の PATH の段を足した。3 回目（PR の core）は
+門番まで届き、赤は環境の道具不足だけだった。
+
+```
+TALLY: 629/637 passed; red: verify-clippy verify-cognitive-complexity verify-m0
+      verify-m3 verify-m7 verify-rustfmt
+```
+
+| 赤 | ログ | 原因 |
+|---|---|---|
+| verify-clippy・verify-cognitive-complexity | `'cargo-clippy' is not installed for the toolchain 'stable'` | コンテナに clippy が無い |
+| verify-rustfmt | `'cargo-fmt' is not installed for the toolchain 'stable'` | コンテナに rustfmt が無い |
+| verify-m0・verify-m3・verify-m7 | `r26_effects.rs:1164` が `Os { code: 2, NotFound }` | `/usr/bin/time`（GNU time）が無い |
+
+6 本とも環境の道具不足で、判定条件そのものの赤ではない（決定 11 で runner 側に
+`clippy`・`rustfmt`・`time` を入れ、コールドビルドでも core 層が 15 分で完走することを
+確かめた）。`rustfmt 1.9.0-stable`・`clippy 0.1.98`・`time (GNU Time)` がコンテナに入り、
+`Listening for Jobs` まで進むことをログで確認した。
+
+決定 11 の反映後（コンテナを作り直して再走。run 35811354380、途中の `workflow_dispatch`）。
+
+```
+$ gh workflow run ci.yml --ref prune-gates -f tier=core
+$ gh api /repos/jozobeer/hado/actions/runs/35811354380/jobs --jq '.jobs[]|{runner_name,conclusion}'
+{"runner_name":"hado-ci-docker","conclusion":"success"}
+
+ci-run: event=workflow_dispatch ref=refs/heads/prune-gates tier=core jobs=12 out=target/ci-gates
+TALLY: 637/637 passed; red: none
+PASSED: 14/14
+```
+
+コンテナの runner で core 層が緑、文書層も緑。コールドビルドで 7 分 23 秒（02:41:29 →
+02:48:52。standard runner の実測は 12〜20 分なので、こちらの方が速い）。`target/` を
+キャッシュしていないので、この時間は毎回かかる。
+
+`runs-on: [self-hosted, linux, x64]` の下で `sudo apt-get update && install` が通ること、
+`cargo` が PATH に無いこと（決定 10 の段で通ること）を、走行のログで確かめた。

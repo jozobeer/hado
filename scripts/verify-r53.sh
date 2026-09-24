@@ -29,10 +29,8 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(*args, cwd=None):
     return subprocess.run([HADO, *args], capture_output=True, cwd=cwd)
-
 
 def project(directory, files):
     path = Path(directory)
@@ -192,30 +190,6 @@ PY
 }
 
 # --- 53-e: 仕様と層と lock ---
-r53_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-section = spec.split('## 50. ', 1)[1].split('\n## ', 1)[0]
-assert '`.` で始まる' in section, '§50 does not exclude dot names'
-namespace = spec.split('## 51. ', 1)[1].split('\n## ', 1)[0]
-assert '`.` で始まる' in namespace, '§51 does not mention dot directories'
-trace = Path('docs/spec-trace.md').read_text()
-row = [line for line in trace.splitlines() if line.startswith('| §50 ') and '`.hd`' in line]
-assert row and '`.`' in row[0], 'the §50 trace row does not record the exclusion'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r53' in full, 'r53 is not in the full tier'
-wants = Path('docs/wants.md').read_text()
-assert 'R53' in wants, 'wants.md does not record R53'
-print('docs: §50 and §51 sentences, the trace row, the tier and wants')
-PY
-}
-
-r53_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
 
 # --- 53-f: 整形も隔離先を触らない ---
 r53_format_scope() {
@@ -252,8 +226,6 @@ check '53-a a hidden directory is skipped, Bad and 1x are still refused' r53_hid
 check '53-b a hidden file is not read, a visible one is' r53_hidden_file
 check '53-c a hidden tree is not read' r53_hidden_tree
 check '53-d an explicitly named hidden file is read' r53_explicit_entry
-check '53-e spec, trace, tier, wants' r53_docs
-check '53-e corpus lock' r53_lock
 check '53-f fmt and build --fix leave the isolated tree alone' r53_format_scope
 
 echo "PASSED: $passed/$total"

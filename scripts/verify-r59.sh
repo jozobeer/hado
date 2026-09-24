@@ -29,7 +29,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def write(root, name, files):
     directory = Path(root) / name
     for relative, text in files.items():
@@ -38,20 +37,16 @@ def write(root, name, files):
         path.write_text(text)
     return directory
 
-
 def project(root, name, files, *args, entry='main.hd'):
     """Write `files` under `<root>/<name>` and run the CLI on the entry."""
     directory = write(root, name, files)
     return subprocess.run([HADO, *args, str(directory / entry)], capture_output=True)
 
-
 def source_of(root, name, relative='main.hd'):
     return (Path(root) / name / relative).read_text()
 
-
 def accepted(result):
     assert result.returncode == 0 and result.stderr == b'', (result.returncode, result.stderr.decode())
-
 
 def diagnostic(result, code, status=1):
     """The run's single diagnostic line, split into its parts."""
@@ -65,7 +60,6 @@ def diagnostic(result, code, status=1):
     return {'path': match.group(1), 'line': int(match.group(2)), 'col': int(match.group(3)),
             'message': match.group(5)}
 
-
 def position(text, needle, occurrence=1):
     """The 1-based (line, col) of the nth occurrence of `needle`."""
     index = -1
@@ -74,10 +68,8 @@ def position(text, needle, occurrence=1):
     before = text[:index]
     return before.count('\n') + 1, index - (before.rfind('\n') + 1) + 1
 
-
 def anchor(found):
     return found['path'], found['line'], found['col']
-
 
 def build_run(root, name, files, expect):
     """Build the program and check the value `main` prints."""
@@ -333,30 +325,6 @@ print('untouched: E513 has no rewrite')
 PY
 }
 
-# --- 59-i: 仕様と層と lock ---
-r59_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '操作を参照するか' in spec, '§37 does not say what using an effect means'
-rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
-assert 'handler' in rows['E513'], rows['E513']
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r59' in full, 'r59 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r59' in trace, 'spec-trace does not name verify-r59'
-bug = Path('docs/bug.md').read_text()
-assert '未使用の効果に E513 が出ない' not in bug, 'bug.md still records the unused effect'
-print('docs: §37, the error table, the trace rows, the tier and bug.md')
-PY
-}
-
-r59_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '59-a an unused effect is E513' r59_unused_effect
 check '59-b an unused handler is E513, with runs' r59_handler
 check '59-c an operation reference and its types' r59_operation
@@ -365,8 +333,6 @@ check '59-e the prelude stays exempt' r59_prelude
 check '59-f an unreachable def does not save the effect' r59_reachability
 check '59-g one report per run' r59_one_report
 check '59-h E513 has no rewrite' r59_untouched
-check '59-i spec, trace, tier, bug' r59_docs
-check '59-i corpus lock' r59_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

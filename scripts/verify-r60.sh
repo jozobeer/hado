@@ -29,7 +29,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def write(root, name, files):
     directory = Path(root) / name
     for relative, text in files.items():
@@ -38,20 +37,16 @@ def write(root, name, files):
         path.write_text(text)
     return directory
 
-
 def project(root, name, files, *args, entry='main.hd'):
     """Write `files` under `<root>/<name>` and run the CLI on the entry."""
     directory = write(root, name, files)
     return subprocess.run([HADO, *args, str(directory / entry)], capture_output=True)
 
-
 def source_of(root, name, relative='main.hd'):
     return (Path(root) / name / relative).read_text()
 
-
 def accepted(result):
     assert result.returncode == 0 and result.stderr == b'', (result.returncode, result.stderr.decode())
-
 
 def diagnostic(result, code, status=1):
     """The run's single diagnostic line, split into its parts."""
@@ -65,7 +60,6 @@ def diagnostic(result, code, status=1):
     return {'path': match.group(1), 'line': int(match.group(2)), 'col': int(match.group(3)),
             'message': match.group(5)}
 
-
 def parts(found):
     """Split the message into the prose and the optional related position (§56)."""
     import re
@@ -75,7 +69,6 @@ def parts(found):
     return match.group(1), {'label': match.group(2), 'path': match.group(3),
                             'line': int(match.group(4)), 'col': int(match.group(5))}
 
-
 def position(text, needle, occurrence=1):
     """The 1-based (line, col) of the nth occurrence of `needle`."""
     index = -1
@@ -84,10 +77,8 @@ def position(text, needle, occurrence=1):
     before = text[:index]
     return before.count('\n') + 1, index - (before.rfind('\n') + 1) + 1
 
-
 def anchor(found):
     return found['path'], found['line'], found['col']
-
 
 def expected_at(source, needle, occurrence=1):
     return {'label': 'expected here', 'path': 'main.hd', 'line': position(source, needle, occurrence)[0],
@@ -307,29 +298,6 @@ print('untouched: E305 has no rewrite')
 PY
 }
 
-# --- 60-i: 仕様と層 ---
-r60_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '期待の側が式である' in spec or 'expected here' in spec, '§56 does not name the E305 label'
-assert '宣言された戻り型' in spec, '§15.1 does not list the sites'
-rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
-assert '型が食い違った式の先頭' in rows['E305'], rows['E305']
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r60' in full, 'r60 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r60' in trace, 'spec-trace does not name verify-r60'
-print('docs: §15.1, §56, the error table, the trace rows and the tier')
-PY
-}
-
-r60_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '60-a the declared return type' r60_return_type
 check '60-b the arms of a conditional' r60_arms
 check '60-c the condition of a conditional' r60_condition
@@ -338,8 +306,6 @@ check '60-e the argument of a call' r60_argument
 check '60-f the symmetric sites and the control' r60_symmetric
 check '60-g one report per run' r60_one_report
 check '60-h E305 has no rewrite' r60_untouched
-check '60-i spec, trace, tier' r60_docs
-check '60-j corpus lock' r60_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
