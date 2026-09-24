@@ -263,8 +263,11 @@ if not isinstance(jobs, dict) or len(jobs) != 1:
 job = next(iter(jobs.values()))
 # 門番は Linux x86_64 を要る（libgc-dev・Cranelift）。GitHub の standard runner か、
 # 既定のラベルを持つ自前の Linux x86_64 runner のどちらでもよい（docs/rounds/ci.md の決定 9）。
+# 自前の側はラベルを**厳密に**比べる。GitHub は全てのラベルを持つ runner を要るので、
+# 余分なラベルを足すと job が誰にも拾われなくなる（`windows` を足しても subset では緑になる。
+# 審査の指摘）。ラベルを増やすときは docs/rounds/ci.md の決定とここを同時に直す。
 runs_on = job.get('runs-on')
-self_hosted = isinstance(runs_on, list) and {'self-hosted', 'linux', 'x64'} <= set(runs_on)
+self_hosted = isinstance(runs_on, list) and set(runs_on) == {'self-hosted', 'linux', 'x64'}
 if runs_on != 'ubuntu-latest' and not self_hosted:
     fail(f'runs-on: {runs_on!r} (the gates need Linux x86_64)')
 if not isinstance(job.get('timeout-minutes'), int):

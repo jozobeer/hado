@@ -362,6 +362,17 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   落ちる（`quick` → `full` で PR を回す `core` から消える）。探針を `m1-spec` で測り直し、
   変異前 1・変異後 0・`verify-gate-cache` は `PASSED: 26/26` を確かめた。
 
+### 審査の指摘と対応（10 回目）
+
+`bbed4ea` への Codex 審査で 1 件（P2）が付いた。
+
+- **自前 runner のラベルを部分集合で見ている（`scripts/verify-ci.sh`）**: `{'self-hosted', 'linux',
+  'x64'} <= set(runs_on)` なので、`[self-hosted, linux, x64, windows]` のような余分なラベルを
+  許していた。GitHub は全てのラベルを持つ runner を要るので、この workflow は誰にも拾われず、
+  job が始まらないまま緑になる。厳密な集合の比較に変えた。`ubuntu-latest` と
+  `[self-hosted, linux, x64]` は緑、`[self-hosted, linux, x64, windows]` と
+  `[self-hosted, linux]` は赤を確かめた（直す前は余分なラベルで緑だった）。
+
 ### 仕様本文の契約の引き受け手（人の判断。2026-09-23）
 
 落ちた仕様本文の針（25 本の門番）と門番ごとの層の所属は、**戻さずに着地する**と決めた。理由は、
