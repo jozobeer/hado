@@ -223,3 +223,33 @@ TALLY: 40/40 passed; red: none
 
 `#31` 以前は main のワークフローが `runs-on: ubuntu-latest` で、org の Free 枠の支払いに
 より job が始まらなかった（steps 0 で 2 秒）。取り込みで self-hosted へ切り替わった。
+
+### 着地後の全走（2026-09-24）
+
+PR #34 が着地した（`d9e5a4a`）。続けて #32・#33・#35 も着地したので、その全部が入った
+`855e003` で main を checkout して全走を回した。
+
+```
+$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full-all 2>&1 | tail -1
+TALLY: 3726/3726 passed; red: none
+$ tail -1 target/main-full-all/lint-docs.log
+PASSED: 16/16
+```
+
+TALLY の内訳は門番 65 本の合計 3710 と文書層の 16 である。`tools/gates/main.hd` は出力先の
+ディレクトリの全ファイルを読むので `lint-docs.log` も数に入る。
+
+```
+$ python3 -c "..."   # target/main-full-all/*.log から PASSED: n/N の N を合計（lint-docs を除く）
+門番 65 本の合計 3710
+$ echo $((3710+16))
+3726
+```
+
+**同じ main で CI は赤になる。** self-hosted runner の full 層は 3725/3726 で
+`red: verify-lsp-minimal.log`、`NG: lifecycle-shutdown probe error: timeout: lsp client`。
+手元では 11/11 で通る。門番は `scripts/verify-lsp-minimal.sh` が `scripts/lsp-check.py` を
+呼ぶ形で、`open()` の client 初期化に 30 秒の予算を置く（`scripts/lsp-check.py` の `wait_for`）。
+最初の探針が `lifecycle-shutdown` なので、`scripts/hado-lsp.sh` の `cargo run` のビルド待ち
+（並走する門番のビルドと cargo の lock を奪い合う）がこの 30 秒を使い切る。ビルドが温まって
+いれば通り、要る回だけ落ちる。この回の実測では 2 件目以降の 10 本は通っている。
