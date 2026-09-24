@@ -178,6 +178,26 @@ Codex 審査で 2 件（P2）が付いた。どちらも直した。
 - **実測ブロックの出力が古い（`docs/rounds/spec-model.md`）**: 3 回目で段階の検査を足した
   ので、門番の出力に `7 段階の族` が入る。記録を実際の出力に直した。
 
+### 審査の指摘と対応（5 回目）
+
+Codex 審査で 3 件（P2）が付いた。いずれも自分が入れた検査の穴なので直した。
+
+- **文法の本文のフェンス行（`scripts/spec-lock.sh`）**: 本文にフェンス行があると、生成した
+  `docs/spec.md` を次の走行が構造として読み、正本を直しても復旧できなくなる。組む前に
+  弾く。変異で `spec-lock: spec/grammar.ebnf の 字句: の本文にフェンス行 '\`\`\`'` を確かめた。
+- **`spec/stages.toml` の `stages` の形（`scripts/verify-spec-model.sh`）**: 文字列にすると
+  `in` が部分文字列の照合になり、族の取り違えが素通りする。空でない文字列の並びであることを
+  見る。変異（`stages = "字句構文"`）で赤を確かめた。
+- **`-O` で `assert` が消える（`scripts/verify-spec-model.sh`）**: `PYTHONOPTIMIZE=1` で
+  `assert` が消えると、検査が黙って通る。先頭で `if not __debug__` を見て落とす。§99 を
+  入れて表も作り直した変異で、`-O` なしは `PASSED: 1/2`、`-O` ありも
+  `verify-spec-model: assert が無効（PYTHONOPTIMIZE か -O）` を出して `PASSED: 1/2` を確かめた。
+
+3 件目と同じ穴が `scripts/lint-docs.sh` にもあることを実測した（`doc_type_spelling` が
+消え、別の検査だけが赤になる）。本ラウンドの成果物ではないので
+`docs/issues/gate-optimize-flag.md` に切った。往復は 5 回目で `AGENTS.md` の予算（3 回）を
+超えている。以後の指摘は同じ issue へ切る。
+
 ### main の取り込み（#31 の着地後）
 
 PR #31 が着地した（`2372f95`）ので main を取り込んだ。`scripts/corpus-lock.sh --check` は

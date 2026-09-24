@@ -50,6 +50,12 @@ except ModuleNotFoundError:
 
 spec = Path('docs/spec.md').read_text()
 
+# この門番は lint-docs.sh と同じく assert で書く。-O か PYTHONOPTIMIZE が付くと assert が
+# 消えて検査が黙って通るので、先に落とす（審査の指摘）。ここは if で書く（assert では
+# 消えてしまうので用を成さない）。
+if not __debug__:
+    sys.exit('verify-spec-model: assert が無効（PYTHONOPTIMIZE か -O）。付けずに回すこと')
+
 # spec.md の `## ` 見出しから、節と付録の一覧を作る。
 headings = set()
 for line in spec.split('\n'):
@@ -68,6 +74,13 @@ assert records, 'spec/stages.toml が空'
 families = [s['family'] for s in records]
 assert len(families) == len(set(families)), \
     f'spec/stages.toml に重複した族: {sorted({f for f in families if families.count(f) > 1})}'
+# stages は文字列の並びである。文字列にすると `in` が部分文字列の照合になり、族の
+# 取り違えが素通りする（審査の指摘）。
+for s in records:
+    assert isinstance(s['stages'], list) and s['stages'], \
+        f'spec/stages.toml の {s["family"]} の stages が空'
+    assert all(isinstance(v, str) and v.strip() for v in s['stages']), \
+        f'spec/stages.toml の {s["family"]} の stages に空か文字列でない値'
 stages = {s['family']: s['stages'] for s in records}
 
 problems = []

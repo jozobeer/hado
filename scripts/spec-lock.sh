@@ -83,7 +83,13 @@ def grammar_groups():
         elif groups:
             groups[-1][1].append(line)
     # 群の区切りの空行を落とす。
-    return [(label, body[:-1] if body and body[-1] == '' else body) for label, body in groups]
+    groups = [(label, body[:-1] if body and body[-1] == '' else body) for label, body in groups]
+    # 本文にフェンス行があると、生成した spec.md を次の走行が構造として読み、直せなくなる。
+    for label, body in groups:
+        for line in body:
+            if line.startswith('```'):
+                sys.exit(f'spec-lock: spec/grammar.ebnf の {label} の本文にフェンス行 {line!r}')
+    return groups
 
 
 def fences_in(lines, start, end):
