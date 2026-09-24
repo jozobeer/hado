@@ -171,7 +171,9 @@ fn default_definitions_are_required_and_checked_after_inference() {
         ),
     ] {
         let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\nimplement WorldDefault as WorldDefault\n{definition}\n");
-        let result = hado::check_source(&source, "/tmp/stdlib/default_probe.hd");
+        // Logical stdlib/ skips the implicit prelude so this probe can declare
+        // its own `effect Error` without colliding with prelude Error (E205).
+        let result = hado::check_source(&source, "stdlib/default_probe.hd");
         match expected {
             Some(code) => assert_eq!(
                 result.err().expect(&source).code,

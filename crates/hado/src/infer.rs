@@ -2313,9 +2313,7 @@ impl Checker<'_> {
                 if !self
                     .trusted_start
                     .is_some_and(|line| node.span.line >= line)
-                    && !std::path::Path::new(self.path)
-                        .components()
-                        .any(|part| part.as_os_str() == "stdlib")
+                    && !crate::is_stdlib_source(self.path)
                 {
                     return Err(self.error(
                         node.span,

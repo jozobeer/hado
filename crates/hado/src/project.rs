@@ -66,7 +66,10 @@ impl Project {
             return Err(LoadError::Diagnostic(source_diagnostic(&files, error)));
         }
         let last_line = token_files.last().unwrap().tokens.last().unwrap().span.line;
-        let mut parsed = crate::with_prelude(ast, &files[0].physical.to_string_lossy(), last_line)?;
+        // The diagnostic path is the entry's name in its root (`main.hd`), never
+        // a filesystem path. Passing the physical path made any directory named
+        // `stdlib` look like the language stdlib and dropped the implicit prelude.
+        let mut parsed = crate::with_prelude(ast, &files[0].path, last_line)?;
         // §52: another file's `main` is an entry only in an entry inspection.
         parsed.other_entry_roots = if parsed.inspection == crate::Inspection::Entry {
             other_entry_roots

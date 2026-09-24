@@ -52,6 +52,34 @@ fn scalar_prelude_is_implicit_without_exposing_intrinsics() {
 }
 
 #[test]
+fn prelude_is_attached_when_a_directory_named_stdlib_is_on_the_path() {
+    // A user project may live under a folder named `stdlib`. That is not the
+    // language's stdlib/; §55 still concatenates prelude and `__` stays E202.
+    let source = "def main = List.length [1, 2, 3]\n";
+    assert!(
+        hado::check_source(source, "/tmp/stdlib/app/main.hd").is_ok(),
+        "an absolute path with a stdlib directory is still a user entry"
+    );
+    let error = hado::check_source(
+        "def main = __string_length \"hi\"",
+        "/tmp/stdlib/app/main.hd",
+    )
+    .err()
+    .expect("user code under a stdlib directory cannot call __");
+    assert_eq!(error.code.as_deref(), Some("E202"));
+
+    let dir = std::env::temp_dir().join(format!("stdlib/hado-user-project-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.hd");
+    std::fs::write(&path, source).unwrap();
+    let project = hado::project::Project::load(&path).expect("load under stdlib");
+    project
+        .check()
+        .expect("prelude List is in scope for a project under stdlib");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn generic_prelude_operations_execute() {
     let cases = [
         (
