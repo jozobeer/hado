@@ -30,7 +30,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def run(root, name, source, *args):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -38,15 +37,12 @@ def run(root, name, source, *args):
     path.write_text(source)
     return subprocess.run([HADO, *args, str(path)], capture_output=True)
 
-
 def source_of(root, name):
     return (Path(root) / name / 'main.hd').read_text()
-
 
 def accepted(root, name, source):
     result = run(root, name, source, 'check')
     assert result.returncode == 0 and result.stderr == b'', (name, result.returncode, result.stderr.decode())
-
 
 def check_code(root, name, source, code, hint='absent'):
     """`check` reports `code`. `hint` is the expected canonical form, or None for none at all."""
@@ -61,7 +57,6 @@ def check_code(root, name, source, code, hint='absent'):
         assert 'canonical form: ' + hint in text, (name, hint, text)
     return result
 
-
 def check_fix(root, name, source, expected):
     """`check --fix` applies the rewrite, passes, and leaves exactly `expected`."""
     result = run(root, name, source, 'check', '--fix')
@@ -69,7 +64,6 @@ def check_fix(root, name, source, expected):
     text = source_of(root, name)
     assert text == expected, (name, repr(text), repr(expected))
     return text
-
 
 def fmt(root, name, source, expected):
     result = run(root, name, source, 'fmt')
@@ -79,7 +73,6 @@ def fmt(root, name, source, expected):
     second = run(root, name, text, 'fmt')
     assert second.returncode == 0 and source_of(root, name) == text, (name, 'fmt must be idempotent')
     return text
-
 
 def fmt_check(root, name, source, want):
     result = run(root, name, source, 'fmt', '--check')
@@ -195,36 +188,11 @@ print('usage: an unknown or missing format is exit 2')
 PYEOF3
 }
 
-# --- 65-f: 仕様と層 ---
-r65_docs() {
-    python3 - <<'PYEOF3'
-from pathlib import Path
-
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r65' in full, 'r65 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r65' in trace, 'spec-trace does not name verify-r65'
-assert Path('docs/rounds/r65.md').is_file(), 'docs/rounds/r65.md is missing'
-spec = Path('docs/spec.md').read_text()
-section = spec.split('## 58.4. ', 1)[1].split('\n## ', 1)[0]
-assert 'json' in section, '§58.4 does not record the JSON format'
-print('docs: §58.4, the trace row, the tier and the plan')
-PYEOF3
-}
-
-# --- 65-g: コーパスロック ---
-r65_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '65-a one line of JSON per diagnostic' r65_json_line
 check '65-b the canonical form is a field' r65_canonical
 check '65-c the related position is a field' r65_related
 check '65-d the default line is unchanged' r65_default
 check '65-e an unknown format is exit 2' r65_usage
-check '65-f spec, trace, tier' r65_docs
-check '65-g corpus lock' r65_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

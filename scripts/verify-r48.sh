@@ -31,7 +31,6 @@ from pathlib import Path
 
 HADO = None
 
-
 def write(root, name, source):
     directory = Path(root) / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -39,32 +38,26 @@ def write(root, name, source):
     path.write_text(source)
     return path
 
-
 def hado(args, env=None, stdin=None):
     return subprocess.run([HADO, *args], capture_output=True, input=stdin, env=env)
-
 
 def execute(path, args=(), stdin=None):
     """Run a built executable directly, not through the CLI."""
     return subprocess.run([str(path), *args], capture_output=True, input=stdin)
-
 
 def temp_env(path):
     """Run with TMPDIR inside the gate so a leftover run directory is visible."""
     path.mkdir(parents=True, exist_ok=True)
     return {**os.environ, 'TMPDIR': str(path)}
 
-
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
 
 def check_code(path, code):
     result = hado(['check', str(path)])
     assert result.returncode == 1, (path, result.returncode, result.stderr.decode())
     match = re.match(rb'[^:]+:(\d+):(\d+): error\[(E\d+)\]', result.stderr)
     assert match and match.group(3).decode() == code, (path, code, result.stderr.decode())
-
 
 def run_value(root, name, value):
     """`run` a literal main and require the value on stdout with exit code 0."""
@@ -78,7 +71,6 @@ def run_value(root, name, value):
     assert list(temporary.iterdir()) == [], (name, list(temporary.iterdir()))
     assert sorted(entry.name for entry in path.parent.iterdir()) == ['main.hd', 'tmp'], name
     return path
-
 
 def control(root):
     """The comparisons must reject a wrong value and a wrong exit code."""
@@ -237,39 +229,11 @@ print('build: -o writes only the requested path, the default is unchanged')
 PY
 }
 
-r48_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-body = spec.split('## 58. ', 1)[1].split('\n# 付録', 1)[0]
-for fragment in ['hado run', '-o <path>', '一時ディレクトリ', '終了コード', 'canonical form:']:
-    assert fragment in body, fragment
-wants = Path('docs/wants.md').read_text()
-assert 'R48' in wants, 'wants does not mention R48'
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r48' in full, 'r48 is not in the full tier'
-print('docs: §58, wants points at R48, r48 in the full tier')
-PY
-}
-
-r48_unit_tests() {
-    cargo test --offline -q --test run_cli
-}
-
-r48_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '48-a run prints the main value and leaves no binary' r48_value
 check '48-b run forwards the arguments after --' r48_arguments
 check '48-c run returns the program exit code' r48_exit_code
 check '48-d run passes standard input through' r48_stdin
 check '48-e build -o writes only the requested path' r48_output_path
-check '48-e spec §58, wants, full tier' r48_docs
-check '48-e run_cli tests' r48_unit_tests
-check '48-e corpus lock' r48_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

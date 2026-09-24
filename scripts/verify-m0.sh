@@ -10,7 +10,7 @@ cd "$ROOT"
 . scripts/lib/gate-cache.sh
 
 ok=0
-total=7
+total=8
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -105,6 +105,39 @@ if [ -z "$rt_reasons" ]; then
     pass 7 "runtime"
 else
     fail 7 "runtime:$rt_reasons"
+fi
+
+# --- check 8: 専用のテストターゲットが実在し、走っている ---
+# 削除したラッパー門番（`cargo test --test rN_...` を呼んでいた verify-r13.sh や
+# verify-record-constructors.sh）が持っていた検査。`cargo test` は対象ごと消えても残りを
+# 走らせて緑になるので、対象の名前が全走の出力に現れることを見る（審査の指摘）。名前は
+# ディスクから導くと、消えた対象が期待からも消えて素通りするため、削除した門番が守っていた
+# 組をここに固定する。
+target_reasons=""
+for name in \
+    named_record_constructors named_record_order \
+    r9_coverage r9_grammar r9_module_types r9_names r9_order r9_print r9_syntax r9_unused \
+    r13_conditions r14_rails r16_sections r17_files r18_spelling \
+    r19_contracts r20_entries r21_functors r22_namespaces r23_syntax \
+    r24_effects r25_effects r26_effects r31_effects r37_world
+do
+    if [ ! -f "crates/hado/tests/$name.rs" ]; then
+        target_reasons="$target_reasons absent-$name"
+    elif ! grep -qF "Running tests/$name.rs" "$TMPD/test.log"; then
+        target_reasons="$target_reasons not-run-$name"
+    else
+        # 中身を空にすると `Running` は出るが 0 件になる。1 件以上を要求する。
+        count=$(awk -v n="tests/$name.rs" '
+            index($0, "Running " n) { seen = 1; next }
+            seen && /^running [0-9]+ tests?$/ { print $2; exit }
+        ' "$TMPD/test.log")
+        [ "${count:-0}" -ge 1 ] || target_reasons="$target_reasons empty-$name"
+    fi
+done
+if [ -z "$target_reasons" ]; then
+    pass 8 "test-targets"
+else
+    fail 8 "test-targets:$target_reasons"
 fi
 
 echo "PASSED: $ok/$total"

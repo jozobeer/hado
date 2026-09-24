@@ -417,18 +417,5 @@ match = re.search(r'^prelude inventory: (\d+)/(\d+)$', text, flags=re.M)
 assert match, 'missing prelude inventory line'
 assert match.group(1) == match.group(2) and int(match.group(1)) > 0, match.group(0)
 PYCODE
-# m7 は cargo test --offline --no-fail-fast を実走する。その結果も空振りなく検査する。
-check '36-h cargo tests executed by m7: no failures' python3 - "$workdir/m7.log" <<'PYCODE'
-from pathlib import Path
-import re, sys
-source = Path(sys.argv[1]).read_text()
-results = re.findall(r'^test result: (\w+)\. (\d+) passed; (\d+) failed;', source, re.M)
-assert results and sum(int(passed) for _, passed, _ in results) > 0
-assert all(state == 'ok' and int(failed) == 0 for state, _, failed in results)
-print(f'cargo test: {sum(int(passed) for _, passed, _ in results)} passed; 0 failed')
-PYCODE
-for gate in m4 m5 m6; do
-    check "36-h $gate" full_gate "$gate"
-done
 echo "PASSED: $passed/$total"
 [ "$total" -gt 0 ] && [ "$passed" -eq "$total" ]

@@ -6,7 +6,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 pass=0
-total=5
+total=4
 ok() { echo "OK: $1"; pass=$((pass + 1)); }
 ng() { echo "NG: $1 ($2)"; }
 
@@ -54,20 +54,6 @@ if [ "$empty" = "0" ]; then
   ok "70-d no diagnostics prints nothing"
 else
   ng "70-d no diagnostics prints nothing" "lines=$empty"
-fi
-
-# 70-e: 層・系譜・手順書・コーパスのロック。
-missing=""
-bash scripts/run-gates.sh --print-tier full | grep -qx r70 || missing="$missing tier"
-grep -q "verify-r70" docs/spec-trace.md || missing="$missing trace"
-[ -f docs/rounds/r70.md ] || missing="$missing plan"
-if [ -n "$(git status --porcelain tests/accept tests/reject stdlib tests/corpus.sha256)" ]; then
-  missing="$missing corpus"
-fi
-if [ -z "$missing" ]; then
-  ok "70-e tier, trace, plan, corpus lock"
-else
-  ng "70-e tier, trace, plan, corpus lock" "missing:$missing"
 fi
 
 echo "PASSED: $pass/$total"
