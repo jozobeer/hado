@@ -101,21 +101,11 @@ def r75_fmt_shares_the_rewrite_and_is_idempotent():
     assert Path(path).read_text() == text, 'the second fmt changed the file'
 
 
-def r75_docs():
-    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-    assert 'r75' in full, 'r75 is not in the full tier'
-    assert 'verify-r75' in Path('docs/spec-trace.md').read_text(), 'the trace has no r75 row'
-    assert Path('docs/rounds/r75.md').is_file(), 'docs/rounds/r75.md is missing'
-    assert 'E505' in Path('docs/spec.md').read_text(), 'the spec does not mention E505'
-    assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
-
-
 for name, fn in (
     ('75-a the E515 flow reaches acceptance', r75_e515_flow_reaches_acceptance),
     ('75-b E505 alone reaches acceptance and carries its canonical form', r75_e505_alone_reaches_acceptance),
     ('75-c a referenced spread binding is left alone', r75_leaves_used_bindings_alone),
     ('75-d fmt shares the rewrite and is idempotent', r75_fmt_shares_the_rewrite_and_is_idempotent),
-    ('75-e spec, trace, tier, corpus lock', r75_docs),
 ):
     check(name, fn)
 

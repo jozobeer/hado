@@ -32,7 +32,6 @@ HADO = None
 FIRST = 'first declared'
 CONTRACT = 'declared in the contract'
 
-
 def project(root, name, files, *args, entry='main.hd'):
     """Write `files` under `<root>/<name>` and run the CLI on the entry."""
     directory = Path(root) / name
@@ -42,10 +41,8 @@ def project(root, name, files, *args, entry='main.hd'):
         path.write_text(text)
     return subprocess.run([HADO, *args, str(directory / entry)], capture_output=True)
 
-
 def source_of(root, name, relative='main.hd'):
     return (Path(root) / name / relative).read_text()
-
 
 def diagnostic(result, code, status=1):
     """The run's single diagnostic line, split into its parts."""
@@ -58,12 +55,10 @@ def diagnostic(result, code, status=1):
     return {'path': match.group(1), 'line': int(match.group(2)), 'col': int(match.group(3)),
             'message': match.group(5)}
 
-
 def related(found, label):
     """The related position of a diagnostic, or None when it has none."""
     match = re.search(r'; ' + re.escape(label) + r' at ([^\s:]+):(\d+):(\d+)$', found['message'])
     return None if match is None else (match.group(1), int(match.group(2)), int(match.group(3)))
-
 
 def position(text, needle, occurrence=1):
     """The 1-based (line, col) of the nth occurrence of `needle`."""
@@ -72,7 +67,6 @@ def position(text, needle, occurrence=1):
         index = text.index(needle, index + 1)
     before = text[:index]
     return before.count('\n') + 1, index - (before.rfind('\n') + 1) + 1
-
 
 def anchor(found):
     return found['path'], found['line'], found['col']
@@ -314,33 +308,6 @@ print('untouched: E205 and E602 have no rewrite')
 PY
 }
 
-# --- 58-i: 仕様と層と lock ---
-r58_docs() {
-    python3 - <<'PY'
-from pathlib import Path
-
-spec = Path('docs/spec.md').read_text()
-assert '関連位置' in spec, '§56 does not mention the related position'
-assert 'first declared' in spec, '§56 does not write the E205 label'
-assert 'declared in the contract' in spec, '§56 does not write the E602 label'
-rows = {line.split('|')[1].strip(): line for line in spec.splitlines() if line.startswith('| E')}
-assert 'first declared' in rows['E205'], rows['E205']
-assert 'declared in the contract' in rows['E602'], rows['E602']
-import subprocess
-full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-assert 'r58' in full, 'r58 is not in the full tier'
-trace = Path('docs/spec-trace.md').read_text()
-assert 'verify-r58' in trace, 'spec-trace does not name verify-r58'
-wants = Path('docs/wants.md').read_text()
-assert 'R58' in wants, 'wants.md does not record R58'
-print('docs: §56, the error table, the trace rows, the tier and wants')
-PY
-}
-
-r58_lock() {
-    sha256sum --strict --status -c tests/corpus.sha256
-}
-
 check '58-a the second declaration names the first' r58_same_file
 check '58-b the later file points into the entry' r58_cross_file
 check '58-c a repeated value and a repeated record field' r58_repeats
@@ -349,8 +316,6 @@ check '58-e the contract member is named from the hdi' r58_contract
 check '58-f the contract in the entry file' r58_same_file_contract
 check '58-g prelude conflicts and cycles carry no position' r58_negatives
 check '58-h E205 and E602 have no rewrite' r58_untouched
-check '58-i spec, trace, tier, wants' r58_docs
-check '58-i corpus lock' r58_lock
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

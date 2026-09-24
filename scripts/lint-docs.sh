@@ -7,6 +7,8 @@
 # 移した元:
 #   verify-m1-spec.sh の検査 1（見出し）・2（新設節）・4（対応表）・5（条件列の逐語）
 #   verify-r38.sh の 38-c の逐語 regex・38-e の版文字列と ledger 節
+#   verify-r68.sh などの「spec, trace, tier, corpus lock」のうち、spec-trace と
+#   ラウンドの記録の関係（検査 14）
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -66,18 +68,30 @@ integers = [number for number in body if len(number) == 1]
 assert [number[0] for number in integers] == list(range(1, len(integers) + 1)), integers
 assert appendix == [f'付録{chr(ord("A") + i)}' for i in range(len(appendix))], appendix
 assert appendix, 'no appendix section'
+# 付録の節は `# 付録` の部の下にある（旧 verify-r42 の 42-b が持っていた構造の検査）。
+assert re.search(r'^# 付録$', spec, flags=re.M), 'no appendix part heading'
+# 文法の概形は付録C にある（節番号は増やしても動かさないので、位置を名指しで固定する）。
+assert re.search(r'^## 付録C 文法の概形$', spec, flags=re.M), '文法の概形 is not 付録C'
 PY
 }
 
 # --- 検査 2: 節は部の下にあり、部の見出しに節番号は無い ---
 doc_parts() {
-    local reasons="" seen=0 line
+    local reasons="" seen=0 appendix_part=0 line
     while IFS= read -r line; do
         if printf '%s' "$line" | grep -qE '^# [0-9]+\.'; then
             reasons="$reasons numbered-part"
         fi
         if printf '%s' "$line" | grep -qE '^## ([0-9]+(\.[0-9]+)?\.|付録[A-Z] )'; then
             [ "$seen" -eq 1 ] || reasons="$reasons section-before-part"
+        fi
+        # 付録の節の前には `# 付録` の部が要る（`seen` は最初の部で 1 になったきりなので、
+        # 部の見出しそのものが消えても素通りする。旧 verify-r42 の 42-b の検査）。
+        if [ "$line" = '# 付録' ]; then
+            appendix_part=1
+        fi
+        if printf '%s' "$line" | grep -qE '^## 付録[A-Z] '; then
+            [ "${appendix_part:-0}" -eq 1 ] || reasons="$reasons appendix-section-before-part"
         fi
         if printf '%s' "$line" | grep -qE '^# '; then
             seen=1
@@ -236,10 +250,16 @@ doc_condition_column() {
 
 # --- 検査 5: 版（spec と spec-coverage が同じ版を名乗る） ---
 doc_version() {
-    local sv cv
+    local sv cv n
     sv=$(head -n 1 "$SPEC" | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -n 1)
     cv=$(head -n 1 "$COV" | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -n 1)
-    [ -n "$sv" ] && [ "$sv" = "$cv" ]
+    [ -n "$sv" ] && [ "$sv" = "$cv" ] || return 1
+    # 版は文書から導かず、1 か所で名指しで固定する（旧 verify-r42 の spec_version が
+    # 持っていた検査。導出にすると、前付けと見出しを揃えて書き換えるだけで素通りする）。
+    [ "$sv" = 'v0.4' ] || return 1
+    # 前付けの中の版はその 1 つだけ（過去の版は git tag が持つ）。
+    n=$(sed -n '1,/^## 規範性/p' "$SPEC" | grep -oE 'v[0-9]+(\.[0-9]+)+' | grep -cvx "$sv" || true)
+    [ "$n" -eq 0 ]
 }
 
 # --- 検査 6: # round: を持つ門番にラウンドファイルと実測がある ---
@@ -735,6 +755,232 @@ for path in sorted(root.glob('*.md')):
 PYEOF
 }
 
+# --- 検査 11: 現行の snapshot だけを持つ（verify-r42.sh の 42-a(2) を移した） ---
+doc_current_only() {
+    python3 - <<'PY'
+from pathlib import Path
+import re
+
+assert not Path('docs/spec-map.md').exists(), 'docs/spec-map.md still exists'
+front = Path('docs/spec.md').read_text().split('## 規範性', 1)[0]
+assert 'spec-map' not in front, 'the front matter mentions spec-map'
+bad = []
+for rel in ['docs/spec.md', 'docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md']:
+    if 'spec-map' in Path(rel).read_text():
+        bad.append(rel)
+for path in sorted(Path('scripts').glob('verify-*.sh')):
+    if 'spec-map' in path.read_text():
+        bad.append(str(path))
+assert not bad, bad
+print('current only: no spec-map in the live documents or gates')
+PY
+}
+
+# --- 検査 12: コーパスのタグが §56 の表の節と一致し、全て実在の節を指す（42-a(3)） ---
+doc_corpus_tags() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+appendix = set(re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M))
+tag_re = re.compile(r'^// spec: (§\d+(?:\.\d+)?|付録[A-Z])$', re.M)
+
+def exists(tag):
+    if tag.startswith('§'):
+        return tag[1:] in headings
+    return tag in appendix
+
+table_text = spec.split('## 56. エラーコード', 1)[1]
+table = dict(re.findall(r'^\| (E[1-7]\d\d) \|[^|]*\| (§\d+(?:\.\d+)?|付録[A-Z]) \|', table_text, flags=re.M))
+reject_dirs = [path for path in Path('tests/reject').iterdir() if path.is_dir()]
+assert len(table) == len(reject_dirs), (len(table), len(reject_dirs))
+bad = []
+for path in sorted(Path('tests').rglob('main.hd')):
+    text = path.read_text()
+    tag = tag_re.search(text)
+    if not tag:
+        bad.append(f'{path}:no-spec-tag')
+        continue
+    if not exists(tag.group(1)):
+        bad.append(f'{path}:missing-heading-{tag.group(1)}')
+    error = re.search(r'^// error: (E[1-7]\d\d)$', text, flags=re.M)
+    if error and table.get(error.group(1)) != tag.group(1):
+        bad.append(f'{path}:{error.group(1)}-table-{table.get(error.group(1))}-tag-{tag.group(1)}')
+for path in sorted(Path('tests/library').rglob('*')):
+    if path.suffix in ('.hd', '.hdi'):
+        tag = tag_re.search(path.read_text())
+        if tag and not exists(tag.group(1)):
+            bad.append(f'{path}:missing-heading-{tag.group(1)}')
+assert not bad, bad[:10]
+print(f'codes: {len(table)}, corpus tags resolve and match')
+PY
+}
+
+# --- 検査 13: 現行の文書の §参照と付録参照が全て実在を指す（42-a(4)） ---
+doc_spec_refs() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+headings = set(re.findall(r'^## (\d+(?:\.\d+)?)\.', spec, flags=re.M))
+letters = {name[-1] for name in re.findall(r'^## (付録[A-Z]) ', spec, flags=re.M)}
+bad = []
+for rel in ['docs/spec-coverage.md', 'docs/spec-trace.md', 'docs/corpus.md', 'README.md', 'CONTRIBUTING.md', 'docs/bug.md', 'docs/wants.md']:
+    text = Path(rel).read_text()
+    missing = sorted({n for n in re.findall(r'§(\d+(?:\.\d+)?)', text)} - headings)
+    missing += sorted({a for a in re.findall(r'付録([A-Z])', text)} - letters)
+    if missing:
+        bad.append(f'{rel}:{missing}')
+assert not bad, bad
+print('live document references resolve')
+PY
+}
+
+# --- 検査 14: 門番と文書の関係（spec-trace の門番と検査名、ラウンドの記録） ---
+# 旧 verify-r*.sh の「spec, trace, tier」検査のうち、文書の関係だけを一般化して引き取る
+# （68-e・70-e などの round 側の検査を落とした分。門番自身の検査は門番に残る）。
+doc_gate_relationships() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+bad = []
+text = Path('docs/spec-trace.md').read_text()
+# spec-trace が名指しする門番は実在する。
+for ref in sorted(set(re.findall(r'verify-[a-z0-9-]+', text))):
+    if not Path('scripts', ref + '.sh').is_file():
+        bad.append(f'{ref}:missing')
+# `verify-<名>.sh`（<検査名>） の検査名は、その門番が登録した検査の中にある。本文のどこかに
+# 現れればよいとすると、`check` の呼び出しを消して節のコメントだけ残したときに素通りする
+# ので、ラベルを引数として渡している箇所（`check '...'`・`('...', fn)`・
+# `helper '...'`）だけを見る（審査の指摘）。
+comment_only = re.compile(r'^\s*#')
+for line in text.splitlines():
+    for gate, listing in re.findall(r'(verify-[a-z0-9-]+)\.sh`?（([^）]*)）', line):
+        path = Path('scripts', gate + '.sh')
+        if not path.is_file():
+            continue
+        body = path.read_text()
+        labels = [
+            label for body_line in body.splitlines()
+            if not comment_only.match(body_line)
+            for label in re.findall(r"'([^']*)'|\"([^\"]*)\"", body_line)
+            for label in ([label[0] or label[1]] if isinstance(label, tuple) else [label])
+        ]
+        # 動的に組むラベル（`70-$([ ... ] && echo b || echo c)`）は、式が作る文字だけを
+        # 候補にする。番号だけで例外にすると、その番号の別の検査を消しても素通りする。
+        dynamic = {}
+        for number, expr in re.findall(r'([0-9]+)-\$\((.*?)\)', body, re.S):
+            dynamic.setdefault(number, set()).update(re.findall(r'echo\s+([a-z])\b', expr))
+        for number, first, last in re.findall(r'([0-9]+)-([a-z])(?:〜[0-9]+-([a-z]))?', listing):
+            letters = [chr(c) for c in range(ord(first), ord(last) + 1)] if last else [first]
+            for letter in letters:
+                needle = f'{number}-{letter}'
+                if letter in dynamic.get(number, ()):
+                    continue
+                if not any(
+                    re.search(rf'(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])', label)
+                    for label in labels
+                ):
+                    bad.append(f'{gate}:{needle}')
+assert not bad, sorted(set(bad))
+
+# 逆向き: spec-trace の「固定するもの」が門番を名指ししている節は、その行を残す。行ごと
+# 消すと「固定するもの」が消えるのに前向きの照合だけでは緑のままになる（旧 verify-r68 などの
+# 68-e が持っていた関係、審査の指摘）。表に行を持たない門番（R29〜R31・R38・R49・R51・
+# R11〜R26 など。spec-trace は「R38 の判定器」やテストの名前で指す）は最初から対象外。
+trace_gate_rows = [
+    'verify-r32.sh', 'verify-r33.sh', 'verify-r34.sh', 'verify-r35.sh', 'verify-r36.sh',
+    'verify-r37.sh', 'verify-r43.sh', 'verify-r45.sh', 'verify-r46.sh', 'verify-r47.sh',
+    'verify-r48.sh', 'verify-r50.sh', 'verify-r52.sh', 'verify-r53.sh', 'verify-r54.sh',
+    'verify-r55.sh', 'verify-r56.sh', 'verify-r57.sh', 'verify-r58.sh', 'verify-r59.sh',
+    'verify-r60.sh', 'verify-r61.sh', 'verify-r62.sh', 'verify-r63.sh', 'verify-r64.sh',
+    'verify-r65.sh', 'verify-r68.sh', 'verify-r69.sh', 'verify-r70.sh', 'verify-r71.sh',
+    'verify-r72.sh', 'verify-r73.sh', 'verify-r74.sh', 'verify-r75.sh', 'verify-r76.sh',
+    'verify-r77.sh', 'verify-r81.sh',
+]
+trace_rows = Path('docs/spec-trace.md').read_text()
+# 門番そのものが消えても、前向きの照合は参照が無いので素通りし、ここもファイルが無いので
+# 飛ばしていた。一覧は「その門番と spec-trace の行が実在する」の契約として扱う。
+unlisted = []
+for name in trace_gate_rows:
+    if not Path('scripts', name).is_file():
+        unlisted.append(f'{name}:absent')
+    elif not re.search(rf'\b{re.escape(name)}\b', trace_rows):
+        unlisted.append(f'{name}:unlisted')
+assert not unlisted, unlisted
+
+# verify-rN.sh は自分のラウンドの記録を持つ（r10-r13 のような範囲の記録でもよい）。
+stems = [path.stem for path in Path('docs/rounds').glob('*.md')]
+missing = []
+for path in sorted(Path('scripts').glob('verify-r*.sh')):
+    number = re.fullmatch(r'verify-r(\d+)', path.stem)
+    if not number:
+        continue
+    n = int(number.group(1))
+    if (Path('docs/rounds') / f'r{n}.md').is_file():
+        continue
+    if any(
+        (found := re.fullmatch(r'r(\d+)-r(\d+)', stem)) and int(found.group(1)) <= n <= int(found.group(2))
+        for stem in stems
+    ):
+        continue
+    missing.append(path.stem)
+assert not missing, missing
+print('gate relationships: spec-trace names resolve and round gates have records')
+PY
+}
+
+# --- 検査 15: 仕様の型名は Void で、綴りを保つ（旧 verify-r81.sh の r81_spec を移した） ---
+# 旧い型名 Unit が仕様に戻っても、振る舞いの検査（81-a / 81-c）は緑のままになる。仕様本文の
+# 綴りそのものを固定する（審査の指摘）。
+doc_type_spelling() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+# 語の全体で見る。`UnitPrice` のような現行の識別子を巻き込まない（旧 r81_spec と同じ）。
+assert not re.search(r'\bUnit\b', spec), 'old type name remains in docs/spec.md'
+for needle in (
+    '\nVoid\n',
+    'Void は `()` とする。',
+    'Void は i64 の 0 とする。',
+    '| Void | 入れ子では `()` |',
+    'Void は何も出さない',
+    'void            := "()"',
+    'bool | void',
+    'once log(contents: String): Void {Error}',
+):
+    assert needle in spec, needle
+assert '`()`' in spec
+PY
+}
+
+# --- 検査 16: 仕様が効果操作を once / again と綴る（旧 verify-r44.sh の 44-b を移した） ---
+# 移設した r23_syntax は綴りをコンパイラの入力としてしか見ないので、仕様本文だけを書き換える
+# 退行（`once` をキーワードの文から落とす、`reply` を戻す）は緑のままになる（審査の指摘）。
+doc_effect_keywords() {
+    python3 - <<'PY'
+import re
+from pathlib import Path
+
+spec = Path('docs/spec.md').read_text()
+assert not re.search(r'\breply\b', spec), 'reply remains in docs/spec.md'
+assert not re.search(r'\bcapture\b', spec), 'capture remains in docs/spec.md'
+needles = [
+    '| `once` |', '| `again` |', 'once ask: String', 'again yield value =>',
+    'once log(contents: String): Void {Error}', '`once` `abort` `again`',
+    'op_kind         := "once" | "abort" | "again"',
+]
+missing = [needle for needle in needles if needle not in spec]
+assert not missing, missing
+PY
+}
+
 check 'spec sections §1..§56 and 付録A.. exist once in reading order' doc_headings
 check 'spec sections sit under part headings' doc_parts
 check 'spec-coverage matches the plan tables 2.2/2.3/9.2/11.2/13.2/18.4/24.2' doc_coverage
@@ -745,6 +991,12 @@ check 'R38 spec sentences are pinned verbatim once each' doc_r38_sentences
 check 'each issue cause points at a path and an identifier' doc_issue_causes
 check 'each issue 現象 carries measured evidence in a fence or table' doc_issue_evidence
 check 'each issue document has the required name, priority and sections' doc_issue_names
+check 'the current spec is the only snapshot (no spec-map)' doc_current_only
+check 'corpus tags match the §56 table and resolve' doc_corpus_tags
+check 'section and appendix references in the live documents resolve' doc_spec_refs
+check 'spec-trace gate names and check names resolve, and round gates have records' doc_gate_relationships
+check 'the spec keeps the Void type name and its spelling' doc_type_spelling
+check 'the spec spells the effect operations once / again' doc_effect_keywords
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

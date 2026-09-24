@@ -96,21 +96,11 @@ def r73_leaves_other_bodies_alone():
     assert Path(path).read_text() == before, 'the other-body shape changed'
 
 
-def r73_docs():
-    full = subprocess.run(['bash', 'scripts/run-gates.sh', '--print-tier', 'full'], capture_output=True, text=True, check=True).stdout.split()
-    assert 'r73' in full, 'r73 is not in the full tier'
-    assert 'verify-r73' in Path('docs/spec-trace.md').read_text(), 'the trace has no r73 row'
-    assert Path('docs/rounds/r73.md').is_file(), 'docs/rounds/r73.md is missing'
-    assert 'E501' in Path('docs/spec.md').read_text(), 'the spec does not mention E501'
-    assert run(['sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256']).returncode == 0
-
-
 for name, fn in (
     ('73-a check --fix makes E501 accepted', r73_fix_accepts),
     ('73-b fmt does the same and is idempotent', r73_fmt_accepts_and_is_idempotent),
     ('73-c the value is unchanged', r73_value_is_unchanged),
     ('73-d a different body is left alone', r73_leaves_other_bodies_alone),
-    ('73-e spec, trace, tier, corpus lock', r73_docs),
 ):
     check(name, fn)
 
