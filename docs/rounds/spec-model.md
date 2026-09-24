@@ -229,18 +229,27 @@ TALLY: 40/40 passed; red: none
 PR #34 が着地した（`d9e5a4a`）。続けて #32・#33・#35 も着地したので、その全部が入った
 `855e003` で main を checkout して全走を回した。
 
+終了コードも残す。`scripts/run-gates.sh` は並走中の木の変更を `status=1` にし、ログが緑の
+まま非 0 で終わることがあるので、`| tail -1` だけでは成功を確かめられない。
+
 ```
-$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full-all 2>&1 | tail -1
+$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full-all 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
 TALLY: 3726/3726 passed; red: none
+exit=0
 $ tail -1 target/main-full-all/lint-docs.log
 PASSED: 16/16
 ```
 
 TALLY の内訳は門番 65 本の合計 3710 と文書層の 16 である。`tools/gates/main.hd` は出力先の
-ディレクトリの全ファイルを読むので `lint-docs.log` も数に入る。
+ディレクトリの全ファイルを読むので `lint-docs.log` も数に入る。内訳は残したログから数える。
 
 ```
-$ python3 -c "..."   # target/main-full-all/*.log から PASSED: n/N の N を合計（lint-docs を除く）
+$ python3 -c "
+> import re, pathlib
+> d = pathlib.Path('target/main-full-all')
+> logs = [f for f in sorted(d.glob('*.log')) if f.name != 'lint-docs.log']
+> print('門番', len(logs), '本の合計', sum(int(re.findall(r'PASSED: \d+/(\d+)', f.read_text())[-1]) for f in logs))
+> "
 門番 65 本の合計 3710
 $ echo $((3710+16))
 3726
