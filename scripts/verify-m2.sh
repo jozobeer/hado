@@ -238,30 +238,32 @@ else
     fail 6 "glue:$c6_reasons"
 fi
 
-# --- check 7: verification preserves documentation, runtime, and scripts ---
-# m1-corpus の検査 7 は自分の走行の間しか見ない。単体で門番を回す手順（AGENTS.md）と
-# 直列の全走（--jobs 1）では、M2 の前後を覆うものが他に無いので、ここでも固定する。
-if sha256sum --status -c "$TMPD/protected.sha"; then
-    pass 7 "protected-files-unchanged"
-else
-    fail 7 "protected-files-changed"
-fi
-
-# --- check 8: the whole test suite passes, including the associativity probe ---
+# --- check 7: the whole test suite passes, including the associativity probe ---
 # docs/corpus.md: 式木の往復は結合性を見ない（描画側が括弧を必ず付ける）ので、
 # `parser::tests::left_assoc_add_and_mul` がそれを固定し、この門番が `cargo test` 全体を
 # 見ることで捕まえる。単体で m2 を回す手順では m0 が走らないので、ここで見ないと
 # 無括弧の連鎖の退行が誰にも見えない（審査の指摘）。全走では cargo_cached が m0 の
 # 同じ実走に畳むので、費用は増えない。
-c8_reasons=""
+c7_reasons=""
 cargo_cached test --offline --no-fail-fast >"$TMPD/cargo.log" 2>&1
-[ "$?" -eq 0 ] || c8_reasons="$c8_reasons cargo-test-exit!=0"
+[ "$?" -eq 0 ] || c7_reasons="$c7_reasons cargo-test-exit!=0"
 grep -Eq '^test parser::tests::left_assoc_add_and_mul \.\.\. ok$' "$TMPD/cargo.log" \
-    || c8_reasons="$c8_reasons associativity-probe-not-run"
-if [ -z "$c8_reasons" ]; then
-    pass 8 "cargo-test+assoc"
+    || c7_reasons="$c7_reasons associativity-probe-not-run"
+if [ -z "$c7_reasons" ]; then
+    pass 7 "cargo-test+assoc"
 else
-    fail 8 "cargo-test+assoc:$c8_reasons"
+    fail 7 "cargo-test+assoc:$c7_reasons"
+fi
+
+# --- check 8: verification preserves documentation, runtime, and scripts ---
+# m1-corpus の検査 7 は自分の走行の間しか見ない。単体で門番を回す手順（AGENTS.md）と
+# 直列の全走（--jobs 1）では、M2 の前後を覆うものが他に無いので、ここでも固定する。
+# 照合は最後に置く。検査 7 の `cargo test` が `docs` `runtime` `scripts` を書き換えても、
+# その前に比べていては緑のままになる（審査の指摘）。
+if sha256sum --status -c "$TMPD/protected.sha"; then
+    pass 8 "protected-files-unchanged"
+else
+    fail 8 "protected-files-changed"
 fi
 
 echo "PASSED: $ok/$total"

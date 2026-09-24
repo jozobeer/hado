@@ -939,10 +939,12 @@ PY
 # 綴りそのものを固定する（審査の指摘）。
 doc_type_spelling() {
     python3 - <<'PY'
+import re
 from pathlib import Path
 
 spec = Path('docs/spec.md').read_text()
-assert 'Unit' not in spec, 'old type name remains in docs/spec.md'
+# 語の全体で見る。`UnitPrice` のような現行の識別子を巻き込まない（旧 r81_spec と同じ）。
+assert not re.search(r'\bUnit\b', spec), 'old type name remains in docs/spec.md'
 for needle in (
     '\nVoid\n',
     'Void は `()` とする。',
