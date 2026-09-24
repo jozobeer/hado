@@ -11,7 +11,8 @@
 # 絶対パスを使う。PATH 上の同名ツールは見ない。`target/` を PATH に足さず、
 # `hado` という名前の実行ファイルにも依存しない（`cmd` は checkout の
 # scripts/hado-lsp.sh を指し、判定器はそこから `cargo run --offline -q -- lsp` を
-# 起こす）。
+# 起こす）。起動器が exec した先はプロセス名 `hado` で見分け、それまでの cargo の
+# build lock 待ちをサーバの応答の予算から外す（docs/rounds/lsp-probe-lock.md）。
 set -eu
 cd "$(dirname "$0")/.."
 
