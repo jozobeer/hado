@@ -410,28 +410,6 @@ m2 は 8 → 8 検査に戻り、core は 639/639。削りの正味は −68 →
 文書層が +6 になったため）。削りの判断そのものは、呼び直しの側（検査 5）だけを冗長と見る形で
 保っている。
 
-## 着地後の全走（2026-09-24）
-
-`2372f95`（PR #31 の着地）で main を checkout して回した。`--jobs 4`。
-
-```
-$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full 2>&1 | tail -1
-TALLY: 3724/3724 passed; red: none
-$ tail -1 target/main-full/lint-docs.log
-PASSED: 16/16
-```
-
-TALLY の内訳は門番 64 本の合計 3708 と文書層の 16 である。`tools/gates/main.hd` は出力先の
-ディレクトリの全ファイルを読むので、`run-gates.sh` が同じ場所へ書く `lint-docs.log` も数に
-入る。門番だけを数えた値ではない。
-
-```
-$ python3 -c "..."   # target/main-full/*.log から PASSED: n/N の N を合計（lint-docs を除く）
-合計 3708 門番 64
-$ echo $((3708+16))
-3724
-```
-
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -484,9 +462,16 @@ m0 の全走は `OK: 2 cargo-test passed=746`（8/8。検査 8 は審査の 3 �
 回し、後者が `3720/3720`・`red: none`。core は 602 → 639（m6 の +38 と、審査で戻した m0 の検査 8・m2 の検査 8）。文書層は 14 → 16
 （検査 15・16）。
 
-門番は 83 → 64 本。全走の検査の合計は 3788 → 3720（test-prune の実測が 3788）。落とした
-検査は 107 件、m6 が既定で回すようになった受理コーパス 38 件と lint-docs の検査 6 件が
-増えて、正味 −63。core 層は 602 → 639（m6 の +38 と、審査で戻した m0 の検査 8・m2 の検査 8）。
+門番は 83 → 64 本。全走の検査の合計は、基準にした test-prune の木の実測が 3788（門番 3778・
+文書層 10）、着地した main（`2372f95`）の実測が 3724（門番 3708・文書層 16）で、差は −64。
+門番が −70、文書層が +6 である。落とした検査は 108 件（門番ごと消した 19 本の 39 件と、残した
+門番から落とした 69 件）、増えた検査は m6 が既定で回すようになった受理コーパス 38 件で、
+`3778 − 108 + 38 = 3708` と合う（基準と着地の内訳は `docs/rounds/test-prune.md` の 3788 と、
+下の「着地後の全走」のログから数えた）。
+
+審査の途中に測った 3720（門番 3706・文書層 14）はその時点の木の値で、着地の値ではない。
+着地との差は門番 +2（審査で戻した m0 の検査 8 と m2 の検査 8）と文書層 +2（検査 15・16）。
+core 層は 602 → 639（m6 の +38 と、審査で戻した m0 の検査 8・m2 の検査 8）。
 quick 層は 38 のまま。
 
 主な門番の検査数（前 → 後）: m0 7 → 8、m2 8 → 8（審査で戻した）、m3 12 → 11、m6 73 → 111、
@@ -505,3 +490,33 @@ wall は約 20 分。critical path は r34・m0・r35 で変わらず、削減�
 `docs/spec-trace.md` の 5 行目だけを、R9〜R28 の判定が `crates/hado/tests/` にあり m0 が回す
 という記述に替えた。
 
+### 着地後の全走（2026-09-24）
+
+`2372f95`（PR #31 の着地）で main を checkout して回した。`--jobs 4`。終了コードも残す。
+`scripts/run-gates.sh` は並走中の木の変更を `status=1` にし、ログが緑のまま非 0 で終わる
+ことがあるので、`| tail -1` だけでは成功を確かめられない（`the working tree changed
+during the parallel phase`）。
+
+```
+$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+TALLY: 3724/3724 passed; red: none
+exit=0
+$ tail -1 target/main-full/lint-docs.log
+PASSED: 16/16
+```
+
+TALLY の内訳は門番 64 本の合計 3708 と文書層の 16 である。`tools/gates/main.hd` は出力先の
+ディレクトリの全ファイルを読むので、`run-gates.sh` が同じ場所へ書く `lint-docs.log` も数に
+入る。門番だけを数えた値ではない。内訳は残したログから数える。
+
+```
+$ python3 -c "
+> import re, pathlib
+> d = pathlib.Path('target/main-full')
+> logs = [f for f in sorted(d.glob('*.log')) if f.name != 'lint-docs.log']
+> print('門番', len(logs), '本の合計', sum(int(re.findall(r'PASSED: \d+/(\d+)', f.read_text())[-1]) for f in logs))
+> "
+門番 64 本の合計 3708
+$ echo $((3708+16))
+3724
+```
