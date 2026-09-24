@@ -3317,9 +3317,7 @@ impl Checker<'_> {
                     ..
                 } => {
                     let (types, result) = self.operation_payload(name, row)?;
-                    for (param, ty) in params.iter().zip(types) {
-                        self.bind_param(param, &ty);
-                    }
+                    self.bind_operation_params(params, &types, *arm_span)?;
                     let resume = Ty::fn_with(vec![result], answer.clone(), Row::pure());
                     let previous = self.resume_type.replace(resume);
                     let ty = self.expression(ret);
@@ -3334,11 +3332,8 @@ impl Checker<'_> {
                     span: arm_span,
                     ..
                 } => {
-                    let (types, _) = self
-                        .operation_payload(name, row)
-                        .unwrap_or((Vec::new(), Ty::Void));
-                    for (param, ty) in params.iter().zip(types) {
-                        self.bind_param(param, &ty);
+                    if let Ok((types, _)) = self.operation_payload(name, row) {
+                        self.bind_operation_params(params, &types, *arm_span)?;
                     }
                     let ty = self.expression(ret)?;
                     self.unify(&ty, answer, *arm_span)?;
@@ -3347,15 +3342,16 @@ impl Checker<'_> {
                     name,
                     params,
                     body: ret,
+                    span: arm_span,
                     ..
                 } => {
-                    let (types, _) = self
-                        .operation_payload(name, row)
-                        .unwrap_or((Vec::new(), Ty::Void));
-                    for (param, ty) in params.iter().zip(types) {
-                        self.bind_param(param, &ty);
+                    if let Ok((types, result)) = self.operation_payload(name, row) {
+                        self.bind_operation_params(params, &types, *arm_span)?;
+                        let ty = self.expression(ret)?;
+                        self.unify(&ty, &result, ret.span)?;
+                    } else {
+                        let _ = self.expression(ret)?;
                     }
-                    let _ = self.expression(ret)?;
                 }
             }
         }
@@ -3370,6 +3366,21 @@ impl Checker<'_> {
             self.values
                 .insert(param.name.clone(), Scheme::monomorphic(ty.clone()));
         }
+    }
+
+    fn bind_operation_params(
+        &mut self,
+        params: &[Param],
+        types: &[Ty],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if params.len() != types.len() {
+            return Err(self.error(span, Some("E301"), "handler arm arity mismatch"));
+        }
+        for (param, ty) in params.iter().zip(types) {
+            self.bind_param(param, ty);
+        }
+        Ok(())
     }
 
     fn operation_payload(&mut self, name: &str, row: &Row) -> Result<(Vec<Ty>, Ty), Diagnostic> {
