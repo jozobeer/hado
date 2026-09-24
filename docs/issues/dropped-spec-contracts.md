@@ -13,9 +13,13 @@ $ bash scripts/verify-r50.sh 2>&1 | tail -1
 PASSED: 4/4
 ```
 
+層の所属は、層を**後ろへ**動かしたときだけ検出力が落ちる（`hado_tier_gates` は累積なので、`full` は `quick` と `core` を含む。`full` へ動かすと PR を回す `core` から消える）。`--print-tier` は `verify-` と `.sh` を落とした名前を出すので、門番のファイル名ではなくその名前で照合する。
+
 ```
-$ sed -i 's/^# tier: full$/# tier: quick/' scripts/verify-r52.sh
-$ bash scripts/run-gates.sh --print-tier full | tr ' ' '\n' | grep -c verify-r52
+$ bash scripts/run-gates.sh --print-tier core | tr ' ' '\n' | grep -c '^m1-spec$'
+1
+$ sed -i 's/^# tier: quick$/# tier: full/' scripts/verify-m1-spec.sh
+$ bash scripts/run-gates.sh --print-tier core | tr ' ' '\n' | grep -c '^m1-spec$'
 0
 $ bash scripts/verify-gate-cache.sh 2>&1 | tail -1
 PASSED: 26/26

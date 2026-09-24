@@ -342,6 +342,26 @@ PR #31 の Codex 審査で 4 件（P2）が付き、4 件とも直した。
   照合を検査 8 に入れ替えた。書き換えるスタブで、直す前は `PASSED: 8/8`、直した後は
   `NG: 8 protected-files-changed`（`PASSED: 7/8`）を確かめた。
 
+### 審査の指摘と対応（9 回目）
+
+`b56cfc5` への Codex 審査で 2 件（P2）が付いた。どちらも自分が入れた検査と記録の欠陥なので直した。
+
+- **コーパスの照合も `cargo test` より前にある（`scripts/verify-m2.sh`）**: 8 回目で保護対象の
+  照合を最後に移したが、検査 5 のコーパスの照合は前段のままだった。片付けが戻すのは
+  `tests/accept` と `tests/reject` だけなので、`tests/library` や `crates/hado/tests/corpus.rs` の
+  書き換えは残る。検査 8 で両方を照合するようにした（`tree-unchanged`）。検査 7 が
+  `crates/hado/tests/corpus.rs` を書き換えるスタブで、直す前は `PASSED: 8/8`、直した後は
+  `NG: 8 tree-unchanged: corpus-changed`（`PASSED: 7/8`）を確かめた。
+  最初の変異は `tests/library/main.hd` に追記したが、このファイルは開始時に存在しない
+  （未追跡で、テストが作る）ので `sha256sum -c` は新しいファイルを見ない。変異が無効だった
+  ので、開始時に確実に在る追跡済みのファイルに変えて測り直した。
+- **層の所属の探針が測れていなかった（`docs/issues/dropped-spec-contracts.md`）**: 記録した
+  探針は `--print-tier` の名前を `verify-r52` で照合していたが、実際は `verify-` と `.sh` を
+  落とした `r52` を出す。加えて `hado_tier_gates` は累積なので `full` は `quick` と `core` を
+  含み、`full` へ動かしても full の走行からは消えない。層を**後ろへ**動かしたときだけ検出力が
+  落ちる（`quick` → `full` で PR を回す `core` から消える）。探針を `m1-spec` で測り直し、
+  変異前 1・変異後 0・`verify-gate-cache` は `PASSED: 26/26` を確かめた。
+
 ### 仕様本文の契約の引き受け手（人の判断。2026-09-23）
 
 落ちた仕様本文の針（25 本の門番）と門番ごとの層の所属は、**戻さずに着地する**と決めた。理由は、

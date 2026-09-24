@@ -255,15 +255,20 @@ else
     fail 7 "cargo-test+assoc:$c7_reasons"
 fi
 
-# --- check 8: verification preserves documentation, runtime, and scripts ---
+# --- check 8: verification preserves the corpus, documentation, runtime, and scripts ---
 # m1-corpus の検査 7 は自分の走行の間しか見ない。単体で門番を回す手順（AGENTS.md）と
 # 直列の全走（--jobs 1）では、M2 の前後を覆うものが他に無いので、ここでも固定する。
-# 照合は最後に置く。検査 7 の `cargo test` が `docs` `runtime` `scripts` を書き換えても、
-# その前に比べていては緑のままになる（審査の指摘）。
-if sha256sum --status -c "$TMPD/protected.sha"; then
-    pass 8 "protected-files-unchanged"
+# 照合は最後に置く。検査 7 の `cargo test` が保護対象を書き換えても、その前に比べて
+# いては緑のままになる（審査の指摘）。検査 5 のコーパスの照合も同じ理由でここで繰り返す
+# （片付けが戻すのは `tests/accept` と `tests/reject` だけで、`tests/library` や
+# `crates/hado/tests/corpus.rs` の書き換えは残る。審査の指摘）。
+c8_reasons=""
+sha256sum --status -c "$TMPD/corpus.sha" || c8_reasons="$c8_reasons corpus-changed"
+sha256sum --status -c "$TMPD/protected.sha" || c8_reasons="$c8_reasons protected-files-changed"
+if [ -z "$c8_reasons" ]; then
+    pass 8 "tree-unchanged"
 else
-    fail 8 "protected-files-changed"
+    fail 8 "tree-unchanged:$c8_reasons"
 fi
 
 echo "PASSED: $ok/$total"
