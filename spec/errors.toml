@@ -1,0 +1,498 @@
+# 仕様 §56 のエラーコード表の正本。docs/spec.md の §56 の表は
+# scripts/spec-lock.sh がここから生成する（手で表を編集しない）。
+#
+# code    コード（E と 3 桁）
+# name    短い名前
+# section 主となる節（§N か 付録X）
+# stage   検査段階（字句 / 構文 / 名前解決 / 型 / 網羅性 / 冗長 / 単相化）
+# anchor  アンカー。表に置くとき `|` は `\|` に逃がす
+
+[[error]]
+code    = "E100"
+name    = "syntax-error"
+section = "付録C"
+stage   = "構文"
+anchor  = "文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `|`"
+
+[[error]]
+code    = "E101"
+name    = "nested-branch"
+section = "§30"
+stage   = "構文"
+anchor  = "内側の `if` か `fn`"
+
+[[error]]
+code    = "E102"
+name    = "rec-on-value"
+section = "§9"
+stage   = "構文"
+anchor  = "`rec`"
+
+[[error]]
+code    = "E103"
+name    = "float-literal-form"
+section = "§5"
+stage   = "字句"
+anchor  = "リテラル"
+
+[[error]]
+code    = "E104"
+name    = "comment-form"
+section = "§5"
+stage   = "字句"
+anchor  = "コメントの先頭（`--` `#` の 1 文字目）"
+
+[[error]]
+code    = "E105"
+name    = "no-tuple"
+section = "§20"
+stage   = "構文"
+anchor  = "`(`"
+
+[[error]]
+code    = "E106"
+name    = "constructor-call-form"
+section = "§13"
+stage   = "構文"
+anchor  = "constructor 名"
+
+[[error]]
+code    = "E107"
+name    = "operator-overloading"
+section = "§4"
+stage   = "構文"
+anchor  = "`def` の直後の演算子"
+
+[[error]]
+code    = "E108"
+name    = "adt-leading-pipe"
+section = "§17"
+stage   = "構文"
+anchor  = "最初の constructor 名"
+
+[[error]]
+code    = "E109"
+name    = "zero-parameter-arrow"
+section = "§8"
+stage   = "構文"
+anchor  = "`=>`"
+
+[[error]]
+code    = "E110"
+name    = "string-escape-form"
+section = "§5"
+stage   = "字句"
+anchor  = "`\\`"
+
+[[error]]
+code    = "E111"
+name    = "char-literal-form"
+section = "§5"
+stage   = "字句"
+anchor  = "`'`"
+
+[[error]]
+code    = "E112"
+name    = "int-literal-range"
+section = "§5"
+stage   = "字句"
+anchor  = "リテラル"
+
+[[error]]
+code    = "E123"
+name    = "abort-return-type"
+section = "§37"
+stage   = "構文"
+anchor  = "`abort` の操作の `:`"
+
+[[error]]
+code    = "E124"
+name    = "resume-outside-again"
+section = "§38"
+stage   = "構文"
+anchor  = "`resume`"
+
+[[error]]
+code    = "E125"
+name    = "pattern-column-count"
+section = "§26"
+stage   = "構文"
+anchor  = "scrutinee と数の合わない pattern の列を持つ腕の `|`"
+
+[[error]]
+code    = "E201"
+name    = "implicit-recursion"
+section = "§9"
+stage   = "名前解決"
+anchor  = "自分を参照する名前"
+
+[[error]]
+code    = "E202"
+name    = "dunder-in-user"
+section = "§49"
+stage   = "名前解決"
+anchor  = "`__` 名"
+
+[[error]]
+code    = "E203"
+name    = "dunder-as-value"
+section = "§49"
+stage   = "名前解決"
+anchor  = "`__` 名"
+
+[[error]]
+code    = "E204"
+name    = "unbound-name"
+section = "§49"
+stage   = "名前解決"
+anchor  = "名前"
+
+[[error]]
+code    = "E205"
+name    = "duplicate-name"
+section = "§49"
+stage   = "名前解決"
+anchor  = "2 回目の宣言の名前。ファイルをまたぐ順序は第50節。名前空間の単位と、根との同名でサブディレクトリ側を指す規則は第51節。`library` の重複は 2 回目の `library`（第52節）。関連位置は同じ名前の 1 回目の宣言（§56 のラベルは `first declared`）で、同じ名前が 2 度現れる宣言（値・型・constructor・契約・実装・型引数と、record の field と名前付き constructor の field）と、根の名前との衝突と、外側の型との衝突と、`library` の重複で出す。prelude と組み込み型の名前との衝突と、実装の中の型の衝突（`type_realizations`）では出さない"
+
+[[error]]
+code    = "E206"
+name    = "entry-form"
+section = "§10"
+stage   = "名前解決"
+anchor  = "`def main`。`build` に `main` が無ければ 1:1。`library` を宣言したディレクトリの `main` はその `def`（第52節）"
+
+[[error]]
+code    = "E207"
+name    = "rec-cycle-value"
+section = "§9"
+stage   = "名前解決"
+anchor  = "閉路に含まれる値定義の `def`"
+
+[[error]]
+code    = "E208"
+name    = "missing-rec"
+section = "§9"
+stage   = "名前解決"
+anchor  = "`rec` の無い `def`"
+
+[[error]]
+code    = "E301"
+name    = "arity-mismatch"
+section = "§13"
+stage   = "型"
+anchor  = "適用の先頭"
+
+[[error]]
+code    = "E302"
+name    = "recursive-type-arg"
+section = "§16"
+stage   = "型"
+anchor  = "宣言と異なる型引数"
+
+[[error]]
+code    = "E303"
+name    = "rail-type"
+section = "§34"
+stage   = "型"
+anchor  = "`let p? =` の右辺は Option、`do` の右辺は効果を持つ式か Option。どちらでもない式"
+
+[[error]]
+code    = "E304"
+name    = "record-ambiguous"
+section = "§18"
+stage   = "型"
+anchor  = "record 式か record パターンの `{`。型が未確定の field 参照では参照式の先頭"
+
+[[error]]
+code    = "E305"
+name    = "type-mismatch"
+section = "§15"
+stage   = "型"
+anchor  = "型が食い違った式の先頭。適用の引数については下記"
+
+[[error]]
+code    = "E306"
+name    = "occurs-check"
+section = "§15"
+stage   = "型"
+anchor  = "同上"
+
+[[error]]
+code    = "E307"
+name    = "poly-recursion"
+section = "§9"
+stage   = "型"
+anchor  = "再帰呼び出しの先頭。間接呼び出しの位置を追跡できない場合は再帰関数の `def` の先頭（§9）"
+
+[[error]]
+code    = "E308"
+name    = "effect-position"
+section = "§36"
+stage   = "型"
+anchor  = "許されない位置に置かれた効果を持つ式の先頭"
+
+[[error]]
+code    = "E401"
+name    = "missing-cond-fallback"
+section = "§25"
+stage   = "網羅性"
+anchor  = "`if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if`"
+
+[[error]]
+code    = "E402"
+name    = "non-exhaustive"
+section = "§28"
+stage   = "網羅性"
+anchor  = "`if`。`let` ではそのパターン"
+
+[[error]]
+code    = "E403"
+name    = "unreachable-branch"
+section = "§43"
+stage   = "網羅性"
+anchor  = "到達不能な腕の `|`"
+
+[[error]]
+code    = "E404"
+name    = "fallback-not-last"
+section = "§43"
+stage   = "網羅性"
+anchor  = "fallback より後の腕の `|`"
+
+[[error]]
+code    = "E405"
+name    = "duplicate-pattern"
+section = "§44"
+stage   = "網羅性"
+anchor  = "重複する 2 番目の腕の `|`"
+
+[[error]]
+code    = "E406"
+name    = "duplicate-condition"
+section = "§44"
+stage   = "網羅性"
+anchor  = "同上"
+
+[[error]]
+code    = "E501"
+name    = "identity-binding"
+section = "§41"
+stage   = "冗長"
+anchor  = "`let`"
+
+[[error]]
+code    = "E502"
+name    = "identical-branches"
+section = "§42"
+stage   = "冗長"
+anchor  = "`if`。第32節の形では `def` か `fn`"
+
+[[error]]
+code    = "E503"
+name    = "catch-all-underscore"
+section = "§29"
+stage   = "冗長"
+anchor  = "`_`"
+
+[[error]]
+code    = "E504"
+name    = "let-question-underscore"
+section = "§35"
+stage   = "冗長"
+anchor  = "`_`"
+
+[[error]]
+code    = "E505"
+name    = "unused-binding"
+section = "§39"
+stage   = "冗長"
+anchor  = "束縛名"
+
+[[error]]
+code    = "E506"
+name    = "implicit-discard"
+section = "§40"
+stage   = "冗長"
+anchor  = "`_`"
+
+[[error]]
+code    = "E507"
+name    = "rewrap"
+section = "§45"
+stage   = "冗長"
+anchor  = "`if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる"
+
+[[error]]
+code    = "E508"
+name    = "repropagate"
+section = "§36"
+stage   = "冗長"
+anchor  = "再伝播する腕の `|`。Option の再伝播に当てる"
+
+[[error]]
+code    = "E510"
+name    = "list-literal-form"
+section = "§22"
+stage   = "冗長"
+anchor  = "式の `Cons` か `Nil`"
+
+[[error]]
+code    = "E511"
+name    = "cond-to-literal-pattern"
+section = "§26"
+stage   = "冗長"
+anchor  = "`if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if`"
+
+[[error]]
+code    = "E512"
+name    = "top-var-pattern"
+section = "§26"
+stage   = "冗長"
+anchor  = "変数パターン"
+
+[[error]]
+code    = "E513"
+name    = "unused-toplevel"
+section = "§39"
+stage   = "冗長"
+anchor  = "未使用の宣言の先頭。効果（第37節）と handler（第38節）にも当てる"
+
+[[error]]
+code    = "E514"
+name    = "unused-implement-def"
+section = "§47"
+stage   = "冗長"
+anchor  = "`def`"
+
+[[error]]
+code    = "E515"
+name    = "if-on-sole-parameter"
+section = "§31"
+stage   = "冗長"
+anchor  = "`def` か `fn`"
+
+[[error]]
+code    = "E516"
+name    = "list-pattern-form"
+section = "§22"
+stage   = "冗長"
+anchor  = "パターンの `Cons` か `Nil`"
+
+[[error]]
+code    = "E517"
+name    = "if-chain-on-parameters"
+section = "§32"
+stage   = "冗長"
+anchor  = "`def` か `fn`"
+
+[[error]]
+code    = "E518"
+name    = "unused-type-parameter"
+section = "§16"
+stage   = "冗長"
+anchor  = "使われない型変数の宣言"
+
+[[error]]
+code    = "E519"
+name    = "underscore-parameter"
+section = "§39"
+stage   = "冗長"
+anchor  = "`_`"
+
+[[error]]
+code    = "E520"
+name    = "boolean-branch-form"
+section = "§24"
+stage   = "冗長"
+anchor  = "`if`。第31節の形では `def` か `fn`"
+
+[[error]]
+code    = "E521"
+name    = "unused-functor-parameter"
+section = "§48"
+stage   = "冗長"
+anchor  = "引数名"
+
+[[error]]
+code    = "E522"
+name    = "duplicate-effect"
+section = "§20"
+stage   = "冗長"
+anchor  = "行の 2 番目に現れた同じ効果"
+
+[[error]]
+code    = "E601"
+name    = "opaque-type"
+section = "§47"
+stage   = "型"
+anchor  = "field access の `.`"
+
+[[error]]
+code    = "E602"
+name    = "contract-mismatch"
+section = "§47"
+stage   = "型"
+anchor  = "`implement`。契約の member の食い違い（欠けた member、定義の形、型、多相性、欠けた型）では、関連位置は契約側のその宣言である（§56 のラベルは `declared in the contract`）。functor の食い違いと抽象型の実体化の循環では出さない"
+
+[[error]]
+code    = "E603"
+name    = "contract-type-unresolved"
+section = "§46"
+stage   = "型"
+anchor  = "契約修飾の型 `X.T`"
+
+[[error]]
+code    = "E604"
+name    = "functor-reapplied"
+section = "§48"
+stage   = "型"
+anchor  = "2 回目の `implement`"
+
+[[error]]
+code    = "E605"
+name    = "handler-mismatch"
+section = "§38"
+stage   = "型"
+anchor  = "過不足のある `handler`"
+
+[[error]]
+code    = "E701"
+name    = "main-polymorphic"
+section = "§10"
+stage   = "単相化"
+anchor  = "`def main`"
+
+[[error]]
+code    = "E702"
+name    = "main-contains-fn"
+section = "§10"
+stage   = "単相化"
+anchor  = "`def main`"
+
+[[error]]
+code    = "E703"
+name    = "eq-on-fn"
+section = "§21"
+stage   = "単相化"
+anchor  = "演算子"
+
+[[error]]
+code    = "E704"
+name    = "compare-on-fn"
+section = "§21"
+stage   = "単相化"
+anchor  = "`compare`"
+
+[[error]]
+code    = "E705"
+name    = "main-contains-abstract"
+section = "§10"
+stage   = "単相化"
+anchor  = "`shared` で解けない抽象型を含む `def main`"
+
+[[error]]
+code    = "E706"
+name    = "main-user-effect"
+section = "§10"
+stage   = "単相化"
+anchor  = "`def main`"
