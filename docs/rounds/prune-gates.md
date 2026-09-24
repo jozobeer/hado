@@ -410,6 +410,28 @@ m2 は 8 → 8 検査に戻り、core は 639/639。削りの正味は −68 →
 文書層が +6 になったため）。削りの判断そのものは、呼び直しの側（検査 5）だけを冗長と見る形で
 保っている。
 
+## 着地後の全走（2026-09-24）
+
+`2372f95`（PR #31 の着地）で main を checkout して回した。`--jobs 4`。
+
+```
+$ bash scripts/run-gates.sh --tier full --jobs 4 target/main-full 2>&1 | tail -1
+TALLY: 3724/3724 passed; red: none
+$ tail -1 target/main-full/lint-docs.log
+PASSED: 16/16
+```
+
+TALLY の内訳は門番 64 本の合計 3708 と文書層の 16 である。`tools/gates/main.hd` は出力先の
+ディレクトリの全ファイルを読むので、`run-gates.sh` が同じ場所へ書く `lint-docs.log` も数に
+入る。門番だけを数えた値ではない。
+
+```
+$ python3 -c "..."   # target/main-full/*.log から PASSED: n/N の N を合計（lint-docs を除く）
+合計 3708 門番 64
+$ echo $((3708+16))
+3724
+```
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -432,7 +454,7 @@ TALLY: 38/38 passed; red: none
 $ bash scripts/run-gates.sh --tier core --jobs 3 target/gates-core 2>&1 | tail -1
 TALLY: 639/639 passed; red: none
 $ HADO_GATE_TIMES=target/gate-times.tsv bash scripts/run-gates.sh --tier full --jobs 3 target/gates-full 2>&1 | tail -1
-TALLY: 3720/3720 passed; red: none
+TALLY: 3720/3720 passed; red: none   # 審査の途中の値。着地後の全走は下の「着地後の全走」
 $ bash scripts/verify-m0.sh 2>&1 | tail -1
 PASSED: 8/8
 $ bash scripts/verify-m2.sh 2>&1 | tail -1
