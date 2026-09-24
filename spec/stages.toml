@@ -1,0 +1,33 @@
+# 仕様 §56 の検査段階の正本。表の stage 列は、コードの族（先頭 2 文字）ごとにここで
+# 許した段階のいずれかでなければならない。段階はこの順に走る（§56 の散文）。
+#
+# family  コードの先頭 2 文字
+# stages  その族が取り得る段階
+
+[[stage]]
+family = "E1"
+stages = ["字句", "構文"]
+
+[[stage]]
+family = "E2"
+stages = ["名前解決"]
+
+[[stage]]
+family = "E3"
+stages = ["型"]
+
+[[stage]]
+family = "E4"
+stages = ["網羅性"]
+
+[[stage]]
+family = "E5"
+stages = ["冗長"]
+
+[[stage]]
+family = "E6"
+stages = ["型"]
+
+[[stage]]
+family = "E7"
+stages = ["単相化"]

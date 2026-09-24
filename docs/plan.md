@@ -1297,7 +1297,7 @@ slug `prelude-tail-recursion`、`highlight-treesitter`、`lsp-minimal` を次の
 
 | 段 | 内容 | 状態 |
 |---|---|---|
-| 1 | エラーコード表と文法。`spec/errors.toml`・`spec/grammar.ebnf` を正本にし、§56 の表と付録C のフェンスを生成する | 済み（`docs/rounds/spec-model.md`） |
+| 1 | エラーコード表と文法。`spec/errors.toml`・`spec/grammar.ebnf`・`spec/stages.toml` を正本にし、§56 の表と付録C のフェンスを生成する | 済み（`docs/rounds/spec-model.md`） |
 | 2 | 追跡表。`docs/spec-trace.md`・`docs/spec-coverage.md` をデータにし、Markdown を生成する | 未着手 |
 | 3 | `scripts/lint-docs.sh` を 1 つのパーサと宣言的な規則に割る。散文の針を隔離する | 未着手 |
 | 4 | 実測を生成物にする（`docs/issues/lint-docs-hardening.md` の案 A） | 未着手 |

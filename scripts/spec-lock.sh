@@ -20,8 +20,16 @@ esac
 python3 - "$mode" <<'PY'
 import difflib
 import sys
-import tomllib
 from pathlib import Path
+
+# tomllib は 3.11 から。古い python3（Ubuntu 22.04 の 3.10 など）では tomli を探す。
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        sys.exit('spec-lock: TOML を読むのに Python 3.11 以上か tomli が要る')
 
 mode = sys.argv[1]
 SPEC = Path('docs/spec.md')
@@ -29,6 +37,9 @@ text = SPEC.read_text()
 
 # 表の見出しと区切り。列は spec/errors.toml の並びと同じ。
 COLUMNS = ['コード', '短い名前', '節', '段階', 'アンカー']
+# 付録C のフェンス。開きは言語を伴い、閉じは言語を伴わない。
+FENCE_OPEN = '```text'
+FENCE_CLOSE = '```'
 
 
 def section_bounds(lines, prefix):
@@ -38,26 +49,62 @@ def section_bounds(lines, prefix):
     return start, end
 
 
+def field(entry, key):
+    """表のセルに置ける値か確かめて返す。改行は表を壊し、空は契約を消す。"""
+    value = entry.get(key)
+    if not isinstance(value, str) or not value.strip():
+        sys.exit(f'spec-lock: {entry.get("code", "?")} の {key} が空')
+    if '\n' in value or '\r' in value:
+        sys.exit(f'spec-lock: {entry.get("code", "?")} の {key} に改行')
+    return value
+
+
 def error_table():
     """spec/errors.toml から §56 の表を組む。セルの `|` は `\\|` に逃がす。"""
     entries = tomllib.loads(Path('spec/errors.toml').read_text())['error']
     rows = ['| ' + ' | '.join(COLUMNS) + ' |', '|' + '---|' * len(COLUMNS)]
     for e in entries:
-        cells = [e['code'], e['name'], e['section'], e['stage'], e['anchor'].replace('|', '\\|')]
+        cells = [field(e, k) for k in ('code', 'name', 'section', 'stage')]
+        cells.append(field(e, 'anchor').replace('|', '\\|'))
         rows.append('| ' + ' | '.join(cells) + ' |')
     return rows
 
 
 def grammar_groups():
-    """spec/grammar.ebnf の `### <ラベル>` ごとの本文。"""
+    """spec/grammar.ebnf の `### <ラベル>` ごとの本文。
+
+    先頭の `### ` より前だけが注記で、以後は `### ` の行までが本文である（本文の行は
+    先頭が `#` でも落とさない）。
+    """
     groups = []
     for line in Path('spec/grammar.ebnf').read_text().split('\n'):
         if line.startswith('### '):
             groups.append((line[4:].strip(), []))
-        elif groups and not line.startswith('#'):
+        elif groups:
             groups[-1][1].append(line)
     # 群の区切りの空行を落とす。
     return [(label, body[:-1] if body and body[-1] == '' else body) for label, body in groups]
+
+
+def fences_in(lines, start, end):
+    """付録C のフェンスの (開き, 閉じ) を行番号で返す。開きと閉じを厳密に区別する。"""
+    fences = []
+    open_at = None
+    for i in range(start, end):
+        line = lines[i]
+        if open_at is None:
+            if line == FENCE_OPEN:
+                open_at = i
+            elif line.startswith('```'):
+                raise SystemExit(f'spec-lock: {i + 1} 行目のフェンスの開きが {line!r}')
+        elif line == FENCE_CLOSE:
+            fences.append((open_at, i))
+            open_at = None
+        elif line.startswith('```'):
+            raise SystemExit(f'spec-lock: {i + 1} 行目のフェンスの閉じが {line!r}')
+    if open_at is not None:
+        raise SystemExit('spec-lock: 付録C のフェンスが閉じていない')
+    return fences
 
 
 def rewrite(lines):
@@ -65,30 +112,24 @@ def rewrite(lines):
     # --- §56 の表 ---
     start, end = section_bounds(lines, '## 56. ')
     run = [i for i in range(start, end) if lines[i].startswith('|')]
-    assert run and run == list(range(run[0], run[-1] + 1)), '§56 の表が連続していない'
+    if not run or run != list(range(run[0], run[-1] + 1)):
+        raise SystemExit('spec-lock: §56 の表が連続していない（手で編集したか）')
     lines = lines[:run[0]] + error_table() + lines[run[-1] + 1:]
 
     # --- 付録C のフェンス ---
     start, end = section_bounds(lines, '## 付録C')
-    fences = []
-    open_at = None
-    for i in range(start, end):
-        if lines[i].startswith('```'):
-            if open_at is None:
-                open_at = i
-            else:
-                fences.append((open_at, i))
-                open_at = None
-    assert open_at is None, '付録C のフェンスが閉じていない'
+    fences = fences_in(lines, start, end)
     groups = grammar_groups()
-    assert len(fences) == len(groups), \
-        f'付録C のフェンス {len(fences)} 本に対し spec/grammar.ebnf の群が {len(groups)} 本'
+    if len(fences) != len(groups):
+        raise SystemExit(
+            f'spec-lock: 付録C のフェンス {len(fences)} 本に対し spec/grammar.ebnf の群が {len(groups)} 本')
     # 後ろから置き換えて添字を保つ。
     for (open_at, close_at), (label, body) in reversed(list(zip(fences, groups))):
         # フェンスの直前の非空行がラベル。群のラベルと一致することを確かめる。
         label_at = next(i for i in range(open_at - 1, start - 1, -1) if lines[i].strip())
-        assert lines[label_at].strip() == label, \
-            f'付録C のラベル {lines[label_at].strip()!r} が spec/grammar.ebnf の {label!r} と違う'
+        if lines[label_at].strip() != label:
+            raise SystemExit(
+                f'spec-lock: 付録C のラベル {lines[label_at].strip()!r} が spec/grammar.ebnf の {label!r} と違う')
         lines = lines[:open_at + 1] + body + lines[close_at:]
     return lines
 

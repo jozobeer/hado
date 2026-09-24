@@ -37,8 +37,16 @@ lock_case() {
 model_case() {
     python3 - <<'PY'
 import re
-import tomllib
+import sys
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        sys.exit('verify-spec-model: TOML を読むのに Python 3.11 以上か tomli が要る')
 
 spec = Path('docs/spec.md').read_text()
 
@@ -53,39 +61,53 @@ assert headings, 'spec.md に見出しが無い'
 errors = tomllib.loads(Path('spec/errors.toml').read_text())['error']
 assert errors, 'spec/errors.toml が空'
 
+# コードの族ごとに取り得る段階（spec/stages.toml）。
+stages = {s['family']: s['stages'] for s in tomllib.loads(Path('spec/stages.toml').read_text())['stage']}
+assert stages, 'spec/stages.toml が空'
+
 problems = []
 codes = [e['code'] for e in errors]
+names = [e['name'] for e in errors]
 for code, count in ((c, codes.count(c)) for c in set(codes)):
     if count > 1:
-        problems.append(f'{code}:duplicate')
+        problems.append(f'{code}:duplicate-code')
+for name, count in ((n, names.count(n)) for n in set(names)):
+    if count > 1:
+        problems.append(f'{name}:duplicate-name')
 for e in errors:
     code = e['code']
     if not re.fullmatch(r'E[1-7][0-9]{2}', code):
         problems.append(f'{code}:code-form')
+        continue
     if not re.fullmatch(r'[a-z][a-z0-9-]*', e['name']):
         problems.append(f'{code}:name-form={e["name"]}')
     if e['section'] not in headings:
         problems.append(f'{code}:section-absent={e["section"]}')
-    if not e['stage']:
-        problems.append(f'{code}:stage-empty')
-    if not e['anchor']:
-        problems.append(f'{code}:anchor-empty')
+    # 段階は族ごとに決まる。空だけでなく、他の段階への取り違えも見る。
+    allowed = stages.get(code[:2])
+    if allowed is None:
+        problems.append(f'{code}:family-absent={code[:2]}')
+    elif e['stage'] not in allowed:
+        problems.append(f'{code}:stage={e["stage"]}（{code[:2]} は {allowed}）')
+    if not e['anchor'].strip():
+        problems.append(f'{code}:anchor-blank')
 assert not problems, sorted(problems)
 
 # 文法: `### <ラベル>` ごとに本文があり、ラベルが一意である。
+# 本文の判定は spec-lock.sh と同じにする（空行だけの群を本文在りと数えない）。
 groups = []
 for line in Path('spec/grammar.ebnf').read_text().split('\n'):
     if line.startswith('### '):
         groups.append([line[4:].strip(), []])
-    elif groups and not line.startswith('#'):
+    elif groups:
         groups[-1][1].append(line)
 assert groups, 'spec/grammar.ebnf に群が無い'
-assert all(body for _, body in groups), \
-    [label for label, body in groups if not body]
+assert all(any(b.strip() for b in body) for _, body in groups), \
+    [label for label, body in groups if not any(b.strip() for b in body)]
 labels = [label for label, _ in groups]
 assert len(labels) == len(set(labels)), sorted({l for l in labels if labels.count(l) > 1})
 
-print(f'{len(errors)} エラーコード、{len(groups)} 文法群、見出し {len(headings)}')
+print(f'{len(errors)} エラーコード、{len(groups)} 文法群、{len(stages)} 段階の族、見出し {len(headings)}')
 PY
 }
 
