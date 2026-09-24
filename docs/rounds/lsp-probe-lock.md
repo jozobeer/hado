@@ -36,6 +36,21 @@
 - スコープ: `scripts/lsp-check.py`、`scripts/verify-lsp-minimal.sh` の見出し、本ファイル。
 - 未確認: CI で lock を握っていたのがどの門番か。full 層の CI が緑になるか。
 
+### 期待値の根拠
+
+- 30 秒は `lsp-minimal` が置いた応答の予算で、手元の単独走では 11 本の合計が 8 秒に
+  収まる。この予算は変えない。
+- 見張りの 300 秒は、同じ判定器が cargo を起こす `run_hado` の timeout と同じ。
+
+### 成果物
+
+`scripts/lsp-check.py`、`scripts/verify-lsp-minimal.sh` の見出し、本ファイル。
+
+### 工程
+
+lock の保持で赤を再現 → `open()` の待ちを 2 段に分ける → 欠陥の注入と実測 →
+full 層の CI（workflow_dispatch）。
+
 ### 判定
 
 - lock（`target/debug/.cargo-lock`）を 60 秒握った状態で `bash scripts/verify-lsp-minimal.sh`
@@ -47,10 +62,19 @@
 - 負荷の無い単独走が `PASSED: 11/11`。
 - full 層の CI で `verify-lsp-minimal` が緑。
 
+### 許容される赤
+
+無し。
+
 ### スコープ外
 
 - `scripts/run-gates.sh` の順序と並列度。clippy の門番を前段に移しても、ほかの門番も
   cargo を起こすので、取り合いは残る。
+
+### 中断の条件
+
+full 層の CI で同じ探針が `timeout: lsp client` で落ちたら、lock 待ちの仮説が外れて
+いるので、実装を足さずに探索へ戻る。
 
 ## 系譜
 
@@ -103,8 +127,8 @@ user	0m1.444s
 sys	0m0.607s
 ```
 
-修正後。同じ条件で緑になる。単独走は 7.85 秒で、修正前の 7.4 秒より、各探針の最初の
-見張りの 200 ms の分だけ延びる。
+修正後。同じ条件で緑になる。単独走は 7.85 秒で、修正前の 7.4 秒より約 0.4 秒延びる
+（見張りを 200 ms 刻みで見る分と推定。内訳は測っていない）。
 
 ```
 $ (flock target/debug/.cargo-lock sleep 60 &); sleep 0.5
