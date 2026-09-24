@@ -2018,7 +2018,7 @@ def A drop(values: A List, count: Int): A List Pure
 
 | コード | 短い名前 | 節 | 段階 | アンカー |
 |---|---|---|---|---|
-| E100 | syntax-error | 付録C | 構文 | 文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `|` |
+| E100 | syntax-error | 付録C | 構文 | 文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `\|` |
 | E101 | nested-branch | §30 | 構文 | 内側の `if` か `fn` |
 | E102 | rec-on-value | §9 | 構文 | `rec` |
 | E103 | float-literal-form | §5 | 字句 | リテラル |
@@ -2052,9 +2052,9 @@ def A drop(values: A List, count: Int): A List Pure
 | E308 | effect-position | §36 | 型 | 許されない位置に置かれた効果を持つ式の先頭 |
 | E401 | missing-cond-fallback | §25 | 網羅性 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
 | E402 | non-exhaustive | §28 | 網羅性 | `if`。`let` ではそのパターン |
-| E403 | unreachable-branch | §43 | 網羅性 | 到達不能な腕の `|` |
-| E404 | fallback-not-last | §43 | 網羅性 | fallback より後の腕の `|` |
-| E405 | duplicate-pattern | §44 | 網羅性 | 重複する 2 番目の腕の `|` |
+| E403 | unreachable-branch | §43 | 網羅性 | 到達不能な腕の `\|` |
+| E404 | fallback-not-last | §43 | 網羅性 | fallback より後の腕の `\|` |
+| E405 | duplicate-pattern | §44 | 網羅性 | 重複する 2 番目の腕の `\|` |
 | E406 | duplicate-condition | §44 | 網羅性 | 同上 |
 | E501 | identity-binding | §41 | 冗長 | `let` |
 | E502 | identical-branches | §42 | 冗長 | `if`。第32節の形では `def` か `fn` |
@@ -2063,7 +2063,7 @@ def A drop(values: A List, count: Int): A List Pure
 | E505 | unused-binding | §39 | 冗長 | 束縛名 |
 | E506 | implicit-discard | §40 | 冗長 | `_` |
 | E507 | rewrap | §45 | 冗長 | `if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる |
-| E508 | repropagate | §36 | 冗長 | 再伝播する腕の `|`。Option の再伝播に当てる |
+| E508 | repropagate | §36 | 冗長 | 再伝播する腕の `\|`。Option の再伝播に当てる |
 | E510 | list-literal-form | §22 | 冗長 | 式の `Cons` か `Nil` |
 | E511 | cond-to-literal-pattern | §26 | 冗長 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
 | E512 | top-var-pattern | §26 | 冗長 | 変数パターン |
