@@ -97,7 +97,7 @@ spec-lock --check: 一致（70 エラーコード、10 文法群）
 $ bash scripts/verify-spec-model.sh
 spec-lock --check: 一致（70 エラーコード、10 文法群）
 OK: docs/spec.md matches spec/ (spec-lock --check)
-70 エラーコード、10 文法群、見出し 69
+70 エラーコード、10 文法群、7 段階の族、見出し 69
 OK: the model is well formed and its sections exist
 PASSED: 2/2
 ```
@@ -167,6 +167,16 @@ TALLY: 641/641 passed; red: none
 変異は 8 件とも赤（`#` 行の保持だけは、保たれることを生成物で確かめた）。`tomllib` の退避は
 `tomllib` を失敗させる module を `PYTHONPATH` に置いて、両方の道具が理由を出して落ちることを
 確かめた。
+
+### 審査の指摘と対応（4 回目）
+
+Codex 審査で 2 件（P2）が付いた。どちらも直した。
+
+- **`spec/stages.toml` の族の重複（`scripts/verify-spec-model.sh`）**: 辞書に畳む前に
+  重複を弾くようにした。同じ族を 2 度書くと辞書が黙って後を残すので、写し間違いが
+  見えなかった。変異（E1 の記録を 2 つにする）で `PASSED: 1/2` を確かめた。
+- **実測ブロックの出力が古い（`docs/rounds/spec-model.md`）**: 3 回目で段階の検査を足した
+  ので、門番の出力に `7 段階の族` が入る。記録を実際の出力に直した。
 
 ### main の取り込み（#31 の着地後）
 

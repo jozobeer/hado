@@ -61,9 +61,14 @@ assert headings, 'spec.md に見出しが無い'
 errors = tomllib.loads(Path('spec/errors.toml').read_text())['error']
 assert errors, 'spec/errors.toml が空'
 
-# コードの族ごとに取り得る段階（spec/stages.toml）。
-stages = {s['family']: s['stages'] for s in tomllib.loads(Path('spec/stages.toml').read_text())['stage']}
-assert stages, 'spec/stages.toml が空'
+# コードの族ごとに取り得る段階（spec/stages.toml）。同じ族を 2 度書くと辞書が黙って
+# 後のものを残すので、畳む前に重複を弾く。
+records = tomllib.loads(Path('spec/stages.toml').read_text())['stage']
+assert records, 'spec/stages.toml が空'
+families = [s['family'] for s in records]
+assert len(families) == len(set(families)), \
+    f'spec/stages.toml に重複した族: {sorted({f for f in families if families.count(f) > 1})}'
+stages = {s['family']: s['stages'] for s in records}
 
 problems = []
 codes = [e['code'] for e in errors]
