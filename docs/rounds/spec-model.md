@@ -139,8 +139,22 @@ TALLY: 3790/3790 passed; red: none
 quick 層は 38 → 40、core 層は 602 → 604、全走は 3788 → 3790（新しい門番の 2 検査）。
 門番は 83 → 84 本。
 
-### CI
+### main の取り込み（#31 の着地後）
 
-PR #34 は main から切ったので、ワークフローはまだ `runs-on: ubuntu-latest` である。org の
-Free 枠の支払いで job が始まらず（steps 0 で 2 秒）、赤になる。PR #31 が self-hosted へ
-切り替えるので、#31 の着地後に main を取り込むと回る。
+PR #31 が着地した（`2372f95`）ので main を取り込んだ。`scripts/corpus-lock.sh --check` は
+差分なし（exit 0）。門番は 65 本、quick 層は 40/40・red なし。
+
+```
+$ git merge main --no-edit
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+$ bash scripts/spec-lock.sh --check
+spec-lock --check: 一致（70 エラーコード、10 文法群）
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --tier quick --jobs 4 target/quick-gates | tail -1
+TALLY: 40/40 passed; red: none
+```
+
+`#31` 以前は main のワークフローが `runs-on: ubuntu-latest` で、org の Free 枠の支払いに
+より job が始まらなかった（steps 0 で 2 秒）。取り込みで self-hosted へ切り替わった。
