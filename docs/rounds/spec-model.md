@@ -198,6 +198,12 @@ Codex 審査で 3 件（P2）が付いた。いずれも自分が入れた検査
 `docs/issues/gate-optimize-flag.md` に切った。往復は 5 回目で `AGENTS.md` の予算（3 回）を
 超えている。以後の指摘は同じ issue へ切る。
 
+### 審査の指摘と対応（6 回目・打ち切り）
+
+`b5d4cb3` への Codex 審査で 3 件（P2）が付いた。3 件とも実在を確かめた（字下げしたフェンス行、
+表のセルの `|`、使われない族 `E8` のいずれも門番が通す）。往復は 6 回目で、5 回目に宣言した
+打ち切りに従い `docs/issues/spec-lock-input-hardening.md` へ切った。本ラウンドでは直さない。
+
 ### main の取り込み（#31 の着地後）
 
 PR #31 が着地した（`2372f95`）ので main を取り込んだ。`scripts/corpus-lock.sh --check` は
