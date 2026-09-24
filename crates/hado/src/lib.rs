@@ -252,6 +252,17 @@ fn resolve_namespaces(
     parsed.namespace_anchors = resolved.error_anchors;
 }
 
+/// Whether `path` names a language stdlib source. Tests and the implicit prelude
+/// pass `stdlib/<file>.hd` as a logical path so `__` names resolve (E202) and
+/// the prelude is not attached twice. A filesystem path that merely contains a
+/// directory named `stdlib` is ordinary user code (§55).
+pub(crate) fn is_stdlib_source(path: &str) -> bool {
+    std::path::Path::new(path)
+        .components()
+        .next()
+        .is_some_and(|component| component.as_os_str() == "stdlib")
+}
+
 fn with_prelude(
     mut ast: parser::Ast,
     path: &str,
@@ -279,10 +290,7 @@ fn with_prelude(
         );
     }
     let mut trusted_start = None;
-    if !std::path::Path::new(path)
-        .components()
-        .any(|part| part.as_os_str() == "stdlib")
-    {
+    if !is_stdlib_source(path) {
         let mut line = source_lines + 2;
         trusted_start = Some(line + 1);
         for module in [
