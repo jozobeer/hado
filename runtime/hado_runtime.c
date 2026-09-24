@@ -158,7 +158,11 @@ HadoString *hado_argv_get(int64_t index) {
   return bytes_from_c_string(process_argv[index + 1]);
 }
 
+/* Paths and env names are length-delimited and may contain NUL. Passing a
+   truncated C string to fopen/getenv/opendir would operate on a different
+   name (spec §55 maps that class of I/O failure to status 4). */
 static char *nul_terminated_name(const HadoString *name) {
+  if (memchr(name->bytes, 0, name->length) != NULL) return NULL;
   char *copy = hado_alloc(name->length + 1);
   if (copy == NULL) abort();
   memcpy(copy, name->bytes, name->length);
@@ -167,11 +171,13 @@ static char *nul_terminated_name(const HadoString *name) {
 }
 
 int8_t hado_env_has(const HadoString *name) {
-  return getenv(nul_terminated_name(name)) != NULL;
+  char *c_name = nul_terminated_name(name);
+  return c_name != NULL && getenv(c_name) != NULL;
 }
 
 HadoString *hado_env_get(const HadoString *name) {
-  const char *value = getenv(nul_terminated_name(name));
+  char *c_name = nul_terminated_name(name);
+  const char *value = c_name == NULL ? NULL : getenv(c_name);
   return bytes_from_c_string(value == NULL ? "" : value);
 }
 
@@ -227,7 +233,9 @@ static int64_t read_io_stream(FILE *stream) {
 
 int64_t hado_io_read_file(const HadoString *path) {
   io_bytes = NULL;
-  FILE *stream = fopen(nul_terminated_name(path), "rb");
+  char *c_path = nul_terminated_name(path);
+  if (c_path == NULL) return 4;
+  FILE *stream = fopen(c_path, "rb");
   if (stream == NULL) return io_status_from_errno(errno);
   int64_t status = read_io_stream(stream);
   if (fclose(stream) != 0 && status == 0) status = io_status_from_errno(errno);
@@ -236,7 +244,9 @@ int64_t hado_io_read_file(const HadoString *path) {
 }
 
 int64_t hado_io_write_file(const HadoString *path, const HadoString *contents) {
-  FILE *stream = fopen(nul_terminated_name(path), "wb");
+  char *c_path = nul_terminated_name(path);
+  if (c_path == NULL) return 4;
+  FILE *stream = fopen(c_path, "wb");
   if (stream == NULL) return io_status_from_errno(errno);
   errno = 0;
   int64_t status = fwrite(contents->bytes, 1, contents->length, stream) == contents->length
@@ -303,7 +313,9 @@ static int64_t collect_io_names(DIR *directory) {
 int64_t hado_io_read_dir(const HadoString *path) {
   io_names = NULL;
   io_name_count = 0;
-  DIR *directory = opendir(nul_terminated_name(path));
+  char *c_path = nul_terminated_name(path);
+  if (c_path == NULL) return 4;
+  DIR *directory = opendir(c_path);
   if (directory == NULL) return io_status_from_errno(errno);
   int64_t status = collect_io_names(directory);
   if (closedir(directory) != 0 && status == 0) status = io_status_from_errno(errno);
