@@ -142,10 +142,25 @@ def no_suggestion(cases, code):
     return body
 
 
+def load_error_json():
+    # 読み込みに失敗する入口（親ディレクトリが無い）でも、--format json を
+    # 受ける命令は JSON を出す（§58.4）。`test` は根の列挙で、`build --fix` は
+    # 整形の前段で、それぞれ読み込みに失敗する。
+    for command in ('test', 'build'):
+        path = ROOT / f'missing-{command}' / 'main.hd'
+        extra = ['--fix'] if command == 'build' else []
+        result = hado(command, '--format', 'json', *extra, path)
+        assert result.returncode == 1, (command, result.returncode)
+        report = one_json_line(result)
+        assert set(report) == FIELDS, (command, sorted(report))
+        assert report['code'] is None, (command, report)
+
+
 check('the default line shows the canonical spelling', human_line)
 for command in ('check', 'build', 'run'):
     check(f'{command} --format json reports the suggestion', json_from(command))
 check('test --format json reports the suggestion', json_from_test)
+check('a load error is JSON for every command that takes --format', load_error_json)
 check('fmt and check --fix do not apply a suggestion', not_applied)
 check('E520 keeps a canonical rewrite and no suggestion', rewrite_control)
 check('other E101 shapes have no suggestion', no_suggestion(OTHER_E101, 'E101'))
