@@ -3,21 +3,20 @@
 # round: canonical-in-syntax-errors
 # 構文と分岐の拒否に正準の綴りを出す（`docs/rounds/canonical-in-syntax-errors.md`）。
 # 検体は 1 つずつ別ディレクトリに置く（読み込みは入力根の全 .hd を見るため。§50）。
+# `hado` は `cargo run --offline -q --` で起こす（target/ の配置を決め打ちしない）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-cargo build --offline -q --bin hado || exit 1
-target_dir=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
-python3 - "$target_dir/debug/hado" "$workdir" <<'PYEOF'
+python3 - "$workdir" <<'PYEOF'
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-HADO, ROOT = sys.argv[1], Path(sys.argv[2])
+ROOT = Path(sys.argv[1])
 DEF_FORM = 'def f(a: T, b: U): R =>'
 ARM_FORM = '| p => if | c => a | b'
 FIELDS = {'path', 'line', 'col', 'end_line', 'end_col', 'code', 'message',
@@ -27,14 +26,25 @@ SPLIT = 'def rec bump (entries: Entry List) (word: String): Entry List =>\n  ent
 NESTED = 'def label n =>\n  if n\n    | 0 => "zero"\n    | _ => if n > 0 => "positive" | "negative"\n'
 TARGETS = (('split', SPLIT, 'E100', DEF_FORM), ('nested', NESTED, 'E101', ARM_FORM))
 
+# 対照にする検体はコーパスの配置に依らせず、ここで作る（§58.4 の「他の形には
+# 添えない」を、split 形とは違う E100・E101 と、E520 の書き換えで見る）。
 OTHER_E101 = (
-    ('fn-arms', Path('tests/reject/E101/main.hd').read_text()),
+    ('fn-arms', 'type Choice = | A | B\ndef apply f x => f x\n'
+                'def f (x: Choice) => if x | A => apply fn(| A => 1 | B => 2) A | B => 0\n'
+                'def main = f A\n'),
     ('pattern-in-arm', 'def label n =>\n  if n\n    | 0 => "zero"\n    | m => if m\n'
                        '      | 1 => "one"\n      | default => "many"\n'),
     ('branch-in-column', 'def label n =>\n  if n\n    | 0 => "zero"\n    | m => if\n'
                          '      | m > 0 => if m > 9 => "big" | "small"\n      | "negative"\n'),
+    # 不完全な `if` の後ろに宣言が続く形。次の宣言の `=>` を Boolean branch の
+    # 印と読むと suggestion が付く（§26.1）。
+    ('incomplete-before-declaration',
+     'def f x =>\n  if x\n    | 0 => 0\n    | _ => if broken\ndef g y => y\n'),
 )
-OTHER_E100 = (('annotation', Path('tests/reject/E100/main.hd').read_text()),)
+OTHER_E100 = (
+    ('annotation', 'def id(x: Option<Int>): Option<Int> => x\ndef main = id (Some(1))\n'),
+    ('literal-group', 'def f(a: Int) (1)\n'),
+)
 
 passed = 0
 total = 0
@@ -52,7 +62,9 @@ def place(name, source, file='main.hd'):
 
 
 def hado(*args):
-    return subprocess.run([HADO, *map(str, args)], capture_output=True, text=True)
+    return subprocess.run(
+        ['cargo', 'run', '--offline', '-q', '--', *map(str, args)],
+        capture_output=True, text=True)
 
 
 def one_json_line(result):
@@ -120,7 +132,7 @@ def not_applied():
 
 
 def rewrite_control():
-    source = Path('tests/reject/E520/main.hd').read_text()
+    source = 'def f (b: Bool) => if b | true => 1 | false => 0\ndef main = f true\n'
     report = one_json_line(hado('check', '--format', 'json', place('e520', source)))
     assert report['code'] == 'E520', report
     assert report['canonical'] is not None and 'if b => 1 | 0' in report['canonical'], report
