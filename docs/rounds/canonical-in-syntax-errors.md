@@ -226,3 +226,50 @@ passed 753 failed 0
 $ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
 TALLY: 40/40 passed; red: none
 ```
+
+四次レビュー（Codex）の指摘 2 件。
+
+1 件目は 2 個目の括弧の中身を字面で見ていたこと。`(b:)` も
+`(b: Int c: String)` も `name: Type` の列に見えるので Parameters の綴りを添えて
+いた。先読みを字面の走査から型の文法の読み取りに置き換え、1 組を最後まで読めて
+かつ空でないときだけ群と数える（§8 により引数は 1 個以上なので `()` は群では
+ない）。門番に `name-only-with-colon` と `mixed-group` を足した。
+
+```
+$ cargo run --offline -q -- check --format json a1/main.hd   # def f(a: Int) (b:)
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+$ cargo run --offline -q -- check --format json a2/main.hd   # def f(a: Int) (b: Int c: String)
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+# 直した後は 2 つとも suggestion が null。分割した形には添えたまま
+$ cargo run --offline -q -- check --format json c1/main.hd   # def rec bump (entries: Entry List) (word: String)
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+```
+
+2 件目は腕の本体に括弧で包んで置いた Boolean branch。`| p => (if c => a | b)` にも
+腕の条件列の綴りを添える（§26.1）。本体の最上位が Boolean branch のときだけ
+添え、腕の外の括弧（`def f c d => if c => (if d => 1 | 2) | 3`）には添えない。
+
+```
+$ cargo run --offline -q -- check b1/main.hd   # def f x => if x | 0 => (if true => 1 | 2) | _ => 0
+main.hd:3:13: error[E101]: branches cannot be nested inside another branch
+# 直した後
+main.hd:3:13: error[E101]: branches cannot be nested inside another branch; suggestion: | p => if | c => a | b
+$ cargo run --offline -q -- check b2/main.hd   # 腕の外の括弧
+main.hd:1:23: error[E101]: branches cannot be nested inside another branch
+```
+
+検体を足した時点で門番は赤（`other E100 shapes` と、`paren-in-arm` の既定の 1 行・
+`check`/`build`/`run`/`test` の JSON の 5 件、`PASSED: 4/10`）。直した後は緑。
+
+```
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+$ cargo fmt --all --check && cargo clippy --offline --all-targets -- -D warnings
+（出力なし）
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 753 failed 0
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+```
