@@ -1681,6 +1681,7 @@ impl Checker<'_> {
             })
         });
         Diagnostic {
+            suggestion: None,
             related,
             path: self.path.into(),
             line: span.line,

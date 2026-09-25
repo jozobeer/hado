@@ -564,6 +564,28 @@ pub struct Diagnostic {
     pub code: Option<String>,
     pub message: String,
     pub related: Option<Box<Related>>,
+    pub suggestion: Option<Suggestion>,
+}
+
+/// 形の提示（§58.4）。書き換え（第57節）ではないので `fmt` も `--fix` も適用しない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Suggestion {
+    /// §8: 引数を括弧ごとに分けた `def`。
+    Parameters,
+    /// §8: 同じ形の契約の member。
+    ContractParameters,
+    /// §26.1: 腕に置いた Boolean branch。
+    ArmConditions,
+}
+
+impl Suggestion {
+    pub fn form(self) -> &'static str {
+        match self {
+            Self::Parameters => "def f(a: T, b: U): R =>",
+            Self::ContractParameters => "def f(a: T, b: U): R",
+            Self::ArmConditions => "| p => if | c => a | b",
+        }
+    }
 }
 
 impl Diagnostic {
@@ -606,6 +628,9 @@ impl fmt::Display for Diagnostic {
                 "; {label} at {}:{}:{}",
                 related.path, related.line, related.col
             )?;
+        }
+        if let Some(suggestion) = self.suggestion {
+            write!(f, "; suggestion: {}", suggestion.form())?;
         }
         Ok(())
     }
@@ -650,6 +675,7 @@ pub fn parse(toks: &[Tok]) -> Result<Program, String> {
 
 fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
     Diagnostic {
+        suggestion: None,
         related: None,
         path: path.to_string(),
         line: e.line,
@@ -713,7 +739,58 @@ struct Parser<'a> {
     in_resume_scope: bool,
 }
 
+/// 先読みの前に控える解析の状態。式を読むと位置のほかに、後で使う記録
+/// （`branch_anchors` など）と診断、`resume` の文脈が増える。先読みが外れたら
+/// ここへ戻して、読まなかったことにする。
+struct ExpressionState {
+    pos: usize,
+    branches_after_fallback: usize,
+    branch_anchors: usize,
+    branch_spans: usize,
+    equality_anchors: usize,
+    qualified_type_anchors: usize,
+    name_sites: usize,
+    written_list_patterns: usize,
+    long_condition_functions: usize,
+    diagnostics: usize,
+    in_resume_scope: bool,
+}
+
 impl Parser<'_> {
+    fn expression_state(&self) -> ExpressionState {
+        ExpressionState {
+            pos: self.pos,
+            branches_after_fallback: self.branches_after_fallback.len(),
+            branch_anchors: self.branch_anchors.len(),
+            branch_spans: self.branch_spans.len(),
+            equality_anchors: self.equality_anchors.len(),
+            qualified_type_anchors: self.qualified_type_anchors.len(),
+            name_sites: self.name_sites.len(),
+            written_list_patterns: self.written_list_patterns.len(),
+            long_condition_functions: self.long_condition_functions.len(),
+            diagnostics: self.diagnostics.len(),
+            in_resume_scope: self.in_resume_scope,
+        }
+    }
+
+    fn restore_expression_state(&mut self, state: ExpressionState) {
+        self.pos = state.pos;
+        self.branches_after_fallback
+            .truncate(state.branches_after_fallback);
+        self.branch_anchors.truncate(state.branch_anchors);
+        self.branch_spans.truncate(state.branch_spans);
+        self.equality_anchors.truncate(state.equality_anchors);
+        self.qualified_type_anchors
+            .truncate(state.qualified_type_anchors);
+        self.name_sites.truncate(state.name_sites);
+        self.written_list_patterns
+            .truncate(state.written_list_patterns);
+        self.long_condition_functions
+            .truncate(state.long_condition_functions);
+        self.diagnostics.truncate(state.diagnostics);
+        self.in_resume_scope = state.in_resume_scope;
+    }
+
     fn cur(&self) -> &Tok {
         &self.toks[self.pos.min(self.toks.len() - 1)]
     }
@@ -769,6 +846,7 @@ impl Parser<'_> {
         message: impl Into<String>,
     ) -> Diagnostic {
         Diagnostic {
+            suggestion: None,
             related: None,
             path: self.path.to_string(),
             line: s.line,
@@ -1379,33 +1457,23 @@ impl Parser<'_> {
         }
     }
 
+    // 続く `(` が型付き引数の群を最後まで成しているか。`def f(a: Int) (1)` も
+    // `def f(a: Int) (b)` も引数を括弧ごとに分けた形ではないので、綴りを添えない
+    // （§8、§58.4）。字面ではなく型の文法で 1 組を読み切って決める。引数は 1 個
+    // 以上なので、空の `()` は群と数えない（§8）。
+    fn parameters_ahead(&mut self, contract: bool) -> bool {
+        if self.kind() != &TokKind::LParen {
+            return false;
+        }
+        let save = self.expression_state();
+        let parsed = self.parse_param_group(contract);
+        self.restore_expression_state(save);
+        parsed.is_ok_and(|params| !params.is_empty())
+    }
+
     fn parse_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
-        let mut params = Vec::new();
-        if self.kind() == &TokKind::LParen {
-            self.bump();
-            if contract && self.kind() == &TokKind::RParen {
-                return Err(self.error(None, "contract functions require at least one parameter"));
-            }
-            if self.kind() != &TokKind::RParen {
-                loop {
-                    let span = self.span();
-                    let pname = self.expect_parameter_name(contract)?;
-                    self.expect(&TokKind::Colon)?;
-                    let ty = Some(self.parse_type()?);
-                    params.push(Param {
-                        name: pname,
-                        ty,
-                        span,
-                    });
-                    if self.kind() == &TokKind::Comma {
-                        self.bump();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            self.expect(&TokKind::RParen)?;
-        } else {
+        if self.kind() != &TokKind::LParen {
+            let mut params = Vec::new();
             while matches!(self.kind(), TokKind::Name(_)) {
                 let span = self.span();
                 let n = self.expect_parameter_name(contract)?;
@@ -1415,7 +1483,52 @@ impl Parser<'_> {
                     span,
                 });
             }
+            return Ok(params);
         }
+        let params = self.parse_param_group(contract)?;
+        // §8: 引数は 1 組の括弧に並べる。1 組目にも引数があり、続く `(` も引数の
+        // 群を最後まで成すときだけ、括弧ごとに分けた形とみなして綴りを添える。
+        if !params.is_empty() && self.kind() == &TokKind::LParen {
+            let (expected, form) = if contract {
+                (TokKind::Colon, Suggestion::ContractParameters)
+            } else {
+                (TokKind::Arrow, Suggestion::Parameters)
+            };
+            return Err(Diagnostic {
+                suggestion: self.parameters_ahead(contract).then_some(form),
+                ..self.error(None, format!("expected {expected}, found ("))
+            });
+        }
+        Ok(params)
+    }
+
+    /// 1 組の `(` `)` を読み、その中の引数を返す。続く `(` をどう扱うかは
+    /// 呼び手が決める（§8）。
+    fn parse_param_group(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
+        let mut params = Vec::new();
+        self.bump();
+        if contract && self.kind() == &TokKind::RParen {
+            return Err(self.error(None, "contract functions require at least one parameter"));
+        }
+        if self.kind() != &TokKind::RParen {
+            loop {
+                let span = self.span();
+                let pname = self.expect_parameter_name(contract)?;
+                self.expect(&TokKind::Colon)?;
+                let ty = Some(self.parse_type()?);
+                params.push(Param {
+                    name: pname,
+                    ty,
+                    span,
+                });
+                if self.kind() == &TokKind::Comma {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(&TokKind::RParen)?;
         Ok(params)
     }
 
@@ -1750,7 +1863,9 @@ impl Parser<'_> {
 
     /// Parse an expression that must not itself contain a branch
     /// (§30: branches cannot nest). Used for every component of a branch.
-    fn parse_branch_expr(&mut self) -> Result<Node, Diagnostic> {
+    /// `arm_body` は pattern の腕の本体を読んでいるときだけ真。括弧で包んだ
+    /// Boolean branch が腕の本体を成しているなら、腕の条件列が正準形（§26.1）。
+    fn parse_branch_expr(&mut self, arm_body: bool) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::KwIf {
             return Err(self.error(
                 Some("E101"),
@@ -1762,11 +1877,16 @@ impl Parser<'_> {
         }
         let node = self.parse_expr()?;
         if let Some(sp) = contains_branch(&node) {
-            return Err(self.error_at(
-                sp,
-                Some("E101"),
-                "branches cannot be nested inside another branch",
-            ));
+            let suggestion = (arm_body && matches!(node.kind, NodeKind::BoolBranch { .. }))
+                .then_some(Suggestion::ArmConditions);
+            return Err(Diagnostic {
+                suggestion,
+                ..self.error_at(
+                    sp,
+                    Some("E101"),
+                    "branches cannot be nested inside another branch",
+                )
+            });
         }
         Ok(node)
     }
@@ -2199,12 +2319,12 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Pipe {
             return self.parse_cond_branch(span);
         }
-        let first = self.parse_branch_expr()?;
+        let first = self.parse_branch_expr(false)?;
         if self.kind() == &TokKind::Comma {
             let mut scrutinees = vec![first];
             while self.kind() == &TokKind::Comma {
                 self.bump();
-                scrutinees.push(self.parse_branch_expr()?);
+                scrutinees.push(self.parse_branch_expr(false)?);
             }
             match self.kind() {
                 TokKind::Pipe => return self.parse_pattern_branch(span, scrutinees),
@@ -2219,9 +2339,9 @@ impl Parser<'_> {
         match self.kind() {
             TokKind::Arrow => {
                 self.bump();
-                let then = self.parse_branch_expr()?;
+                let then = self.parse_branch_expr(false)?;
                 self.expect(&TokKind::Pipe)?;
-                let els = self.parse_branch_expr()?;
+                let els = self.parse_branch_expr(false)?;
                 Ok(Node {
                     kind: NodeKind::BoolBranch {
                         cond: Box::new(first),
@@ -2282,7 +2402,7 @@ impl Parser<'_> {
                 continue;
             }
             self.pos = save;
-            let fb = self.parse_branch_expr()?;
+            let fb = self.parse_branch_expr(false)?;
             self.branch_anchors.push((fb.span, pipe));
             fallback = Some(Box::new(fb));
             self.record_fallback_end();
@@ -2357,7 +2477,31 @@ impl Parser<'_> {
             }
             return Ok(body);
         }
-        self.parse_branch_expr()
+        // §26.1: 腕に置いた Boolean branch の正準形は腕の条件列である。Boolean
+        // branch として最後まで成るときだけ、綴りを添える。
+        if self.kind() == &TokKind::KwIf && self.boolean_branch_ahead() {
+            return Err(Diagnostic {
+                suggestion: Some(Suggestion::ArmConditions),
+                ..self.error(
+                    Some("E101"),
+                    "branches cannot be nested inside another branch",
+                )
+            });
+        }
+        self.parse_branch_expr(true)
+    }
+
+    /// 現在の `if` が Boolean branch として最後まで成るか。字面で `=>` を探すので
+    /// はなく、分岐として読んでみて `BoolBranch` になるときだけ真とする。腕の本体
+    /// が不完全な `if`（`| 0 => if true => 1 |`）に綴りを添えないため（§26.1）。
+    fn boolean_branch_ahead(&mut self) -> bool {
+        if self.kind() != &TokKind::KwIf {
+            return false;
+        }
+        let save = self.expression_state();
+        let parsed = self.parse_branch();
+        self.restore_expression_state(save);
+        matches!(parsed, Ok(node) if matches!(node.kind, NodeKind::BoolBranch { .. }))
     }
 
     fn next_is(&self, kind: &TokKind) -> bool {
@@ -2384,7 +2528,7 @@ impl Parser<'_> {
                 branch_first_pipe = Some(pipe);
             }
             self.bump();
-            let head = self.parse_branch_expr()?;
+            let head = self.parse_branch_expr(false)?;
             if arms.is_empty() && self.kind() != &TokKind::Arrow {
                 return Err(self.error_at(
                     pipe,
@@ -2394,7 +2538,7 @@ impl Parser<'_> {
             }
             if self.kind() == &TokKind::Arrow {
                 self.bump();
-                let body = self.parse_branch_expr()?;
+                let body = self.parse_branch_expr(false)?;
                 self.branch_anchors
                     .extend([(head.span, pipe), (body.span, pipe)]);
                 arms.push((head, body));

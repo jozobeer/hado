@@ -48,6 +48,7 @@ impl Project {
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
         let library_error = library_main.map(|span| Diagnostic {
+            suggestion: None,
             related: None,
             path: files[0].path.clone(),
             line: span.line,
@@ -287,28 +288,10 @@ impl Project {
     /// §58.4: the diagnostic as one line of JSON, for tooling. The canonical
     /// form is a field of its own instead of being appended to the message.
     pub fn report_json(&self, error: &Diagnostic) -> String {
-        let related = match &error.related {
-            Some(related) => format!(
-                "{{\"path\": {}, \"line\": {}, \"col\": {}, \"label\": {}}}",
-                json_string(&related.path),
-                related.line,
-                related.col,
-                option_string(error.code.as_deref().and_then(crate::parser::related_label)),
-            ),
-            None => "null".to_string(),
-        };
-        let (end_line, end_col) = self.diagnostic_end(error);
-        format!(
-            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
-            json_string(&error.path),
-            error.line,
-            error.col,
-            end_line,
-            end_col,
-            option_string(error.code.as_deref()),
-            json_string(&error.message),
-            option_string(self.canonical_hint(error).as_deref()),
-            related,
+        diagnostic_json(
+            error,
+            self.diagnostic_end(error),
+            self.canonical_hint(error).as_deref(),
         )
     }
 
@@ -482,6 +465,7 @@ fn collect_sources(
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic {
+        suggestion: None,
         related: None,
         path: path.to_string_lossy().into_owned(),
         line: 1,
@@ -490,6 +474,22 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
         end_col: 1,
         code: None,
         message: error.to_string(),
+    }
+}
+
+/// 読み込みの入力そのものの誤り（§51 の名前空間ディレクトリなど）を、位置を
+/// 持たない診断にする。読む前の誤りなので、位置は入口の先頭に置く。
+pub fn input_diagnostic(input: &Path, message: &str) -> Diagnostic {
+    Diagnostic {
+        suggestion: None,
+        related: None,
+        path: input.to_string_lossy().into_owned(),
+        line: 1,
+        col: 1,
+        end_line: 1,
+        end_col: 1,
+        code: None,
+        message: message.to_string(),
     }
 }
 
@@ -627,6 +627,7 @@ fn read_file(
         None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
     };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+        suggestion: None,
         related: None,
         path: display.clone(),
         line: error.line,
@@ -699,6 +700,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.to_string_lossy().into_owned(),
                 line: token.span.line,
@@ -756,6 +758,7 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     })
                 });
                 let error = Diagnostic {
+                    suggestion: None,
                     related,
                     path: file.source.path.clone(),
                     line: token.span.line,
@@ -818,6 +821,39 @@ pub fn position_at(source: &str, offset: usize) -> (usize, usize) {
         }
     }
     (line, col)
+}
+
+/// §58.4: one diagnostic as one line of JSON. The end and the canonical form
+/// come from the sources, so a diagnostic from a project that did not load
+/// passes its anchor and no canonical form.
+pub fn diagnostic_json(
+    error: &Diagnostic,
+    (end_line, end_col): (usize, usize),
+    canonical: Option<&str>,
+) -> String {
+    let related = match &error.related {
+        Some(related) => format!(
+            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"label\": {}}}",
+            json_string(&related.path),
+            related.line,
+            related.col,
+            option_string(error.code.as_deref().and_then(crate::parser::related_label)),
+        ),
+        None => "null".to_string(),
+    };
+    format!(
+        "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"suggestion\": {}, \"related\": {}}}",
+        json_string(&error.path),
+        error.line,
+        error.col,
+        end_line,
+        end_col,
+        option_string(error.code.as_deref()),
+        json_string(&error.message),
+        option_string(canonical),
+        option_string(error.suggestion.map(crate::parser::Suggestion::form)),
+        related,
+    )
 }
 
 /// A JSON string literal, or `null` when there is nothing to write (§58.4).

@@ -163,6 +163,7 @@ fn record(
     if let Some(&first) = seen.get(name) {
         ambiguous.insert(name.into());
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: Some(Box::new(crate::parser::Related {
                 path: path.into(),
                 line: first.line,

@@ -137,6 +137,7 @@ impl Resolver<'_> {
             })
         });
         self.diagnostics.push(Diagnostic {
+            suggestion: None,
             related,
             path: self.path.into(),
             line: span.line,

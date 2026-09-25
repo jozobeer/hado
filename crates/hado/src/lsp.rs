@@ -852,6 +852,7 @@ fn diagnostics_of(
                 (
                     path.clone(),
                     Diagnostic {
+                        suggestion: None,
                         related: None,
                         path: path
                             .file_name()

@@ -135,6 +135,7 @@ fn unused_declarations(
                 _ => used.contains(&key),
             };
             (!referenced).then(|| Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: span.line,
@@ -173,6 +174,7 @@ fn module_diagnostics(
                 continue;
             }
             diagnostics.push(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: parameter.name_span.line,
@@ -230,6 +232,7 @@ fn local_data_diagnostics(
                 return None;
             }
             Some(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: def.span.line,

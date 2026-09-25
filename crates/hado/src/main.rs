@@ -15,6 +15,24 @@ fn print_diagnostic(project: &Project, error: &hado::parser::Diagnostic) {
     }
 }
 
+/// `Project::load` の失敗を印字する形。診断は §58.4 の JSON にも従う。読み込めて
+/// いないので書き換えは引けず、終端はアンカーと同じ位置である。位置を持たない
+/// 入力の誤り（§51 の名前空間ディレクトリなど）は入口の先頭に置く。
+fn load_error_report(error: &hado::project::LoadError, input: &Path) -> String {
+    if FORMAT_JSON.load(Ordering::Relaxed) {
+        return match error {
+            hado::project::LoadError::Diagnostic(diagnostic) => {
+                hado::project::diagnostic_json(diagnostic, (diagnostic.line, diagnostic.col), None)
+            }
+            hado::project::LoadError::Input(message) => {
+                let diagnostic = hado::project::input_diagnostic(input, message);
+                hado::project::diagnostic_json(&diagnostic, (1, 1), None)
+            }
+        };
+    }
+    error.to_string()
+}
+
 /// コマンドラインの解釈結果。`main` はここから実際の処理を選ぶ。
 struct Cli<'a> {
     command: &'a str,
@@ -245,7 +263,7 @@ fn run_project_command(cli: &Cli<'_>, input: &Path) -> ExitCode {
     let project = match Project::load(input) {
         Ok(project) => project,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error, input));
             return ExitCode::from(1);
         }
     };
@@ -353,7 +371,7 @@ fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
         let project = match Project::load(input) {
             Ok(project) => project,
             Err(error) => {
-                eprintln!("{error}");
+                eprintln!("{}", load_error_report(&error, input));
                 return ExitCode::from(1);
             }
         };
@@ -392,7 +410,7 @@ fn format_sources(input: &Path, check_only: bool) -> Result<bool, ExitCode> {
     let files = match hado::project::source_paths(input) {
         Ok(files) => files,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error, input));
             return Err(ExitCode::from(1));
         }
     };
@@ -446,7 +464,7 @@ enum Outcome {
 fn execute(input: &Path, args: &[String]) -> Outcome {
     let project = match Project::load(input) {
         Ok(project) => project,
-        Err(error) => return Outcome::Failed(error.to_string()),
+        Err(error) => return Outcome::Failed(load_error_report(&error, input)),
     };
     let directory = match RunDirectory::create() {
         Ok(directory) => directory,
@@ -472,7 +490,7 @@ fn run_tests(input: &Path) -> ExitCode {
     let tests = match hado::project::test_paths(input) {
         Ok(tests) => tests,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error, input));
             return ExitCode::from(1);
         }
     };
