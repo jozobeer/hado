@@ -104,6 +104,26 @@ fn restore_nested_outcomes(logical: &Type, actual: &Type, ty: Type) -> Type {
     apply_type_substitutions(ty, &outcome_closure_substitutions(logical, actual))
 }
 
+// 同じ論理型を持つ引数が 2 つ以上あり、実際の型が食い違うとき、結果型のどの
+// 出現がどの引数に由来するかは型からは決められない（`def select(f, g) => g` の
+// 結果は f と g の論理型が同じなら区別できない）。決められない論理型へは戻さ
+// ない。戻さない結果はこの復元を入れる前と同じで、その形は元から落ちる
+// （`docs/issues/effectful-closure-through-prelude.md`）。
+fn ambiguous_logical_types(logical: &[Type], types: &[Type]) -> Vec<Type> {
+    let mut ambiguous = Vec::new();
+    for (index, (left, left_actual)) in logical.iter().zip(types).enumerate() {
+        let collides = logical
+            .iter()
+            .zip(types)
+            .skip(index + 1)
+            .any(|(right, right_actual)| left == right && left_actual != right_actual);
+        if collides && !ambiguous.contains(left) {
+            ambiguous.push(left.clone());
+        }
+    }
+    ambiguous
+}
+
 fn outcome_closure_substitutions(logical: &Type, actual: &Type) -> Vec<(Type, Type)> {
     if logical == actual {
         return vec![];
@@ -5156,14 +5176,19 @@ impl Lowerer {
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred =
             Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
+        let ambiguous = ambiguous_logical_types(&logical, &types);
         let restored = Signature {
             parameters: inferred.parameters.clone(),
-            result: logical
-                .iter()
-                .zip(&types)
-                .fold(inferred.result.clone(), |result, (logical, actual)| {
-                    restore_nested_outcomes(logical, actual, result)
-                }),
+            result: logical.iter().zip(&types).fold(
+                inferred.result.clone(),
+                |result, (logical, actual)| {
+                    if ambiguous.contains(logical) {
+                        result
+                    } else {
+                        restore_nested_outcomes(logical, actual, result)
+                    }
+                },
+            ),
         };
         let signature = self.outcome_signature(&types, &restored, outcome_answer.as_ref())?;
         let key = self.specialized_name(name);
