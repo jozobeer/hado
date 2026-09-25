@@ -113,3 +113,52 @@ DivisionByZero
 ```
 
 `Array.get xs 5` にした入力は `IndexOutOfRange`。どちらも df4f2ac で同じ出力。
+
+一次レビュー（Codex）の指摘 2 件。1 件は再現した退行で、1 件は再現できなかった。
+
+指摘 1（`specialize_function` の結果型の復元）は再現した。引数の論理型が同じで
+実際の型が違うと、結果型の出現を片方の引数の実際の型へ戻していた。
+
+```
+$ cat sel/main.hd
+handler Error as Catch
+abort raise _ => 0
+return value => value
+
+def select(f: Fn(Int => Int {Error}), g: Fn(Int => Int)): Fn(Int => Int) => do f 1 -> g
+
+def main =
+  with Catch ->
+  let h = select fn(x => 8 / x) fn(x => x + 1) ->
+  h 1
+$ cargo run --offline -q -- run sel/main.hd
+lowered return type differs from inferred signature for file0$select
+# この復元の適用だけを外すと通る（この PR が入れた退行）
+$ cargo run --offline -q -- run sel/main.hd
+2
+```
+
+`ambiguous_logical_types` で、同じ論理型を持つ引数の実際の型が食い違うときは
+その論理型へ戻さないようにした。戻さない結果は復元を入れる前と同じ挙動である。
+`Array.of_list` の形（引数が 1 つ）は衝突しないので目的は変わらない。
+
+```
+$ cargo test --offline -q --test r26_effects
+test result: ok. 54 passed; 0 failed
+$ cargo test --offline -q --test r26_effects an_effectful_parameter_does_not_restore
+# ガードを外すと赤
+assertion `left == right` failed: lowered return type differs from inferred signature for file0$select
+$ bash scripts/verify-m4.sh 2>&1 | tail -1
+PASSED: 140/140
+$ cargo test --offline -q 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 755 failed 0
+```
+
+指摘 2（`restored_success_type`）は再現できなかった。構造照合が働くこと自体は
+確かめた。`Array.get#Catch` の本体で、abort の成功型 `Closure([Int], Int)` に対し
+`Closure([Int], $Outcome(Int, Int, Void))` を返している。ただし、これが有効な
+プログラムを壊す入力を組めなかった。`if b => fn(x => (x + 1)) | raise { message =
+"no" }` を評価してから効果付きの閉包を返す形は、この修正の前後で同じ
+`lowered return type differs from inferred signature for file0$make` で落ちる
+（`restored_success_type` を外しても同じ出力）。abort の成功型が本当に純粋な
+閉包で、関数の結果型が効果付きの閉包になる入力が要る。返信で最小の入力を仰いだ。
