@@ -2477,7 +2477,8 @@ impl Parser<'_> {
             }
             return Ok(body);
         }
-        // §26.1: 腕に置いた Boolean branch の正準形は腕の条件列である。
+        // §26.1: 腕に置いた Boolean branch の正準形は腕の条件列である。Boolean
+        // branch として最後まで成るときだけ、綴りを添える。
         if self.kind() == &TokKind::KwIf && self.boolean_branch_ahead() {
             return Err(Diagnostic {
                 suggestion: Some(Suggestion::ArmConditions),
@@ -2490,28 +2491,17 @@ impl Parser<'_> {
         self.parse_branch_expr(true)
     }
 
-    /// 現在の `if` が Boolean branch か。括弧の外で `=>` が `|` より先に来れば
-    /// Boolean branch（`if c => a | b`）、`|` が先なら pattern branch である。
-    /// 宣言を越えては読まない。腕の本体が不完全な `if`（`| _ => if broken`）の
-    /// とき、続く宣言の `=>` を Boolean branch の印と読み違える（§26.1）。
-    fn boolean_branch_ahead(&self) -> bool {
-        let mut depth = 0usize;
-        for token in &self.toks[self.pos + 1..] {
-            match token.kind {
-                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-                    let Some(outer) = depth.checked_sub(1) else {
-                        return false;
-                    };
-                    depth = outer;
-                }
-                _ if depth == 0 && declaration_keyword(&token.kind) => return false,
-                TokKind::Arrow if depth == 0 => return true,
-                TokKind::Pipe if depth == 0 => return false,
-                _ => {}
-            }
+    /// 現在の `if` が Boolean branch として最後まで成るか。字面で `=>` を探すので
+    /// はなく、分岐として読んでみて `BoolBranch` になるときだけ真とする。腕の本体
+    /// が不完全な `if`（`| 0 => if true => 1 |`）に綴りを添えないため（§26.1）。
+    fn boolean_branch_ahead(&mut self) -> bool {
+        if self.kind() != &TokKind::KwIf {
+            return false;
         }
-        false
+        let save = self.expression_state();
+        let parsed = self.parse_branch();
+        self.restore_expression_state(save);
+        matches!(parsed, Ok(node) if matches!(node.kind, NodeKind::BoolBranch { .. }))
     }
 
     fn next_is(&self, kind: &TokKind) -> bool {
