@@ -162,3 +162,58 @@ passed 755 failed 0
 `lowered return type differs from inferred signature for file0$make` で落ちる
 （`restored_success_type` を外しても同じ出力）。abort の成功型が本当に純粋な
 閉包で、関数の結果型が効果付きの閉包になる入力が要る。返信で最小の入力を仰いだ。
+
+二次レビュー（Codex）の指摘 1 件。再現した退行で、一次レビューのガードでは
+足りなかった。
+
+指摘は再現した。引数が 1 つでも、scheme が結果型そのものに関数型を書いている
+ときは、その出現を引数の実際の型へ戻してはならない。
+
+```
+$ cat rep/main.hd
+handler Error as Catch
+abort raise _ => 0
+return value => value
+
+def replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1 -> fn(x => x + 1)
+
+def main =
+  with Catch ->
+  let h = replace fn(x => 8 / x) ->
+  h 1
+$ cargo run --offline -q -- check rep/main.hd; echo $?
+0
+$ cargo run --offline -q -- run rep/main.hd
+lowered return type differs from inferred signature for file0$replace
+```
+
+構造一致で結果型を書き換えるのをやめ、scheme を実際の型で単一化した結果を結果型
+にした。scheme が引数の型に関数型を書いている引数だけは論理型で単一化する
+（本体が outcome をほどくため。`List.map` の `Fn(A => B)`。実際の型で束縛すると
+`tests/accept/list_map_head_order` が `lowered return type differs from inferred
+signature for List.map` で落ちる）。期待する結果型は渡さない（論理型で書かれて
+いて食い違う。`Array.build` の `A Array`）。`ambiguous_logical_types` は要らなく
+なった。
+
+```
+$ cargo run --offline -q -- run rep/main.hd
+2
+$ cargo run --offline -q -- run sel/main.hd
+2
+$ cargo run --offline -q -- run arr/main.hd
+0
+$ cargo test --offline -q --test r26_effects
+test result: ok. 55 passed; 0 failed
+$ bash scripts/verify-m4.sh 2>&1 | tail -1
+PASSED: 140/140
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 756 failed 0
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+```
+
+実際の型で単一化できない形は論理型のままにした。その形（`List.map`・
+`List.reverse` に効果を持つ関数を渡す prelude の穴）はこの PR の前から同じ出力で
+落ちる。`docs/issues/effectful-closure-through-prelude.md` を、残った穴に絞った。

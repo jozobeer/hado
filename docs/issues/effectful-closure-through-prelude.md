@@ -38,15 +38,17 @@ $ cargo run --offline -q -- run set/main.hd
 list element type mismatch
 ```
 
-`reverse`・`map` は effectful-closure-in-array の前（df4f2ac）でも同じ出力。`to_list`・`set` は前は `array intrinsic argument type mismatch` で、いまは List 側で落ちる。
+`reverse`・`map` は effectful-closure-in-array の前（df4f2ac）でも同じ出力。`to_list`・`set` は前は `array intrinsic argument type mismatch` で、いまは List 側で落ちる。4 つとも 2026-09-26 の二次レビュー対応（結果型を実際の型の単一化から取る）の後も同じ出力。
 
 ## 原因
 
-`crates/hado/src/mono.rs` の `specialize_function` は scheme を `logical_argument` の論理型で単一化するので、多相な callee の本体では型変数が outcome の無い閉包に解ける。本体で作るリスト（`[head, ...acc]`）や閉包呼び出しの型は論理型、引数から来た値は実際の型で、両者が食い違う。`restore_nested_outcomes` は callee の結果型と `__array_alloc`・abort の成功型だけを戻し、本体の中の構築と呼び出しは戻さない。
+`crates/hado/src/mono.rs` の `specialize_function` は scheme を `logical_argument` の論理型で単一化するので、多相な callee の本体では型変数が outcome の無い閉包に解ける。本体で作るリスト（`[head, ...acc]`）や閉包呼び出しの型は論理型、引数から来た値は実際の型で、両者が食い違う。
+
+2026-09-26 の二次レビュー対応で、結果型は「実際の型での単一化」から取るようになった（scheme が引数の型に関数型を書いている引数だけ論理型で束縛する）。`restore_nested_outcomes` は消えた。残っているのは本体の側で、`List.map` の `Fn(A => B)` のように scheme が関数型を書いた引数は論理型で束縛するので、本体が作るリストの要素型は outcome の無い閉包のままになる。呼び出し元は同じリストの要素を効果付きの閉包として扱うので、`call arguments do not match the closure signature` で食い違う。`restored_array_allocation`・`restored_success_type` は、結果型と本体の型が食い違う箇所を個別に埋めている。
 
 ## 案
 
-- 推奨: 型変数には実際の型を、scheme が関数型を書いた位置にだけ論理型を束縛する。本体の型を解くときに実際の型が出るので、`restore_nested_outcomes` と `restored_array_allocation`・`restored_success_type` は要らなくなる見込み（未確認）。
+- 推奨: 本体も実際の型で下ろす。scheme が関数型を書いた引数にも実際の型を束縛し、本体の呼び出しと構築を効果付きの型で解く。`restore_*` は要らなくなる見込み（未確認）。
 - 退ける: 落ちる箇所ごとに `restored_*` を足す。stdlib の関数の書き方ごとに穴が残る。
 
 ## 完了条件
@@ -57,4 +59,4 @@ list element type mismatch
 
 ## 由来
 
-`docs/wants.md` に無い。effectful-closure-in-array の周辺の実測（`docs/rounds/effectful-closure-in-array.md`）。§19、§36。
+`docs/wants.md` に無い。effectful-closure-in-array の周辺の実測（`docs/rounds/effectful-closure-in-array.md`）。§19、§36。残る穴の切り出しは 2026-09-26（同ラウンドの二次レビュー対応）。
