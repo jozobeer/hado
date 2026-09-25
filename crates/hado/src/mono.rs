@@ -98,6 +98,52 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+// `Array.of_list` のような純粋な callee は、scheme の単一化で入れ子の
+// outcome を落とす。結果型に同じ閉包が載っているなら、引数側の実際の型へ戻す。
+fn restore_nested_outcomes(logical: &Type, actual: &Type, ty: Type) -> Type {
+    apply_type_substitutions(ty, &outcome_closure_substitutions(logical, actual))
+}
+
+fn outcome_closure_substitutions(logical: &Type, actual: &Type) -> Vec<(Type, Type)> {
+    if logical == actual {
+        return vec![];
+    }
+    match (logical, actual) {
+        (Type::Closure(_, _), Type::Closure(_, _)) if logical_argument(actual) == *logical => {
+            vec![(logical.clone(), actual.clone())]
+        }
+        (Type::Data(left, left_args), Type::Data(right, right_args))
+        | (Type::Abstract(left, left_args), Type::Abstract(right, right_args))
+            if left == right && left_args.len() == right_args.len() =>
+        {
+            left_args
+                .iter()
+                .zip(right_args)
+                .flat_map(|(logical, actual)| outcome_closure_substitutions(logical, actual))
+                .collect()
+        }
+        _ => vec![],
+    }
+}
+
+fn apply_type_substitutions(ty: Type, substitutions: &[(Type, Type)]) -> Type {
+    if let Some((_, replacement)) = substitutions.iter().find(|(from, _)| *from == ty) {
+        return replacement.clone();
+    }
+    let apply = |ty| apply_type_substitutions(ty, substitutions);
+    match ty {
+        Type::Data(name, arguments) => Type::Data(name, arguments.into_iter().map(apply).collect()),
+        Type::Abstract(name, arguments) => {
+            Type::Abstract(name, arguments.into_iter().map(apply).collect())
+        }
+        Type::Closure(parameters, result) => Type::Closure(
+            parameters.into_iter().map(apply).collect(),
+            Box::new(apply(*result)),
+        ),
+        other => other,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
@@ -2850,10 +2896,9 @@ impl Lowerer {
                             .composite_types
                             .get(&(node.span.line, node.span.col))
                             .ok_or("missing array allocation result type")?;
-                        Some(
-                            Type::try_from(&self.specialization.resolve(ty))
-                                .map_err(|_| "array allocation result type is not concrete")?,
-                        )
+                        let allocation = Type::try_from(&self.specialization.resolve(ty))
+                            .map_err(|_| "array allocation result type is not concrete")?;
+                        Some(self.restored_array_allocation(allocation))
                     } else {
                         None
                     };
@@ -2920,6 +2965,33 @@ impl Lowerer {
             Err(_) => return Err("abort result type is not concrete".into()),
         };
         self.abort_raise_with(arguments, result)
+    }
+
+    // 特殊化の結果型へ戻した入れ子の outcome は、本体の checker 型には残らない。
+    // 本体で確保する Array の型を、戻した結果型に揃える。
+    fn restored_array_allocation(&self, allocation: Type) -> Type {
+        match self.active.last() {
+            Some((_, _, active)) if logical_argument(&active.result) == allocation => {
+                active.result.clone()
+            }
+            _ => allocation,
+        }
+    }
+
+    // abort の成功型も、戻した結果型に揃える。
+    fn restored_success_type(&self, success: Type) -> Type {
+        let Some((_, _, active)) = self.active.last() else {
+            return success;
+        };
+        let restored = match outcome_parts(&active.result) {
+            Ok((payload, _, _)) => payload,
+            Err(_) => active.result.clone(),
+        };
+        if logical_argument(&restored) == success {
+            restored
+        } else {
+            success
+        }
     }
 
     fn abort_raise_with(
@@ -3890,7 +3962,7 @@ impl Lowerer {
         arguments: Vec<Expression>,
         effect: &str,
     ) -> Result<Expression, String> {
-        let success = self.node_type(node).unwrap_or(Type::Void);
+        let success = self.restored_success_type(self.node_type(node).unwrap_or(Type::Void));
         self.abort_outcome_with(arguments, effect, success)
     }
 
@@ -5062,7 +5134,16 @@ impl Lowerer {
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred =
             Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
-        let signature = self.outcome_signature(&types, &inferred, outcome_answer.as_ref())?;
+        let restored = Signature {
+            parameters: inferred.parameters.clone(),
+            result: logical
+                .iter()
+                .zip(&types)
+                .fold(inferred.result.clone(), |result, (logical, actual)| {
+                    restore_nested_outcomes(logical, actual, result)
+                }),
+        };
+        let signature = self.outcome_signature(&types, &restored, outcome_answer.as_ref())?;
         let key = self.specialized_name(name);
         if let Some(function) = self.cached_specialization(&key, &types, &signature.result) {
             return Ok(function);
