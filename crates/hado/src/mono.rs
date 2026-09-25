@@ -98,6 +98,10 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+// `Array.of_list` のような callee は、scheme の単一化で入れ子の outcome を
+// 落とす。実際の型での単一化が通るなら、結果型はそちらから取る（下の
+// `specialize_function`）。実際の型で単一化できない形は論理型のままにする。
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64),
@@ -2868,10 +2872,9 @@ impl Lowerer {
                             .composite_types
                             .get(&(node.span.line, node.span.col))
                             .ok_or("missing array allocation result type")?;
-                        Some(
-                            Type::try_from(&self.specialization.resolve(ty))
-                                .map_err(|_| "array allocation result type is not concrete")?,
-                        )
+                        let allocation = Type::try_from(&self.specialization.resolve(ty))
+                            .map_err(|_| "array allocation result type is not concrete")?;
+                        Some(self.restored_array_allocation(allocation))
                     } else {
                         None
                     };
@@ -2938,6 +2941,33 @@ impl Lowerer {
             Err(_) => return Err("abort result type is not concrete".into()),
         };
         self.abort_raise_with(arguments, result)
+    }
+
+    // 特殊化の結果型へ戻した入れ子の outcome は、本体の checker 型には残らない。
+    // 本体で確保する Array の型を、戻した結果型に揃える。
+    fn restored_array_allocation(&self, allocation: Type) -> Type {
+        match self.active.last() {
+            Some((_, _, active)) if logical_argument(&active.result) == allocation => {
+                active.result.clone()
+            }
+            _ => allocation,
+        }
+    }
+
+    // abort の成功型も、戻した結果型に揃える。
+    fn restored_success_type(&self, success: Type) -> Type {
+        let Some((_, _, active)) = self.active.last() else {
+            return success;
+        };
+        let restored = match outcome_parts(&active.result) {
+            Ok((payload, _, _)) => payload,
+            Err(_) => active.result.clone(),
+        };
+        if logical_argument(&restored) == success {
+            restored
+        } else {
+            success
+        }
     }
 
     fn abort_raise_with(
@@ -3912,7 +3942,7 @@ impl Lowerer {
         arguments: Vec<Expression>,
         operation: &str,
     ) -> Result<Expression, String> {
-        let success = self.node_type(node).unwrap_or(Type::Void);
+        let success = self.restored_success_type(self.node_type(node).unwrap_or(Type::Void));
         self.abort_outcome_with(arguments, operation, success)
     }
 
@@ -5084,7 +5114,43 @@ impl Lowerer {
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred =
             Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
-        let signature = self.outcome_signature(&types, &inferred, outcome_answer.as_ref())?;
+        // 結果型は「実際の型」での単一化から取る。scheme が結果型を書いている
+        // 位置（`Array.of_list` の `A Array`、`Array.get` の `A`）は、型変数に
+        // 実際の型を束縛すれば outcome を保ったまま解ける。構造で結果型を書き換え
+        // ると、`def replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1
+        // -> fn(x => (x + 1))` のように scheme が結果型そのものを書いている位置
+        // まで引数の閉包で書き換えてしまう（戻り値の実体は別の閉包である）。
+        //
+        // ただし scheme が引数の型に関数型を書いているときは論理型で単一化する。
+        // その引数の outcome は本体がほどいて伝播させるので、実際の型で束縛すると
+        // 本体が組み立てる型と食い違う（`List.map` の `Fn(A => B)`）。
+        let mut probe = crate::types::Inference::default();
+        let scheme_parameters = match probe.instantiate(&scheme) {
+            Ty::Fn(parameters, _, _) => parameters,
+            _ => Vec::new(),
+        };
+        let mixed: Vec<Type> = types
+            .iter()
+            .zip(&logical)
+            .enumerate()
+            .map(
+                |(index, (actual, logical))| match scheme_parameters.get(index) {
+                    Some(parameter) if !parameter.has_function() => actual.clone(),
+                    _ => logical.clone(),
+                },
+            )
+            .collect();
+        // 期待する結果型は渡さない。期待は論理型で書かれていて（呼び出し元の
+        // 環境も論理型で型付けされている）、実際の型で束縛した引数と食い違う
+        // （`Array.build` の `A Array`）。
+        let restored = match Signature::specialize_result(&scheme, &mixed, None) {
+            Ok(actual) => Signature {
+                parameters: inferred.parameters.clone(),
+                result: actual.result,
+            },
+            Err(_) => inferred.clone(),
+        };
+        let signature = self.outcome_signature(&types, &restored, outcome_answer.as_ref())?;
         let key = self.specialized_name(name);
         if let Some(function) = self.cached_specialization(&key, &types, &signature.result) {
             return Ok(function);

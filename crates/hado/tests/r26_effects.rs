@@ -1010,6 +1010,77 @@ fn an_effectful_closure_in_an_adt_field_keeps_its_outcome() {
 }
 
 #[test]
+fn an_effectful_closure_in_an_array_slot_keeps_its_outcome() {
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let xs = Array.of_list [fn(x => 8 / x)] ->\n  let f = Array.get xs 0 ->\n  f 0\n");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn an_effectful_parameter_does_not_restore_the_result_of_another() {
+    // f と g の論理型（outcome を外した形）が同じなので、結果型 `g` の出現を
+    // f の実際の型（効果付き）へ戻してはならない。
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef select(f: Fn(Int => Int {Error}), g: Fn(Int => Int)): Fn(Int => Int) => do f 1 -> g\ndef main =\n  with Catch ->\n  let h = select fn(x => 8 / x) fn(x => x + 1) ->\n  h 1\n");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"2\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn an_effectful_parameter_does_not_restore_a_written_result() {
+    // 引数が 1 つでも、scheme が結果型そのものに関数型を書いているときは、その
+    // 出現を引数の実際の型（効果付き）へ戻してはならない。戻り値の実体は本体が
+    // 組み立てる別の閉包である（`fn(x => x + 1)` は効果を持たない）。
+    let case = Case::new();
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1 -> fn(x => x + 1)\ndef main =\n  with Catch ->\n  let h = replace fn(x => 8 / x) ->\n  h 1\n");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"2\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn an_effectful_closure_in_a_monomorphic_adt_field_keeps_its_outcome() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}))\ndef main =\n  with Catch ->\n  let Box(f) = Box(fn(x => 8 / x)) ->\n  f 0\n");
