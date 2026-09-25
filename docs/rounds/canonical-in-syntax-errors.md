@@ -116,3 +116,26 @@ PASSED: 5/5
 |---|---|
 | `boolean_branch_ahead` を常に真にする | `PASSED: 8/9`（other E101 shapes が NG） |
 | `execute` の読み込みの失敗を `error.to_string()` に戻す | `PASSED: 7/9`（run と test が NG） |
+
+一次レビュー（Codex）の指摘 1 件を修正と門番に取り込んだ（補修）。`test` は根の
+列挙の失敗を、`build --fix` は整形の前段の失敗を、既定の 1 行で出していた。どちらも
+`LoadError` なので `load_error_report` に通した。指摘は `test` の 1 か所だが、
+`source_paths` の失敗が同じ形で残っていたので揃えた。
+
+```
+# 直す前（親ディレクトリが無い入力を `test --format json` に与える）
+$ target/debug/hado test --format json /tmp/nope/main.hd
+/tmp/nope:1:1: error: No such file or directory (os error 2)
+# 直した後は 1 行の JSON（`check` と同じ形）
+$ target/debug/hado test --format json /tmp/nope/main.hd
+{"path": "/tmp/nope", "line": 1, "col": 1, "end_line": 1, "end_col": 1, "code": null, ...}
+$ target/debug/hado build --fix --format json /tmp/nope/main.hd
+{"path": "/tmp/nope", "line": 1, "col": 1, "end_line": 1, "end_col": 1, "code": null, ...}
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+# 探針（`run_tests` と `format_sources` を既定の 1 行に戻す）
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 9/10（a load error is JSON for every command that takes --format が NG）
+```
