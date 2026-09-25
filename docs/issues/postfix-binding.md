@@ -61,4 +61,4 @@ a
 
 ## 由来
 
-2026-09-26 の相談。動機は、書くときに考える順序である。計算を先に考え、名前は後から付ける。先例は SQL の `SELECT … AS name`、Clojure の `as->`、Haskell の `where`。§11、§34、§35、§36、§53、E101、E303。関連する issue は `do-option-absent`。
+2026-09-26 の相談。先例は SQL の `SELECT … AS name`、Clojure の `as->`、Haskell の `where`。§11、§34、§35、§36、§53、E101、E303。関連する issue は `do-option-absent`。
