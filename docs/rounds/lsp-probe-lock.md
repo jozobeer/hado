@@ -186,3 +186,17 @@ judge 17.64 s real
 PASSED: 11/11
 judge 20.04 s real
 ```
+
+full 層の CI（workflow_dispatch、`7a8c067`）。赤の回と同じく clippy の門番 2 本と同じ時刻に
+起動し、緑になった。修正前の main は同じ層で 8 走のうち 1 走が緑だったので、1 走の緑は
+弱い証拠である。
+
+```
+$ gh workflow run ci.yml --ref lsp-probe-lock -f tier=full
+$ gh run view 36075408253 --log | grep -E 'ci-run:|RUN: verify-(clippy|cognitive-complexity|lsp-minimal)|TALLY'
+2026-09-24T23:59:56.3901687Z ci-run: event=workflow_dispatch ref=refs/heads/lsp-probe-lock tier=full jobs=12 out=target/ci-gates
+2026-09-25T00:06:32.9768018Z RUN: verify-clippy -> /home/runner/_work/hado/hado/target/ci-gates/verify-clippy.log
+2026-09-25T00:06:32.9768966Z RUN: verify-cognitive-complexity -> /home/runner/_work/hado/hado/target/ci-gates/verify-cognitive-complexity.log
+2026-09-25T00:06:32.9790785Z RUN: verify-lsp-minimal -> /home/runner/_work/hado/hado/target/ci-gates/verify-lsp-minimal.log
+2026-09-25T00:12:07.0333551Z TALLY: 3726/3726 passed; red: none
+```
