@@ -187,9 +187,9 @@ PASSED: 11/11
 judge 20.04 s real
 ```
 
-full 層の CI（workflow_dispatch、`7a8c067`）。赤の回と同じく clippy の門番 2 本と同じ時刻に
-起動し、緑になった。修正前の main は同じ層で 8 走のうち 1 走が緑だったので、1 走の緑は
-弱い証拠である。
+full 層の CI（workflow_dispatch、`7a8c067` と `aff3f18`）。2 走とも赤の回と同じく clippy の
+門番 2 本と同じ時刻に起動し、緑になった。修正前の main は同じ層で 8 走のうち 1 走だけが
+緑だった。
 
 ```
 $ gh workflow run ci.yml --ref lsp-probe-lock -f tier=full
@@ -199,4 +199,27 @@ $ gh run view 36075408253 --log | grep -E 'ci-run:|RUN: verify-(clippy|cognitive
 2026-09-25T00:06:32.9768966Z RUN: verify-cognitive-complexity -> /home/runner/_work/hado/hado/target/ci-gates/verify-cognitive-complexity.log
 2026-09-25T00:06:32.9790785Z RUN: verify-lsp-minimal -> /home/runner/_work/hado/hado/target/ci-gates/verify-lsp-minimal.log
 2026-09-25T00:12:07.0333551Z TALLY: 3726/3726 passed; red: none
+$ gh run view 36076601674 --log | grep -E 'ci-run:|RUN: verify-(clippy|cognitive-complexity|lsp-minimal)|TALLY'
+2026-09-25T00:22:43.4650839Z ci-run: event=workflow_dispatch ref=refs/heads/lsp-probe-lock tier=full jobs=12 out=target/ci-gates
+2026-09-25T00:29:29.5307032Z RUN: verify-clippy -> /home/runner/_work/hado/hado/target/ci-gates/verify-clippy.log
+2026-09-25T00:29:29.5309336Z RUN: verify-cognitive-complexity -> /home/runner/_work/hado/hado/target/ci-gates/verify-cognitive-complexity.log
+2026-09-25T00:29:29.5371960Z RUN: verify-lsp-minimal -> /home/runner/_work/hado/hado/target/ci-gates/verify-lsp-minimal.log
+2026-09-25T00:35:07.2440202Z TALLY: 3726/3726 passed; red: none
+```
+
+### 着地後の全走（2026-09-25）
+
+`3ae5599`（PR #40 の着地）で main の push が CI の full 層を回した。手元では回していない。
+赤の回と同じく clippy の門番 2 本と同じ時刻に `verify-lsp-minimal` が起動し、緑で終わった。
+
+```
+$ gh run view 36077778733 --json conclusion,headSha --jq '"\(.conclusion) \(.headSha[0:7])"'
+success 3ae5599
+$ gh run view 36077778733 --log | grep -E 'ci-run:|RUN: verify-(clippy|cognitive-complexity|lsp-minimal)|TALLY|PASSED: 16/16'
+2026-09-25T00:35:51.6780313Z ci-run: event=push ref=refs/heads/main tier=full jobs=12 out=target/ci-gates
+2026-09-25T00:42:41.4374305Z RUN: verify-clippy -> /home/runner/_work/hado/hado/target/ci-gates/verify-clippy.log
+2026-09-25T00:42:41.4377767Z RUN: verify-cognitive-complexity -> /home/runner/_work/hado/hado/target/ci-gates/verify-cognitive-complexity.log
+2026-09-25T00:42:41.4379745Z RUN: verify-lsp-minimal -> /home/runner/_work/hado/hado/target/ci-gates/verify-lsp-minimal.log
+2026-09-25T00:48:18.6148735Z TALLY: 3726/3726 passed; red: none
+2026-09-25T00:48:30.5978060Z PASSED: 16/16
 ```
