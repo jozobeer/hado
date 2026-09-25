@@ -273,3 +273,50 @@ PASSED: 16/16
 $ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
 TALLY: 40/40 passed; red: none
 ```
+
+五次レビュー（Codex）の指摘 3 件。3 件とも再現した。
+
+1 件目は 1 組目が空の分けた形。指摘の `def f() (b: Int) => b` の `()` は Void の
+字句なので、先読みの経路には入らず `function requires a parameter` で止まる。
+群として読まれる空の組は空白を入れた `( )` で、こちらは `expected =>, found (`
+に Parameters の綴りが付いていた。1 組目にも引数があることを条件に足した。
+
+2 件目は途中で終わる Boolean branch。`| 0 => if true => 1 |` は Boolean branch
+として成っていない（閉じの式が無い）のに、区切りの `|` を見ただけで腕の条件列の
+綴りを添えていた。字面の走査をやめ、分岐として先読みして `BoolBranch` になると
+きだけ添える。腕の本体が不完全な `if` の後ろに宣言が続く形
+（`incomplete-before-declaration`）と、腕の外の括弧には添えないままである。
+
+3 件目は名前空間ディレクトリの誤り（§51）の `--format json`。`LoadError::Input`
+は `_` の腕に落ちて人間向けの 1 行になっていた。位置を持たない診断に組み、
+`check`・`build`・`run`・`test` のどの経路でも §58.4 の 10 フィールドを出す。
+
+```
+$ cargo run --offline -q -- check --format json e1/main.hd   # def f( ) (b: Int) => b
+{"path": "main.hd", ..., "code": "E100", "message": "expected =>, found (", "suggestion": "def f(a: T, b: U): R =>", ...}
+$ cargo run --offline -q -- check --format json e2/main.hd   # def f x =>\n  if x\n    | 0 => if true => 1 |
+{"path": "main.hd", ..., "code": "E101", "suggestion": "| p => if | c => a | b", ...}
+$ cargo run --offline -q -- check --format json root/main.hd   # root/Bad/ がある根
+invalid namespace directory: Bad
+```
+
+直した後は 1 件目・2 件目とも `suggestion` が null、3 件目は同じメッセージの
+JSON になる。指摘の 1 件目は `def f() (b: Int)` の形で、これは直す前も後も
+`function requires a parameter`（`suggestion` は null）である。
+
+```
+$ bash scripts/verify-canonical-in-syntax-errors.sh 2>&1 | tail -1
+PASSED: 10/10
+$ cargo fmt --all --check && cargo clippy --offline --all-targets -- -D warnings
+（出力なし）
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 753 failed 0
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+```
+
+検体を足した時点の門番は赤（`other E100 shapes`・`other E101 shapes`・
+`a load error is JSON for every command that takes --format` の 3 件、
+`PASSED: 7/10`）。直した後は緑。
