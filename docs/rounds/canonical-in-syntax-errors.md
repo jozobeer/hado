@@ -139,3 +139,62 @@ PASSED: 16/16
 $ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
 PASSED: 9/10（a load error is JSON for every command that takes --format が NG）
 ```
+
+二次レビュー（Codex）の指摘 4 件（うち 1 件は同文が 2 スレッド）。4 件とも直した。
+
+1 件目は `boolean_branch_ahead` が宣言を越えて `=>` を探していたこと。腕の本体が
+不完全な `if broken` のとき、続く宣言の `=>` を Boolean branch の印と読み、
+pattern branch の形にも ArmConditions の綴りを添えていた。
+
+```
+$ cat leak/main.hd
+def f x =>
+  if x
+    | 0 => 0
+    | _ => if broken
+def g y => y
+$ cargo run --offline -q -- check --format json leak/main.hd
+{"path": "main.hd", ..., "code": "E101", "suggestion": "| p => if | c => a | b", ...}
+# 宣言を始めるキーワード（`declaration_keyword`）で探索を止めた後
+$ cargo run --offline -q -- check --format json leak/main.hd
+{"path": "main.hd", ..., "code": "E101", "suggestion": null, ...}
+```
+
+2 件目は 2 個目の `(` がパラメータ群を始めるときだけ Parameters の綴りを添える
+こと。`def f(a: Int) (1)` は引数を括弧ごとに分けた形ではない（§8、§58.4）。指摘に
+あった `def f(a: Int) () => a` は直す前から綴りを添えていない（別の経路で
+`expected =>, found ()` になる）。
+
+```
+$ cargo run --offline -q -- check --format json group/main.hd   # def f(a: Int) (1)
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+# 直した後
+{"path": "main.hd", ..., "code": "E100", "suggestion": null, ...}
+# 対照（分割した形には添えたまま）
+$ cargo run --offline -q -- check --format json other/main.hd   # def f(a: Int) (b: Int): Int => a
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+```
+
+3 件目と 4 件目は門番の側。対照の検体（E101 の fn の括弧、E100 の型の綴り、
+E520 の書き換え）をスクリプト内で作るようにして、コーパスのパスを読まなくした。
+`hado` は `cargo run --offline -q --` で起こし、`target/` の配置を決め打ちしない。
+コーパス側の同じ形は `cargo test` のコーパス判定が見ている。
+
+```
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+# 注入（宣言の境界を外す / 2 個目の括弧を確かめない）
+NG: other E101 shapes have no suggestion: ('incomplete-before-declaration', ...)
+NG: other E100 shapes have no suggestion: ('literal-group', ...)
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 753 failed 0
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+```
+
+コーパスのパスを読む門番は他にも残っている（`verify-r69.sh` の `E502`、
+`verify-r71.sh` の `E504`、`verify-prelude-tail-recursion.sh` の
+`list_map_head_order` など）。この門番は検体を自分で作る形にしたが、既存の門番は
+そのままにした。
