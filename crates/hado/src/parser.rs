@@ -1406,16 +1406,52 @@ impl Parser<'_> {
         }
     }
 
-    // 続く `(` がパラメータ群を始めるか。`def f(a: Int) (1)` の `(1)` は引数を
-    // 括弧ごとに分けた形ではないので、綴りを添えない（§8、§58.4）。
+    // 続く `(` が型付き引数の群を最後まで成しているか。`def f(a: Int) (1)` も
+    // `def f(a: Int) (b)` も引数を括弧ごとに分けた形ではないので、綴りを添えない
+    // （§8、§58.4）。`name: Type` の列と閉じ括弧まで先読みする。
     fn parameters_ahead(&self, contract: bool) -> bool {
-        let Some(TokKind::Name(name)) = self.toks.get(self.pos + 1).map(|token| &token.kind) else {
-            return false;
-        };
-        if !contract && name == "_" {
-            return true;
+        let mut index = self.pos + 1;
+        loop {
+            let Some(TokKind::Name(name)) = self.toks.get(index).map(|token| &token.kind) else {
+                return false;
+            };
+            let named =
+                name.chars().next().is_some_and(char::is_lowercase) || (!contract && name == "_");
+            if !named || self.toks.get(index + 1).map(|token| &token.kind) != Some(&TokKind::Colon)
+            {
+                return false;
+            }
+            index += 2;
+            // 型を読み飛ばす。括弧の中の区切りは数えない。
+            loop {
+                match self.toks.get(index).map(|token| &token.kind) {
+                    None => return false,
+                    Some(TokKind::Comma) => {
+                        index += 1;
+                        break;
+                    }
+                    Some(TokKind::RParen) => return true,
+                    Some(TokKind::LParen | TokKind::LBracket | TokKind::LBrace) => {
+                        index += 1;
+                        let mut depth = 1usize;
+                        while depth > 0 {
+                            match self.toks.get(index).map(|token| &token.kind) {
+                                None => return false,
+                                Some(TokKind::LParen | TokKind::LBracket | TokKind::LBrace) => {
+                                    depth += 1;
+                                }
+                                Some(TokKind::RParen | TokKind::RBracket | TokKind::RBrace) => {
+                                    depth -= 1;
+                                }
+                                Some(_) => {}
+                            }
+                            index += 1;
+                        }
+                    }
+                    Some(_) => index += 1,
+                }
+            }
         }
-        name.chars().next().is_some_and(char::is_lowercase)
     }
 
     fn parse_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
