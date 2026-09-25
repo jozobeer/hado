@@ -24,7 +24,10 @@ FIELDS = {'path', 'line', 'col', 'end_line', 'end_col', 'code', 'message',
 
 SPLIT = 'def rec bump (entries: Entry List) (word: String): Entry List =>\n  entries\n'
 NESTED = 'def label n =>\n  if n\n    | 0 => "zero"\n    | _ => if n > 0 => "positive" | "negative"\n'
-TARGETS = (('split', SPLIT, 'E100', DEF_FORM), ('nested', NESTED, 'E101', ARM_FORM))
+# 腕の本体に括弧で包んで置いた Boolean branch も、腕の条件列が正準形（§26.1）。
+PAREN_IN_ARM = 'def label n =>\n  if n\n    | 0 => (if n > 0 => "positive" | "negative")\n    | _ => "zero"\n'
+TARGETS = (('split', SPLIT, 'E100', DEF_FORM), ('nested', NESTED, 'E101', ARM_FORM),
+           ('paren-in-arm', PAREN_IN_ARM, 'E101', ARM_FORM))
 
 # 対照にする検体はコーパスの配置に依らせず、ここで作る（§58.4 の「他の形には
 # 添えない」を、split 形とは違う E100・E101 と、E520 の書き換えで見る）。
@@ -40,12 +43,18 @@ OTHER_E101 = (
     # 印と読むと suggestion が付く（§26.1）。
     ('incomplete-before-declaration',
      'def f x =>\n  if x\n    | 0 => 0\n    | _ => if broken\ndef g y => y\n'),
+    # 腕の本体ではないところの括弧付き Boolean branch は他の形（§58.4）。
+    ('paren-not-in-arm', 'def f c d => if c => (if d => 1 | 2) | 3\n'),
 )
 OTHER_E100 = (
     ('annotation', 'def id(x: Option<Int>): Option<Int> => x\ndef main = id (Some(1))\n'),
     ('literal-group', 'def f(a: Int) (1)\n'),
     ('name-only-group', 'def f(a: Int) (b)\n'),
     ('empty-group', 'def f(a: Int) ()\n'),
+    # 2 個目の括弧が「引数名: 型」の列として最後まで成っているかは、字面では
+    # なく型の文法で決める（§8、§58.4）。
+    ('name-only-with-colon', 'def f(a: Int) (b:)\n'),
+    ('mixed-group', 'def f(a: Int) (b: Int c: String)\n'),
 )
 
 passed = 0
