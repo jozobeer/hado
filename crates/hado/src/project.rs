@@ -48,6 +48,7 @@ impl Project {
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
         let library_error = library_main.map(|span| Diagnostic {
+            suggestion: None,
             related: None,
             path: files[0].path.clone(),
             line: span.line,
@@ -464,6 +465,7 @@ fn collect_sources(
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic {
+        suggestion: None,
         related: None,
         path: path.to_string_lossy().into_owned(),
         line: 1,
@@ -609,6 +611,7 @@ fn read_file(
         None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
     };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+        suggestion: None,
         related: None,
         path: display.clone(),
         line: error.line,
@@ -681,6 +684,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.to_string_lossy().into_owned(),
                 line: token.span.line,
@@ -738,6 +742,7 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     })
                 });
                 let error = Diagnostic {
+                    suggestion: None,
                     related,
                     path: file.source.path.clone(),
                     line: token.span.line,
@@ -821,7 +826,7 @@ pub fn diagnostic_json(
         None => "null".to_string(),
     };
     format!(
-        "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
+        "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"suggestion\": {}, \"related\": {}}}",
         json_string(&error.path),
         error.line,
         error.col,
@@ -830,6 +835,7 @@ pub fn diagnostic_json(
         option_string(error.code.as_deref()),
         json_string(&error.message),
         option_string(canonical),
+        option_string(error.suggestion.map(crate::parser::Suggestion::form)),
         related,
     )
 }

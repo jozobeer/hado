@@ -483,6 +483,7 @@ fn check_parsed_filtered(
             (Some(error), _) => Err(error),
             (None, Some(checked)) => Ok(checked),
             (None, None) => Err(parser::Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: 1,
@@ -549,6 +550,7 @@ pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic>
 
 pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
     parser::Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: 1,
@@ -584,6 +586,7 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
     let checked = check_parsed(parsed, path)?;
     let ast = &parsed.ast;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: ast.span.line,
@@ -594,6 +597,7 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
         message: "main must be a value definition for lowering".into(),
     })?;
     let program = mono::lower_program(ast, &checked).map_err(|message| parser::Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: main.span.line,

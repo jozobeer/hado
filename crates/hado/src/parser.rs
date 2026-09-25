@@ -564,6 +564,28 @@ pub struct Diagnostic {
     pub code: Option<String>,
     pub message: String,
     pub related: Option<Box<Related>>,
+    pub suggestion: Option<Suggestion>,
+}
+
+/// 形の提示（§58.4）。書き換え（第57節）ではないので `fmt` も `--fix` も適用しない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Suggestion {
+    /// §8: 引数を括弧ごとに分けた `def`。
+    Parameters,
+    /// §8: 同じ形の契約の member。
+    ContractParameters,
+    /// §26.1: 腕に置いた Boolean branch。
+    ArmConditions,
+}
+
+impl Suggestion {
+    pub fn form(self) -> &'static str {
+        match self {
+            Self::Parameters => "def f(a: T, b: U): R =>",
+            Self::ContractParameters => "def f(a: T, b: U): R",
+            Self::ArmConditions => "| p => if | c => a | b",
+        }
+    }
 }
 
 impl Diagnostic {
@@ -606,6 +628,9 @@ impl fmt::Display for Diagnostic {
                 "; {label} at {}:{}:{}",
                 related.path, related.line, related.col
             )?;
+        }
+        if let Some(suggestion) = self.suggestion {
+            write!(f, "; suggestion: {}", suggestion.form())?;
         }
         Ok(())
     }
@@ -650,6 +675,7 @@ pub fn parse(toks: &[Tok]) -> Result<Program, String> {
 
 fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
     Diagnostic {
+        suggestion: None,
         related: None,
         path: path.to_string(),
         line: e.line,
@@ -769,6 +795,7 @@ impl Parser<'_> {
         message: impl Into<String>,
     ) -> Diagnostic {
         Diagnostic {
+            suggestion: None,
             related: None,
             path: self.path.to_string(),
             line: s.line,
@@ -1405,6 +1432,18 @@ impl Parser<'_> {
                 }
             }
             self.expect(&TokKind::RParen)?;
+            // §8: 引数は 1 組の括弧に並べる。括弧ごとに分けた形には綴りを添える。
+            if self.kind() == &TokKind::LParen {
+                let (expected, form) = if contract {
+                    (TokKind::Colon, Suggestion::ContractParameters)
+                } else {
+                    (TokKind::Arrow, Suggestion::Parameters)
+                };
+                return Err(Diagnostic {
+                    suggestion: Some(form),
+                    ..self.error(None, format!("expected {expected}, found ("))
+                });
+            }
         } else {
             while matches!(self.kind(), TokKind::Name(_)) {
                 let span = self.span();
@@ -2357,7 +2396,38 @@ impl Parser<'_> {
             }
             return Ok(body);
         }
+        // §26.1: 腕に置いた Boolean branch の正準形は腕の条件列である。
+        if self.kind() == &TokKind::KwIf && self.boolean_branch_ahead() {
+            return Err(Diagnostic {
+                suggestion: Some(Suggestion::ArmConditions),
+                ..self.error(
+                    Some("E101"),
+                    "branches cannot be nested inside another branch",
+                )
+            });
+        }
         self.parse_branch_expr()
+    }
+
+    /// 現在の `if` が Boolean branch か。括弧の外で `=>` が `|` より先に来れば
+    /// Boolean branch（`if c => a | b`）、`|` が先なら pattern branch である。
+    fn boolean_branch_ahead(&self) -> bool {
+        let mut depth = 0usize;
+        for token in &self.toks[self.pos + 1..] {
+            match token.kind {
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                    let Some(outer) = depth.checked_sub(1) else {
+                        return false;
+                    };
+                    depth = outer;
+                }
+                TokKind::Arrow if depth == 0 => return true,
+                TokKind::Pipe if depth == 0 => return false,
+                _ => {}
+            }
+        }
+        false
     }
 
     fn next_is(&self, kind: &TokKind) -> bool {

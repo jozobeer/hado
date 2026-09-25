@@ -633,6 +633,7 @@ fn resolve_type_names(
     if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &ty.kind {
         if !types.contains(name) {
             diagnostics.push(crate::parser::Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: ty.name_span.line,
@@ -694,6 +695,7 @@ fn resolve_effect_label(
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !effects.contains(name) {
                 diagnostics.push(crate::parser::Diagnostic {
+                    suggestion: None,
                     related: None,
                     path: path.into(),
                     line: ty.name_span.line,
@@ -733,6 +735,7 @@ fn entry_form(
     }
     let span = main.map_or(crate::parser::Span::point(1, 1), |def| def.span);
     Err(crate::parser::Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: span.line,
@@ -843,6 +846,7 @@ fn register(
 ) -> Result<(), crate::parser::Diagnostic> {
     if let Some(&first) = names.get(name) {
         return Err(crate::parser::Diagnostic {
+            suggestion: None,
             related: Some(Box::new(crate::parser::Related {
                 path: path.into(),
                 line: first.line,
@@ -899,6 +903,7 @@ fn collect_cycle_violations(
         }
         if let Some((code, message)) = cycle_violation(def) {
             diagnostics.push(crate::parser::Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: def.span.line,

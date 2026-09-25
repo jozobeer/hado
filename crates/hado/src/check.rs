@@ -15,6 +15,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for span in &ast.long_condition_functions {
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: span.line,
@@ -27,6 +28,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     }
     for span in &ast.written_list_patterns {
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: span.line,
@@ -39,6 +41,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     }
     for span in &ast.branches_after_fallback {
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: span.line,
@@ -305,6 +308,7 @@ fn check_definition(
             if !contract_member {
                 for param in params.iter().filter(|param| param.name == "_") {
                     diagnostics.push(Diagnostic {
+                        suggestion: None,
                         related: None,
                         path: path.into(),
                         line: param.span.line,
@@ -362,6 +366,7 @@ fn check_effect_rows(ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic
 /// E522: 同じ効果が 1 つの row に 2 度書かれている。
 fn duplicate_effect(effect: &TypeExpr, path: &str) -> Diagnostic {
     Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: effect.name_span.line,
@@ -426,6 +431,7 @@ fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnost
             continue;
         }
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: parameter.span.line,
@@ -482,6 +488,7 @@ fn check_unused<'a>(
             continue;
         }
         diagnostics.push(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: span.line,
@@ -546,6 +553,7 @@ fn check_sole_parameter_branch(
         return Ok(());
     }
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: span.line,
@@ -578,6 +586,7 @@ pub(crate) fn matrix_coverage(
         _ => return Ok(()),
     };
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: location.line,
@@ -619,6 +628,7 @@ fn check_boolean_form(
     }
     let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: span.line,
@@ -752,6 +762,7 @@ fn identical_branches(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     }
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: node.span.line,
@@ -786,6 +797,7 @@ fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     }
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: pat.span.line,
@@ -804,6 +816,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     if matches!(pat.kind, PatternKind::Underscore) {
         return Err(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: pat.span.line,
@@ -821,6 +834,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     }
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: node.span.line,
@@ -866,6 +880,7 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
         ("E512", pattern, "top-level variable patterns are forbidden")
     };
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: pattern.span.line,
@@ -908,6 +923,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     };
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: body.span.line,
@@ -971,6 +987,7 @@ fn check_rewrap(ast: &Ast, node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
+        suggestion: None,
         related: None,
         path: path.into(),
         line: span.line,
@@ -995,6 +1012,7 @@ fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {
             .any(|(patterns, _)| patterns.iter().any(needs_literal_fallback))
     {
         return Err(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: node.span.line,
@@ -1026,6 +1044,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     if fallback.is_none() {
         return Err(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: node.span.line,
@@ -1042,6 +1061,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 || matches!(previous.kind, NodeKind::Bool(true))
         }) {
             return Err(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: condition.span.line,
@@ -1065,6 +1085,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
             .all(|(condition, _)| literal_comparison(condition) == Some(name))
         {
             return Err(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: node.span.line,
@@ -1129,6 +1150,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 continue;
             };
             return Err(Diagnostic {
+                suggestion: None,
                 related: None,
                 path: path.into(),
                 line: pattern.span.line,
@@ -1156,6 +1178,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
 fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if matches!(&node.kind, NodeKind::Name(name) if matches!(name.as_str(), "Nil" | "Cons")) {
         return Err(Diagnostic {
+            suggestion: None,
             related: None,
             path: path.into(),
             line: node.span.line,

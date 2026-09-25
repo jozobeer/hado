@@ -15,6 +15,17 @@ fn print_diagnostic(project: &Project, error: &hado::parser::Diagnostic) {
     }
 }
 
+/// `Project::load` の失敗を印字する形。診断は §58.4 の JSON にも従う。読み込めて
+/// いないので書き換えは引けず、終端はアンカーと同じ位置である。
+fn load_error_report(error: &hado::project::LoadError) -> String {
+    match error {
+        hado::project::LoadError::Diagnostic(diagnostic) if FORMAT_JSON.load(Ordering::Relaxed) => {
+            hado::project::diagnostic_json(diagnostic, (diagnostic.line, diagnostic.col), None)
+        }
+        _ => error.to_string(),
+    }
+}
+
 /// コマンドラインの解釈結果。`main` はここから実際の処理を選ぶ。
 struct Cli<'a> {
     command: &'a str,
@@ -245,7 +256,7 @@ fn run_project_command(cli: &Cli<'_>, input: &Path) -> ExitCode {
     let project = match Project::load(input) {
         Ok(project) => project,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error));
             return ExitCode::from(1);
         }
     };
@@ -353,7 +364,7 @@ fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
         let project = match Project::load(input) {
             Ok(project) => project,
             Err(error) => {
-                eprintln!("{error}");
+                eprintln!("{}", load_error_report(&error));
                 return ExitCode::from(1);
             }
         };
@@ -446,7 +457,7 @@ enum Outcome {
 fn execute(input: &Path, args: &[String]) -> Outcome {
     let project = match Project::load(input) {
         Ok(project) => project,
-        Err(error) => return Outcome::Failed(error.to_string()),
+        Err(error) => return Outcome::Failed(load_error_report(&error)),
     };
     let directory = match RunDirectory::create() {
         Ok(directory) => directory,
