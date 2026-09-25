@@ -257,3 +257,19 @@ signature for make`）は指摘の入力では出ず、返す閉包の引数の�
 `map`・`to_list`・`set` の 4 つが `specialization failed: Mismatch`。試して戻した）。
 本体が読む型の解決だけを実際の型へ寄せる設計が要る。`docs/issues/`
 `effectful-closure-through-prelude.md` に、この形と実測、試して戻した案を足した。
+
+着地後（main を checkout した側、2026-09-26）。PR #43 は `06dc519` で入り、#44 の
+着地（`fca01a1`）の後の 1 回の全走で測った。
+
+```
+$ git log --oneline -1
+fca01a1 Merge pull request #44 from jozobeer/canonical-in-syntax-errors
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 756 failed 0
+$ cargo fmt --all --check && cargo clippy --offline --all-targets -- -D warnings
+（出力なし）
+$ bash scripts/run-gates.sh --jobs 4 --tier full gate-out 2>&1 | tail -1
+TALLY: 3736/3736 passed; red: none
+$ bash scripts/corpus-lock.sh --check; echo $?
+0
+```
