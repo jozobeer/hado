@@ -57,10 +57,11 @@ issue の完了条件のとおり。`8 / 0` の `raise` が `Catch` に届き、
 - 効果を持つ閉包を多相な prelude 関数に通すと落ちる、より広い不具合
   （`docs/issues/effectful-closure-through-prelude.md`）。`Array.set`・`Array.to_list` は
   この穴で落ちる。
+- 効果の違う閉包を並べたリストリテラル（`docs/issues/effectful-closure-in-list-literal.md`）。
 
 ### 中断の条件
 
-欠陥の注入で、外しても緑のままの箇所があれば、その箇所を消す。
+欠陥の注入で、戻しても出力が変わらない箇所は入れない。
 
 ## 系譜
 
@@ -91,15 +92,24 @@ $ bash scripts/verify-m4.sh 2>&1 | tail -1
 PASSED: 140/140
 ```
 
-欠陥の注入（issue のプログラム）。handler の無い abort を戻しても、handler の無い
-プログラム（`8 / 0` と範囲外の `Array.get`）は修正前も修正後も `DivisionByZero` と
-`IndexOutOfRange` で終わるので、その変更は外した。
+欠陥の注入。各行は、その箇所だけを修正前に戻したときの issue のプログラムの出力。
+
+| 戻した箇所 | 出力 |
+|---|---|
+| `restored_array_allocation` | `array intrinsic argument type mismatch` |
+| `abort_outcome` の `restored_success_type` | `done payload mismatch` |
+| `specialize_function` の結果型の復元 | `array intrinsic argument type mismatch` |
+
+handler の無い abort（`abort_raise`）の成功型は、戻しても戻さなくても出力が同じ。
 
 ```
-$ # restored_array_allocation を外す
-array intrinsic argument type mismatch
-$ # abort_outcome の restored_success_type を外す
-done payload mismatch
-$ # specialize_function の結果型の復元を外す
-array intrinsic argument type mismatch
+$ cat noh/main.hd
+def main =
+  let xs = Array.of_list [fn(x => 8 / x)] ->
+  let f = Array.get xs 0 ->
+  f 0
+$ cargo run --offline -q -- run noh/main.hd
+DivisionByZero
 ```
+
+`Array.get xs 5` にした入力は `IndexOutOfRange`。どちらも df4f2ac で同じ出力。
