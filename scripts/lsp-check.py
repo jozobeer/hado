@@ -197,8 +197,31 @@ local function publishes_for(uri)
   return list
 end
 
+-- README の cmd（scripts/hado-lsp.sh → cargo run）は exec で `hado lsp` に置き換わる。
+-- それまでの時間は並走する門番と取り合う cargo の build lock 待ちなので、サーバの
+-- 応答の予算（30 秒）に入れない。spawn は edit の中で同期に起きるので、子が居なければ
+-- 起動器が終わったと読み、30 秒の予算で赤にする。
+local function launched()
+  for _, pid in ipairs(vim.api.nvim_get_proc_children(vim.fn.getpid())) do
+    local proc = vim.api.nvim_get_proc(pid)
+    if not proc or proc.name ~= 'hado' then return false end
+  end
+  return true
+end
+
+-- nvim_get_proc_children は pgrep を、nvim_get_proc は ps を起こす。vim.wait の条件に
+-- 置くと、その子の終了が待ちを起こして条件を評価し直し、ps を回し続ける。
+local function wait_launched()
+  local deadline = vim.uv.hrtime() + tonumber(vim.env.HADO_LSP_LAUNCH_MS) * 1e6
+  while not launched() do
+    if vim.uv.hrtime() > deadline then error('timeout: lsp launcher', 0) end
+    vim.wait(200)
+  end
+end
+
 local function open(path)
   vim.cmd('edit ' .. vim.fn.fnameescape(path))
+  wait_launched()
   wait_for(function()
     local clients = vim.lsp.get_clients({ bufnr = 0 })
     return #clients > 0 and clients[1].initialized == true
@@ -230,6 +253,11 @@ result.publishes = publishes
 '''
 
 
+# 起動器が `hado lsp` に exec するまでの見張り。cargo の build lock の待ちを含むので、
+# run_hado と同じ 300 秒にする。
+LAUNCH_SECONDS = 300
+
+
 class Nvim:
     """Neovim を headless で起こし、Lua の probe を走らせて JSON を受け取る。"""
 
@@ -240,7 +268,7 @@ class Nvim:
         # 相対の作業場所を nvim に渡すと file URI が壊れ、publish を取り落とす。
         self.work = Path(work).resolve()
 
-    def run(self, body, env_extra=None, timeout=120):
+    def run(self, body, env_extra=None, timeout=120 + LAUNCH_SECONDS):
         probe = self.work / 'probe.lua'
         probe.write_text(PROBE_HEAD + PRELUDE + '\n' + body + '\n' + PROBE_TAIL,
                          encoding='utf-8')
@@ -252,6 +280,7 @@ class Nvim:
             'HADO_LSP_ROOT': str(self.root),
             'HADO_LSP_WORK': str(self.work),
             'HADO_LSP_OUT': str(out),
+            'HADO_LSP_LAUNCH_MS': str(LAUNCH_SECONDS * 1000),
         })
         for key, value in (env_extra or {}).items():
             env[key] = value
