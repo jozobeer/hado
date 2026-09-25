@@ -287,28 +287,10 @@ impl Project {
     /// §58.4: the diagnostic as one line of JSON, for tooling. The canonical
     /// form is a field of its own instead of being appended to the message.
     pub fn report_json(&self, error: &Diagnostic) -> String {
-        let related = match &error.related {
-            Some(related) => format!(
-                "{{\"path\": {}, \"line\": {}, \"col\": {}, \"label\": {}}}",
-                json_string(&related.path),
-                related.line,
-                related.col,
-                option_string(error.code.as_deref().and_then(crate::parser::related_label)),
-            ),
-            None => "null".to_string(),
-        };
-        let (end_line, end_col) = self.diagnostic_end(error);
-        format!(
-            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
-            json_string(&error.path),
-            error.line,
-            error.col,
-            end_line,
-            end_col,
-            option_string(error.code.as_deref()),
-            json_string(&error.message),
-            option_string(self.canonical_hint(error).as_deref()),
-            related,
+        diagnostic_json(
+            error,
+            self.diagnostic_end(error),
+            self.canonical_hint(error).as_deref(),
         )
     }
 
@@ -818,6 +800,38 @@ pub fn position_at(source: &str, offset: usize) -> (usize, usize) {
         }
     }
     (line, col)
+}
+
+/// §58.4: one diagnostic as one line of JSON. The end and the canonical form
+/// come from the sources, so a diagnostic from a project that did not load
+/// passes its anchor and no canonical form.
+pub fn diagnostic_json(
+    error: &Diagnostic,
+    (end_line, end_col): (usize, usize),
+    canonical: Option<&str>,
+) -> String {
+    let related = match &error.related {
+        Some(related) => format!(
+            "{{\"path\": {}, \"line\": {}, \"col\": {}, \"label\": {}}}",
+            json_string(&related.path),
+            related.line,
+            related.col,
+            option_string(error.code.as_deref().and_then(crate::parser::related_label)),
+        ),
+        None => "null".to_string(),
+    };
+    format!(
+        "{{\"path\": {}, \"line\": {}, \"col\": {}, \"end_line\": {}, \"end_col\": {}, \"code\": {}, \"message\": {}, \"canonical\": {}, \"related\": {}}}",
+        json_string(&error.path),
+        error.line,
+        error.col,
+        end_line,
+        end_col,
+        option_string(error.code.as_deref()),
+        json_string(&error.message),
+        option_string(canonical),
+        related,
+    )
 }
 
 /// A JSON string literal, or `null` when there is nothing to write (§58.4).
