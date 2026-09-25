@@ -1455,44 +1455,8 @@ impl Parser<'_> {
     }
 
     fn parse_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
-        let mut params = Vec::new();
-        if self.kind() == &TokKind::LParen {
-            self.bump();
-            if contract && self.kind() == &TokKind::RParen {
-                return Err(self.error(None, "contract functions require at least one parameter"));
-            }
-            if self.kind() != &TokKind::RParen {
-                loop {
-                    let span = self.span();
-                    let pname = self.expect_parameter_name(contract)?;
-                    self.expect(&TokKind::Colon)?;
-                    let ty = Some(self.parse_type()?);
-                    params.push(Param {
-                        name: pname,
-                        ty,
-                        span,
-                    });
-                    if self.kind() == &TokKind::Comma {
-                        self.bump();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            self.expect(&TokKind::RParen)?;
-            // §8: 引数は 1 組の括弧に並べる。括弧ごとに分けた形には綴りを添える。
-            if self.kind() == &TokKind::LParen {
-                let (expected, form) = if contract {
-                    (TokKind::Colon, Suggestion::ContractParameters)
-                } else {
-                    (TokKind::Arrow, Suggestion::Parameters)
-                };
-                return Err(Diagnostic {
-                    suggestion: self.parameters_ahead(contract).then_some(form),
-                    ..self.error(None, format!("expected {expected}, found ("))
-                });
-            }
-        } else {
+        if self.kind() != &TokKind::LParen {
+            let mut params = Vec::new();
             while matches!(self.kind(), TokKind::Name(_)) {
                 let span = self.span();
                 let n = self.expect_parameter_name(contract)?;
@@ -1502,7 +1466,51 @@ impl Parser<'_> {
                     span,
                 });
             }
+            return Ok(params);
         }
+        let params = self.parse_param_group(contract)?;
+        // §8: 引数は 1 組の括弧に並べる。括弧ごとに分けた形には綴りを添える。
+        if self.kind() == &TokKind::LParen {
+            let (expected, form) = if contract {
+                (TokKind::Colon, Suggestion::ContractParameters)
+            } else {
+                (TokKind::Arrow, Suggestion::Parameters)
+            };
+            return Err(Diagnostic {
+                suggestion: self.parameters_ahead(contract).then_some(form),
+                ..self.error(None, format!("expected {expected}, found ("))
+            });
+        }
+        Ok(params)
+    }
+
+    /// 1 組の `(` `)` を読み、その中の引数を返す。続く `(` をどう扱うかは
+    /// 呼び手が決める（§8）。
+    fn parse_param_group(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
+        let mut params = Vec::new();
+        self.bump();
+        if contract && self.kind() == &TokKind::RParen {
+            return Err(self.error(None, "contract functions require at least one parameter"));
+        }
+        if self.kind() != &TokKind::RParen {
+            loop {
+                let span = self.span();
+                let pname = self.expect_parameter_name(contract)?;
+                self.expect(&TokKind::Colon)?;
+                let ty = Some(self.parse_type()?);
+                params.push(Param {
+                    name: pname,
+                    ty,
+                    span,
+                });
+                if self.kind() == &TokKind::Comma {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect(&TokKind::RParen)?;
         Ok(params)
     }
 
