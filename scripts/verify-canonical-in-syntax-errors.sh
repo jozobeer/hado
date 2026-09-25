@@ -45,6 +45,9 @@ OTHER_E101 = (
      'def f x =>\n  if x\n    | 0 => 0\n    | _ => if broken\ndef g y => y\n'),
     # 腕の本体ではないところの括弧付き Boolean branch は他の形（§58.4）。
     ('paren-not-in-arm', 'def f c d => if c => (if d => 1 | 2) | 3\n'),
+    # 途中で終わる Boolean branch は Boolean branch として成っていない（§26.1）。
+    # 区切りの `|` だけを見て suggestion を付けてはならない。
+    ('incomplete-boolean-branch', 'def f x =>\n  if x\n    | 0 => if true => 1 |\n'),
 )
 OTHER_E100 = (
     ('annotation', 'def id(x: Option<Int>): Option<Int> => x\ndef main = id (Some(1))\n'),
@@ -55,6 +58,10 @@ OTHER_E100 = (
     # なく型の文法で決める（§8、§58.4）。
     ('name-only-with-colon', 'def f(a: Int) (b:)\n'),
     ('mixed-group', 'def f(a: Int) (b: Int c: String)\n'),
+    # 1 組目が空なら、2 組目が引数の群でも「引数を括弧ごとに分けた def」ではない（§8）。
+    # 空の `()` は Void の字句なので、群として読まれるのは空白を入れた `( )`。
+    ('empty-first-group', 'def f( ) (b: Int) => b\n'),
+    ('void-first-group', 'def f() (b: Int) => b\n'),
 )
 
 passed = 0
@@ -177,6 +184,17 @@ def load_error_json():
         report = one_json_line(result)
         assert set(report) == FIELDS, (command, sorted(report))
         assert report['code'] is None, (command, report)
+    # 名前空間ディレクトリの誤り（§51）も、入力そのものの誤りとして同じ形にする。
+    root = ROOT / 'bad-namespace'
+    (root / 'Bad').mkdir(parents=True)
+    (root / 'main.hd').write_text('def main = 1\n')
+    (root / 'Bad' / 'x.hd').write_text('def x = 1\n')
+    for args in (('check',), ('build',), ('build', '--fix'), ('run',), ('test',)):
+        result = hado(*args, '--format', 'json', root / 'main.hd')
+        assert result.returncode == 1, (args, result.returncode)
+        report = one_json_line(result)
+        assert set(report) == FIELDS, (args, sorted(report))
+        assert report['code'] is None, (args, report)
 
 
 check('the default line shows the canonical spelling', human_line)
