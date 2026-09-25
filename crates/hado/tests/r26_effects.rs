@@ -1557,3 +1557,73 @@ fn once_handler_arm_must_bind_every_operation_parameter() {
         source.find("once ask =>").unwrap() + "once ".len(),
     );
 }
+
+#[test]
+fn each_again_operation_of_one_effect_runs_its_own_arm() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect A\nagain ping(value: Int): Void\nagain pong(value: Int): Void\nhandler A as H\nagain ping value =>\n  let rest = resume () ->\n  [value, ...rest]\nagain pong value =>\n  let rest = resume () ->\n  [value + 100, ...rest]\nreturn _ => []\ndef main = with H -> do ping 1 -> do pong 2 -> ()\n",
+    );
+    let dump = case.command("dump-mono", "main.hd");
+    assert_eq!(
+        dump.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&dump.stderr)
+    );
+    let ir = String::from_utf8_lossy(&dump.stdout);
+    assert!(ir.contains("$Yield#1"), "{ir}");
+    assert!(ir.contains("$Yield#2"), "{ir}");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[1, 102]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn each_abort_operation_of_one_effect_runs_its_own_arm() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect E\nabort miss\nabort bad\nhandler E as H\nabort miss => \"miss\"\nabort bad => \"bad\"\nreturn v => v\ndef f (x: Int): String {E} => if x == 0 => miss | bad\ndef main = with H -> f 1\n",
+    );
+    let dump = case.command("dump-mono", "main.hd");
+    assert_eq!(
+        dump.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&dump.stderr)
+    );
+    let ir = String::from_utf8_lossy(&dump.stdout);
+    assert!(ir.contains("$Fail#1"), "{ir}");
+    assert!(ir.contains("$Fail#2"), "{ir}");
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"bad\n");
+    assert!(output.stderr.is_empty());
+}

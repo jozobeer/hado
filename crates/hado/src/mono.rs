@@ -481,6 +481,8 @@ struct Lowerer {
     /// 腕は自分の handler の外で走るので、handler は自分の腕を捕まえない。
     /// 腕の中でさらに別の handler の腕を lower するので、入れ子の分だけ積む。
     arm_handlers: Vec<usize>,
+    /// `$Fail#` / `$Yield#` のタグは操作名で引く。効果名だと、同じ効果の
+    /// 二番目以降の again / abort が最初の腕で処理される。
     fail_ids: std::collections::HashMap<String, u32>,
     yield_ids: std::collections::HashMap<String, u32>,
     operation_types: std::collections::HashMap<String, Signature>,
@@ -1410,9 +1412,25 @@ fn outcome_parts(ty: &Type) -> Result<(Type, Type, Type), String> {
     Ok((success, answer, payload))
 }
 
-fn handles_op(handler: &crate::parser::HandlerDecl, kind: crate::parser::OpKind) -> bool {
+fn handler_operations(
+    handler: &crate::parser::HandlerDecl,
+    kind: crate::parser::OpKind,
+) -> Vec<String> {
+    handler
+        .arms
+        .iter()
+        .filter_map(|arm| match arm {
+            crate::parser::HandlerArm::Operation {
+                kind: found, name, ..
+            } if *found == kind => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn handler_has_operation(handler: &crate::parser::HandlerDecl, name: &str) -> bool {
     handler.arms.iter().any(|arm| {
-        matches!(arm, crate::parser::HandlerArm::Operation { kind: found, .. } if *found == kind)
+        matches!(arm, crate::parser::HandlerArm::Operation { name: found, .. } if found == name)
     })
 }
 
@@ -3029,11 +3047,8 @@ impl Lowerer {
             )],
             result: Type::Data("Exception".into(), vec![]),
         };
-        match self
-            .handler_for("raise")
-            .map(|handler| handler.effect.clone())
-        {
-            Some(effect) => self.abort_outcome_with(vec![exception], &effect, success),
+        match self.handler_for("raise") {
+            Some(_) => self.abort_outcome_with(vec![exception], "raise", success),
             None => self.abort_raise_with(vec![exception], success),
         }
     }
@@ -3055,9 +3070,10 @@ impl Lowerer {
                 }
             }
             crate::parser::OpKind::Abort => {
-                match self.handler_for(name).map(|handler| handler.effect.clone()) {
-                    Some(effect) => self.abort_outcome(node, arguments, &effect),
-                    None => self.abort_raise(node, arguments),
+                if self.handler_for(name).is_some() {
+                    self.abort_outcome(node, arguments, name)
+                } else {
+                    self.abort_raise(node, arguments)
                 }
             }
         }
@@ -3216,29 +3232,29 @@ impl Lowerer {
         Ok(signature.parameters.first().cloned().unwrap_or(Type::Void))
     }
 
-    fn fail_constructor(&mut self, effect: &str) -> String {
-        format!("{FAIL}#{}", self.fail_tag_for(effect))
+    fn fail_constructor(&mut self, operation: &str) -> String {
+        format!("{FAIL}#{}", self.fail_tag_for(operation))
     }
 
-    fn yield_constructor(&mut self, effect: &str) -> String {
-        format!("{YIELD}#{}", self.yield_tag_for(effect))
+    fn yield_constructor(&mut self, operation: &str) -> String {
+        format!("{YIELD}#{}", self.yield_tag_for(operation))
     }
 
-    fn fail_tag_for(&mut self, effect: &str) -> u32 {
-        if let Some(&tag) = self.fail_ids.get(effect) {
+    fn fail_tag_for(&mut self, operation: &str) -> u32 {
+        if let Some(&tag) = self.fail_ids.get(operation) {
             return tag;
         }
         let tag = self.alloc_outcome_tag();
-        self.fail_ids.insert(effect.to_string(), tag);
+        self.fail_ids.insert(operation.to_string(), tag);
         tag
     }
 
-    fn yield_tag_for(&mut self, effect: &str) -> u32 {
-        if let Some(&tag) = self.yield_ids.get(effect) {
+    fn yield_tag_for(&mut self, operation: &str) -> u32 {
+        if let Some(&tag) = self.yield_ids.get(operation) {
             return tag;
         }
         let tag = self.alloc_outcome_tag();
-        self.yield_ids.insert(effect.to_string(), tag);
+        self.yield_ids.insert(operation.to_string(), tag);
         tag
     }
 
@@ -3446,7 +3462,7 @@ impl Lowerer {
                 None => self.answer_for_handler(&handler)?,
             },
         };
-        let constructor = self.yield_constructor(&handler.effect);
+        let constructor = self.yield_constructor(name);
         let input = self.again_result_type(node)?;
         let signature = Signature {
             parameters: arguments.iter().map(Expression::ty).collect(),
@@ -3697,20 +3713,21 @@ impl Lowerer {
             self.apply_return_arm(handler, project(variable, DONE, 0, convert.success.clone()))?;
         let done = self.finish_convert_arm(done, convert)?;
         let mut arms = vec![(DONE.into(), done)];
-        if handles_op(handler, crate::parser::OpKind::Abort) {
-            let fail = self.fail_constructor(&handler.effect);
+        for name in handler_operations(handler, crate::parser::OpKind::Abort) {
+            let fail = self.fail_constructor(&name);
             if self.operation_types.contains_key(&fail) {
                 let body = self.abort_arm(
                     handler,
+                    &name,
                     project(variable, &fail, 0, self.outcome_payload(&fail)?),
                 )?;
                 arms.push((fail, self.finish_convert_arm(body, convert)?));
             }
         }
-        if handles_op(handler, crate::parser::OpKind::Again) {
-            let constructor = self.yield_constructor(&handler.effect);
+        for name in handler_operations(handler, crate::parser::OpKind::Again) {
+            let constructor = self.yield_constructor(&name);
             if self.operation_types.contains_key(&constructor) {
-                arms.push(self.own_yield_arm(handler, variable, convert)?);
+                arms.push(self.own_yield_arm(handler, &name, variable, convert)?);
             }
         }
         if convert.forwarding {
@@ -3735,10 +3752,11 @@ impl Lowerer {
     fn own_yield_arm(
         &mut self,
         handler: &crate::parser::HandlerDecl,
+        operation: &str,
         variable: &Expression,
         convert: &ConvertCtx,
     ) -> Result<(String, Expression), String> {
-        let constructor = self.yield_constructor(&handler.effect);
+        let constructor = self.yield_constructor(operation);
         let yield_value = project(
             variable,
             &constructor,
@@ -3758,7 +3776,7 @@ impl Lowerer {
             ),
         );
         let resume = self.continuation_calling_convert(continuation, convert)?;
-        let body = self.yield_arm(handler, yield_value, resume)?;
+        let body = self.yield_arm(handler, operation, yield_value, resume)?;
         Ok((constructor, self.finish_convert_arm(body, convert)?))
     }
 
@@ -3768,13 +3786,13 @@ impl Lowerer {
         variable: &Expression,
         convert: &ConvertCtx,
     ) -> Result<Vec<(String, Expression)>, String> {
-        let effects: Vec<_> = self.yield_ids.keys().cloned().collect();
+        let operations: Vec<_> = self.yield_ids.keys().cloned().collect();
         let mut arms = Vec::new();
-        for effect in effects {
-            if effect == handler.effect {
+        for operation in operations {
+            if handler_has_operation(handler, &operation) {
                 continue;
             }
-            let constructor = self.yield_constructor(&effect);
+            let constructor = self.yield_constructor(&operation);
             if !self.operation_types.contains_key(&constructor) {
                 continue;
             }
@@ -3815,13 +3833,13 @@ impl Lowerer {
         variable: &Expression,
         convert: &ConvertCtx,
     ) -> Result<Vec<(String, Expression)>, String> {
-        let effects: Vec<_> = self.fail_ids.keys().cloned().collect();
+        let operations: Vec<_> = self.fail_ids.keys().cloned().collect();
         let mut arms = Vec::new();
-        for effect in effects {
-            if effect == handler.effect {
+        for operation in operations {
+            if handler_has_operation(handler, &operation) {
                 continue;
             }
-            let constructor = self.fail_constructor(&effect);
+            let constructor = self.fail_constructor(&operation);
             if !self.operation_types.contains_key(&constructor) {
                 continue;
             }
@@ -3891,15 +3909,17 @@ impl Lowerer {
     fn abort_arm(
         &mut self,
         handler: &crate::parser::HandlerDecl,
+        operation: &str,
         payload: Expression,
     ) -> Result<Expression, String> {
         let Some((params, body)) = handler.arms.iter().find_map(|arm| match arm {
             crate::parser::HandlerArm::Operation {
                 kind: crate::parser::OpKind::Abort,
+                name,
                 params,
                 body,
                 ..
-            } => Some((params.clone(), body.clone())),
+            } if name == operation => Some((params.clone(), body.clone())),
             _ => None,
         }) else {
             return Err("missing abort arm".into());
@@ -3922,16 +3942,18 @@ impl Lowerer {
     fn yield_arm(
         &mut self,
         handler: &crate::parser::HandlerDecl,
+        operation: &str,
         value: Expression,
         resume: Expression,
     ) -> Result<Expression, String> {
         let Some((params, body)) = handler.arms.iter().find_map(|arm| match arm {
             crate::parser::HandlerArm::Operation {
                 kind: crate::parser::OpKind::Again,
+                name,
                 params,
                 body,
                 ..
-            } => Some((params.clone(), body.clone())),
+            } if name == operation => Some((params.clone(), body.clone())),
             _ => None,
         }) else {
             return Err("missing again arm".into());
@@ -3960,16 +3982,16 @@ impl Lowerer {
         &mut self,
         node: &crate::parser::Node,
         arguments: Vec<Expression>,
-        effect: &str,
+        operation: &str,
     ) -> Result<Expression, String> {
         let success = self.restored_success_type(self.node_type(node).unwrap_or(Type::Void));
-        self.abort_outcome_with(arguments, effect, success)
+        self.abort_outcome_with(arguments, operation, success)
     }
 
     fn abort_outcome_with(
         &mut self,
         arguments: Vec<Expression>,
-        effect: &str,
+        operation: &str,
         success: Type,
     ) -> Result<Expression, String> {
         let answer = self
@@ -3981,7 +4003,7 @@ impl Lowerer {
             .into_iter()
             .next()
             .unwrap_or(Expression::Constant(Constant::Void));
-        let constructor = self.fail_constructor(effect);
+        let constructor = self.fail_constructor(operation);
         self.operation_types.insert(
             constructor.clone(),
             Signature {
@@ -4145,8 +4167,8 @@ impl Lowerer {
             DONE.into(),
             Expression::call_closure(rest.clone(), vec![project(&value, DONE, 0, success)])?,
         )];
-        for effect in self.yield_ids.keys().cloned().collect::<Vec<_>>() {
-            let constructor = self.yield_constructor(&effect);
+        for operation in self.yield_ids.keys().cloned().collect::<Vec<_>>() {
+            let constructor = self.yield_constructor(&operation);
             let Some(operation) = operation_types
                 .get(&constructor)
                 .or_else(|| self.operation_types.get(&constructor))
@@ -5498,6 +5520,19 @@ mod tests {
             tags.iter().copied().collect::<Vec<_>>(),
             (1..=32).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn outcome_tags_are_per_operation_not_per_effect() {
+        let mut lowerer = Lowerer::default();
+        let ping = lowerer.yield_constructor("ping");
+        let pong = lowerer.yield_constructor("pong");
+        assert_ne!(ping, pong);
+        assert_eq!(lowerer.yield_constructor("ping"), ping);
+        let miss = lowerer.fail_constructor("miss");
+        let bad = lowerer.fail_constructor("bad");
+        assert_ne!(miss, bad);
+        assert_eq!(lowerer.fail_constructor("miss"), miss);
     }
 
     #[test]
