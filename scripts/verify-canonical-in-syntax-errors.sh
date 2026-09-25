@@ -44,6 +44,8 @@ OTHER_E101 = (
 OTHER_E100 = (
     ('annotation', 'def id(x: Option<Int>): Option<Int> => x\ndef main = id (Some(1))\n'),
     ('literal-group', 'def f(a: Int) (1)\n'),
+    ('name-only-group', 'def f(a: Int) (b)\n'),
+    ('empty-group', 'def f(a: Int) ()\n'),
 )
 
 passed = 0
