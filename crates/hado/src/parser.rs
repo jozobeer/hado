@@ -739,7 +739,58 @@ struct Parser<'a> {
     in_resume_scope: bool,
 }
 
+/// 先読みの前に控える解析の状態。式を読むと位置のほかに、後で使う記録
+/// （`branch_anchors` など）と診断、`resume` の文脈が増える。先読みが外れたら
+/// ここへ戻して、読まなかったことにする。
+struct ExpressionState {
+    pos: usize,
+    branches_after_fallback: usize,
+    branch_anchors: usize,
+    branch_spans: usize,
+    equality_anchors: usize,
+    qualified_type_anchors: usize,
+    name_sites: usize,
+    written_list_patterns: usize,
+    long_condition_functions: usize,
+    diagnostics: usize,
+    in_resume_scope: bool,
+}
+
 impl Parser<'_> {
+    fn expression_state(&self) -> ExpressionState {
+        ExpressionState {
+            pos: self.pos,
+            branches_after_fallback: self.branches_after_fallback.len(),
+            branch_anchors: self.branch_anchors.len(),
+            branch_spans: self.branch_spans.len(),
+            equality_anchors: self.equality_anchors.len(),
+            qualified_type_anchors: self.qualified_type_anchors.len(),
+            name_sites: self.name_sites.len(),
+            written_list_patterns: self.written_list_patterns.len(),
+            long_condition_functions: self.long_condition_functions.len(),
+            diagnostics: self.diagnostics.len(),
+            in_resume_scope: self.in_resume_scope,
+        }
+    }
+
+    fn restore_expression_state(&mut self, state: ExpressionState) {
+        self.pos = state.pos;
+        self.branches_after_fallback
+            .truncate(state.branches_after_fallback);
+        self.branch_anchors.truncate(state.branch_anchors);
+        self.branch_spans.truncate(state.branch_spans);
+        self.equality_anchors.truncate(state.equality_anchors);
+        self.qualified_type_anchors
+            .truncate(state.qualified_type_anchors);
+        self.name_sites.truncate(state.name_sites);
+        self.written_list_patterns
+            .truncate(state.written_list_patterns);
+        self.long_condition_functions
+            .truncate(state.long_condition_functions);
+        self.diagnostics.truncate(state.diagnostics);
+        self.in_resume_scope = state.in_resume_scope;
+    }
+
     fn cur(&self) -> &Tok {
         &self.toks[self.pos.min(self.toks.len() - 1)]
     }
@@ -1414,13 +1465,9 @@ impl Parser<'_> {
         if self.kind() != &TokKind::LParen {
             return false;
         }
-        let save = self.pos;
-        let name_sites = self.name_sites.len();
-        let qualified_type_anchors = self.qualified_type_anchors.len();
+        let save = self.expression_state();
         let parsed = self.parse_param_group(contract);
-        self.pos = save;
-        self.name_sites.truncate(name_sites);
-        self.qualified_type_anchors.truncate(qualified_type_anchors);
+        self.restore_expression_state(save);
         parsed.is_ok_and(|params| !params.is_empty())
     }
 
