@@ -320,3 +320,27 @@ TALLY: 40/40 passed; red: none
 検体を足した時点の門番は赤（`other E100 shapes`・`other E101 shapes`・
 `a load error is JSON for every command that takes --format` の 3 件、
 `PASSED: 7/10`）。直した後は緑。
+
+六次レビュー（Codex）の指摘 1 件。再現したが、spec の読み方の判断なので現行の
+ままとした。切り出し先は `docs/issues/e101-suggestion-scope.md`。
+
+指摘は、腕の本体の `if` の else が続く腕の綴りを食う形
+（`if x | A => if true => 1 | B => 2`）にも腕の条件列の綴りが付く、というもの。
+
+```
+$ cat e/main.hd
+def f x =>
+  if x
+    | A => if true => 1
+    | B => 2
+$ cargo run --offline -q -- check --format json e/main.hd
+{"path": "main.hd", "line": 3, "col": 12, "end_line": 3, "end_col": 12, "code": "E101", "message": "branches cannot be nested inside another branch", "canonical": null, "suggestion": "| p => if | c => a | b", "related": null}
+```
+
+§24 は `|` の右を必ず else の式と定めるので、腕の本体は `if true => 1 | B`
+（else が `B`）の Boolean branch として成り、直後の `=>` が外側の腕の綴りとして
+余る。§26.1 も、fallback を持たない腕の条件列が続く `|` の腕を自分の条件として
+読むと明記し、この形の曖昧さは貪欲に読む。先読みの終端が `=>` のときは添えない
+形にすると 1 か所（`boolean_branch_ahead`）で変わることも確かめたが、ill-formed
+な入力でだけ差が出る（valid な入力では両案一致）ので、spec の明文に従い現行の
+ままとした。人に確認して切り出しを選んでいる（2026-09-26）。
