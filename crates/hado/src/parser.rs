@@ -1406,6 +1406,18 @@ impl Parser<'_> {
         }
     }
 
+    // 続く `(` がパラメータ群を始めるか。`def f(a: Int) (1)` の `(1)` は引数を
+    // 括弧ごとに分けた形ではないので、綴りを添えない（§8、§58.4）。
+    fn parameters_ahead(&self, contract: bool) -> bool {
+        let Some(TokKind::Name(name)) = self.toks.get(self.pos + 1).map(|token| &token.kind) else {
+            return false;
+        };
+        if !contract && name == "_" {
+            return true;
+        }
+        name.chars().next().is_some_and(char::is_lowercase)
+    }
+
     fn parse_params(&mut self, contract: bool) -> Result<Vec<Param>, Diagnostic> {
         let mut params = Vec::new();
         if self.kind() == &TokKind::LParen {
@@ -1440,7 +1452,7 @@ impl Parser<'_> {
                     (TokKind::Arrow, Suggestion::Parameters)
                 };
                 return Err(Diagnostic {
-                    suggestion: Some(form),
+                    suggestion: self.parameters_ahead(contract).then_some(form),
                     ..self.error(None, format!("expected {expected}, found ("))
                 });
             }
@@ -2411,6 +2423,8 @@ impl Parser<'_> {
 
     /// 現在の `if` が Boolean branch か。括弧の外で `=>` が `|` より先に来れば
     /// Boolean branch（`if c => a | b`）、`|` が先なら pattern branch である。
+    /// 宣言を越えては読まない。腕の本体が不完全な `if`（`| _ => if broken`）の
+    /// とき、続く宣言の `=>` を Boolean branch の印と読み違える（§26.1）。
     fn boolean_branch_ahead(&self) -> bool {
         let mut depth = 0usize;
         for token in &self.toks[self.pos + 1..] {
@@ -2422,6 +2436,7 @@ impl Parser<'_> {
                     };
                     depth = outer;
                 }
+                _ if depth == 0 && declaration_keyword(&token.kind) => return false,
                 TokKind::Arrow if depth == 0 => return true,
                 TokKind::Pipe if depth == 0 => return false,
                 _ => {}
