@@ -217,3 +217,43 @@ TALLY: 40/40 passed; red: none
 実際の型で単一化できない形は論理型のままにした。その形（`List.map`・
 `List.reverse` に効果を持つ関数を渡す prelude の穴）はこの PR の前から同じ出力で
 落ちる。`docs/issues/effectful-closure-through-prelude.md` を、残った穴に絞った。
+
+三次レビュー（Codex）の指摘 1 件。再現しなかった。
+
+指摘は「返す閉包の引数の位置に型変数が現れるとき、結果型だけ実際の型にして本体は
+論理型で下ろすので単相化が落ちる。この変更の前は通っていた」というもの。指摘の形
+（契約の member が `Fn(A => Int)` を返し、その閉包の引数の型が実装の引数から
+決まらない形）を組み、`e42dd6f` の親（`4ab9a98`）と `9469380` の両方で走らせた。
+
+```
+$ cat maker/main.hd | tail -n +4
+def main =
+  with Catch ->
+  let x = Some(fn(y => 8 / y)) ->
+  let f = Maker.make x ->
+  f x
+module Maker
+def A make(x: A): Fn(A => Int) Pure
+implement Maker as Maker
+def make _ => fn(_ => 1)
+$ git checkout 4ab9a98 -- crates/hado/src/mono.rs crates/hado/src/types.rs
+$ cargo run --offline -q -- run maker/main.hd
+unresolved return type: Variable(3)
+$ git checkout HEAD -- crates/hado/src/mono.rs crates/hado/src/types.rs
+$ cargo run --offline -q -- run maker/main.hd
+unresolved return type: Variable(3)
+```
+
+前後で出力が同じなので、この PR が入れた退行ではない。止まる場所も原因も別で、
+実装 `def make _ => fn(_ => 1)` の scheme は `Fn(A => Fn(B => Int {C}) {D})`
+（`specialize_function` に一時的な `eprintln!` を入れて読んだ）で、閉包の引数の型
+`B` がどの引数からも決まらない。`specialize_result` が `B` を解決できず、本体を
+下ろす前に止まる。指摘の文言（`lowered return type differs from inferred
+signature for make`）は指摘の入力では出ず、返す閉包の引数の型が引数から決まる形で
+なければその段には届かない。
+
+本体も実際の型で下ろす案は、`concrete` に `mixed` をそのまま渡すと
+`specialization.unify(scheme.body(), &concrete)` が `Mismatch` になる（`reverse`・
+`map`・`to_list`・`set` の 4 つが `specialization failed: Mismatch`。試して戻した）。
+本体が読む型の解決だけを実際の型へ寄せる設計が要る。`docs/issues/`
+`effectful-closure-through-prelude.md` に、この形と実測、試して戻した案を足した。
