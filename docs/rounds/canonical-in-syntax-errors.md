@@ -198,3 +198,31 @@ TALLY: 40/40 passed; red: none
 `verify-r71.sh` の `E504`、`verify-prelude-tail-recursion.sh` の
 `list_map_head_order` など）。この門番は検体を自分で作る形にしたが、既存の門番は
 そのままにした。
+
+三次レビュー（Codex）の指摘 1 件。2 個目の括弧の中身を最後まで見ていなかった。
+
+`def f(a: Int) (b)` の `(b)` は型を持たないので、引数を括弧ごとに分けた形ではない
+のに Parameters の綴りを添えていた。
+
+```
+$ cargo run --offline -q -- check --format json group/main.hd   # def f(a: Int) (b)
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+# 直した後
+{"path": "main.hd", ..., "code": "E100", "suggestion": null, ...}
+```
+
+`name: Type` の列と閉じ括弧まで先読みする。型の中の括弧は数えない。
+
+```
+$ cargo run --offline -q -- check --format json other/main.hd   # def f(a: Int) (b: Option(Int)): Int => a
+{"path": "main.hd", ..., "code": "E100", "suggestion": "def f(a: T, b: U): R =>", ...}
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+# 注入（名前が小文字なら true）
+NG: other E100 shapes have no suggestion: ('name-only-group', ...)
+PASSED: 9/10
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 753 failed 0
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+```
