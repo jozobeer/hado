@@ -2167,7 +2167,7 @@ hado test <file.hd>
 
 `hado check --format json <file.hd>`（`build` / `run` / `test` でも同じ）は、診断を 1 行に 1 つ、JSON で標準エラーに出す。既定は今までどおりの 1 行である。診断の順と印字先は既定と同じで、終了コードも変えない（第54節）。`--format` に `json` 以外を与えると用法の誤りで終了コード 2 とする。`fmt` と `dump-mono` は `--format` を受けない。
 
-1 行のフィールドは `path` `line` `col` `end_line` `end_col` `code` `message` `canonical` `related` の 9 つである。`canonical` は局所的な書き換え（第57節）の正準形で、無ければ `null` とする。`message` に `; canonical form: ...` は混ぜない。`code` はコードを持たない診断では `null`。`related` は関連位置（第56節）で、無ければ `null`、あれば `{"path": ..., "line": ..., "col": ..., "label": ...}` である。`label` は第56節のラベル（`first declared` など）で、無ければ `null` とする。
+1 行のフィールドは `path` `line` `col` `end_line` `end_col` `code` `message` `canonical` `suggestion` `related` の 10 である。`canonical` は局所的な書き換え（第57節）の正準形で、無ければ `null` とする。`suggestion` は書き換えの無い拒否に添える正準の綴りの形で、無ければ `null` とする。引数を括弧ごとに分けた `def`（E100）には `def f(a: T, b: U): R =>`（契約の member は `def f(a: T, b: U): R`、第8節）、Boolean branch を pattern の腕に置いた形（E101）には `| p => if | c => a | b`（第26.1節）を添え、他の形には添えない。`suggestion` は形の提示で書き換えではないので、`hado fmt` と `--fix` は適用しない。同じ診断で `canonical` と `suggestion` を同時に `null` でなくすることはない。既定の 1 行は末尾に `; suggestion: ...` を足す。`message` に `; canonical form: ...` と `; suggestion: ...` は混ぜない。`code` はコードを持たない診断では `null`。`related` は関連位置（第56節）で、無ければ `null`、あれば `{"path": ..., "line": ..., "col": ..., "label": ...}` である。`label` は第56節のラベル（`first declared` など）で、無ければ `null` とする。
 
 `line` `col` は診断のアンカー（第56節のエラー表の列）で、1-based である。`end_line` `end_col` はその診断の書き換え範囲（第57節）の終端で、同じく 1-based の Unicode スカラの数として数え、終端は exclusive とする。書き換えの無い診断の終端はアンカーと同じ位置になる。範囲の始まりは常に `line` `col` と一致する。`end_col - col` は対象のスカラ数、`end_line - line` は対象の行数から 1 を引いた数である。
 
