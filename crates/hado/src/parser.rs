@@ -1815,7 +1815,9 @@ impl Parser<'_> {
 
     /// Parse an expression that must not itself contain a branch
     /// (§30: branches cannot nest). Used for every component of a branch.
-    fn parse_branch_expr(&mut self) -> Result<Node, Diagnostic> {
+    /// `arm_body` は pattern の腕の本体を読んでいるときだけ真。括弧で包んだ
+    /// Boolean branch が腕の本体を成しているなら、腕の条件列が正準形（§26.1）。
+    fn parse_branch_expr(&mut self, arm_body: bool) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::KwIf {
             return Err(self.error(
                 Some("E101"),
@@ -1827,11 +1829,16 @@ impl Parser<'_> {
         }
         let node = self.parse_expr()?;
         if let Some(sp) = contains_branch(&node) {
-            return Err(self.error_at(
-                sp,
-                Some("E101"),
-                "branches cannot be nested inside another branch",
-            ));
+            let suggestion = (arm_body && matches!(node.kind, NodeKind::BoolBranch { .. }))
+                .then_some(Suggestion::ArmConditions);
+            return Err(Diagnostic {
+                suggestion,
+                ..self.error_at(
+                    sp,
+                    Some("E101"),
+                    "branches cannot be nested inside another branch",
+                )
+            });
         }
         Ok(node)
     }
@@ -2264,12 +2271,12 @@ impl Parser<'_> {
         if self.kind() == &TokKind::Pipe {
             return self.parse_cond_branch(span);
         }
-        let first = self.parse_branch_expr()?;
+        let first = self.parse_branch_expr(false)?;
         if self.kind() == &TokKind::Comma {
             let mut scrutinees = vec![first];
             while self.kind() == &TokKind::Comma {
                 self.bump();
-                scrutinees.push(self.parse_branch_expr()?);
+                scrutinees.push(self.parse_branch_expr(false)?);
             }
             match self.kind() {
                 TokKind::Pipe => return self.parse_pattern_branch(span, scrutinees),
@@ -2284,9 +2291,9 @@ impl Parser<'_> {
         match self.kind() {
             TokKind::Arrow => {
                 self.bump();
-                let then = self.parse_branch_expr()?;
+                let then = self.parse_branch_expr(false)?;
                 self.expect(&TokKind::Pipe)?;
-                let els = self.parse_branch_expr()?;
+                let els = self.parse_branch_expr(false)?;
                 Ok(Node {
                     kind: NodeKind::BoolBranch {
                         cond: Box::new(first),
@@ -2347,7 +2354,7 @@ impl Parser<'_> {
                 continue;
             }
             self.pos = save;
-            let fb = self.parse_branch_expr()?;
+            let fb = self.parse_branch_expr(false)?;
             self.branch_anchors.push((fb.span, pipe));
             fallback = Some(Box::new(fb));
             self.record_fallback_end();
@@ -2432,7 +2439,7 @@ impl Parser<'_> {
                 )
             });
         }
-        self.parse_branch_expr()
+        self.parse_branch_expr(true)
     }
 
     /// 現在の `if` が Boolean branch か。括弧の外で `=>` が `|` より先に来れば
@@ -2483,7 +2490,7 @@ impl Parser<'_> {
                 branch_first_pipe = Some(pipe);
             }
             self.bump();
-            let head = self.parse_branch_expr()?;
+            let head = self.parse_branch_expr(false)?;
             if arms.is_empty() && self.kind() != &TokKind::Arrow {
                 return Err(self.error_at(
                     pipe,
@@ -2493,7 +2500,7 @@ impl Parser<'_> {
             }
             if self.kind() == &TokKind::Arrow {
                 self.bump();
-                let body = self.parse_branch_expr()?;
+                let body = self.parse_branch_expr(false)?;
                 self.branch_anchors
                     .extend([(head.span, pipe), (body.span, pipe)]);
                 arms.push((head, body));
