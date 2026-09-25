@@ -477,6 +477,22 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
     }
 }
 
+/// 読み込みの入力そのものの誤り（§51 の名前空間ディレクトリなど）を、位置を
+/// 持たない診断にする。読む前の誤りなので、位置は入口の先頭に置く。
+pub fn input_diagnostic(input: &Path, message: &str) -> Diagnostic {
+    Diagnostic {
+        suggestion: None,
+        related: None,
+        path: input.to_string_lossy().into_owned(),
+        line: 1,
+        col: 1,
+        end_line: 1,
+        end_col: 1,
+        code: None,
+        message: message.to_string(),
+    }
+}
+
 /// §50: the sources of the project whose entry is `entry`, paired with the
 /// path diagnostics print for them. The entry comes first, then the other
 /// files in byte order of their relative paths. Reading is left to the caller,
