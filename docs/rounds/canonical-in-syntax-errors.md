@@ -344,3 +344,18 @@ $ cargo run --offline -q -- check --format json e/main.hd
 形にすると 1 か所（`boolean_branch_ahead`）で変わることも確かめたが、ill-formed
 な入力でだけ差が出る（valid な入力では両案一致）ので、spec の明文に従い現行の
 ままとした。人に確認して切り出しを選んでいる（2026-09-26）。
+
+着地後（main を checkout した側、2026-09-26）。PR #44 は `fca01a1` で入った。
+
+```
+$ git log --oneline -1
+fca01a1 Merge pull request #44 from jozobeer/canonical-in-syntax-errors
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 756 failed 0
+$ cargo fmt --all --check && cargo clippy --offline --all-targets -- -D warnings
+（出力なし）
+$ bash scripts/run-gates.sh --jobs 4 --tier full gate-out 2>&1 | tail -1
+TALLY: 3736/3736 passed; red: none
+$ bash scripts/corpus-lock.sh --check; echo $?
+0
+```
