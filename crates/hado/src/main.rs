@@ -403,7 +403,7 @@ fn format_sources(input: &Path, check_only: bool) -> Result<bool, ExitCode> {
     let files = match hado::project::source_paths(input) {
         Ok(files) => files,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error));
             return Err(ExitCode::from(1));
         }
     };
@@ -483,7 +483,7 @@ fn run_tests(input: &Path) -> ExitCode {
     let tests = match hado::project::test_paths(input) {
         Ok(tests) => tests,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", load_error_report(&error));
             return ExitCode::from(1);
         }
     };
