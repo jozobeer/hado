@@ -1439,8 +1439,9 @@ impl Parser<'_> {
             return Ok(params);
         }
         let params = self.parse_param_group(contract)?;
-        // §8: 引数は 1 組の括弧に並べる。括弧ごとに分けた形には綴りを添える。
-        if self.kind() == &TokKind::LParen {
+        // §8: 引数は 1 組の括弧に並べる。1 組目にも引数があり、続く `(` も引数の
+        // 群を最後まで成すときだけ、括弧ごとに分けた形とみなして綴りを添える。
+        if !params.is_empty() && self.kind() == &TokKind::LParen {
             let (expected, form) = if contract {
                 (TokKind::Colon, Suggestion::ContractParameters)
             } else {
