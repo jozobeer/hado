@@ -217,6 +217,17 @@ impl Ty {
         }
     }
 
+    /// 引数の型に関数型が書かれているか。書かれている引数は本体が outcome を
+    /// ほどく前提なので、scheme の単一化には論理型を使う（`mono.rs` の
+    /// `specialize_function`）。
+    pub(crate) fn has_function(&self) -> bool {
+        match self {
+            Ty::Fn(_, _, _) => true,
+            Ty::Adt(_, args) | Ty::Abstract(_, args) => args.iter().any(Ty::has_function),
+            _ => false,
+        }
+    }
+
     pub fn is_monomorphic(&self) -> bool {
         let mut variables = BTreeSet::new();
         self.free_variables(&mut variables);
