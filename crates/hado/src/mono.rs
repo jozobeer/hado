@@ -98,71 +98,9 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
-// `Array.of_list` のような純粋な callee は、scheme の単一化で入れ子の
-// outcome を落とす。結果型に同じ閉包が載っているなら、引数側の実際の型へ戻す。
-fn restore_nested_outcomes(logical: &Type, actual: &Type, ty: Type) -> Type {
-    apply_type_substitutions(ty, &outcome_closure_substitutions(logical, actual))
-}
-
-// 同じ論理型を持つ引数が 2 つ以上あり、実際の型が食い違うとき、結果型のどの
-// 出現がどの引数に由来するかは型からは決められない（`def select(f, g) => g` の
-// 結果は f と g の論理型が同じなら区別できない）。決められない論理型へは戻さ
-// ない。戻さない結果はこの復元を入れる前と同じで、その形は元から落ちる
-// （`docs/issues/effectful-closure-through-prelude.md`）。
-fn ambiguous_logical_types(logical: &[Type], types: &[Type]) -> Vec<Type> {
-    let mut ambiguous = Vec::new();
-    for (index, (left, left_actual)) in logical.iter().zip(types).enumerate() {
-        let collides = logical
-            .iter()
-            .zip(types)
-            .skip(index + 1)
-            .any(|(right, right_actual)| left == right && left_actual != right_actual);
-        if collides && !ambiguous.contains(left) {
-            ambiguous.push(left.clone());
-        }
-    }
-    ambiguous
-}
-
-fn outcome_closure_substitutions(logical: &Type, actual: &Type) -> Vec<(Type, Type)> {
-    if logical == actual {
-        return vec![];
-    }
-    match (logical, actual) {
-        (Type::Closure(_, _), Type::Closure(_, _)) if logical_argument(actual) == *logical => {
-            vec![(logical.clone(), actual.clone())]
-        }
-        (Type::Data(left, left_args), Type::Data(right, right_args))
-        | (Type::Abstract(left, left_args), Type::Abstract(right, right_args))
-            if left == right && left_args.len() == right_args.len() =>
-        {
-            left_args
-                .iter()
-                .zip(right_args)
-                .flat_map(|(logical, actual)| outcome_closure_substitutions(logical, actual))
-                .collect()
-        }
-        _ => vec![],
-    }
-}
-
-fn apply_type_substitutions(ty: Type, substitutions: &[(Type, Type)]) -> Type {
-    if let Some((_, replacement)) = substitutions.iter().find(|(from, _)| *from == ty) {
-        return replacement.clone();
-    }
-    let apply = |ty| apply_type_substitutions(ty, substitutions);
-    match ty {
-        Type::Data(name, arguments) => Type::Data(name, arguments.into_iter().map(apply).collect()),
-        Type::Abstract(name, arguments) => {
-            Type::Abstract(name, arguments.into_iter().map(apply).collect())
-        }
-        Type::Closure(parameters, result) => Type::Closure(
-            parameters.into_iter().map(apply).collect(),
-            Box::new(apply(*result)),
-        ),
-        other => other,
-    }
-}
+// `Array.of_list` のような callee は、scheme の単一化で入れ子の outcome を
+// 落とす。実際の型での単一化が通るなら、結果型はそちらから取る（下の
+// `specialize_function`）。実際の型で単一化できない形は論理型のままにする。
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
@@ -5176,19 +5114,41 @@ impl Lowerer {
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
         let inferred =
             Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
-        let ambiguous = ambiguous_logical_types(&logical, &types);
-        let restored = Signature {
-            parameters: inferred.parameters.clone(),
-            result: logical.iter().zip(&types).fold(
-                inferred.result.clone(),
-                |result, (logical, actual)| {
-                    if ambiguous.contains(logical) {
-                        result
-                    } else {
-                        restore_nested_outcomes(logical, actual, result)
-                    }
+        // 結果型は「実際の型」での単一化から取る。scheme が結果型を書いている
+        // 位置（`Array.of_list` の `A Array`、`Array.get` の `A`）は、型変数に
+        // 実際の型を束縛すれば outcome を保ったまま解ける。構造で結果型を書き換え
+        // ると、`def replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1
+        // -> fn(x => (x + 1))` のように scheme が結果型そのものを書いている位置
+        // まで引数の閉包で書き換えてしまう（戻り値の実体は別の閉包である）。
+        //
+        // ただし scheme が引数の型に関数型を書いているときは論理型で単一化する。
+        // その引数の outcome は本体がほどいて伝播させるので、実際の型で束縛すると
+        // 本体が組み立てる型と食い違う（`List.map` の `Fn(A => B)`）。
+        let mut probe = crate::types::Inference::default();
+        let scheme_parameters = match probe.instantiate(&scheme) {
+            Ty::Fn(parameters, _, _) => parameters,
+            _ => Vec::new(),
+        };
+        let mixed: Vec<Type> = types
+            .iter()
+            .zip(&logical)
+            .enumerate()
+            .map(
+                |(index, (actual, logical))| match scheme_parameters.get(index) {
+                    Some(parameter) if !parameter.has_function() => actual.clone(),
+                    _ => logical.clone(),
                 },
-            ),
+            )
+            .collect();
+        // 期待する結果型は渡さない。期待は論理型で書かれていて（呼び出し元の
+        // 環境も論理型で型付けされている）、実際の型で束縛した引数と食い違う
+        // （`Array.build` の `A Array`）。
+        let restored = match Signature::specialize_result(&scheme, &mixed, None) {
+            Ok(actual) => Signature {
+                parameters: inferred.parameters.clone(),
+                result: actual.result,
+            },
+            Err(_) => inferred.clone(),
         };
         let signature = self.outcome_signature(&types, &restored, outcome_answer.as_ref())?;
         let key = self.specialized_name(name);
