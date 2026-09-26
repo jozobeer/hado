@@ -251,3 +251,12 @@ exit=0
 読まない r49・r51 を除く 14 本、r62〜r65、r68・r69、r72〜r76 で合計 25 本）。
 
 
+
+着地後（2026-09-27）。PR #46 は `f71986e` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ git log --oneline -1
+f71986e Merge pull request #46 from jozobeer/dropped-spec-contracts
+$ gh run list --branch main --limit 3
+completed	success	Merge pull request #46 from jozobeer/dropped-spec-contracts	ci	main	push	36262364465	20m59s	2026-09-26T18:23:25Z
+```
