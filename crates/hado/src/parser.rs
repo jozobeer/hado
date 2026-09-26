@@ -2616,7 +2616,34 @@ impl Parser<'_> {
             );
         }
         self.expect(&TokKind::RParen)?;
+        if !postfix_print::branch_has_arrow(&node) && self.enclosing_close_follows() {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(
+                node.span,
+                "`if(...)` with nothing after it; write it without parentheses",
+                canonical,
+            );
+        }
         Ok(node)
+    }
+
+    /// 次のトークンが、中の構文も閉じる位置か（区切り・閉じ括弧・閉じの印・宣言や
+    /// handler の腕の始まり・入力の終わり）。そこに置いた `if(...)` の括弧は余分である。
+    fn enclosing_close_follows(&self) -> bool {
+        match self.kind() {
+            TokKind::Comma
+            | TokKind::Semicolon
+            | TokKind::RParen
+            | TokKind::RBracket
+            | TokKind::RBrace
+            | TokKind::Eof
+            | TokKind::KwOnce
+            | TokKind::KwAbort
+            | TokKind::KwAgain
+            | TokKind::KwReturn => true,
+            TokKind::Slash => self.slash_starts_close(),
+            kind => declaration_keyword(kind),
+        }
     }
 
     /// 後置構文の裸の `if`。本体に `->` があれば `/if` で閉じる。無ければ

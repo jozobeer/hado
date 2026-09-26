@@ -419,7 +419,7 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
             "{}({})",
             expr_prec(f, indent, false, 9),
             args.iter()
-                .map(|a| expr(a, indent, false))
+                .map(|a| enclosed(a, indent))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -438,10 +438,10 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         NodeKind::List(items, rest) => {
             let mut parts = items
                 .iter()
-                .map(|item| expr(item, indent, false))
+                .map(|item| enclosed(item, indent))
                 .collect::<Vec<_>>();
             if let Some(rest) = rest {
-                parts.push(format!("...{}", expr(rest, indent, false)));
+                parts.push(format!("...{}", enclosed(rest, indent)));
             }
             format!("[{}]", parts.join(", "))
         }
@@ -475,6 +475,12 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         }
         NodeKind::Resume => "resume".to_string(),
     }
+}
+
+/// 区切り（`,`・`;`）か閉じ括弧（`)`・`]`・`}`）が後ろに来る位置。そこで中の構文も
+/// 閉じるので、末尾と同じく印を付けない。
+fn enclosed(node: &Node, indent: usize) -> String {
+    expr(node, indent, true)
 }
 
 fn wrap(text: String, prec: u8, min: u8) -> String {
@@ -611,7 +617,7 @@ fn with_args(args: &[Node], indent: usize) -> String {
 fn fields_text(fields: &[(DeclaredName, Node)], indent: usize) -> String {
     fields
         .iter()
-        .map(|(field, value)| format!("{} = {}", field.name, expr(value, indent, false)))
+        .map(|(field, value)| format!("{} = {}", field.name, enclosed(value, indent)))
         .collect::<Vec<_>>()
         .join("; ")
 }
