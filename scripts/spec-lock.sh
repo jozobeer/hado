@@ -42,6 +42,12 @@ FENCE_OPEN = '```text'
 FENCE_CLOSE = '```'
 
 
+def fence_like(line):
+    """Markdown がフェンス行として読む行か。先頭の空白は 3 文字まで（GFM）。"""
+    indent = len(line) - len(line.lstrip(' '))
+    return indent <= 3 and line[indent:].startswith('```')
+
+
 def section_bounds(lines, prefix):
     """`## <prefix>` の見出しから、次の `## ` の手前まで（最後の節は末尾まで）。"""
     start = next(i for i, line in enumerate(lines) if line.startswith(prefix))
@@ -49,23 +55,31 @@ def section_bounds(lines, prefix):
     return start, end
 
 
-def field(entry, key):
-    """表のセルに置ける値か確かめて返す。改行は表を壊し、空は契約を消す。"""
+def field(entry, key, escape_pipe=False):
+    """表のセルに置ける値か確かめて返す。
+
+    改行は表を壊し、空は契約を消す。`|` は列を増やすので、`anchor` のように逃がして
+    置くセルだけ `escape_pipe` を立て、それ以外は拒む。
+    """
     value = entry.get(key)
     if not isinstance(value, str) or not value.strip():
         sys.exit(f'spec-lock: {entry.get("code", "?")} の {key} が空')
     if '\n' in value or '\r' in value:
         sys.exit(f'spec-lock: {entry.get("code", "?")} の {key} に改行')
+    if '|' in value:
+        if not escape_pipe:
+            sys.exit(f'spec-lock: {entry.get("code", "?")} の {key} に `|`（表の列が増える）')
+        value = value.replace('|', '\\|')
     return value
 
 
 def error_table():
-    """spec/errors.toml から §56 の表を組む。セルの `|` は `\\|` に逃がす。"""
+    """spec/errors.toml から §56 の表を組む。アンカーの `|` だけを `\\|` に逃がす。"""
     entries = tomllib.loads(Path('spec/errors.toml').read_text())['error']
     rows = ['| ' + ' | '.join(COLUMNS) + ' |', '|' + '---|' * len(COLUMNS)]
     for e in entries:
         cells = [field(e, k) for k in ('code', 'name', 'section', 'stage')]
-        cells.append(field(e, 'anchor').replace('|', '\\|'))
+        cells.append(field(e, 'anchor', escape_pipe=True))
         rows.append('| ' + ' | '.join(cells) + ' |')
     return rows
 
@@ -85,9 +99,10 @@ def grammar_groups():
     # 群の区切りの空行を落とす。
     groups = [(label, body[:-1] if body and body[-1] == '' else body) for label, body in groups]
     # 本文にフェンス行があると、生成した spec.md を次の走行が構造として読み、直せなくなる。
+    # 字下げしたフェンス行も Markdown は閉じとして読むので、3 文字までを同じに扱う。
     for label, body in groups:
         for line in body:
-            if line.startswith('```'):
+            if fence_like(line):
                 sys.exit(f'spec-lock: spec/grammar.ebnf の {label} の本文にフェンス行 {line!r}')
     return groups
 
