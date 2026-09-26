@@ -200,7 +200,7 @@ fn abort_handler_skips_do_continuation_on_division_by_zero() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "handler Error as Catch\nabort raise _ => 5\nreturn value => value\ndef main =\n  with Catch ->\n  do (7 / 0) ->\n  9\n",
+        "handler Error as Catch\nabort raise _ => 5\nreturn value => value\ndef main = with Catch -> 7 / 0 ->\n  9",
     );
     let built = case.build("main.hd");
     assert_eq!(
@@ -918,7 +918,7 @@ fn effectful_callback_reaches_the_handler_through_prelude_folds() {
 #[test]
 fn callback_passed_through_a_pure_callee_keeps_its_own_result() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef identity (f: Fn(Int => Int)): Fn(Int => Int) => f\ndef main =\n  with Catch ->\n  let f = identity fn(x => 8 / x) ->\n  f 0\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef identity (f: Fn(Int => Int)): Fn(Int => Int) => f\ndef main = with Catch -> identity fn(x => 8 / x) as f ->\n  f 0");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -990,7 +990,7 @@ fn do_binds_a_callback_held_in_a_record_field() {
 #[test]
 fn an_effectful_closure_in_an_adt_field_keeps_its_outcome() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let opt = Some(fn(x => 8 / x)) ->\n  if opt | Some(f) => f 0 | None => 0\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> Some(fn(x => 8 / x)) as opt ->\n  if opt | Some(f) => f 0 | None => 0");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1012,7 +1012,7 @@ fn an_effectful_closure_in_an_adt_field_keeps_its_outcome() {
 #[test]
 fn an_effectful_closure_in_an_array_slot_keeps_its_outcome() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let xs = Array.of_list [fn(x => 8 / x)] ->\n  let f = Array.get xs 0 ->\n  f 0\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> Array.of_list [fn(x => 8 / x)] as xs ->\n  Array.get xs 0 as f ->\n  f 0");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1105,7 +1105,7 @@ fn an_effectful_closure_in_a_monomorphic_adt_field_keeps_its_outcome() {
 #[test]
 fn a_lambda_may_return_an_effectful_lambda() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => fn(y => x / y)) ->\n  let divide = make 8 ->\n  divide 0\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> fn(x => fn(y => x / y)) as make ->\n  make 8 as divide ->\n  divide 0");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1245,7 +1245,7 @@ fn max_rss_kb(bin: &std::path::Path) -> u64 {
 }
 
 fn collect_handler() -> &'static str {
-    "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [value, ...rest]\nreturn _ => []\n"
+    "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as Collect\nagain yield value => resume () as rest ->\n  [value, ...rest]\nreturn _ => []"
 }
 
 fn list_literal(values: &[i64]) -> String {
@@ -1538,7 +1538,7 @@ fn an_effectful_closure_nested_in_a_monomorphic_adt_field_arg_keeps_its_outcome(
 #[test]
 fn a_lambda_may_return_an_adt_holding_an_effectful_lambda() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let make = fn(x => Some(fn(y => x / y))) ->\n  let holder = make 8 ->\n  if holder | Some(f) => f 0 | None => -1\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> fn(x => Some(fn(y => x / y))) as make ->\n  make 8 as holder ->\n  if holder | Some(f) => f 0 | None => -1");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1612,7 +1612,7 @@ fn each_again_operation_of_one_effect_runs_its_own_arm() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "effect A\nagain ping(value: Int): Void\nagain pong(value: Int): Void\nhandler A as H\nagain ping value =>\n  let rest = resume () ->\n  [value, ...rest]\nagain pong value =>\n  let rest = resume () ->\n  [value + 100, ...rest]\nreturn _ => []\ndef main = with H -> do ping 1 -> do pong 2 -> ()\n",
+        "effect A\nagain ping(value: Int): Void\nagain pong(value: Int): Void\nhandler A as H\nagain ping value => resume () as rest ->\n  [value, ...rest]\nagain pong value => resume () as rest ->\n  [value + 100, ...rest]\nreturn _ => []\ndef main = with H -> ping 1 ->\n  pong 2 ->\n  ()",
     );
     let dump = case.command("dump-mono", "main.hd");
     assert_eq!(

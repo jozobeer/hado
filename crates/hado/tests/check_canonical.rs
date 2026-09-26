@@ -2,7 +2,7 @@ use hado::{check, parser::parse_source};
 
 #[test]
 fn identity_binding_reports_its_location() {
-    let ast = parse_source("def f v =>\n  let x = v -> x\ndef main = f 1", "t").unwrap();
+    let ast = parse_source("def f v => v as x ->\n  x\ndef main = f 1", "t").unwrap();
     let error = check::check_ast(&ast, "t").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E501"));
     assert_eq!((error.line, error.col), (2, 3));
@@ -10,12 +10,12 @@ fn identity_binding_reports_its_location() {
 
 #[test]
 fn identity_binding_is_found_inside_nested_expressions() {
-    let ast = parse_source("def main = Some(let x = 1 -> x)", "t").unwrap();
+    let ast = parse_source("def main = Some(1 as x ->\n  x)", "t").unwrap();
     assert_eq!(
         check::check_ast(&ast, "t").unwrap_err().code.as_deref(),
         Some("E501")
     );
-    let ast = parse_source("def main = let x = 1 -> x + 2", "t").unwrap();
+    let ast = parse_source("def main = 1 as x ->\n  x + 2", "t").unwrap();
     check::check_ast(&ast, "t").unwrap();
 }
 
@@ -205,8 +205,8 @@ fn fallback_must_be_last_in_both_branch_forms() {
 #[test]
 fn unused_let_binding_respects_shadowing() {
     for source in [
-        "def main = let x = 1 -> 2",
-        "def main = let x = 1 -> fn(x => x + 2) 3",
+        "def main = 1 as x ->\n  2",
+        "def main = 1 as x ->\n  fn(x => x + 2) 3",
     ] {
         assert_eq!(
             hado::check_source(source, "t")
@@ -218,8 +218,8 @@ fn unused_let_binding_respects_shadowing() {
         );
     }
     for source in [
-        "def main = let x = 1 -> fn(y => x + y) 3",
-        "def main = let x = 1 -> let x = x + 1 -> x + 2",
+        "def main = 1 as x ->\n  fn(y => x + y) 3",
+        "def main = 1 as x ->\n  x + 1 as x ->\n  x + 2",
     ] {
         hado::check_source(source, "t").unwrap();
     }
@@ -304,7 +304,7 @@ fn record_binding_checks_each_bound_name() {
 
 #[test]
 fn unused_railway_binding_requires_do() {
-    let source = "def main = let x? = Some(1) -> Some(2)";
+    let source = "def main = Some(1) as x? ->\n  Some(2)";
     assert_eq!(
         hado::check_source(source, "t")
             .err()
@@ -313,12 +313,12 @@ fn unused_railway_binding_requires_do() {
             .as_deref(),
         Some("E505")
     );
-    hado::check_source("def main = let x? = Some(1) -> Some(x + 2)", "t").unwrap();
+    hado::check_source("def main = Some(1) as x? ->\n  Some(x + 2)", "t").unwrap();
 }
 
 #[test]
 fn body_type_error_precedes_discarded_railway_syntax() {
-    let source = "def main = let _? = Some(1) -> 1";
+    let source = "def main = Some(1) as _? ->\n  1";
     assert_eq!(
         hado::check_source(source, "t")
             .err()

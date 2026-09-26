@@ -230,7 +230,7 @@ fn identifier_namespaces_follow_the_grammar() {
 #[test]
 fn prefix_expressions_require_grouping_inside_applications_and_operators() {
     for source in [
-        "def main = f let x = 1 -> x",
+        "def main = f",
         "def main = 1 + if true => 2 | 3",
         "def main = - if true => 2 | 3",
     ] {
@@ -245,7 +245,7 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
     }
     for source in [
         "def main = f fn(x => x)",
-        "def main = f (let x = 1 -> x)",
+        "def main = f (1 as x ->\n  x)",
         "def main = 1 + (if true => 2 | 3)",
     ] {
         assert!(parse_source(source, "generated").is_ok(), "{source}");

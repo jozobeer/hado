@@ -649,7 +649,7 @@ fn print_postfix_command(cli: &Cli<'_>) -> ExitCode {
             }
         };
         let display = file.to_string_lossy().into_owned();
-        let ast = match hado::parser::parse_source(&text, &display) {
+        let ast = match hado::parser::parse_for_conversion(&text, &display) {
             Ok(ast) => ast,
             Err(error) => {
                 eprintln!("skip: {display}: {error}");

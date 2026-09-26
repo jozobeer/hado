@@ -17,7 +17,7 @@ fn dependencies_precede_users_and_cycles_stay_together() {
 
 #[test]
 fn local_names_do_not_create_definition_dependencies() {
-    let ast = parse_source("def f g => g\ndef g f => f\ndef main = let f = 1 -> f", "t").unwrap();
+    let ast = parse_source("def f g => g\ndef g f => f\ndef main = 1 as f ->\n  f", "t").unwrap();
     assert_eq!(
         definition_groups(&ast),
         vec![vec!["f"], vec!["g"], vec!["main"]]

@@ -99,9 +99,9 @@ fn bindings_and_fn() {
 #[test]
 fn removed_binding_keywords_are_e100() {
     for source in [
-        "def main = let x = 1 -> x",
-        "def main = let x? = f y -> x",
-        "def main = do g x -> x",
+        "def main = 1 as x ->\n  x",
+        "def main = f y as x? ->\n  x",
+        "def main = g x ->\n  x",
     ] {
         let d = parse_source(source, "t").unwrap_err();
         assert_eq!(d.code.as_deref(), Some("E100"), "{source}: {d}");

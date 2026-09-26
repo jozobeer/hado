@@ -72,7 +72,7 @@ fn cli_rejects_noncanonical_identity_binding() {
     let dir = std::env::temp_dir().join(format!("hado-canonical-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
-    std::fs::write(&path, "def main = let x = 1 -> x").unwrap();
+    std::fs::write(&path, "def main = 1 as x ->\n  x").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("check")
         .arg(&path)

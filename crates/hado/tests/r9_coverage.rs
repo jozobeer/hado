@@ -125,7 +125,7 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
     for (source, name) in [
         ("def f used unused => used + 1\ndef main = f 1 2", "unused"),
         ("def main = fn(used, unused => used + 1) 1 2", "unused"),
-        ("def f outer => let outer = 1 -> outer + 2\ndef main = f 1", "outer"),
+        ("def f outer => 1 as outer ->\n  outer + 2\ndef main = f 1", "outer"),
         ("def f | Some(unused) => 1 | 0\ndef main = f (Some(1))", "unused"),
         ("type Pair = { left: Int; right: Int }\ndef f (pair: Pair) => if pair | { left; right } => left\ndef main = f { left = 1; right = 2 }", "right }"),
     ] {

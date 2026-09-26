@@ -735,8 +735,17 @@ fn identity_let_fix(
     if start >= body_start || value_start >= body_start {
         return None;
     }
+    // §11: 後置では `e as p ->` が束縛の綴りなので、値の後ろの `as p ->` ごと
+    // 落とす。値そのものを残す（`g 4 as x -> x` は `g 4` になる）。
     let head = source[value_start..body_start].trim_end();
-    let text = head.strip_suffix("->").unwrap_or(head).trim().to_string();
+    let text = head
+        .strip_suffix("->")
+        .map(str::trim_end)
+        .and_then(|head| head.rsplit_once(" as "))
+        .map_or_else(
+            || head.strip_suffix("->").unwrap_or(head).trim().to_string(),
+            |(value, _)| value.trim_end().to_string(),
+        );
     if text.is_empty() {
         return None;
     }

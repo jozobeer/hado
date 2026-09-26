@@ -90,7 +90,7 @@ fn function_parameters_shadow_operations_in_infer_and_mono() {
 
 #[test]
 fn let_bindings_shadow_operations() {
-    Case::new("def main = Int.to_string (let raise = 5 -> raise + 1)\n").runs(6);
+    Case::new("def main = Int.to_string (5 as raise ->\n  raise + 1)").runs(6);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn user_operation_parameters_shadow_operations() {
 
 #[test]
 fn shadowed_again_is_a_local_let_value() {
-    Case::new("effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n").runs(9);
+    Case::new("effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => tick as x ->\n  x + 1\ndef main = Int.to_string (f 8)").runs(9);
 }
 
 #[test]

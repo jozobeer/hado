@@ -65,40 +65,36 @@ fn the_sole_parameter_keeps_rec_and_drops_for_other_forms() {
 
 #[test]
 fn an_identity_binding_is_replaced_by_its_value() {
-    let source = "def g n => n + 1\ndef main =\n  let x = g 4 -> x\n";
+    // §41: 束縛は値の後ろに付くので、位置は本体の `x` を指す。
+    let source = "def g n => n + 1\ndef main = g 4 as x ->\n  x";
     let fix = fixes(source)
         .into_iter()
         .find(|fix| fix.code == "E501")
         .unwrap();
-    assert_eq!((fix.line, fix.col), (3, 3));
+    assert_eq!((fix.line, fix.col), (2, 12));
     assert_eq!(fix.replacement, "g 4");
-    assert_eq!(
-        applied(source, "E501"),
-        "def g n => n + 1\ndef main =\n  g 4\n"
-    );
+    assert_eq!(applied(source, "E501"), "def g n => n + 1\ndef main = g 4");
 
-    let literal = "def main = let x = 5 -> x\n";
+    let literal = "def main = 5 as x -> x\n";
     assert_eq!(applied(literal, "E501"), "def main = 5\n");
 }
 
 #[test]
-fn the_nested_let_separator_is_the_body_arrow() {
-    // 値の式の `->` を分離点と取り違えない。
-    let source = "def main =\n  let x = let y = 1 -> y -> x\n";
+fn an_identity_binding_nested_in_a_value_keeps_its_own_arrow() {
+    // 値の式の中の束縛の `->` を、外側の束縛の分離点と取り違えない。
+    let source = "def main = (3 as y -> y) as x -> x";
     let fix = fixes(source)
         .into_iter()
         .find(|fix| fix.code == "E501")
         .unwrap();
-    assert_eq!(fix.replacement, "let y = 1 -> y");
-    let once = applied(source, "E501");
-    assert_eq!(once, "def main =\n  let y = 1 -> y\n");
-    assert_eq!(applied(&once, "E501"), "def main =\n  1\n");
+    // 内側の `as y -> y` は値の一部なので、外側の束縛の綴りだけが落ちる。
+    assert_eq!(fix.replacement, "3 as y -> y)");
 }
 
 #[test]
-fn a_comment_inside_e515_and_e501_ranges_is_not_deleted() {
+fn a_comment_inside_e501_ranges_is_not_deleted() {
     let branch = "def f x\n  // keep\n  => if x\n  | Some(v) => v\n  | 0\ndef main = f (Some(7))\n";
     assert_eq!(fix_at(branch, "E515", 1, 1), None);
-    let binding = "def main =\n  let x = 5 // keep\n    -> x\n";
-    assert_eq!(fix_at(binding, "E501", 2, 3), None);
+    let binding = "def main = 5 // keep\n  as x -> x\n";
+    assert_eq!(fix_at(binding, "E501", 1, 12), None);
 }
