@@ -993,6 +993,12 @@ impl Parser<'_> {
         let failed_at = self.pos;
         self.pos = start;
         while self.kind() != &TokKind::Eof {
+            // `/module`・`/implement` は見出しの終わり。ここで止めて閉じを
+            // 消費しない。消費すると `expect_close` が閉じを見失い、閉じの
+            // 不足という別の E100 が本当の誤りを覆う。
+            if self.pos > start && self.at_block_close() {
+                break;
+            }
             if self.pos > start && self.pos >= failed_at && declaration_keyword(self.kind()) {
                 break;
             }
