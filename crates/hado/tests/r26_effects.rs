@@ -1741,3 +1741,16 @@ fn contract_member_returning_a_closure_over_an_effectful_argument() {
         "1",
     );
 }
+
+// 同じ効果を捕まえる handler が入れ子のときは内側を選ぶ（`handler_for` と同じ）。
+// `apply` に渡す閉包の outcome の答えは内側 `Catch`（Int）になる。直す前は外側
+// `Outer`（String）を選び、`lowered return type differs from inferred signature`
+// で赤。`x = 1` は割り切れるので `Catch` の abort は走らず、外側 `Outer` の
+// return 腕が値を `"outer"` にして返す。
+#[test]
+fn nested_handlers_of_the_same_effect_pick_the_inner_answer() {
+    runs_effectful_closure_source(
+        "handler Error as Outer\nabort raise _ => \"outer\"\nreturn value => \"outer\"\n\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\n\ndef apply(f: Fn(Int => Int {Error})): Int {Error} => f 1\n\ndef main =\n  with Outer ->\n  with Catch ->\n  apply fn(x => 8 / x)\n",
+        "outer",
+    );
+}
