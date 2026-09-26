@@ -271,3 +271,12 @@ exit=0
 門番で後から書き換えた例が無い（`git log` で全門番を走査して 0 件）ので `spec-model` の
 ままにし、本ラウンドの実測は本ファイルに置いた。
 
+
+着地後（2026-09-27）。PR #48 は `ddcbb6a` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ git log --oneline -1
+ddcbb6a Merge pull request #48 from jozobeer/spec-lock-input-hardening
+$ gh run list --branch main --limit 3
+completed	success	Merge pull request #48 from jozobeer/spec-lock-input-hardening	ci	main	push	36267746758	14m31s	2026-09-26T19:55:58Z
+```
