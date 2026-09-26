@@ -4,6 +4,8 @@ fn scalar_prelude_wrappers_check_and_execute() {
     let modules = [
         include_str!("../../../stdlib/error.hd"),
         include_str!("../../../stdlib/list.hd"),
+        // string.hd の split / join は Array の to_list / of_list を通る。
+        include_str!("../../../stdlib/array.hd"),
         include_str!("../../../stdlib/string.hd"),
         include_str!("../../../stdlib/int.hd"),
         include_str!("../../../stdlib/float.hd"),
