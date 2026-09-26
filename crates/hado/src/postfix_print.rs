@@ -173,13 +173,25 @@ fn pattern_arms(
         out.push_str(&format!(
             " | {} => {}",
             comma_patterns(patterns),
-            expr(value, indent, tail)
+            arm_value(value, indent, tail)
         ));
     }
     if let Some(fallback) = fallback {
-        out.push_str(&format!(" | {}", expr(fallback, indent, tail)));
+        out.push_str(&format!(" | {}", arm_value(fallback, indent, tail)));
     }
     out
+}
+
+/// 腕の本体。本体が `->` を含むなら括弧で包む。包まないと、後ろに続く
+/// `| 次の腕` が本体の内側の分岐の腕として読まれる（`| A => 2 as y -> y | B => 3`
+/// の `| B` は内側の fallback になる）。
+fn arm_value(value: &Node, indent: usize, tail: bool) -> String {
+    let text = expr(value, indent, tail);
+    if contains_continuation(value) {
+        format!("({text})")
+    } else {
+        text
+    }
 }
 
 fn cond_arms(arms: &[(Node, Node)], fallback: Option<&Node>, indent: usize, tail: bool) -> String {
