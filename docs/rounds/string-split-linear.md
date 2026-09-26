@@ -98,7 +98,7 @@ $ /usr/bin/time -f '%e' target/perf-scratch/join40000/program < /dev/null
 0.62
 ```
 
-門番（変更後）。
+門番（変更後、main 取り込み後）。
 
 ```
 $ bash scripts/verify-string-split-linear.sh
@@ -106,20 +106,33 @@ OK: a semantics: split and join equations and EmptySeparator
 OK: b length: String.length scans no bytes and does not slow with length
 OK: c layout: runtime unit tests after the HadoString header migration
 OK: d abi: every HadoString *-returning function classified and measured
-split ascii lines: small=0.699s large=1.947s subtracted 0.327->0.777 ratio 2.38
+split ascii lines: small=0.986s large=1.561s subtracted 0.427->0.671 ratio 1.57
 OK: e perf: split on ASCII lines is linear
-split multibyte lines: small=0.466s large=0.966s subtracted 0.141->0.325 ratio 2.31
+split multibyte lines: small=0.488s large=0.929s subtracted 0.130->0.261 ratio 2.00
 OK: f perf: split on Japanese lines is linear
-g: small=0.491s large=1.054s subtracted 0.294->0.650 ratio 2.21
+g: small=0.472s large=0.857s subtracted 0.286->0.519 ratio 1.82
 OK: g perf: split with a growing ASCII separator is linear
-h: small=0.686s large=1.395s subtracted 0.339->0.672 ratio 1.98
+h: small=0.411s large=0.843s subtracted 0.203->0.418 ratio 2.06
 OK: h perf: split with a growing Japanese separator is linear
-join: small=0.323s large=0.661s subtracted 0.293->0.604 ratio 2.06
+join: small=0.292s large=0.475s subtracted 0.266->0.437 ratio 1.64
 OK: i perf: join is linear in the element count
 control: the control-subtracted ratio judge rejects the issue example that the total ratio accepts
 OK: j control: the subtracted ratio judge rejects the issue example
 PASSED: 10/10
 ```
+
+`cargo test --offline` と文書の門番と quick 層。
+
+```
+$ cargo test --offline | tail -3
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --tier quick target/gates-quick | tail -1
+TALLY: 40/40 passed; red: none
+```
+
+`git merge main` の後の `scripts/corpus-lock.sh --check` の差分は `stdlib/string.hd` の 1 行だけで、`bash scripts/corpus-lock.sh` で作り直した。門番を足したので `bash scripts/gate-tiers-lock.sh` で層の錠も作り直し、`bash scripts/verify-spec-contracts.sh` は `PASSED: 2/2`。
 
 `split` と `join` の意味（検査 a が測る等式の一覧）。
 
