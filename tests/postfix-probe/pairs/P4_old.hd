@@ -1,0 +1,1 @@
+def rec loop offset n => if n == 0 => offset | let f = fn(x => loop offset x) -> f (n - 1)

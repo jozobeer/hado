@@ -1,0 +1,4 @@
+def main =
+  let ok = true ->
+  do if ok => log "a" | log "b" ->
+  log "finish"
