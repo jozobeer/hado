@@ -81,7 +81,8 @@ $ cargo run --offline -q -- run target/issue/absent/main.hd
   - `main` に `Absent` が残ったときの扱い（ユーザー定義の効果なら今は E706）
   - §33 の境界「理由の有無」の言い直し（Option と効果の境界から、`Absent` と `Error` の境界へ）。`docs/plan.md` の 17 節 Q7 と Q8 の書き直しになる
   - E303・E504・E507・E508 の再定義
-  - abort を handler で捕まえる実行コストと `?` のタグ検査との比較、abort の handler の入れ子（`docs/ledger.md` の 17.9 の表）は未確認。仕様を変える前に、受理コーパスと stdlib の Option の箇所を効果版に書き直して実測する
+  - 先に `handler-answer-types` を直す。`None` へ戻す handler は 1 つの本体の中で多くの型に使われるので、今は `build` が落ちる。既定値を handler で持ち込む形（`Option.unwrap_or` にあたるもの）は `handler-value-args` に依存する
+  - 2026-09-26 の実験: 受理コーパスで `?` を使う 2 本（`rail_forms`・`user_store`）は効果版に書き直せて、同じ出力になった（`?` は 3 から 0）。データの Option を変換する形も `with Maybe -> f (present value)`（`def present | Some(x) => x | absent`）で `?` なしに書ける。不在を毎回 handler で回復する 10^6 回の検索は `?` 版の約 2 倍（1 回あたり約 16 ns）。`docs/ledger.md` の 17.9 の表の `Collect ⊃ Trap` は再現しない
 - 次善: `do` から Option だけを外す。`let p? =` は残し、中身を使わずに `None` だけ伝播する形は `if o | Some(_) => … | None => None` を正準形にする（今は E508）。使用が 0 件の形なので、長く書くことを許す。
 - 退ける: `let _? =` を正準形に戻す（綴りを却下）。`do` を Void 限定にし、Void 以外の値は `ignore` 関数で捨てる（冗長として却下。効果を持つ部分関数の値を捨てて検証だけする用途は `do Int.parse s ->` で足りる）。
 
