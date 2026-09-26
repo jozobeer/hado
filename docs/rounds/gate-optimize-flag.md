@@ -40,6 +40,10 @@ issue の推奨 (a)（`scripts/lint-docs.sh` の python の先頭に門を置く
   （`docs/rounds/spec-lock-input-hardening.md` の決定 4）と同じで、`# round:` はその門番を
   新設したラウンドを指す。本ラウンドの実測は本ファイルに置く。
 - 決定 4: 門番を増やさない。`scripts/gate-tiers.lock` は触らない。
+- 決定 5: 門番は `-O` の赤と理由だけを見る（issue の指定どおり）。正しい環境の
+  `PASSED: 16/16` は本ファイルの「門番と層」と full 層の走行が測る。quick は保存ごとの層で、
+  正常走は負荷時に 16〜20 秒かかるので毎回は回さない。`-O` の探針は門が先頭で落とすので
+  門番の走行は 0.4 秒である。
 
 ### 期待値の根拠
 
@@ -128,4 +132,30 @@ exit=0
 $ PYTHONOPTIMIZE=1 bash scripts/lint-docs.sh 2>&1 | tail -1; echo "exit=${PIPESTATUS[0]}"
 PASSED: 15/16
 exit=1
+```
+
+### Green（-O は理由を出して落ちる）
+
+門番は緑に戻り、`-O` の呼び出しは理由を出して非 0 で終わる。
+
+```
+$ bash scripts/verify-spec-model.sh 2>&1 | tail -3
+OK: the model is well formed and its sections exist
+OK: the docs layer refuses to run when assert is disabled
+PASSED: 3/3
+$ PYTHONOPTIMIZE=1 bash scripts/lint-docs.sh 2>&1; echo "exit=$?"
+lint-docs: assert が無効（PYTHONOPTIMIZE か -O）。付けずに回すこと
+exit=1
+```
+
+正しい環境の出力（`PASSED: 16/16`）は「門番と層」で測る。`-O` の探針は門が先頭で
+落とすので、門番の走行は 0.4 秒である。
+
+```
+$ time bash scripts/verify-spec-model.sh >/dev/null 2>&1; echo "gate exit=$?"
+gate exit=0
+
+real	0m0.439s
+user	0m0.121s
+sys	0m0.049s
 ```
