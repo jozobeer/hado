@@ -107,3 +107,95 @@ $ bash scripts/lint-docs.sh 2>&1 | tail -1
 PASSED: 16/16
 $ git checkout -- docs/plan.md
 ```
+
+### Green（lock と門番を足した後）
+
+`docs/frozen-docs.sha256` が `docs/ledger.md` と `docs/plan.md` のハッシュを記録し、`--check` がバイト一致を出す。
+
+```
+$ bash scripts/frozen-docs-lock.sh
+2
+$ cat docs/frozen-docs.sha256
+1b04b12ee6bf567c3f403fcd75618fda603be54170313969d7df5a412cfa322f  docs/ledger.md
+93eb3505fca705d455347d8da483655e8357c359c683af305d3c0413b15f9b2b  docs/plan.md
+$ bash scripts/frozen-docs-lock.sh --check; echo "exit=$?"
+exit=0
+$ bash scripts/verify-frozen-docs.sh
+OK: the frozen documents match the recorded hashes
+PASSED: 1/1
+```
+
+### 探針（門番を足した後は赤になる）
+
+台帳の `Unit` を `Void` に一括置換すると、台帳のハッシュが変わるので赤になる。
+
+```
+$ sed -i 's/Unit/Void/g' docs/ledger.md
+$ bash scripts/verify-frozen-docs.sh 2>&1 | tail -5
+@@ -1,2 +1,2 @@
+-1b04b12ee6bf567c3f403fcd75618fda603be54170313969d7df5a412cfa322f  docs/ledger.md
++7e4836ade9334a8fd198c35fe1ebcf4151242addbb6ead1df0e120a3d900c6d0  docs/ledger.md
+ 93eb3505fca705d455347d8da483655e8357c359c683af305d3c0413b15f9b2b  docs/plan.md
+NG: the frozen documents match the recorded hashes
+PASSED: 0/1
+$ git checkout -- docs/ledger.md
+```
+
+凍結した節（`docs/plan.md` の 35 節）に行を足すと、計画のハッシュが変わるので赤になる。
+
+```
+$ sed -i '/^## 35\. /a 探針で凍結した節に足した行。' docs/plan.md
+$ bash scripts/verify-frozen-docs.sh 2>&1 | tail -5
+@@ -1,2 +1,2 @@
+ 1b04b12ee6bf567c3f403fcd75618fda603be54170313969d7df5a412cfa322f  docs/ledger.md
+-93eb3505fca705d455347d8da483655e8357c359c683af305d3c0413b15f9b2b  docs/plan.md
++0a84698ad617221ca29d5da5cb8573b9df18b6e854946e5f644b6635e77c3350  docs/plan.md
+NG: the frozen documents match the recorded hashes
+PASSED: 0/1
+$ git checkout -- docs/plan.md
+$ git status --short
+```
+
+### 層の生成物（門番を足すと赤になり、作り直すと緑になる）
+
+```
+$ bash scripts/gate-tiers-lock.sh --check 2>&1 | tail -3
+ embed-runtime	full
++frozen-docs	core
+ gate-cache	quick
+$ echo "lock-check exit=${PIPESTATUS[0]}"
+lock-check exit=1
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1
+PASSED: 1/2
+$ bash scripts/gate-tiers-lock.sh
+69
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1
+PASSED: 2/2
+```
+
+### 門番と層
+
+```
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
+TALLY: 41/41 passed; red: none
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1
+PASSED: 2/2
+$ bash scripts/verify-parallel-rounds.sh 2>&1 | tail -1
+PASSED: 5/5
+```
+
+`--tier full` の全走は着地側で回す（`AGENTS.md`）。本ラウンドは Rust を触らず、足した門番は core なので、着地の条件に要る quick 層・層の照合・文書層を手元で回した。着地後の全走は main を checkout した側が本節に追記する。
+
+### 実装から分かったこと
+
+仮説は「`sha256sum` の列を corpus-lock と同じ形で記録し、`--check` を門番が呼べば、丸ごと 2 ファイルのバイト一致で 2 種の探針を止められる」で、当たった。節を切り出すパーサは要らず、`diff -u` の出力がそのまま探針の理由（どのハッシュが変わったか）になった。`# tier: core` の判断も、`scripts/ci-run.sh` が `pull_request` を core で回すことと一致した。
+
+外れたのは工程の順序の見立てである。`docs/plan.md` を丸ごと凍結するので、36 節の移設を終えた後にしか lock を作れない。先に lock を作ると移設そのものが赤になる。工程を「移設 → lock と門番 → 層の生成物」の順に組み替え、探針の赤は移設の後に測った。Red の実測は移設の前後で同じ結果（`lint-docs` が緑のまま）だった。
+
+決められなかった点は 3 つある。
+
+1. 凍結する対象の一覧は `scripts/frozen-docs-lock.sh` の `frozen_docs` が唯一の正で、対象を消す変更は門番では止まらない。`scripts/verify-m3.sh` の corpus lock は期待値をディスクから導いて同じ穴を塞いでいるが、どの文書が凍結かはディスクから導けない。機構の変更は差分としてレビューで見る。
+2. `docs/ledger.md` 末尾の「設計メモ」は凍結で追記できなくなったので、仕様変更に至らなかった案の置き場を `docs/rounds.md` で `docs/plans/<名前>.md` へ寄せた。決定 D4 の「丸ごと」から出る帰結で、issue に明示は無い。
+3. `docs/ledger.md` の「設計メモ」自身が「採用した版ごとの決定は `docs/plan.md`」と書くが、凍結された本文なので直さない。読み手には `AGENTS.md` と `docs/rounds.md` の新しい記述が優先する。
