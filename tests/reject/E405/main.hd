@@ -1,9 +1,5 @@
 // spec: §44
 // error: E405
 // item: 冗長・到達不能の判定
-def f x =>
-  if x
-  | 1 => 10
-  | 1 => 20
-  | 0
+def f x => if x | 1 => 10 | 1 => 20 | 0
 def main = f 1

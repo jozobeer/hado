@@ -2,3 +2,4 @@ implement UserId as OffsetId
 type T = Int
 def make value => value + 100
 def value id => id
+/implement

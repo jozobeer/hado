@@ -2,4 +2,5 @@
 // item: 配列
 // expect-error: IndexOutOfRange
 // needs: prelude
-def main = let a = Array.of_list [10, 20] -> Array.set a (Array.length a) 99
+def main = Array.of_list [10, 20] as a ->
+  Array.set a (Array.length a) 99

@@ -1,4 +1,6 @@
 module Float
-def to_string(value: Float): String Pure
+def to_string (value: Float): String Pure
+/module
 implement Float as Float
 def to_string value => __float_to_string value
+/implement

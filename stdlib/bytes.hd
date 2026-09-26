@@ -1,31 +1,20 @@
 module Bytes
-def length(bytes: Bytes): Int Pure
-def get(bytes: Bytes, index: Int): Int {Error}
-def of_list(values: Int List): Bytes {Error}
-def to_list(bytes: Bytes): Int List Pure
-def to_string(bytes: Bytes): String {Error}
-def of_string(value: String): Bytes Pure
+def length (bytes: Bytes): Int Pure
+def get (bytes: Bytes, index: Int): Int {Error}
+def of_list (values: Int List): Bytes {Error}
+def to_list (bytes: Bytes): Int List Pure
+def to_string (bytes: Bytes): String {Error}
+def of_string (value: String): Bytes Pure
+/module
 implement Bytes as Bytes
 def length bytes => __bytes_length bytes
-def get bytes index =>
-  if index >= 0 && index < __bytes_length bytes
-    => __bytes_get bytes index
-    | raise { message = "IndexOutOfRange" }
-def of_list values =>
-  if range_ok values
-    => build values 0 (List.length values |> __bytes_alloc)
-    | raise { message = "ByteOutOfRange" }
+def get bytes index => if index >= 0 && index < __bytes_length bytes => __bytes_get bytes index | raise { message = "IndexOutOfRange" }
+def of_list values => if range_ok values => build values 0 (List.length values |> __bytes_alloc) | raise { message = "ByteOutOfRange" }
 def to_list bytes => elements bytes (__bytes_length bytes - 1) []
-def to_string bytes =>
-  if __bytes_is_utf8 bytes
-    => __bytes_to_string_unchecked bytes
-    | raise { message = "InvalidUtf8" }
+def to_string bytes => if __bytes_is_utf8 bytes => __bytes_to_string_unchecked bytes | raise { message = "InvalidUtf8" }
 def of_string value => __bytes_of_string value
 def range_ok values => List.fold values true fn(ok, value => ok && value >= 0 && value <= 255)
-def rec build values index target =>
-  if values
-  | [] => target
-  | [head, ...tail] => build tail (index + 1) (__bytes_fill_unchecked target index head)
+def rec build values index target => if values | [] => target | [head, ...tail] => build tail (index + 1) (__bytes_fill_unchecked target index head)
 // 添字を末尾から先頭へ動かし、その順に cons する。reverse は要らない。
-def rec elements bytes index acc =>
-  if index < 0 => acc | elements bytes (index - 1) [__bytes_get bytes index, ...acc]
+def rec elements bytes index acc => if index < 0 => acc | elements bytes (index - 1) [__bytes_get bytes index, ...acc]
+/implement

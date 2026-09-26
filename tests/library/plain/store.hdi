@@ -1,2 +1,3 @@
 module Store
-def read(x: Int): Int
+def read (x: Int): Int
+/module

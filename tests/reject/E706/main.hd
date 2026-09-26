@@ -3,7 +3,7 @@
 // item: 末尾呼び出しの限定
 effect A Yield
 again yield(value: A): Void
-def rec loop (n: Int): Void {Int Yield} =>
-  if n <= 0 => ()
-  | do yield n -> loop (n - 1)
+def rec loop (n: Int): Void {Int Yield} => if n <= 0 => () | yield n ->
+  loop (n - 1)
+  /if
 def main = loop 1

@@ -3,19 +3,19 @@
 // item: module
 // needs: prelude
 type User = { id: Int }
-def saved
-| Some(user) => do UserStore.save user -> true
-| false
-def main =
-  let ok = UserStore.find 1 |> saved ->
+def saved | Some(user) => UserStore.save user ->
+  true | false
+def main = UserStore.find 1 |> saved as ok ->
   if ok => 1 | 0
 module UserStore
 type T
-def find(id: Int): T Option
-def save(user: T): Void {Error}
-def delete(user: T): Void {Error}
+def find (id: Int): T Option
+def save (user: T): Void {Error}
+def delete (user: T): Void {Error}
+/module
 implement UserStore as UserStore
 type T = User
 def find id => if id > 0 => Some({ id = id }) | None
-def save(_: T): Void {Error} => ()
+def save (_: T): Void {Error} => ()
 def delete user => if user.id > 0 => () | raise { message = "NotFound" }
+/implement

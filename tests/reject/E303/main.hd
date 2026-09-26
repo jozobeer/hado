@@ -1,7 +1,6 @@
 // spec: §34
 // error: E303
 // item: let p? =
-def f x =>
-  let n? = 1 ->
+def f x => 1 as n? ->
   n
 def main = f 0

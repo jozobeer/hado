@@ -5,9 +5,8 @@ def parse (input: Int List): Int List {Error} => input
 def validate | [] => () | [_, ..._] => raise { message = "invalid" }
 def authorize | [] => () | [_, ..._] => raise { message = "denied" }
 def save | [] => "ok" | [_, ..._] => raise { message = "save failed" }
-def create_user input =>
-  let parsed = parse input ->
-  do validate parsed ->
-  do authorize parsed ->
+def create_user input => parse input as parsed ->
+  validate parsed ->
+  authorize parsed ->
   save parsed
 def main = create_user []

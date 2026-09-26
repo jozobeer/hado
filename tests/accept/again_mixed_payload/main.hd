@@ -6,9 +6,13 @@ again s(value: String): Void
 effect Y
 again y(value: Int): Void
 handler S as Names
-again s value => let rest = resume () -> [value, ...rest]
+again s value => resume () as rest ->
+  [value, ...rest]
 return x => x
 handler Y as Collect
-again y value => let rest = resume () -> [String.concat "n" (Int.to_string value), ...rest]
+again y value => resume () as rest ->
+  [String.concat "n" (Int.to_string value), ...rest]
 return _ => []
-def main = with Names -> with Collect -> do s "a" -> do y 1 -> ()
+def main = with Names -> with Collect -> s "a" ->
+  y 1 ->
+  ()

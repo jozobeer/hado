@@ -4,13 +4,17 @@
 def main = Store.find (IntId.make 41)
 module UserId
 type T
-def make(value: Int): T
-def value(id: T): Int
+def make (value: Int): T
+def value (id: T): Int
+/module
 module UserStore
-def find(id: UserId.T): Int
+def find (id: UserId.T): Int
+/module
 implement UserId as IntId
 type T = Int
 def make value => value
 def value id => id
+/implement
 implement UserStore as Store
 def find id => IntId.value id
+/implement

@@ -1,6 +1,4 @@
 // spec: §45
 // error: E507
-def f
-  | Some(v) => Some(v)
-  | None => None
-def main = f (Some(1))
+def f | Some(v) => Some(v) | None => None
+def main = f Some(1)

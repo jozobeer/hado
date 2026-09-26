@@ -4,6 +4,4 @@ effect Ask
 once ask: String
 handler Ask as Fixed
 once ask => "hello"
-def main =
-  with Fixed ->
-  ask
+def main = with Fixed -> ask

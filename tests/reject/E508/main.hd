@@ -1,8 +1,5 @@
 // spec: §36
 // error: E508
 def find_user (id: Int): Int Option => Some(id)
-def f id =>
-  if find_user id
-  | Some(user) => Some(user + 1)
-  | None => None
+def f id => if find_user id | Some(user) => Some(user + 1) | None => None
 def main = f 1

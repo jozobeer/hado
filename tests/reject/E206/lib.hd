@@ -1,7 +1,7 @@
 library
-
 module Store
-def read(value: Int): Int
-
+def read (value: Int): Int
+/module
 implement Store as MemoryStore
 def read value => value
+/implement

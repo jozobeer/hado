@@ -3,6 +3,4 @@
 handler Error as ToZero
 abort raise _ => 0
 return value => value
-def main =
-  with ToZero ->
-  raise { message = "caught" }
+def main = with ToZero -> raise { message = "caught" }

@@ -4,12 +4,15 @@
 type Input = { value: Int }
 def main = MemoryStore.read { value = 20 } + FileStore.read { value = 20 }
 module Store
-def read(input: Input): Int
+def read (input: Input): Int
+/module
 implement Store as MemoryStore
 type Entry = { number: Int }
 def unpack item => item.number
 def read input => unpack { number = input.value + 1 }
+/implement
 implement Store as FileStore
 type Entry = | Entry(Int)
 def unpack | Entry(n) => n
-def read input => unpack (Entry(input.value + 1))
+def read input => unpack Entry(input.value + 1)
+/implement

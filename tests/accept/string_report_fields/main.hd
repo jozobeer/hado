@@ -2,7 +2,4 @@
 // item: String 操作
 // expect: [["unit", "7", "7"], ["型", "3", "5"]]
 // needs: prelude
-def main =
-  List.map ["unit PASSED: 7/7", "型 PASSED: 3/5"]
-    fn(line => List.fold (String.split line " PASSED: ") []
-      fn(parts, part => List.append parts (String.split part "/")))
+def main = List.map ["unit PASSED: 7/7", "型 PASSED: 3/5"] fn(line => List.fold (String.split line " PASSED: ") [] fn(parts, part => List.append parts (String.split part "/")))

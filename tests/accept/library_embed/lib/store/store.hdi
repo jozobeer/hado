@@ -1,3 +1,4 @@
 module Store
-def find(x: Int): Int
-def wrap(f: Found): Int
+def find (x: Int): Int
+def wrap (f: Found): Int
+/module

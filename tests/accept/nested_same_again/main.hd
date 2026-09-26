@@ -3,9 +3,12 @@
 effect Y
 again y(value: Int): Void
 handler Y as CollectOuter
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return x => x
 handler Y as CollectInner
-again y value => let rest = resume () -> [value + 100, ...rest]
+again y value => resume () as rest ->
+  [value + 100, ...rest]
 return _ => []
-def main = with CollectOuter -> with CollectInner -> do y 3 -> ()
+def main = with CollectOuter -> with CollectInner -> y 3 ->
+  ()

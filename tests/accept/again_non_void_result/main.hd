@@ -5,4 +5,5 @@ again ask(seed: Int): Int
 handler Ask as Twice
 again ask seed => resume (seed * 2)
 return x => x
-def main = with Twice -> let v = ask 21 -> [v]
+def main = with Twice -> ask 21 as v ->
+  [v]

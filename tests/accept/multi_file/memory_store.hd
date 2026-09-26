@@ -1,2 +1,3 @@
 implement Store as MemoryStore
 def run input => input.value
+/implement

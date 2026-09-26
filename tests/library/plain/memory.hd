@@ -2,3 +2,4 @@
 // item: ライブラリ単位
 implement Store as Memory
 def read x => x
+/implement

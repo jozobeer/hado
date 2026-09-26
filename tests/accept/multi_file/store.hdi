@@ -1,3 +1,4 @@
 type Input = { value: Int }
 module Store
-def run(input: Input): Int
+def run (input: Input): Int
+/module

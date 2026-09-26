@@ -4,9 +4,11 @@
 def main = Phantom.read (Phantom.make 1)
 module Shape
 type A T
-def make(value: Int): Int T
-def read(value: Int T): Int
+def make (value: Int): Int T
+def read (value: Int T): Int
+/module
 implement Shape as Phantom
 type A T = Int
 def make value => value
 def read value => value
+/implement

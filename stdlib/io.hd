@@ -5,34 +5,26 @@ once log(contents: String): Void {Error}
 once read_dir(path: String): String List {Error}
 once read_stdin: Bytes {Error}
 module IoDefault
-def read_file(path: String): Bytes {Error}
-def write_file(path: String, contents: Bytes): Void {Error}
-def log(contents: String): Void {Error}
-def read_dir(path: String): String List {Error}
+def read_file (path: String): Bytes {Error}
+def write_file (path: String, contents: Bytes): Void {Error}
+def log (contents: String): Void {Error}
+def read_dir (path: String): String List {Error}
 def read_stdin: Bytes {Error}
+/module
 implement IoDefault as IoDefault
-def io_failure_message
-  | 1 => "NotFound"
-  | 2 => "PermissionDenied"
-  | 3 => "NotADirectory"
-  | "IoFailure"
-def read_file path =>
-  let status = __io_read_file path ->
+def io_failure_message | 1 => "NotFound" | 2 => "PermissionDenied" | 3 => "NotADirectory" | "IoFailure"
+def read_file path => __io_read_file path as status ->
   if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }
-def write_file path contents =>
-  let status = __io_write_file path contents ->
+def write_file path contents => __io_write_file path contents as status ->
   if status == 0 => () | raise { message = io_failure_message status }
-def log contents =>
-  let status = __io_log contents ->
+def log contents => __io_log contents as status ->
   if status == 0 => () | raise { message = io_failure_message status }
-def read_dir path =>
-  let status = __io_read_dir path ->
+def read_dir path => __io_read_dir path as status ->
   if status == 0 => directory_elements (__io_dir_count 0 - 1) [] | raise { message = io_failure_message status }
 // 添字を末尾から先頭へ動かし、その順に cons する。reverse は要らない。
 // `|>` にしない: 効果を持つ呼び出しを `|>` で書くと、末尾呼び出しの引数の
 // リストで単相化が `list element type mismatch` になる（docs/issues/pipe-in-tail-argument.md）。
-def rec directory_elements (index: Int, acc: String List): String List {Error} =>
-  if index < 0 => acc | directory_elements (index - 1) [Bytes.to_string (__io_dir_get index), ...acc]
-def read_stdin =
-  let status = __io_read_stdin 0 ->
+def rec directory_elements (index: Int, acc: String List): String List {Error} => if index < 0 => acc | directory_elements (index - 1) [Bytes.to_string (__io_dir_get index), ...acc]
+def read_stdin = __io_read_stdin 0 as status ->
   if status == 0 => __io_take_bytes 0 | raise { message = io_failure_message status }
+/implement
