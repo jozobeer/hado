@@ -184,3 +184,33 @@ $ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1; echo "exit=${PIPESTATUS[
 PASSED: 2/2
 exit=0
 ```
+
+### 実装から分かったこと
+
+仮説「先頭の 1 つの門が 12 個の python 断片をまとめて覆い、門は
+`scripts/verify-spec-model.sh` に足せる」は当たった。門は 3 行で、正しい環境の 16 検査は
+変えず、`-O` では理由を出して落ちる。門番の走行は 0.4 秒で、quick 層に足しても保存ごとの
+負荷にならない。
+
+外れたのは「非 0 で終わる」の読みで、これは判定の本体ではない。修正前でも
+`PYTHONOPTIMIZE=1 bash scripts/lint-docs.sh` は非 0（`PASSED: 15/16`）だった。
+`doc_r38_sentences` の否定対照は `assert` ではなく `raise AssertionError` なので `-O` でも
+残り、唯一の NG になる。赤の数は 1 のままなので、消えた検査（`doc_type_spelling`）は
+出力から読めない。**退行を測る側は「理由」である**ため、門番は理由の照合を必須にした。
+issue の完了条件が「検査を消さずに理由を出して非 0」と理由を先に書いているのはこのためで、
+非 0 だけを写すと赤を測ったことにならない。
+
+門を各 python 断片に置く案は 24 行になり、後から足した断片を覆わない。先頭の 1 つは
+断片の数に依らず、将来の断片も覆う。issue の「3 行程度」はこの形で足りる。
+
+理由の文言は先例（`scripts/verify-spec-model.sh`・`scripts/verify-spec-contracts.sh`）と
+同じ `<名>: assert が無効（PYTHONOPTIMIZE か -O）。付けずに回すこと` に揃えた。門番は
+接頭辞（`lint-docs: assert が無効`）までを照合する（文言の後半を門番の暗記にしない）。
+
+設計に還元した点:
+
+- 門番は `-O` の赤と理由だけを測る（決定 5）。正しい環境の正常走を quick で毎回回さない
+  代わりに、lint-docs.sh を常に落とす形に壊した退行は full 層と本ファイルの実測が受ける。
+  両方を 1 本で回す形は quick の予算に合わない。
+- assert で書いた門番すべてに同じ門を測る一般化は、このラウンドの外である（門番を増やすか、
+  既存の 2 本に足すかを含めて、次の候補にする）。
