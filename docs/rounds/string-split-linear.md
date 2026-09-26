@@ -167,3 +167,12 @@ $ printf 'def main = String.length (Float.to_string 0.1)\n' > main.hd && target/
 ```
 
 `Char` のモジュールは §55 の member に無く、`Char.to_string` は存在しない。`Float.to_string 0.1` は `%.17g` で 19 文字であり、`print 0.1`（`hado_canonical_float`）の `0.1` の 3 文字ではない。どちらも本ラウンドの成果物（長さのヘッダと `split` / `join`）の外にある。仕様は変えず、門番は C の `hado_char_to_string`（スカラ数 1）と、ASCII の `Float.to_string` でスカラ数がバイト数と一致すること（検査 d）を測る。`Float.to_string` の綴りは `char-and-float-conversions` のラウンドで扱う。
+
+着地後（2026-09-27）。PR #49 は `d5ff67c` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。新設した門番は tier full なのでこの走行で回る。
+
+```
+$ git log --oneline -1
+d5ff67c Merge pull request #49 from jozobeer/string-split-linear
+$ gh run list --branch main --limit 3
+completed	success	Merge pull request #49 from jozobeer/string-split-linear	ci	main	push	36270392280	29m26s	2026-09-26T20:41:29Z
+```

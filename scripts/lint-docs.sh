@@ -12,6 +12,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# 検査は assert で書く。-O か PYTHONOPTIMIZE が付くと assert が消え、条件が偽でも黙って
+# 通る。検査を走らせる前に落とす（scripts/verify-spec-model.sh の model_case と同じ門。
+# 門番は -O つきの呼び出しで赤と理由の両方を見る）。
+python3 -c 'import sys
+if not __debug__:
+    sys.exit("lint-docs: assert が無効（PYTHONOPTIMIZE か -O）。付けずに回すこと")' || exit 1
+
 passed=0
 total=0
 check() {
