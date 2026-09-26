@@ -75,10 +75,6 @@ fn cons_parts(pattern: &Pattern) -> Option<(&Pattern, &Pattern)> {
     Some((&args[0], &args[1]))
 }
 
-pub fn canonical_program(ast: &Ast) -> String {
-    items(&ast.items)
-}
-
 fn items(values: &[Item]) -> String {
     values.iter().map(item).collect::<Vec<_>>().join("\n")
 }

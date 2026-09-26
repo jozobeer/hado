@@ -641,49 +641,6 @@ pub fn parse_source(src: &str, path: &str) -> Result<Ast, Diagnostic> {
     parse_source_partial(src, path)?.finish(path)
 }
 
-/// 試作の構文モード（postfix-binding-probe）。既定は `Infix`（今の構文）。
-/// `Postfix` は `e as p ->`・`e ->`・`/if`・`/fn`・`/module`・`/implement` を読む。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Syntax {
-    Infix,
-    Postfix,
-}
-
-/// `syntax` を指定して 1 ファイルを読む。診断が 1 つでもあれば `Err`。
-pub fn parse_source_syntax(src: &str, path: &str, syntax: Syntax) -> Result<Ast, Diagnostic> {
-    let toks = crate::lexer::lex_full(src).map_err(|e| lex_error_to_diag(e, path))?;
-    parse_tokens_partial_syntax(&toks, path, syntax).finish(path)
-}
-
-/// 試作の実測用。`Postfix` で読んだ構文木と、集まった診断（P001 を含む）を返す。
-/// 診断があっても読めたところまでの木を返す。
-pub fn parse_postfix_probe(src: &str, path: &str) -> (Ast, Vec<Diagnostic>) {
-    let toks = match crate::lexer::lex_full(src) {
-        Ok(toks) => toks,
-        Err(error) => {
-            let diagnostic = lex_error_to_diag(error, path);
-            return (
-                Ast {
-                    name_sites: Vec::new(),
-                    items: Vec::new(),
-                    span: Span::point(0, 0),
-                    library: None,
-                    branches_after_fallback: Vec::new(),
-                    branch_anchors: Vec::new(),
-                    branch_spans: Vec::new(),
-                    equality_anchors: Vec::new(),
-                    qualified_type_anchors: Vec::new(),
-                    written_list_patterns: Vec::new(),
-                    long_condition_functions: Vec::new(),
-                },
-                vec![diagnostic],
-            );
-        }
-    };
-    let parsed = parse_tokens_partial_syntax(&toks, path, Syntax::Postfix);
-    (parsed.ast, parsed.diagnostics)
-}
-
 pub(crate) struct PartialParse {
     pub ast: Ast,
     diagnostics: Vec<Diagnostic>,
@@ -734,21 +691,11 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
     parse_tokens_partial(toks, path).finish(path)
 }
 
-/// `syntax` を指定してトークン列を読む（postfix-binding-probe の `--syntax`）。
-pub fn parse_tokens_syntax(toks: &[Tok], path: &str, syntax: Syntax) -> Result<Ast, Diagnostic> {
-    parse_tokens_partial_syntax(toks, path, syntax).finish(path)
-}
-
 fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
-    parse_tokens_partial_syntax(toks, path, Syntax::Infix)
-}
-
-fn parse_tokens_partial_syntax(toks: &[Tok], path: &str, syntax: Syntax) -> PartialParse {
     let mut parser = Parser {
         toks,
         pos: 0,
         path,
-        syntax,
         branches_after_fallback: Vec::new(),
         branch_anchors: Vec::new(),
         branch_spans: Vec::new(),
@@ -780,7 +727,6 @@ struct Parser<'a> {
     toks: &'a [Tok],
     pos: usize,
     path: &'a str,
-    syntax: Syntax,
     branches_after_fallback: Vec<Span>,
     branch_anchors: Vec<(Span, Span)>,
     branch_spans: Vec<(Span, Span, Span)>,
@@ -967,8 +913,8 @@ impl Parser<'_> {
             if context != TypeContext::TopLevel && self.section_boundary() {
                 break;
             }
-            // 後置構文の `/module`・`/implement` は、その中の項目の終わり。
-            if context != TypeContext::TopLevel && self.postfix() && self.at_block_close() {
+            // `/module`・`/implement` は、その中の項目の終わり。
+            if context != TypeContext::TopLevel && self.at_block_close() {
                 break;
             }
             if outer && section_keyword(self.kind()) {
@@ -1180,9 +1126,7 @@ impl Parser<'_> {
             items,
             span,
         });
-        if self.postfix() {
-            self.expect_close(&item, "module", TokKind::KwModule)?;
-        }
+        self.expect_close(&item, "module", TokKind::KwModule)?;
         Ok(item)
     }
 
@@ -1245,11 +1189,9 @@ impl Parser<'_> {
             }
         } else {
             module.items = self.parse_items(TypeContext::Implementation);
-            if self.postfix() {
-                let item = Item::ModuleImpl(module);
-                self.expect_close(&item, "implement", TokKind::KwImplement)?;
-                return Ok(item);
-            }
+            let item = Item::ModuleImpl(module);
+            self.expect_close(&item, "implement", TokKind::KwImplement)?;
+            return Ok(item);
         }
         Ok(Item::ModuleImpl(module))
     }
@@ -1977,26 +1919,9 @@ impl Parser<'_> {
 
     // --- expressions ---
 
-    fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
-        if self.postfix() {
-            return self.parse_expr_postfix();
-        }
-        match self.kind() {
-            TokKind::KwIf => self.parse_branch(),
-            TokKind::KwLet => self.parse_let(),
-            TokKind::KwDo => self.parse_do(),
-            TokKind::KwWith => self.parse_with(),
-            _ => self.parse_pipe(),
-        }
-    }
-
-    fn postfix(&self) -> bool {
-        self.syntax == Syntax::Postfix
-    }
-
-    /// 後置束縛の構文（postfix-binding-probe）の式。`let` と `do` は E100。
+    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` は E100。
     /// `e as p ->`・`e as p? ->`・`e ->` は `Let`・`LetQ`・`DoQ` へ写す。
-    fn parse_expr_postfix(&mut self) -> Result<Node, Diagnostic> {
+    fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::KwLet {
             return Err(self.error(Some("E100"), "`let` is removed; bind with `e as p ->`"));
         }
@@ -2057,7 +1982,7 @@ impl Parser<'_> {
 
     /// 二項演算子の被演算子に `fn` を直接置くのは E100（`10 / fn(x => x)`）。
     fn reject_fn_operand(&self) -> Result<(), Diagnostic> {
-        if self.postfix() && self.kind() == &TokKind::KwFn {
+        if self.kind() == &TokKind::KwFn {
             return Err(self.error(
                 Some("E100"),
                 "`fn` cannot be the operand of a binary operator",
@@ -2066,7 +1991,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    /// P001（試作専用の正準形違反）。`canonical form:` に直した綴りを添える。
+    /// 閉じの不足を E100 として報告する。`canonical form:` に直した綴りを添える。
     fn report_violation(&mut self, span: Span, message: &str, canonical: String) {
         self.diagnostics.push(Diagnostic {
             suggestion: None,
@@ -2076,7 +2001,7 @@ impl Parser<'_> {
             col: span.col,
             end_line: span.end_line,
             end_col: span.end_col,
-            code: Some("P001".into()),
+            code: Some("E100".into()),
             message: format!("{message}; canonical form: {canonical}"),
         });
     }
@@ -2223,7 +2148,7 @@ impl Parser<'_> {
             let op = match self.kind() {
                 TokKind::Star => BinOp::Mul,
                 // `/if`・`/fn`・`/module`・`/implement` の `/` は除算ではない。
-                TokKind::Slash if self.postfix() && self.slash_starts_close() => break,
+                TokKind::Slash if self.slash_starts_close() => break,
                 TokKind::Slash => BinOp::Div,
                 TokKind::Percent => BinOp::Mod,
                 _ => break,
@@ -2287,7 +2212,7 @@ impl Parser<'_> {
     }
 
     fn atom_start(&self) -> bool {
-        if self.postfix() && self.kind() == &TokKind::KwIf {
+        if self.kind() == &TokKind::KwIf {
             return self.if_paren_closes();
         }
         matches!(
@@ -2333,7 +2258,7 @@ impl Parser<'_> {
     }
 
     fn parse_atom(&mut self) -> Result<Node, Diagnostic> {
-        if self.postfix() && self.if_paren_closes() {
+        if self.if_paren_closes() {
             return self.parse_branch_paren();
         }
         let span = self.span();
@@ -2549,14 +2474,10 @@ impl Parser<'_> {
     fn parse_branch(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump(); // `if`
-        if self.postfix() {
-            let node = self.parse_branch_after_if(span)?;
-            return self.finish_branch_postfix(node);
-        }
-        self.parse_branch_after_if(span)
+        let node = self.parse_branch_after_if(span)?;
+        self.finish_branch_postfix(node)
     }
 
-    /// `if` を読んだ後ろ。旧構文と後置構文で共通の本体。
     fn parse_branch_after_if(&mut self, span: Span) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::Pipe {
             return self.parse_cond_branch(span);
@@ -2630,13 +2551,11 @@ impl Parser<'_> {
     /// 次のトークンが、中の構文も閉じる位置か（区切り・閉じ括弧・閉じの印・宣言や
     /// handler の腕の始まり・入力の終わり）。そこに置いた `if(...)` の括弧は余分である。
     fn enclosing_close_follows(&self) -> bool {
+        if self.at_expression_close() {
+            return true;
+        }
         match self.kind() {
-            TokKind::Comma
-            | TokKind::Semicolon
-            | TokKind::RParen
-            | TokKind::RBracket
-            | TokKind::RBrace
-            | TokKind::Eof
+            TokKind::Eof
             | TokKind::KwOnce
             | TokKind::KwAbort
             | TokKind::KwAgain
@@ -2644,6 +2563,36 @@ impl Parser<'_> {
             TokKind::Slash => self.slash_starts_close(),
             kind => declaration_keyword(kind),
         }
+    }
+
+    /// その位置の `,`・`;`・`)`・`]`・`}` が、今読んでいる式の区切りか閉じ括弧か。
+    /// 読んでいる途中で開いた括弧（`Cons(` の `(`、`[`、`{`）は数に入れない。
+    /// 数に入れると `[if a => 1 | 0, 2]` の `,` が式の区切りに見えなくなる。
+    fn at_expression_close(&self) -> bool {
+        if !matches!(
+            self.kind(),
+            TokKind::Comma
+                | TokKind::Semicolon
+                | TokKind::RParen
+                | TokKind::RBracket
+                | TokKind::RBrace
+        ) {
+            return false;
+        }
+        let mut depth = 0usize;
+        for index in (0..self.pos).rev() {
+            match &self.toks[index].kind {
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth += 1,
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                    if depth == 0 {
+                        return true;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+        true
     }
 
     /// 後置構文の裸の `if`。本体に `->` があれば `/if` で閉じる。無ければ
@@ -2987,36 +2936,9 @@ impl Parser<'_> {
         Ok(params)
     }
 
+    /// §12・§12.1: 本体に `->` があれば `fn x => … /fn`、無ければ `fn(x => …)`。
+    /// 不足は E100、余分と食い違いは P001 か E100。
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
-        if self.postfix() {
-            return self.parse_fun_postfix();
-        }
-        let span = self.span();
-        self.bump();
-        self.expect(&TokKind::LParen)?;
-        let (params, body) = if self.kind() == &TokKind::Pipe {
-            // An anonymous `fn` has no name to read back, so the scrutinee keeps
-            // the `fn` keyword's span.
-            self.parse_arm_function(span, span)?
-        } else {
-            let params = self.parse_lambda_params()?;
-            let body = self.parse_function_body(span)?;
-            (params, body)
-        };
-        self.expect(&TokKind::RParen)?;
-        let end = self.last_end();
-        Ok(Node {
-            kind: NodeKind::Fn {
-                params,
-                body: Box::new(body),
-            },
-            span: span.until(end),
-        })
-    }
-
-    /// 後置構文の `fn`。本体に `->` があれば `fn x => … /fn`、無ければ
-    /// 今の `fn(x => …)` のまま。食い違いと不足・余分は P001 か E100。
-    fn parse_fun_postfix(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump(); // `fn`
         if self.kind() == &TokKind::LParen {
@@ -3093,53 +3015,6 @@ impl Parser<'_> {
             self.report_violation(span, "`fn` is not closed; close it with `/fn`", canonical);
         }
         Ok(node)
-    }
-
-    fn parse_let(&mut self) -> Result<Node, Diagnostic> {
-        let span = self.span();
-        self.bump();
-        let pat = self.parse_pattern()?;
-        let question = self.kind() == &TokKind::Question;
-        if question {
-            self.bump();
-        }
-        self.expect(&TokKind::Eq)?;
-        let value = self.parse_expr()?;
-        self.expect(&TokKind::DashArrow)?;
-        let body = self.parse_expr()?;
-        let kind = if question {
-            NodeKind::LetQ {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
-        } else {
-            NodeKind::Let {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
-        };
-        Ok(Node {
-            kind,
-            span: self.to(span),
-        })
-    }
-
-    fn parse_do(&mut self) -> Result<Node, Diagnostic> {
-        let span = self.span();
-        self.bump();
-        let value = self.parse_expr()?;
-        self.expect(&TokKind::DashArrow)?;
-        let body = self.parse_expr()?;
-        let end = self.last_end();
-        Ok(Node {
-            kind: NodeKind::DoQ {
-                value: Box::new(value),
-                body: Box::new(body),
-            },
-            span: span.until(end),
-        })
     }
 
     fn parse_with(&mut self) -> Result<Node, Diagnostic> {
@@ -3681,15 +3556,15 @@ mod tests;
 
 #[path = "source_print.rs"]
 mod source_print;
-pub use source_print::canonical_program;
 pub(crate) use source_print::{
     arm_function as arm_function_source, item_source, list_pattern as list_pattern_source,
 };
 
 #[path = "postfix_print.rs"]
 mod postfix_print;
-pub use postfix_print::program as postfix_program;
-/// 構文木を後置束縛の綴りで 1 行に印字する（P001 の `canonical form:` と実測に使う）。
+/// §57・§58.1: 正準形（`fmt`・`--fix`・診断の `canonical form:`）の綴り。
+pub use postfix_print::program as canonical_program;
+/// 構文木を後置束縛の綴りで 1 行に印字する（実測に使う）。
 pub fn postfix_node_text(node: &Node) -> String {
     postfix_print::node_text(node)
 }

@@ -1,9 +1,7 @@
-//! 試作の後置束縛構文（postfix-binding-probe）向けの印字器。
+//! §57・§58.1 の正準形の印字器。
 //!
-//! `docs/issues/postfix-binding.md` の推奨（`e as p ->`・`e ->`）と、`if` の
-//! 後ろの有力案（本体に `->` があれば `/if`、無ければ続きがあるときだけ
-//! `if(...)`）で、既存の構文木を 1 通りに綴る。既定の経路（`fmt`・
-//! `canonical_program`）はこのモジュールを使わない。
+//! `e as p ->`・`e ->` の束縛と、`if` の閉じ（本体に `->` があれば `/if`、
+//! 無ければ続きがあるときだけ `if(...)`）で、構文木を 1 通りに綴る。
 //!
 //! 綴りは構文木から決まる。`if` の本体（腕と fallback）に束縛が 1 つでも
 //! あれば `/if` で閉じ、無ければ「続きがある位置」では `if(...)`、末尾では
@@ -479,8 +477,20 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
 
 /// 区切り（`,`・`;`）か閉じ括弧（`)`・`]`・`}`）が後ろに来る位置。そこで中の構文も
 /// 閉じるので、末尾と同じく印を付けない。
+/// 区切りの前の式。`if` は閉じの印を付けず、区切り（`,`・`)` など）に閉じさせる。
+/// `fn` は常に閉じるので、区切りの前でも閉じた綴りになる。
 fn enclosed(node: &Node, indent: usize) -> String {
     expr(node, indent, true)
+}
+
+/// 並置の引数に置く式。区切りの前と同じ扱いにする（§12.1）。
+fn single_argument(node: &Node, indent: usize) -> String {
+    match &node.kind {
+        NodeKind::BoolBranch { .. }
+        | NodeKind::CondBranch { .. }
+        | NodeKind::PatternBranch { .. } => enclosed(node, indent),
+        _ => expr(node, indent, false),
+    }
 }
 
 fn wrap(text: String, prec: u8, min: u8) -> String {
@@ -607,7 +617,7 @@ fn with_args(args: &[Node], indent: usize) -> String {
         format!(
             "({})",
             args.iter()
-                .map(|arg| expr(arg, indent, false))
+                .map(|arg| single_argument(arg, indent))
                 .collect::<Vec<_>>()
                 .join(", ")
         )

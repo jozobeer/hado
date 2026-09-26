@@ -5523,8 +5523,8 @@ mod tests {
     #[test]
     fn computed_callees_lower_as_closure_calls() {
         for source in [
-            "def main = (let chosen = f -> chosen) 3",
-            "def main = 3 |> (let chosen = f -> chosen)",
+            "def main = (f as chosen -> chosen) 3",
+            "def main = 3 |> (f as chosen -> chosen)",
         ] {
             let ast = crate::parser::parse_source(source, "t").unwrap();
             let mut lowerer = Lowerer::default();
