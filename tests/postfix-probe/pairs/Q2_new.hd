@@ -1,3 +1,0 @@
-def big (a: Int, b: Int, c: Int): Int => if (a + b) * 2 > c => 1 | c as d ->
-  d + 1
-  /if

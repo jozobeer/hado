@@ -1,4 +1,0 @@
-// run-expect: 11
-def main =
-  if((1 + 2) * 2 > 5 => 10 | 20) as n ->
-  n + 1

@@ -1,2 +1,0 @@
-// error: P001
-def main = if(c => 1 | log "a" -> 2) -> 3

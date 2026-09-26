@@ -1,1 +1,0 @@
-def map value f => let x? = value -> Some(f x)

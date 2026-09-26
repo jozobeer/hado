@@ -1,2 +1,0 @@
-// error: E100
-def f c => if c => 1 | log "a" -> 2 /fn

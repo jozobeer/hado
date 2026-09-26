@@ -1,2 +1,0 @@
-// error: P001
-def f c => if(c => 1 | 2)

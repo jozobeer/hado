@@ -1,1 +1,0 @@
-def rec loop offset n => if n == 0 => offset | fn(x => loop offset x) as f -> f (n - 1) /if

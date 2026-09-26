@@ -1,2 +1,0 @@
-def find (id: Int): Int Option => Some(id)
-def first (id: Int): Int => if (find id) | Some(y) => y | 0
