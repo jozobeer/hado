@@ -3267,14 +3267,15 @@ impl Lowerer {
             .ok_or_else(|| "again handler missing answer".into())
     }
 
-    // 効果行の効果を捕まえる handler がこの文脈にあれば、その答えを返す。
+    // 効果行の効果を捕まえる handler がこの文脈にあれば、その答えを返す。同じ
+    // 効果を捕まえる handler が入れ子のときは内側を選ぶ（`handler_for` と同じ）。
     fn answer_for_row(&self, row: &crate::types::Row) -> Option<Type> {
         let labels = match row {
             crate::types::Row::Closed(labels) | crate::types::Row::Open(_, labels) => labels,
             crate::types::Row::Var(_) => return None,
         };
         let names: Vec<String> = labels.iter().map(crate::types::effect_ctor).collect();
-        for (index, handler) in self.handler_stack.iter().enumerate() {
+        for (index, handler) in self.handler_stack.iter().enumerate().rev() {
             if self.arm_handlers.contains(&index) {
                 continue;
             }
@@ -4384,7 +4385,7 @@ impl Lowerer {
     // propagation handler の答えに落ちる。入れ子の handler で答えが食い違う
     // 場合は、この選択が yield を捕まえる handler と一致しないことがある。
     fn callback_answer(&self) -> Result<Option<Type>, String> {
-        for (index, handler) in self.handler_stack.iter().enumerate() {
+        for (index, handler) in self.handler_stack.iter().enumerate().rev() {
             if self.arm_handlers.contains(&index) || !Self::handler_has_propagation_ops(handler) {
                 continue;
             }
@@ -4397,7 +4398,7 @@ impl Lowerer {
     }
 
     fn specialization_answer(&self, scheme: &crate::types::Scheme) -> Result<Option<Type>, String> {
-        for (index, handler) in self.handler_stack.iter().enumerate() {
+        for (index, handler) in self.handler_stack.iter().enumerate().rev() {
             // 腕の本体から呼ぶ callee を、その腕の handler では捕まえない。
             if self.arm_handlers.contains(&index) {
                 continue;
