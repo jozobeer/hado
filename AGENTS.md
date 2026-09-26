@@ -2,14 +2,14 @@
 
 ## 読む順
 
-1. `docs/plan.md` — 開発計画と版ごとの決定記録。ラウンドの手順書は `docs/rounds/`
+1. `docs/plan.md` — 凍結した開発計画と版ごとの決定記録。以後の計画は `docs/plans/<名前>.md`、ラウンドの手順書は `docs/rounds/`
 2. `docs/rounds.md` — ラウンドの識別子・ファイルの形・門番の宣言行
 3. `docs/issues.md` — 次にやる候補の置き方。候補は `docs/issues/<slug>.md`、着手でラウンドの slug になる
 4. `docs/corpus.md` — コーパスと門番の規約
 5. `docs/spec.md` — 言語仕様。全ての判断の根拠
 6. `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）。以後の実測は各 `docs/rounds/<slug>.md`
 
-`docs/` の文書は常に現行版で、過去の版は git tag（`v0.1` など）が持つ。文書が食い違ったら仕様本文を正とし、食い違いを報告に書く。計画の中での優先順位は `docs/plan.md` が示す。版をまたぐ作業の計画は 1 本 1 ファイルで `docs/plans/<名前>.md` に置き、`docs/plan.md` に節を足さない。
+`docs/` の文書は常に現行版で、過去の版は git tag（`v0.1` など）が持つ。文書が食い違ったら仕様本文を正とし、食い違いを報告に書く。計画の中での優先順位は `docs/plan.md` が示す。`docs/plan.md` は凍結した記録である（`scripts/frozen-docs-lock.sh` が書き換えを見る）。版をまたぐ作業の計画は 1 本 1 ファイルで `docs/plans/<名前>.md` に置く。
 
 ## 環境
 
@@ -44,7 +44,7 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 - **木が変わらないなら門番を回さない。** コミットメッセージの言い直しや履歴の整理のように、追跡ファイルの中身が変わらない変更では `cargo test` も層別も回さない。
 - **門番の走行中は木を触らない。** `verify-m1-corpus.sh` の検査 7 は `docs` `runtime` `scripts` を開始時に固定する。全走と文書の編集は直列にする（走行中の編集は `protected-files-changed-during-verification` の偽の赤になる）
 - **仕様に疑義が出たら仕様を変えない。** 解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める
-- **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）。`docs/plan.md` に残る版ごとの決定（`v0.x の範囲と決定`）と門番基盤の節は、並走させず 1 本のラウンドが順に書く。2 本が同じ版の表を触るなら、先に着地する側を決めてから始める。
+- **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）。`docs/plan.md` と `docs/ledger.md` は凍結した記録である（`scripts/frozen-docs-lock.sh` が書き換えを見る）。版ごとの決定と版をまたぐ計画は `docs/plans/<名前>.md` が持つ。2 本が同じ版の表を触るなら、先に着地する側を決めてから始める。
 - **門番は自分の層とラウンドを宣言する。** 新しい `scripts/verify-*.sh` は冒頭に `# tier: quick|core|full` と `# round: <slug>` を置く。`scripts/lib/gate-tiers.sh` に一覧は無い
 - **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから `bash scripts/corpus-lock.sh` で作り直す。説明できない行があれば作り直さずに止めて報告する。そのラウンドの門番と quick 層を回してから PR にする。着地後の全走は main を checkout した側が回し、結果は同じ `docs/rounds/<slug>.md` の `## 実測` に追記する `docs:` コミット 1 本を PR で足す（main に直接は書かない）
 
