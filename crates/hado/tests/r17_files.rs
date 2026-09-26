@@ -272,8 +272,6 @@ fn every_source_file_is_checked_and_other_extensions_are_ignored() {
         "implement",
     );
     std::fs::remove_file(case.0.join("unused.hd")).unwrap();
-    // A body that fails to parse inside an `implement` is reported as the
-    // unclosed `implement` at its own keyword, so the anchor is that keyword.
     case.write("broken.hd", "implement S as M\ndef broken = [)\n/implement");
     case.reject(
         "build",
@@ -281,7 +279,7 @@ fn every_source_file_is_checked_and_other_extensions_are_ignored() {
         "broken.hd",
         "implement S as M\ndef broken = [)\n/implement",
         "E100",
-        "implement",
+        ")",
     );
 }
 

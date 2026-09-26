@@ -108,7 +108,7 @@ fn section_errors_preserve_namespace_and_declaration_anchors() {
             ("def main = 1\nmodule Unused\ndef run(x: Int): Int\n/module", "E513", "module Unused"),
             ("def main = 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as Unused\ndef run x => x + 1\n/implement", "E513", "implement S"),
             ("def main = 1\nimplement Missing as M\ndef run x => x + 1\n/implement", "E204", "Missing"),
-            ("def main = 1\nmodule S\ntype T = Int\n/module", "E100", "module S"),
+            ("def main = 1\nmodule S\ntype T = Int\n/module", "E100", "= Int"),
             ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as M\ntype U = Int\ndef run x => x + 1\n/implement", "E204", "U ="),
             ("def main = M.run 1\nmodule S\ndef run(x: Int): Bool\n/module\nimplement S as M\ndef run x => x + 1\n/implement", "E602", "implement S"),
             ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as M\ndef dead x => x + 2\ndef run x => x + 1\n/implement", "E514", "def dead"),

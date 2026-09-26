@@ -115,7 +115,7 @@ fn a_contract_is_not_blamed_for_a_candidate_whose_root_does_not_contain_it() {
     // §58.5 merges the candidates that read the contract. `app/main.hd` walks
     // `app/`, so it can never read the sibling `api/store.hdi`; its refusal is
     // about an unrelated nested project and must not surface on the contract.
-    let contract = "module M\ndef f (x: Int): Int\n";
+    let contract = "module M\ndef f (x: Int): Int\n/module\n";
     let root = workspace(&[
         ("api/store.hdi", contract),
         ("app/main.hd", "def main = 1\n"),
@@ -136,7 +136,7 @@ fn distinct_refusals_are_not_deduplicated() {
     // with a message relative to its own root. §58.5 merges candidate results
     // with only duplicates removed, so both must survive even though both sit at
     // line 1, column 1.
-    let contract = "module M\ndef f (x: Int): Int\n";
+    let contract = "module M\ndef f (x: Int): Int\n/module\n";
     let root = workspace(&[
         ("a/api/store.hdi", contract),
         ("a/api/y.hd", "def y = 1\n"),
