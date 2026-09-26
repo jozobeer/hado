@@ -10,6 +10,19 @@ struct Generator {
     declarations: usize,
     allow_resume: bool,
     library_emitted: bool,
+    /// 直前の生成で `->` の束縛を綴ったか。`capture` が区間ごとに数える。
+    continuation: bool,
+    /// `fn(...)` の本体・腕と、pattern の腕の条件列（`arm_conditions`）を
+    /// 組んでいる深さ。>0 の間は `->` の束縛を綴らない。どちらも `fn(...)`
+    /// の腕に置ける閉じの綴りが無く、正準形が `fn(...)`・`if … /if` のままに
+    /// なって往復しないため（§12・§12.1・§26.1）。
+    sealed_depth: usize,
+    /// 直前の生成式の根が単項 `-`（Neg）か。`- - x` は正準形で `--x` と綴られ、
+    /// コメントの印（E104）に読まれるため、`-` の被演算子には Neg を置かない。
+    neg: bool,
+    /// 直前の生成式の正準形が `fn` で始まるか。二項演算子の右被演算子に
+    /// `fn` を直に置けない（E100）ため、右被演算子では `not` を挟む。
+    fn_head: bool,
 }
 
 impl Generator {
@@ -34,6 +47,28 @@ impl Generator {
             .or_insert_with(|| vec![false; count]);
         assert_eq!(visited.len(), count, "inconsistent alternatives for {rule}");
         visited[choice] = true;
+    }
+
+    /// 式を生成し、その中に `->` の束縛があるかを返す。`if` の本体と `fn` の
+    /// 本体は、束縛の有無で閉じの印が変わる（§12.1）。返した真偽は外側の
+    /// 判定にも引き継ぐ（束縛は入れ子のどこにあっても数える）。
+    fn capture<T>(&mut self, generate: impl FnOnce(&mut Self) -> T) -> (T, bool) {
+        let saved = self.continuation;
+        self.continuation = false;
+        let value = generate(self);
+        let had = self.continuation;
+        self.continuation = saved || had;
+        (value, had)
+    }
+
+    /// `if` の条件や scrutinee、`with` の引数のように、束縛があっても閉じの
+    /// 判定に数えない位置の式を生成する（§12.1 の `contains_continuation`）。
+    fn disregard<T>(&mut self, generate: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = self.continuation;
+        self.continuation = false;
+        let value = generate(self);
+        self.continuation = saved;
+        value
     }
 
     fn name(&mut self, upper: bool) -> String {
@@ -264,7 +299,11 @@ impl Generator {
             self.declarations += 1;
             items.push_str(&format!(" type {abstract_name}"));
         }
-        (format!("module {name} {items}"), name, abstract_name)
+        (
+            format!("module {name} {items} /module"),
+            name,
+            abstract_name,
+        )
     }
 
     fn module_item(&mut self) -> String {
@@ -298,7 +337,7 @@ impl Generator {
         let count = self.choose("implement_item*", 3);
         let items = self.list(count, |g| g.implement_item(&abstract_name), " ");
         format!(
-            "{signature}\nimplement {sig_name} as {} {items}",
+            "{signature}\nimplement {sig_name} as {} {items}\n/implement",
             self.name(true)
         )
     }
@@ -324,7 +363,7 @@ impl Generator {
         } else {
             ""
         };
-        (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) {shared}type {abstract_name} = Int", self.path()), sig_name, name)
+        (format!("{signature}\nimplement {}{sig_name} as {name} ( {params} ) {shared}type {abstract_name} = Int\n/implement", self.path()), sig_name, name)
     }
 
     fn apply_section(&mut self) -> String {
@@ -374,13 +413,17 @@ impl Generator {
     }
 
     fn prefix(&mut self, depth: usize, in_arm: bool) -> String {
+        if self.sealed_depth > 0 {
+            // `fn` の本体では `->` を綴れない（§12.1）。ここは pipe に限る。
+            return self.pipe(depth, in_arm);
+        }
         let choice = self.random(if in_arm { 3 } else { 5 });
         self.prefix_variant(depth, in_arm, choice)
     }
 
     fn prefix_variant(&mut self, depth: usize, in_arm: bool, choice: usize) -> String {
         self.mark("prefix_form", 5, choice);
-        match choice {
+        let source = match choice {
             0 | 1 => {
                 self.mark(
                     if choice == 0 {
@@ -391,25 +434,27 @@ impl Generator {
                     1,
                     0,
                 );
-                format!(
-                    "let {}{} = ( {} ) -> {}",
-                    self.pattern(2),
-                    if choice == 0 { "" } else { "?" },
-                    self.expression(depth, in_arm),
-                    self.expression(depth, in_arm)
-                )
+                let pattern = self.pattern(2);
+                let question = if choice == 0 { "" } else { "?" };
+                let (value, _) = self.capture(|g| g.expression(depth, in_arm));
+                let (body, _) = self.capture(|g| g.expression(depth, in_arm));
+                self.continuation = true;
+                format!("( {value} ) as {pattern}{question} -> {body}")
             }
             2 => {
                 self.mark("rail_discard", 1, 0);
-                format!(
-                    "do ( {} ) -> {}",
-                    self.expression(depth, in_arm),
-                    self.expression(depth, in_arm)
-                )
+                let (value, _) = self.capture(|g| g.expression(depth, in_arm));
+                let (body, _) = self.capture(|g| g.expression(depth, in_arm));
+                self.continuation = true;
+                format!("( {value} ) -> {body}")
             }
             3 => self.with_form(depth, in_arm),
             _ => self.branch(depth),
-        }
+        };
+        // 束縛・rail・with・分岐は根が Neg にならず、`fn` で始まらない。
+        self.neg = false;
+        self.fn_head = false;
+        source
     }
 
     fn with_form(&mut self, depth: usize, in_arm: bool) -> String {
@@ -421,12 +466,12 @@ impl Generator {
         } else {
             self.mark("with_args", 1, 0);
             let count = self.random(3) + 1;
-            format!(
-                "( {} )",
-                self.list(count, |g| g.expression(depth, in_arm), " , ")
-            )
+            // `with` の引数は括弧が閉じるので、束縛の有無を本体へ数えない。
+            let items = self.disregard(|g| g.list(count, |h| h.expression(depth, in_arm), " , "));
+            format!("( {items} )")
         };
-        format!("with {handler}{args} -> {}", self.expression(depth, in_arm))
+        let (body, _) = self.capture(|g| g.expression(depth, in_arm));
+        format!("with {handler}{args} -> {body}")
     }
 
     fn result(&mut self, depth: usize) -> String {
@@ -554,7 +599,10 @@ impl Generator {
         } else {
             self.choose("lambda", 3)
         };
-        if choice == 0 {
+        // `fn(...)` の腕と本体には `->` を綴らない。腕に束縛を置く綴りが
+        // `fn … /fn` に無く、正準形が往復しないため（§12・§12.1）。
+        self.sealed_depth += 1;
+        let source = if choice == 0 {
             format!(
                 "fn ( {} => {} )",
                 self.lambda_params(),
@@ -568,7 +616,9 @@ impl Generator {
                 self.lambda_params(),
                 self.condition_arms(depth)
             )
-        }
+        };
+        self.sealed_depth -= 1;
+        source
     }
 
     fn lambda_params(&mut self) -> String {
@@ -589,15 +639,22 @@ impl Generator {
 
     fn pipe(&mut self, depth: usize, in_arm: bool) -> String {
         let mut source = self.binary(0, depth, in_arm);
+        // 先頭の綴り（`fn` か）は左端の被演算子が決める。
+        let head = self.fn_head;
         let count = if depth == 0 {
             0
         } else {
             self.choose("pipe", 3)
         };
         self.mark("pipe", 3, count);
+        if count > 0 {
+            // `|>` が付くと根はパイプになり Neg ではなくなる。
+            self.neg = false;
+        }
         for _ in 0..count {
             source.push_str(&format!(" |> {}", self.pipe_target(depth - 1, in_arm)));
         }
+        self.fn_head = head;
         source
     }
 
@@ -608,10 +665,13 @@ impl Generator {
             format!("{} . {}", self.upper_reference(), self.name(false))
         };
         let count = self.choose("pipe_arguments", 3);
-        format!(
+        let target = format!(
             "{head} {}",
             self.list(count, |g| g.primary(depth, in_arm), " ")
-        )
+        );
+        self.neg = false;
+        self.fn_head = false;
+        target
     }
 
     fn binary(&mut self, level: usize, depth: usize, in_arm: bool) -> String {
@@ -627,6 +687,8 @@ impl Generator {
         }
         let (rule, operators) = RULES[level];
         let mut source = self.binary(level + 1, depth, in_arm);
+        // 二項演算子の左端は左被演算子なので、先頭の綴りは左が決める。
+        let head = self.fn_head;
         let count = if depth == 0 || self.random(4) != 0 {
             0
         } else if rule == "compare" {
@@ -645,12 +707,20 @@ impl Generator {
         for _ in 0..count {
             let operator = self.random(operators.len());
             self.mark(rule, operators.len() + 1, operator + 1);
-            source.push_str(&format!(
-                " {} {}",
-                operators[operator],
-                self.binary(level + 1, depth - 1, in_arm)
-            ));
+            let right = self.binary(level + 1, depth - 1, in_arm);
+            // 演算子の直後に `fn` を置けない（E100、§7・§12.1）。`not` を挟む。
+            let right = if self.fn_head {
+                format!("not {right}")
+            } else {
+                right
+            };
+            source.push_str(&format!(" {} {}", operators[operator], right));
         }
+        if count > 0 {
+            // 二項演算子が付くと根はその演算になり Neg ではなくなる。
+            self.neg = false;
+        }
+        self.fn_head = head;
         source
     }
 
@@ -658,9 +728,40 @@ impl Generator {
         let choice = if depth == 0 { 2 } else { self.random(3) };
         self.mark("unary", 3, choice);
         match choice {
-            0 => format!("- {}", self.unary(depth - 1, in_arm)),
-            1 => format!("not {}", self.unary(depth - 1, in_arm)),
+            0 => {
+                let operand = self.unary_operand(depth - 1, in_arm);
+                self.fn_head = false;
+                if self.neg {
+                    // `-` の被演算子が Neg だと `--` と綴られてコメントの印に
+                    // 読まれる（E104）。`not` を挟んで根を Neg から外す。
+                    self.neg = false;
+                    format!("not {operand}")
+                } else {
+                    self.neg = true;
+                    format!("- {operand}")
+                }
+            }
+            1 => {
+                let operand = self.unary(depth - 1, in_arm);
+                self.neg = false;
+                self.fn_head = false;
+                format!("not {operand}")
+            }
             _ => self.application(depth, in_arm),
+        }
+    }
+
+    /// `-` の被演算子。単項 `-` を根に置かず、`--` を避ける。
+    fn unary_operand(&mut self, depth: usize, in_arm: bool) -> String {
+        let choice = if depth == 0 { 2 } else { self.random(2) + 1 };
+        self.mark("unary", 3, choice);
+        if choice == 1 {
+            let inner = self.unary(depth - 1, in_arm);
+            self.neg = false;
+            self.fn_head = false;
+            format!("not {inner}")
+        } else {
+            self.application(depth, in_arm)
         }
     }
 
@@ -675,14 +776,18 @@ impl Generator {
             return self.postfix(depth, in_arm);
         }
         let head = self.callee(depth - 1, in_arm);
-        format!(
-            "{head} {}",
-            self.list(count, |g| g.postfix(depth - 1, in_arm), " ")
-        )
+        // 適用の先頭は callee が決める。
+        let fn_head = self.fn_head;
+        let arguments = self.list(count, |g| g.postfix(depth - 1, in_arm), " ");
+        // 適用は根が Neg にならない。
+        self.neg = false;
+        self.fn_head = fn_head;
+        format!("{head} {arguments}")
     }
 
     fn callee(&mut self, depth: usize, in_arm: bool) -> String {
-        match self.choose("callee", 5) {
+        let choice = self.choose("callee", 5);
+        let callee = match choice {
             0 => self.name(false),
             1 => {
                 self.mark("dunder_name", 1, 0);
@@ -692,12 +797,20 @@ impl Generator {
             2 => format!("{} . {}", self.upper_reference(), self.name(false)),
             3 => format!("{} . {}", self.name(false), self.name(false)),
             _ => format!("( {} )", self.lambda(depth, in_arm)),
-        }
+        };
+        self.neg = false;
+        // ラムダを頭に置くと正準形が `fn` で始まる。
+        self.fn_head = choice == 4;
+        callee
     }
 
     fn postfix(&mut self, depth: usize, in_arm: bool) -> String {
         let mut source = self.primary(depth, in_arm);
         let count = self.choose("postfix", 3);
+        // `.name` が付くと根はフィールド参照になり Neg ではなくなる。
+        if count > 0 {
+            self.neg = false;
+        }
         for _ in 0..count {
             source.push_str(&format!(" . {}", self.name(false)));
         }
@@ -707,6 +820,8 @@ impl Generator {
     fn primary(&mut self, depth: usize, in_arm: bool) -> String {
         if self.allow_resume && self.random(3) == 0 {
             self.mark("primary", 15, 14);
+            self.neg = false;
+            self.fn_head = false;
             return "resume".into();
         }
         let alternatives = if depth == 0 {
@@ -716,7 +831,9 @@ impl Generator {
         };
         let choice = alternatives[self.random(alternatives.len())];
         self.mark("primary", 15, choice);
-        match choice {
+        // 括弧だけが Neg と `fn` の頭をそのまま通す。他の綴りは根が Neg や
+        // `fn` にならない。
+        let source = match choice {
             0..=5 => self.literal(choice),
             6 => self.name(false),
             8 => format!("{} . {}", self.upper_reference(), self.name(false)),
@@ -727,9 +844,20 @@ impl Generator {
             9 => self.constructor_expr(depth - 1, in_arm),
             10 => self.record_expr(depth - 1, in_arm),
             11 => self.list_expr(depth - 1, in_arm),
-            12 => self.lambda(depth - 1, in_arm),
-            _ => format!("( {} )", self.expression(depth - 1, in_arm)),
-        }
+            12 => {
+                let lambda = self.lambda(depth - 1, in_arm);
+                self.neg = false;
+                self.fn_head = true;
+                return lambda;
+            }
+            _ => {
+                let inner = self.expression(depth - 1, in_arm);
+                return format!("( {inner} )");
+            }
+        };
+        self.neg = false;
+        self.fn_head = false;
+        source
     }
 
     fn literal(&mut self, choice: usize) -> String {
@@ -821,19 +949,21 @@ impl Generator {
     }
 
     fn branch(&mut self, depth: usize) -> String {
-        match self.choose("branch", 3) {
+        let source = match self.choose("branch", 3) {
             0 => {
                 self.mark("boolean_branch", 1, 0);
+                let condition = self.disregard(|g| g.pipe(depth, true));
+                let (then, then_arrow) = self.capture(|g| g.arm_body(depth));
+                let (els, els_arrow) = self.capture(|g| g.arm_body(depth));
                 format!(
-                    "if {} => {} | {}",
-                    self.pipe(depth, true),
-                    self.arm_body(depth),
-                    self.arm_body(depth)
+                    "if {condition} => {then} | {els}{}",
+                    if then_arrow || els_arrow { " /if" } else { "" }
                 )
             }
             1 => {
                 self.mark("condition_branch", 1, 0);
-                format!("if {}", self.condition_arms(depth))
+                let (arms, arrow) = self.capture(|g| g.condition_arms(depth));
+                format!("if {arms}{}", if arrow { " /if" } else { "" })
             }
             _ => {
                 self.mark("pattern_branch", 1, 0);
@@ -842,10 +972,16 @@ impl Generator {
                 } else {
                     self.random(2) + 2
                 };
-                let scrutinees = self.list(columns, |g| g.pipe(depth, true), " , ");
-                format!("if {scrutinees} {}", self.pattern_arms(depth, columns))
+                let scrutinees =
+                    self.disregard(|g| g.list(columns, |h| h.pipe(depth, true), " , "));
+                let (arms, arrow) = self.capture(|g| g.pattern_arms(depth, columns));
+                format!("if {scrutinees} {arms}{}", if arrow { " /if" } else { "" })
             }
-        }
+        };
+        // 分岐は根が Neg にならず、`fn` で始まらない。
+        self.neg = false;
+        self.fn_head = false;
+        source
     }
 
     fn condition_arms(&mut self, depth: usize) -> String {
@@ -855,11 +991,14 @@ impl Generator {
             count,
             |g| {
                 g.mark("condition_arm", 1, 0);
-                format!("| {} => {}", g.pipe(depth, true), g.arm_body(depth))
+                let condition = g.disregard(|h| h.pipe(depth, true));
+                let body = g.arm_body(depth);
+                format!("| {condition} => {body}")
             },
             " ",
         );
-        format!("{arms} | {}", self.arm_body(depth))
+        let fallback = self.arm_body(depth);
+        format!("{arms} | {fallback}")
     }
 
     fn pattern_arms(&mut self, depth: usize, columns: usize) -> String {
@@ -880,21 +1019,33 @@ impl Generator {
     fn pattern_arm(&mut self, depth: usize, columns: usize) -> String {
         self.mark("pattern_column*", 2, usize::from(columns > 1));
         let patterns = self.list(columns, |g| g.pattern(2), " , ");
-        let body = if self.choose("pattern_arm", 2) == 0 {
-            self.arm_body(depth)
-        } else {
+        let arm_conditions = self.choose("pattern_arm", 2) == 1;
+        // `fn(| … )` の腕に条件列を置くと、正準形が `fn( | p => if(…))` に
+        // なって入れ子の分岐（E101）に読まれる。lambda の中では腕の本体に限る。
+        let body = if arm_conditions && self.sealed_depth == 0 {
             self.arm_conditions(depth)
+        } else {
+            self.arm_body(depth)
         };
         format!("| {patterns} => {body}")
     }
 
     fn arm_conditions(&mut self, depth: usize) -> String {
         self.mark("arm_conditions", 1, 0);
-        format!("if {}", self.condition_arms(depth))
+        // 腕の条件列は素の `if` で終わり、閉じの印を置けない。中に `->` を
+        // 綴ると正準形が `/if` を足して往復しないため、ここでは綴らない。
+        self.sealed_depth += 1;
+        let conditions = self.condition_arms(depth);
+        self.sealed_depth -= 1;
+        format!("if {conditions}")
     }
 
     fn arm_body(&mut self, depth: usize) -> String {
-        let choice = if depth == 0 { 0 } else { self.random(4) };
+        let choice = if depth == 0 || self.sealed_depth > 0 {
+            0
+        } else {
+            self.random(4)
+        };
         self.mark("arm_body", 4, choice);
         if choice == 0 {
             self.pipe(depth, true)

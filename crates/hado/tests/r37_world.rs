@@ -170,7 +170,7 @@ fn default_definitions_are_required_and_checked_after_inference() {
             Some("E301"),
         ),
     ] {
-        let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\nimplement WorldDefault as WorldDefault\n{definition}\n");
+        let source = format!("{prefix}{operation}\nmodule WorldDefault\n{signature}\n/module\nimplement WorldDefault as WorldDefault\n{definition}\n/implement");
         // Logical stdlib/ skips the implicit prelude so this probe can declare
         // its own `effect Error` without colliding with prelude Error (E205).
         let result = hado::check_source(&source, "stdlib/default_probe.hd");
@@ -355,8 +355,8 @@ int32_t hado_entry(void) {
 fn write_file_does_not_truncate_a_path_at_an_embedded_nul() {
     let case = Case::new(
         r#"def main =
-  do write_file "keep" (Bytes.of_string "original") ->
-  do write_file (Bytes.to_string (Bytes.of_list [107, 101, 101, 112, 0, 120])) (Bytes.of_string "overwritten") ->
+  write_file "keep" (Bytes.of_string "original") ->
+  write_file (Bytes.to_string (Bytes.of_list [107, 101, 101, 112, 0, 120])) (Bytes.of_string "overwritten") ->
   0
 "#,
     );
