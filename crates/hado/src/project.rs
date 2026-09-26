@@ -1,5 +1,5 @@
 use crate::lexer::{Tok, TokKind};
-use crate::parser::{Ast, Diagnostic, Related, Span, Syntax};
+use crate::parser::{Ast, Diagnostic, Related, Span};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -39,23 +39,14 @@ impl Project {
         Self::load_with_overlay(entry, &Overlay::new())
     }
 
-    /// 試作の構文モード（postfix-binding-probe）。既定は `Syntax::Infix`。
-    pub fn load_with_syntax(entry: &Path, syntax: Syntax) -> Result<Self, LoadError> {
-        Self::load_inner(entry, &Overlay::new(), syntax)
-    }
-
     /// §58: `load`, reading a source through `overlay` when the overlay holds
     /// its path. The LSP checks a document the editor has not saved, so the
     /// bytes behind a position must come from the overlay rather than disk.
     pub fn load_with_overlay(entry: &Path, overlay: &Overlay) -> Result<Self, LoadError> {
-        Self::load_inner(entry, overlay, Syntax::Infix)
-    }
-
-    fn load_inner(entry: &Path, overlay: &Overlay, syntax: Syntax) -> Result<Self, LoadError> {
         let (token_files, directories) = read_files(entry, overlay)?;
         let files: Vec<_> = token_files.iter().map(|file| file.source.clone()).collect();
         let (libraries, duplicate_library) = library_roots(&token_files);
-        let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries, syntax)?;
+        let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
         let library_error = library_main.map(|span| Diagnostic {
             suggestion: None,
             related: None,
@@ -665,13 +656,12 @@ fn read_file(
 fn parse_files(
     files: &[TokenFile],
     libraries: &BTreeSet<Vec<String>>,
-    syntax: Syntax,
 ) -> Result<(Ast, Vec<String>, Option<Span>), Diagnostic> {
-    let mut ast = parse_file(&files[0], libraries, syntax)?;
+    let mut ast = parse_file(&files[0], libraries)?;
     let mut library_main = library_main_span(&ast, &files[0].source.directory, libraries);
     let mut roots = crate::file_scopes::isolate(&mut ast, 0);
     for (index, file) in files.iter().enumerate().skip(1) {
-        let mut parsed = parse_file(file, libraries, syntax).map_err(|mut error| {
+        let mut parsed = parse_file(file, libraries).map_err(|mut error| {
             error.line -= file.source.offset;
             error
         })?;
@@ -684,17 +674,13 @@ fn parse_files(
     Ok((ast, roots, library_main))
 }
 
-fn parse_file(
-    file: &TokenFile,
-    libraries: &BTreeSet<Vec<String>>,
-    syntax: Syntax,
-) -> Result<Ast, Diagnostic> {
+fn parse_file(file: &TokenFile, libraries: &BTreeSet<Vec<String>>) -> Result<Ast, Diagnostic> {
     let path = Path::new(&file.source.path);
     // §52: an outer `def` is allowed in the root directory and in a library
     // root directory (A3), not in a plain subdirectory (§50).
     let root_file = file.source.directory.is_empty() || libraries.contains(&file.source.directory);
     let role_error = role_error(&file.tokens, path, root_file);
-    let parsed = crate::parser::parse_tokens_syntax(&file.tokens, &file.source.path, syntax);
+    let parsed = crate::parser::parse_tokens(&file.tokens, &file.source.path);
     match (parsed, role_error) {
         (Ok(ast), None) => Ok(ast),
         (Ok(_), Some(error)) | (Err(error), None) => Err(error),
