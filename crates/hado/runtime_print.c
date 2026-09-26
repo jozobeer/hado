@@ -23,6 +23,7 @@ static HadoString *quote_text(const HadoString *value, unsigned char quote) {
   }
   result->bytes[length++] = quote;
   result->length = length;
+  result->scalars = hado_scalar_count(result->bytes, length);
   return result;
 }
 
@@ -43,6 +44,7 @@ HadoString *hado_canonical_float(double value) {
   HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
   result->length = length;
+  result->scalars = length;
   for (size_t i = 0; i < length; ++i) result->bytes[i] = bytes[i];
   return result;
 }

@@ -86,6 +86,12 @@ stages = {s['family']: s['stages'] for s in records}
 problems = []
 codes = [e['code'] for e in errors]
 names = [e['name'] for e in errors]
+# 対応表の族は、誤りが使う族を過不足なく覆う。使われない族が残ると、その族の段階の
+# 割り当てが検査されないまま緑になる。
+used_families = {code[:2] for code in codes}
+if set(stages) != used_families:
+    problems.append(
+        f'family-coverage=table{sorted(set(stages))} vs codes{sorted(used_families)}')
 for code, count in ((c, codes.count(c)) for c in set(codes)):
     if count > 1:
         problems.append(f'{code}:duplicate-code')

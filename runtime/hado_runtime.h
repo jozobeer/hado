@@ -3,8 +3,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* String and Bytes share this layout (spec §19, §55). `length` counts bytes.
+   `scalars` counts Unicode scalar values for a String; a Bytes value that has
+   not been through Bytes.to_string leaves it at HADO_SCALARS_UNKNOWN, because
+   counting the scalars of an arbitrary byte string is only meaningful once
+   RFC 3629 well-formedness is known. */
+#define HADO_SCALARS_UNKNOWN ((size_t)-1)
+
 typedef struct {
   size_t length;
+  size_t scalars;
   unsigned char bytes[];
 } HadoString;
 
@@ -39,6 +47,14 @@ HadoString *hado_string_slice(const HadoString *string, int64_t start, int64_t e
 uint32_t hado_string_get(const HadoString *string, int64_t index);
 int64_t hado_string_find(const HadoString *string, const HadoString *separator, int64_t from);
 HadoString *hado_string_trim(const HadoString *string);
+HadoString *hado_string_split(const HadoString *string, const HadoString *separator);
+HadoString *hado_string_join(const HadoArray *values, const HadoString *separator);
+
+/* Counts the Unicode scalar values in `bytes`. Exposed so the printer in
+   crates/hado/runtime_print.c fills the same header, and counted by
+   hado_byte_scans so a gate can tell a scan from a constant-time read. */
+size_t hado_scalar_count(const unsigned char *bytes, size_t length);
+extern size_t hado_byte_scans;
 
 /* Bytes shares the HadoString layout with String. length counts bytes here,
    while hado_string_length counts Unicode scalar values. */

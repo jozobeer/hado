@@ -151,15 +151,29 @@ fn constructor_tags_follow_declaration_order_within_each_type() {
 }
 
 #[test]
-fn string_literals_encode_byte_lengths_in_target_order() {
+fn string_literals_encode_byte_and_scalar_headers_in_target_order() {
     use hado::repr::{string_literal_data, ByteOrder};
-    for (width, order, prefix) in [
-        (8, ByteOrder::Little, vec![5, 0, 0, 0, 0, 0, 0, 0]),
-        (8, ByteOrder::Big, vec![0, 0, 0, 0, 0, 0, 0, 5]),
+    // "a\0あ" is 5 bytes and 3 scalars, so the two headers differ and a reader
+    // that confuses their order shows up here.
+    for (width, order, length_prefix, scalar_prefix) in [
+        (
+            8,
+            ByteOrder::Little,
+            vec![5, 0, 0, 0, 0, 0, 0, 0],
+            vec![3, 0, 0, 0, 0, 0, 0, 0],
+        ),
+        (
+            8,
+            ByteOrder::Big,
+            vec![0, 0, 0, 0, 0, 0, 0, 5],
+            vec![0, 0, 0, 0, 0, 0, 0, 3],
+        ),
     ] {
         let data = string_literal_data("a\0あ", width, order).unwrap();
-        assert_eq!(&data[..width as usize], prefix);
-        assert_eq!(&data[width as usize..], "a\0あ".as_bytes());
+        let header = width as usize;
+        assert_eq!(&data[..header], length_prefix);
+        assert_eq!(&data[header..2 * header], scalar_prefix);
+        assert_eq!(&data[2 * header..], "a\0あ".as_bytes());
     }
     assert!(string_literal_data("x", 2, ByteOrder::Little).is_err());
 }

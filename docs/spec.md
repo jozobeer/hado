@@ -1909,6 +1909,8 @@ def A ok_or(value: A Option, error: Exception): A {Error}
 
 `String.length` は Unicode スカラ値の個数とする。
 
+`String.length` は O(1) とする。`String.split` と `String.join` は、入力の長さに対して定数回の走査で行う。
+
 member の型は次のとおりとする。`A` は要素型の型変数である。
 
 ```ocaml
