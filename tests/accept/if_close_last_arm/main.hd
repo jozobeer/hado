@@ -1,0 +1,8 @@
+// spec: §12
+// item: if の閉じ（最後の腕への継続）
+// expect: a
+// needs: prelude
+def main = true as ok ->
+  if ok => log "a" | log "b" ->
+  log "finish"
+  /if

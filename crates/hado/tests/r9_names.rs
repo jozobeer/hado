@@ -84,7 +84,7 @@ fn unused_signatures_resolve_all_type_names_at_the_reference() {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         let unknown = format!("Missing{state}");
         let prefix = format!("{}def A convert(value: Fn(A => ", " ".repeat(padding));
-        let source = format!("def main = 1\nmodule API\n{prefix}{unknown})): A");
+        let source = format!("def main = 1\nmodule API\n{prefix}{unknown})): A\n/module");
         let diagnostic = error(&source);
         assert_eq!(diagnostic.code.as_deref(), Some("E204"));
         assert_eq!((diagnostic.line, diagnostic.col), (3, prefix.len() + 1));
@@ -93,7 +93,7 @@ fn unused_signatures_resolve_all_type_names_at_the_reference() {
 
 #[test]
 fn signature_type_variables_are_local_to_each_member() {
-    let source = "def main = 1\nmodule S def A first(x: A): A def second(x: A): Int";
+    let source = "def main = 1\nmodule S def A first(x: A): A def second(x: A): Int /module";
     let diagnostic = error(source);
     assert_eq!(diagnostic.code.as_deref(), Some("E204"));
     assert_eq!(
@@ -107,18 +107,18 @@ fn signature_type_variables_are_local_to_each_member() {
             + "second(x: ".len()
             + 1
     );
-    let valid = "def main = M.first 1\nmodule S type T def A first(x: A): A def second(x: T): Int\nimplement S as M type Representation = { value: Int } type T = Representation def first x => x def second x => x.value";
+    let valid = "def main = M.first 1\nmodule S type T def A first(x: A): A def second(x: T): Int\n/module\nimplement S as M type Representation = { value: Int } type T = Representation def first x => x def second x => x.value\n/implement";
     check_source(valid, "generated-names.hd").unwrap();
 }
 
 #[test]
 fn signatures_cannot_reference_implementation_types() {
-    let source = "def main = 1\nmodule S type T def make(x: Int): T\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }\nmodule API def consume(value: M.T): Int";
+    let source = "def main = 1\nmodule S type T def make(x: Int): T\n/module\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }\n/implement\nmodule API def consume(value: M.T): Int\n/module";
     let diagnostic = error(source);
     assert_eq!(diagnostic.code.as_deref(), Some("E204"));
     assert_eq!(
         (diagnostic.line, diagnostic.col),
-        (4, "module API def consume(value: ".len() + 1)
+        (6, "module API def consume(value: ".len() + 1)
     );
 }
 
@@ -133,8 +133,8 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
                 format!("{field}: Bool }}\ndef main = 1"),
             ),
             (
-                format!("def main = 1 module S def ({variable},"),
-                format!("{variable}) id(x: {variable}): {variable}"),
+                format!("def main = 1 module S def (A{index}, "),
+                format!("A{index}) id(x: {variable}): {variable} /module"),
             ),
             (
                 format!("type ({variable}, "),
@@ -154,7 +154,7 @@ fn duplicate_fields_and_type_variables_report_the_second_name() {
 
 #[test]
 fn aliases_reference_types_without_declaring_constructors() {
-    let source = "def main = 1\nmodule S type T type U\nimplement S as M type T = Int type U = Int";
+    let source = "def main = 1\nmodule S type T type U\n/module\nimplement S as M type T = Int type U = Int\n/implement";
     let ast = hado::parser::parse_source(source, "generated-names.hd").unwrap();
     hado::names::resolve(&ast, "generated-names.hd").unwrap();
 }
@@ -176,12 +176,12 @@ fn signature_mismatches_report_the_module_for_all_four_forms() {
             ),
         ] {
             let source = format!(
-                "def main = 1\nmodule S {signature}\n{}implement S as M {body}",
+                "def main = 1\nmodule S {signature}\n{}\n/module\nimplement S as M {body}\n/implement",
                 " ".repeat(index)
             );
             let diagnostic = error(&source);
             assert_eq!(diagnostic.code.as_deref(), Some("E602"), "{source}");
-            assert_eq!((diagnostic.line, diagnostic.col), (3, index + 1));
+            assert_eq!((diagnostic.line, diagnostic.col), (5, 1));
         }
     }
 }
@@ -202,14 +202,14 @@ fn duplicate_record_values_report_the_second_field_before_type_errors() {
 fn value_name_resolution_respects_binding_scopes() {
     for source in [
         "def f f => f + 1\ndef main = f 1",
-        "def f x => let f = x + 1 -> f + 1\ndef main = f 1",
+        "def f x => x + 1 as f -> f + 1\ndef main = f 1",
         "def f x => fn(f => f + 1) x\ndef main = f 1",
         "def f | Some(f) => f + 1 | None => 0\ndef main = f (Some(1))",
     ] {
         hado::check_source(source, "binding-scope.hd").unwrap();
     }
     for source in [
-        "def main = (let x = 1 -> x + 1) + x",
+        "def main = (1 as x -> x + 1) + x",
         "def f | Some(n) => n + 1 | None => n\ndef main = f (Some(1))",
     ] {
         assert_eq!(
@@ -247,7 +247,7 @@ fn unknown_fields_and_module_members_point_to_the_name() {
             ),
             (
                 "def main = M .",
-                "\nmodule S def run(x: Int): Int\nimplement S as M def run x => x",
+                "\nmodule S def run(x: Int): Int\n/module\nimplement S as M def run x => x\n/implement",
             ),
         ] {
             for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
@@ -272,7 +272,7 @@ fn unknown_module_signatures_point_to_the_signature_name() {
     for padding in 0..20 {
         for spacing in [" ".repeat(padding), format!("\n{}", " ".repeat(padding))] {
             let prefix = format!("def main = 1\nimplement {spacing}");
-            let source = format!("{prefix}Missing{padding} as M");
+            let source = format!("{prefix}Missing{padding} as M\n/implement");
             let diagnostic = error(&source);
             assert_eq!(diagnostic.code.as_deref(), Some("E204"), "{diagnostic}");
             let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
@@ -290,8 +290,9 @@ fn unknown_module_signatures_point_to_the_signature_name() {
 fn unknown_record_pattern_fields_point_to_the_field_name() {
     for index in 0..20 {
         for spacing in [" ", "  ", "\n    "] {
-            let prefix = format!("type R = {{ known: Int }}\ndef main = let {{{spacing}");
-            let source = format!("{prefix}missing{index} = _ }} = {{ known = 1 }} -> 1");
+            let prefix =
+                format!("type R = {{ known: Int }}\ndef main = {{ known = 1 }} as {{{spacing}");
+            let source = format!("{prefix}missing{index} = _ }} -> 1");
             let error = hado::check_source(&source, "pattern-field.hd")
                 .err()
                 .unwrap();

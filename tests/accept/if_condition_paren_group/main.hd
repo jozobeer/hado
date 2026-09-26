@@ -1,0 +1,5 @@
+// spec: §12
+// item: 条件が ( で始まる if（if(...)）
+// expect: 11
+def main = if((1 + 2) * 2 > 5 => 10 | 20) as n ->
+  n + 1

@@ -1,0 +1,5 @@
+// spec: §12
+// item: if の閉じ（if 全体への継続）
+// expect: 2
+def keep (b: Bool): Int => if(b => 1 | 2) + 1
+def main = keep true

@@ -1,0 +1,2 @@
+// spec: §12
+def big (a: Int, b: Int, c: Int): String => if (a + b) * 2 > c => "big" | "small"
