@@ -2929,7 +2929,7 @@ impl Lowerer {
                             .ok_or("missing array allocation result type")?;
                         let allocation = Type::try_from(&self.specialization.resolve(ty))
                             .map_err(|_| "array allocation result type is not concrete")?;
-                        Some(self.restored_array_allocation(allocation))
+                        Some(allocation)
                     } else {
                         None
                     };
@@ -3000,33 +3000,6 @@ impl Lowerer {
             Err(_) => return Err("abort result type is not concrete".into()),
         };
         self.abort_raise_with(arguments, result)
-    }
-
-    // 特殊化の結果型へ戻した入れ子の outcome は、本体の checker 型には残らない。
-    // 本体で確保する Array の型を、戻した結果型に揃える。
-    fn restored_array_allocation(&self, allocation: Type) -> Type {
-        match self.active.last() {
-            Some((_, _, active)) if logical_argument(&active.result) == allocation => {
-                active.result.clone()
-            }
-            _ => allocation,
-        }
-    }
-
-    // abort の成功型も、戻した結果型に揃える。
-    fn restored_success_type(&self, success: Type) -> Type {
-        let Some((_, _, active)) = self.active.last() else {
-            return success;
-        };
-        let restored = match outcome_parts(&active.result) {
-            Ok((payload, _, _)) => payload,
-            Err(_) => active.result.clone(),
-        };
-        if logical_argument(&restored) == success {
-            restored
-        } else {
-            success
-        }
     }
 
     fn abort_raise_with(
@@ -4060,7 +4033,7 @@ impl Lowerer {
         arguments: Vec<Expression>,
         operation: &str,
     ) -> Result<Expression, String> {
-        let success = self.restored_success_type(self.node_type(node).unwrap_or(Type::Void));
+        let success = self.node_type(node).unwrap_or(Type::Void);
         self.abort_outcome_with(arguments, operation, success)
     }
 
