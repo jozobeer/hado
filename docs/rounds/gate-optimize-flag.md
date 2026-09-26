@@ -159,3 +159,28 @@ real	0m0.439s
 user	0m0.121s
 sys	0m0.049s
 ```
+
+### 門番と層（ラウンドの最後）
+
+`corpus-lock --check` は成功時に何も出さない。`cargo test` の末尾は最後のテストバイナリの
+要約である（全体は exit 0）。full 層は着地後に main を checkout した側が回す。
+
+```
+$ bash scripts/corpus-lock.sh --check 2>&1 | tail -2; echo "exit=${PIPESTATUS[0]}"
+exit=0
+$ cargo test --offline 2>&1 | tail -3; echo "exit=${PIPESTATUS[0]}"
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -2; echo "exit=${PIPESTATUS[0]}"
+RUN: verify-spec-model -> /home/zyun/git/local/hado/.worktrees/gate-optimize-flag/target/gates-quick/verify-spec-model.log
+TALLY: 41/41 passed; red: none
+exit=0
+$ bash scripts/lint-docs.sh 2>&1 | tail -1; echo "exit=${PIPESTATUS[0]}"
+PASSED: 16/16
+exit=0
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1; echo "exit=${PIPESTATUS[0]}"
+PASSED: 2/2
+exit=0
+```
