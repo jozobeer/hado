@@ -53,9 +53,9 @@
 | D0 | `docs/wants.md` の低に残る「`as` パターン」（`docs/plan.md` 7 節 Q17' の保留）を消すか | 消した（2026-09-27）。`postfix-binding` で `as` を名付け専用にした。照合対象全体は `e as whole ->` で束縛できる | なし（記録の整合だけ） |
 | D1 | `postfix-binding` を採るか、`if` の閉じの規則を有力案で確定するか | `postfix-binding-probe` の報告で J1〜J6 が PASS なら採る | F3〜F6 |
 | D2 | `do-option-absent` の推奨（不在を効果にする）と次善のどちらか | M5・M6 の着地後、`absent-effect-draft` の実測を見て決める | M7 |
-| D3 | `dropped-spec-contracts` の案 A・B・C | A（`scripts/lint-docs.sh` の 1 検査にまとめる） | G1 |
-| D4 | `frozen-ledger-guard` の案 A・B・C | A（凍結した文書のハッシュを `--check` で照合）。`docs/plan.md` も凍結の対象になり、計画を `docs/plans/` に分ける方針と合う | G4 |
-| D5 | `lint-docs-hardening` の案 A・B・C | A（実測を `scripts/record-round.sh` の生成物にする）。`docs/plan.md` 36 節の第 4 段と同じもの | G5 |
+| D3 | `dropped-spec-contracts` の案 A・B・C | 決めた（2026-09-27）。C を改めた形（針は `verify-spec-contracts.sh` に隔離、層の所属は生成物） | G1 |
+| D4 | `frozen-ledger-guard` の案 A・B・C | 決めた（2026-09-27）。A。`docs/ledger.md` と `docs/plan.md` を丸ごと凍結する | G4 |
+| D5 | `lint-docs-hardening` の案 A・B・C | 決めた（2026-09-27）。issue ごと退けた | G5 |
 | D6 | `e101-suggestion-scope` の読み | F3 の後に、新しい `if` の文法で issue を書き直してから決める | F4 |
 
 ## 1 ラウンドの手順

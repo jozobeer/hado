@@ -48,13 +48,12 @@ PASSED: 26/26
 - 案 B: 門番ごとの `NN-x spec` 検査を元に戻す。25 本の検査が戻り、門番を削る前の状態に近づく。削りの効果は減る。
 - 案 C: 仕様本文の針だけを 1 本の門番（`verify-spec-contracts.sh`）に集める。`scripts/lint-docs.sh` は現行の文書の整合に留める。
 
-推奨は A。文書の整合は `scripts/lint-docs.sh` が持つ規約（`AGENTS.md`）に合い、門番の本数を増やさない。C は門番が 1 本増えるが、仕様本文の契約を文書層から分けたい場合に選ぶ。B は削りの成果を戻すので、削りをやり直す場合に限る。
+C を改めた形に決めた（2026-09-27）。仕様本文の針は `verify-spec-contracts.sh` 1 本に隔離し、`scripts/lint-docs.sh` には入れない（`docs/plan.md` 36 節の第 3 段「散文の針を隔離する」と同じ向き）。層の所属は手で書く表にせず、`scripts/corpus-lock.sh` と同じ形の生成物にして `--check` で照合する（`# tier:` 行と正本を 2 つにしない）。A は 36 節の第 3 段で割り直すことになり、B は削りの成果を戻すので採らない。
 
 ## 完了条件
 
-- 案 A を採る場合: 新しい検査が、落ちた 25 本の仕様本文の針を覆う。§53.1 の `hado: stack overflow` を消す探針、§58 の `hado fmt` の行を消す探針、門番の `# tier:` を書き換える探針の 3 種が赤になる。
-- 案 B を採る場合: 落ちた 25 本の検査が戻り、それぞれの元の探針が赤になる。
-- 案 C を採る場合: 新しい門番 1 本が仕様本文の針を覆い、`# tier: full` を宣言して `scripts/lib/gate-tiers.sh` の層に載る。
+- `scripts/verify-spec-contracts.sh` が落ちた 25 本の仕様本文の針を覆い、`# tier:` と `# round:` を宣言する。§53.1 の `hado: stack overflow` を消す探針と、§58 の `hado fmt` の行を消す探針が赤になる。
+- 層の所属の生成物が記録され、`--check` がバイト一致を見る。`scripts/verify-m1-spec.sh` の `# tier: quick` を `full` に書き換える探針が赤になる。
 - `bash scripts/lint-docs.sh` が赤なし、`bash scripts/run-gates.sh --tier full` が red なし。
 
 ## 由来
