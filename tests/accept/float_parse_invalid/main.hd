@@ -1,0 +1,4 @@
+// spec: §55
+// expect-error: InvalidFloat
+// needs: prelude
+def main = Float.parse "1e3"
