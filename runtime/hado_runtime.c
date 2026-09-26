@@ -653,15 +653,17 @@ int64_t hado_int_parse_unchecked(const HadoString *string) {
   return parse_int(string).value;
 }
 
+/* §54: the same canonical spelling the printer uses, from the Rust formatter.
+   Keeping one formatter keeps `Float.to_string x` and the print of `x` equal. */
 HadoString *hado_float_to_string(double value) {
-  char buffer[32];
-  int length = snprintf(buffer, sizeof(buffer), "%.17g", value);
-  if (length < 0 || (size_t)length >= sizeof(buffer)) abort();
-  HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
+  unsigned char bytes[400];
+  size_t length = hado_format_float(value, bytes, sizeof(bytes));
+  if (length == 0 || length > sizeof(bytes)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
-  result->length = (size_t)length;
-  result->scalars = (size_t)length;
-  memcpy(result->bytes, buffer, result->length);
+  result->length = length;
+  result->scalars = length;
+  memcpy(result->bytes, bytes, length);
   return result;
 }
 
