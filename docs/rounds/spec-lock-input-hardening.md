@@ -226,6 +226,26 @@ $ git status --short
 （空）
 ```
 
+### 門番と層（ラウンドの最後）
+
+`cargo test` の末尾は最後のテストバイナリの要約である（全体は exit 0）。full 層は着地後に
+main を checkout した側が回す。
+
+```
+$ cargo test --offline 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+exit=0
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+TALLY: 40/40 passed; red: none
+exit=0
+$ bash scripts/lint-docs.sh 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+PASSED: 16/16
+exit=0
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+PASSED: 2/2
+exit=0
+```
+
 ### 実装から分かったこと
 
 仮説「3 件は独立な入力経路の穴で、それぞれの持ち主の関数が弾ける」は当たった。
