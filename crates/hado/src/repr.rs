@@ -246,18 +246,32 @@ pub fn string_literal_data(
         4 => {
             let length =
                 u32::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
-            match order {
+            let scalars = u32::try_from(value.chars().count())
+                .map_err(|_| "string exceeds target address space")?;
+            let mut bytes = match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),
-            }
+            };
+            bytes.extend(match order {
+                ByteOrder::Little => scalars.to_le_bytes(),
+                ByteOrder::Big => scalars.to_be_bytes(),
+            });
+            bytes
         }
         8 => {
             let length =
                 u64::try_from(value.len()).map_err(|_| "string exceeds target address space")?;
-            match order {
+            let scalars = u64::try_from(value.chars().count())
+                .map_err(|_| "string exceeds target address space")?;
+            let mut bytes = match order {
                 ByteOrder::Little => length.to_le_bytes().to_vec(),
                 ByteOrder::Big => length.to_be_bytes().to_vec(),
-            }
+            };
+            bytes.extend(match order {
+                ByteOrder::Little => scalars.to_le_bytes(),
+                ByteOrder::Big => scalars.to_be_bytes(),
+            });
+            bytes
         }
         _ => return Err("unsupported pointer width".into()),
     };

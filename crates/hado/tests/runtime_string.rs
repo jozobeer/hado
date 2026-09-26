@@ -13,15 +13,16 @@ fn utf8_strings_count_scalars_and_preserve_embedded_nul() {
 #include <assert.h>
 #include <string.h>
 int32_t hado_entry(void) {
-    struct { size_t length; unsigned char bytes[7]; } a = {7, {'A', 0, 0xe3, 0x81, 0x82, 'B', 'C'}};
-    struct { size_t length; unsigned char bytes[4]; } b = {4, {0xf0, 0x9f, 0x98, 0x80}};
-    struct { size_t length; } empty = {0};
+    struct { size_t length; size_t scalars; unsigned char bytes[7]; } a = {7, 5, {'A', 0, 0xe3, 0x81, 0x82, 'B', 'C'}};
+    struct { size_t length; size_t scalars; unsigned char bytes[4]; } b = {4, 1, {0xf0, 0x9f, 0x98, 0x80}};
+    struct { size_t length; size_t scalars; } empty = {0, 0};
     const HadoString *left = (const HadoString *)&a;
     const HadoString *right = (const HadoString *)&b;
     assert(hado_string_length(left) == 5);
     assert(hado_string_length(right) == 1);
     HadoString *joined = hado_string_concat(left, right);
     assert(joined->length == 11);
+    assert(joined->scalars == 6);
     assert(hado_string_length(joined) == 6);
     assert(memcmp(joined->bytes, a.bytes, 7) == 0);
     assert(memcmp(joined->bytes + 7, b.bytes, 4) == 0);
@@ -29,7 +30,10 @@ int32_t hado_entry(void) {
     assert(hado_string_compare(left, joined) == -1);
     assert(hado_string_compare(right, left) == 1);
     assert(hado_string_compare(left, left) == 0);
-    assert(hado_string_compare(hado_string_concat((const HadoString *)&empty, left), left) == 0);
+    HadoString *empty_left = hado_string_concat((const HadoString *)&empty, left);
+    assert(empty_left->length == 7);
+    assert(empty_left->scalars == 5);
+    assert(hado_string_compare(empty_left, left) == 0);
     return 0;
 }
 "#,
