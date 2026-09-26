@@ -4379,11 +4379,9 @@ impl Lowerer {
 
     // 高階の引数に効果付きの閉包を渡す場合の答え。効果の名前は scheme の行に
     // 現れない（未確定）ので、腕を実行中の handler を除いた最も内側の
-    // propagation handler を使う。
-    // 効果を持つ callback の答え。腕の実行中でなければ、今 lower している
-    // 本体の context（最も内側の handler）の答えを優先し、無ければ最も外側の
-    // propagation handler の答えに落ちる。入れ子の handler で答えが食い違う
-    // 場合は、この選択が yield を捕まえる handler と一致しないことがある。
+    // propagation handler を使う。同じ効果を捕まえる handler が入れ子のときは
+    // 内側を選ぶ（`handler_for` と同じ）。腕の実行中は本体の context の答えを
+    // 優先する。
     fn callback_answer(&self) -> Result<Option<Type>, String> {
         for (index, handler) in self.handler_stack.iter().enumerate().rev() {
             if self.arm_handlers.contains(&index) || !Self::handler_has_propagation_ops(handler) {
