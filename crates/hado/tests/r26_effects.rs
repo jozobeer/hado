@@ -1705,7 +1705,7 @@ fn runs_effectful_closure_source(source: &str, expected: &str) {
 #[test]
 fn reverse_over_effectful_closures_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let fs = List.reverse [fn(x => 8 / x), fn(x => 9 / x)] ->\n  if fs | [g, ...rest] => g 0 + List.length rest | 5\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> List.reverse [fn(x => 8 / x), fn(x => 9 / x)] as fs ->\n  if fs | [g, ...rest] => g 0 + List.length rest | 5",
         "0",
     );
 }
@@ -1721,7 +1721,7 @@ fn map_over_effectful_closures_keeps_their_outcome() {
 #[test]
 fn array_to_list_of_effectful_closures_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let xs = Array.of_list [fn(x => 8 / x), fn(x => 9 / x)] ->\n  let fs = Array.to_list xs ->\n  List.map fs fn(f => f 2) |> List.length\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> Array.of_list [fn(x => 8 / x), fn(x => 9 / x)] as xs ->\n  Array.to_list xs as fs ->\n  List.map fs fn(f => f 2) |> List.length",
         "2",
     );
 }
@@ -1729,7 +1729,7 @@ fn array_to_list_of_effectful_closures_keeps_their_outcome() {
 #[test]
 fn array_set_of_effectful_closures_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let xs = Array.of_list [fn(x => 8 / x)] ->\n  let ys = Array.set xs 0 fn(x => x * 3 / x) ->\n  let f = Array.get ys 0 ->\n  f 5\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> Array.of_list [fn(x => 8 / x)] as xs ->\n  Array.set xs 0 fn(x => x * 3 / x) as ys ->\n  Array.get ys 0 as f ->\n  f 5",
         "3",
     );
 }
@@ -1737,7 +1737,7 @@ fn array_set_of_effectful_closures_keeps_their_outcome() {
 #[test]
 fn contract_member_returning_a_closure_over_an_effectful_argument() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let x = Some(fn(y => 8 / y)) ->\n  let f = Maker.make x ->\n  f x\nmodule Maker\ndef A make(x: A): Fn(A => Int) Pure\nimplement Maker as Maker\ndef make _ => fn(_ => 1)\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Catch -> Some(fn(y => 8 / y)) as x ->\n  Maker.make x as f ->\n  f x\nmodule Maker\ndef A make (x: A): Fn(A => Int) Pure\n/module\nimplement Maker as Maker\ndef make _ => fn(_ => 1)\n/implement",
         "1",
     );
 }
