@@ -92,3 +92,17 @@ J5:手書き(cases=29): PASS
 J6:変異(cases=3): PASS
 PASSED: 5/6
 ```
+
+### 区切りの前の `if` の改訂（2026-09-27）
+`,`・`;`・`)`・`]`・`}` の前の `if` は印を付けない。続きの無い `if(...)` は P001 にする。
+例 S1〜S6・N10・N11 を足した。J3 は作業用ディレクトリで走らせる。
+```
+$ bash scripts/verify-postfix-binding-probe.sh 2>&1 | grep -E '^J[0-9]:|PASSED'
+J1:往復(ok=196): PASS
+J2:冪等(ok=196): PASS
+J3:受理の実行(cases=111): PASS
+J4:拒否のコード(cases=54,mismatch=3): ISSUES
+J5:手書き(cases=38): PASS
+J6:変異(cases=3): PASS
+PASSED: 5/6
+```
