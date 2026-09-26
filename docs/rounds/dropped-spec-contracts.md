@@ -136,4 +136,97 @@ PASSED: 26/26
 ```
 $ git checkout -- docs/spec.md scripts/verify-m1-spec.sh
 $ git status --short
+（空）
 ```
+
+### Green（門番と生成物を足した後）
+
+```
+$ bash scripts/verify-spec-contracts.sh
+spec needles: 69 in §15.1, §24, §26.1, §29, §37, §50, §51, §53.1, §56, §57, §58, §58.1, §58.2, §58.3, §58.4, 付録C and the whole spec, 5 table rows, 1 once, 1 absent
+OK: the spec body keeps the needles of the dropped gates
+OK: the gate tier lock matches the membership derived from # tier:
+PASSED: 2/2
+$ bash scripts/gate-tiers-lock.sh
+67
+```
+
+### 探針（門番を足した後は赤になる）
+
+`hado: stack overflow` の後ろに `X` を足すと、メッセージが変わるので赤になる（針の右端を
+語の続きでないことまで見る）。
+
+```
+$ sed -i 's/hado: stack overflow/hado: stack overflowX/' docs/spec.md
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -3
+AssertionError: ['r50 §53.1: hado: stack overflow']
+NG: the spec body keeps the needles of the dropped gates
+OK: the gate tier lock matches the membership derived from # tier:
+PASSED: 1/2
+$ git checkout -- docs/spec.md
+```
+
+§58 の `hado fmt` の行（§58 の一覧と §58.1 の本文）を消すと赤になる。
+
+```
+$ sed -i 's/hado fmt \[--check\] <file.hd>/hado fmtX/g' docs/spec.md
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -3
+AssertionError: ['r52 §58: hado fmt [--check] <file.hd>', 'r52 §58.1: hado fmt']
+NG: the spec body keeps the needles of the dropped gates
+OK: the gate tier lock matches the membership derived from # tier:
+PASSED: 1/2
+$ git checkout -- docs/spec.md
+```
+
+`scripts/verify-m1-spec.sh` の層を `quick` から `full` へ動かすと、生成物と導出が食い違う。
+
+```
+$ sed -i 's/^# tier: quick$/# tier: full/' scripts/verify-m1-spec.sh
+$ bash scripts/gate-tiers-lock.sh --check 2>&1 | tail -5
+ m1-corpus	core
+-m1-spec	quick
++m1-spec	full
+ m2	core
+ m3	core
+lock exit=1
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -2
+NG: the gate tier lock matches the membership derived from # tier:
+PASSED: 1/2
+$ git checkout -- scripts/verify-m1-spec.sh
+```
+
+生成物は門番を黙って落とさない。`# tier:` を欠く門番を置くと、作り直しも照合も落ちる。
+
+```
+$ printf '#!/usr/bin/env bash\nexit 0\n' > scripts/verify-probe.sh
+$ bash scripts/gate-tiers-lock.sh --check; echo exit=$?
+invalid tier header: verify-probe.sh
+exit=1
+$ bash scripts/gate-tiers-lock.sh; echo rebuild-exit=$?
+invalid tier header: verify-probe.sh
+rebuild-exit=1
+$ rm scripts/verify-probe.sh
+```
+
+### 門番と層
+
+```
+$ bash scripts/verify-gate-cache.sh 2>&1 | tail -1
+PASSED: 26/26
+$ bash scripts/verify-parallel-rounds.sh 2>&1 | tail -1
+PASSED: 5/5
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+$ bash scripts/run-gates.sh --tier quick target/gates-quick 2>&1 | tail -1
+TALLY: 40/40 passed; red: none
+$ bash scripts/corpus-lock.sh --check; echo exit=$?
+exit=0
+$ cargo test --offline 2>&1 | tail -1; echo exit=${PIPESTATUS[0]}
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+exit=0
+```
+
+`--tier full` は着地前には回さない（`AGENTS.md`。着地後に main を checkout した側が回し、
+本節に追記する）。新設した門番は `core` なので、単独の `PASSED: 2/2` と quick 層の
+`TALLY: 40/40` が着地の条件である。
+
