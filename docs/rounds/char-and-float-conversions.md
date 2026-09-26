@@ -85,6 +85,20 @@ issue の完了条件ごとの検査（門番のどの検査が測るか）。
 - `Float.parse` の丸めが glibc の `strtod` と判定器側の期待で食い違ったとき。
 - `Float.to_string` と `main` の印字が同じ `hado_format_float` を通るのに食い違ったとき。
 
+### 実装から分かったこと
+
+仮説と突き合わせる。
+
+- 当たり: `main` の印字は既に `CanonicalFloat`（`hado_format_float`）を通っていた。検査 c は変更前に緑で、直す対象は `Float.to_string` の経路だけだった。`hado_float_to_string` を同じ整形器に替えると、`Float.to_string` と `main` の印字が `0.0` `-0.0` `0.1` 10^300 最大有限値 `nan` `inf` `-inf` で一致した。
+- 当たり: `Float.parse` は文法検査 → `strtod` → 「無限大を弾く」「0 でないのに 0.0 を弾く」で足りる。glibc の `strtod` は round-to-nearest, ties-to-even で、3×10^-324 と 5×10^-324 は ERANGE が立っても非零なので受理し、10^-324 と 2^-1075 は 0 に丸まるので拒否する。境界の期待は判定器側の `float()` と一致した。
+- 当たり: `Int.parse` の is_valid + unchecked の 2 関数の形は `Char.of_int` と `Float.parse` にそのまま使えた。extern 表に足したのは機械語型がスカラの 6 本だけで、新しい ABI の形は要らなかった。
+- 外れではなく設計に還元した点:
+  1. `scripts/verify-m7.sh` は §55 の関数集合から `stdlib/<module 小文字>.hd` を導いて `module` / `implement` と宣言・定義の 2 つを見る。§55 に `Char` を足した時点で `stdlib/char.hd` が必須になり、仕様が単一の情報源として効いた。
+  2. `scripts/verify-m1-corpus.sh` 検査 6 は §55 の関数集合を読んで、member 名を含む受理コーパスに `// needs: prelude` を要求する。`Char` と `Float` の member を足すと、それを使う受理はすべてタグが要る。
+  3. `hado_float_to_string` が外部シンボル `hado_format_float` を参照するようになったので、runtime を単体で `#include` して `-lgc` だけでリンクする探針（`r37_world.rs` の io_probe、`verify-r50.sh` の fault probe、`verify-string-split-linear.sh` の length_probe）がリンクできなくなった。Float の整形を測らない探針に `%.17g` の控えを置いた。共有の費用は、探針のリンク方法を変えるより小さかった。
+  4. 既存の `crates/hado/tests/emit_mono.rs` は `__float_to_string 0.0` に `0` を期待していた。§54 の `0.0` に直した。`Float.to_string` の正準形を変える以上、この期待は仕様側に合わせる。
+  5. 門番の綴りで 3 検査が赤になった。hado の無名関数は `fn(...)` で、負の Int / Float のリテラルは適用の引数に裸で置くと引き算に読まれる（`Char.of_int -1`）。仕様どおりで、直したのは門番の綴りである。
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -132,3 +146,49 @@ judge: canonical round-trips, no exponent, and parse_expected agrees
 OK: i judge: canonical and parse_expected are calibrated
 PASSED: 2/9
 ```
+
+実装後、main を取り込んだ木で回す。`verify-string-split-linear.sh` は 1 回目に検査 i
+（join の線形性）だけが小さい側 0.198 s で測定の下限 0.200 s を割って赤になった。
+このラウンドは `String.join` もその経路も触っておらず、同じ門番を単独で測り直すと
+`small=0.208s` で緑になったので、他のラウンドと同じ計算機で走ったことによる揺れと
+判断する（R1 の門番自身の「許容される赤」と同じ扱い）。
+
+```
+$ bash scripts/verify-char-and-float-conversions.sh
+...
+OK: a char: boundary scalars, round trip, UTF-8 bytes and InvalidScalar
+OK: b float_to_string: §54 canonical spellings, no exponent, nan and inf
+OK: c main print: the same canonical spellings through CanonicalFloat
+OK: d parse accepted: grammar, round trip and correct rounding
+OK: e parse rejected: grammar, overflow and underflow are InvalidFloat
+OK: f of_int: i64 to f64 round to nearest, ties to even
+OK: g spec: §55 inventory, signatures, failure rows and grammar
+OK: h corpus: the §55 accept cases with expect and expect-error run
+OK: i judge: canonical and parse_expected are calibrated
+PASSED: 9/9
+
+$ cargo test --offline
+（赤なし。0 failed）
+
+$ bash scripts/run-gates.sh --tier quick target/gates-quick
+TALLY: 41/41 passed; red: none
+
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+
+$ python3 <verify-m7 の inventory 部分>
+prelude inventory: 73/73
+
+$ bash scripts/verify-string-split-linear.sh    # 2 回目
+...
+OK: i perf: join is linear in the element count
+OK: k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ
+PASSED: 11/11
+```
+
+`bash scripts/corpus-lock.sh --check` の差分は `stdlib/char.hd` の追加、
+`stdlib/float.hd` の変更、`tests/accept` の `char_*` と `float_*` の 10 件だけで、
+すべてこのラウンドの成果物だった。main 側のコーパスと stdlib の変更は無い。
