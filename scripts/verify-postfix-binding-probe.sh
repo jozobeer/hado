@@ -76,9 +76,11 @@ fi
 # ---------- J3/J4: 変換した受理の実行と拒否のコード ----------
 printf '== J3/J4 ==\n'
 J3J4=$(BIN="$BIN" python3 - <<'PY'
-import glob, os, re, subprocess
+import glob, os, re, subprocess, tempfile
 
-bin = os.environ['BIN']
+bin = os.path.abspath(os.environ['BIN'])
+# 受理のプログラムはファイルを書くものがあるので、木の外で走らせる。
+work = tempfile.mkdtemp(prefix='postfix-probe-j3-')
 out = 'target/postfix-probe'
 
 def header(path, marker):
@@ -93,8 +95,8 @@ for main in mains:
     text = open(main, encoding='utf-8').read()
     is_error = any(line.startswith('// expect-error:') for line in text.splitlines())
     want = header(main, '// expect-error:' if is_error else '// expect:')
-    result = subprocess.run([bin, 'run', '--syntax', 'postfix', main],
-                            capture_output=True, text=True)
+    result = subprocess.run([bin, 'run', '--syntax', 'postfix', os.path.abspath(main)],
+                            capture_output=True, text=True, cwd=work)
     if is_error:
         ok = result.returncode != 0 and (want or '') in result.stderr
     else:
