@@ -106,7 +106,7 @@ fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
     )
 }
 fn contract(case: &Case) {
-    case.write("calc.hdi", "module Calc\ndef apply(x: Int): Int");
+    case.write("calc.hdi", "module Calc\ndef apply (x: Int): Int\n/module");
 }
 
 fn entry_source(
@@ -136,7 +136,7 @@ fn generated_project(state: &mut u64, count: usize) {
     for (j, value) in constants.iter().enumerate().rev() {
         case.write(
             &format!("impl{j}.hd"),
-            &format!("implement Calc as Calc{j}\ndef apply x => x + {value}"),
+            &format!("implement Calc as Calc{j}\ndef apply x => x + {value}\n/implement"),
         );
     }
     let mut owners: Vec<_> = (0..count).collect();
@@ -188,7 +188,7 @@ fn sections_only_see_outer_values_from_their_own_file() {
         contract(&case);
         case.write("entry.hd", "def seed = 7\ndef main = M.apply seed");
         let (source, offset) = shifted(
-            "implement Calc as M\ndef apply x => x + seed",
+            "implement Calc as M\ndef apply x => x + seed\n/implement",
             "seed",
             padding,
         );
@@ -201,8 +201,12 @@ fn sections_only_see_outer_values_from_their_own_file() {
         let case = Case::new();
         std::fs::create_dir(case.0.join("nested")).unwrap();
         case.write("entry.hd", "def seed = 7\ndef main = nested::M.run seed");
-        case.write("nested/s.hdi", "module S\ndef run(x: Int): Int");
-        let (source, offset) = shifted("implement S as M\ndef run x => x + seed", "seed", padding);
+        case.write("nested/s.hdi", "module S\ndef run (x: Int): Int\n/module");
+        let (source, offset) = shifted(
+            "implement S as M\ndef run x => x + seed\n/implement",
+            "seed",
+            padding,
+        );
         case.write("nested/m.hd", &source);
         for command in ["check", "build", "dump-mono"] {
             case.reject(command, "entry.hd", "nested/m.hd", "E204", offset);
@@ -220,7 +224,7 @@ fn root_file_without_main_can_use_its_outer_helper_in_its_section() {
         case.write("entry.hd", &format!("def main = M.apply {value}"));
         case.write(
             "support.hd",
-            &format!("def helper x => x + {added}\nimplement Calc as M\ndef apply x => helper x"),
+            &format!("def helper x => x + {added}\nimplement Calc as M\ndef apply x => helper x\n/implement"),
         );
         case.run("entry.hd", value + added);
     }
@@ -235,7 +239,7 @@ fn unused_outer_helper_is_not_rescued_by_another_files_same_name() {
             "def helper x => x + 4\ndef main = M.apply (helper 3)",
         );
         let (source, offset) = shifted(
-            "def helper x => x + 3\nimplement Calc as M\ndef apply x => x",
+            "def helper x => x + 3\nimplement Calc as M\ndef apply x => x\n/implement",
             "def helper",
             padding,
         );
@@ -288,7 +292,7 @@ fn used_support_file_cannot_fall_back_to_sibling_main() {
     case.write("entry.hd", "def main = M.apply 7");
     case.write(
         "support.hd",
-        "def helper x => x + 3\nimplement Calc as M\ndef apply x => helper x",
+        "def helper x => x + 3\nimplement Calc as M\ndef apply x => helper x\n/implement",
     );
     // A1: support.hd has no main, so check treats its directory as a library and
     // entry.hd's main is an ordinary def (E513); build/dump-mono need an entry.
@@ -306,7 +310,7 @@ fn file_isolation_preserves_parameter_let_lambda_and_pattern_shadowing() {
         for i in 0..2 {
             let outer = 1 + random(&mut state, 50);
             let inner = 1 + random(&mut state, 50);
-            let source = format!("def seed = {outer}\ndef local seed => seed + 1\ndef main = seed + local {inner} + (let seed = {inner} -> seed + 3) + (fn(seed => seed + 2)) {inner} + (if Some({inner}) | Some(seed) => seed + 4 | None => 0)");
+            let source = format!("def seed = {outer}\ndef local seed => seed + 1\ndef main = seed + local {inner} + ({inner} as seed ->\n  seed + 3) + (fn(seed => seed + 2)) {inner} + (if Some({inner}) | Some(seed) => seed + 4 | None => 0)");
             let control = Case::new();
             control.write("single.hd", &source);
             control.run("single.hd", outer + 4 * inner + 10);

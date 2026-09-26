@@ -208,7 +208,7 @@ fn array_comparisons_reject_function_elements_recursively() {
             ("a != a", "E703"),
             ("compare a a", "E704"),
         ] {
-            let source = format!("{declaration}def main = let a = {value} -> {expression}");
+            let source = format!("{declaration}def main = {value} as a -> {expression}");
             let error = check_source(&source, "t")
                 .err()
                 .unwrap_or_else(|| panic!("accepted {source}"));

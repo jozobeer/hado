@@ -174,7 +174,7 @@ fn effect_rows_roundtrip_in_result_position() {
         "def f (x: Int): Int Pure => x",
         "def f (x: Int): Int {Io, Error} => x",
         "def f (x: Fn(A => B {E})): Int => 1",
-        "module M\ndef run(x: Int): Int {Io}",
+        "module M\ndef run (x: Int): Int {Io}\n/module",
     ] {
         roundtrip(source);
     }

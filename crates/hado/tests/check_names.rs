@@ -25,16 +25,18 @@ fn intrinsics_are_only_callable_from_stdlib() {
 
 #[test]
 fn old_module_implementation_syntax_is_rejected() {
+    // 旧形の `module … = struct … end` は入力として残す（E100 を測る）。
     let source = "module Hidden = struct def value = 1 end\ndef main = 1";
     let error = check_source(source, "t").err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E100"));
-    assert_eq!((error.line, error.col), (1, source.find('=').unwrap() + 1));
+    // 閉じの印が無い `module` は、その item の先頭を指す（§49）。
+    assert_eq!((error.line, error.col), (1, 1));
 }
 
 #[test]
 fn namespaces_allow_type_module_coexistence_but_reject_duplicates() {
-    let source = "type M = | MkM   def main = if MkM == MkM => M.id 1 | 0\nmodule S def id(x: Int): Int\nimplement S as M def id x => x";
+    let source = "type M = | MkM   def main = if MkM == MkM => M.id 1 | 0\nmodule S\ndef id (x: Int): Int\n/module\nimplement S as M\ndef id x => x\n/implement";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
-    let source = "def main = M.id 1\nmodule S def id(x: Int): Int\nimplement S as M def id x => x\nimplement S as M def id x => x";
+    let source = "def main = M.id 1\nmodule S\ndef id (x: Int): Int\n/module\nimplement S as M\ndef id x => x\n/implement\nimplement S as M\ndef id x => x\n/implement";
     assert!(check_source(source, "t").is_err());
 }

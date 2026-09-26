@@ -90,7 +90,7 @@ fn hover_on_contract(root: &Path, contract: &str, text: &str, line: u64, charact
 
 #[test]
 fn hover_on_a_nested_contract_uses_the_entry_under_the_root() {
-    let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n";
+    let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n/module\n";
     let root = workspace(&[
         ("api/store.hdi", contract),
         ("main.hd", "def use (x: api::T) => x\n"),
@@ -115,7 +115,7 @@ fn hover_on_a_nested_contract_uses_the_entry_under_the_root() {
 
 #[test]
 fn hover_off_a_member_is_null() {
-    let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n";
+    let contract = "type T = | A | B\nmodule M\ndef good (x: Int): T\n/module\n";
     let root = workspace(&[
         ("store.hdi", contract),
         ("main.hd", "def use (x: T) => x\n"),
