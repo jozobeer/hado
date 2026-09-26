@@ -35,28 +35,28 @@
 | `gate-optimize-flag` | G 門番 | 3 | 中 | `scripts/lint-docs.sh`・`scripts/verify-spec-model.sh` | G1・G2（同じファイル） |
 | `frozen-ledger-guard` | G 門番 | 4 | 中 | `scripts/lint-docs.sh` | 決定 D4 |
 | `lint-docs-hardening` | G 門番 | 5 | 中 | `scripts/lint-docs.sh`・`docs/issues.md` | 決定 D5 |
-| `localize-message-positions` | F 前段 | 1 | 中 | `check.rs`・`parser.rs`・`project.rs`・`lsp.rs` | なし |
-| `build-json-diagnostics` | F 前段 | 2 | 中 | `main.rs`・`project.rs` | F1（同じファイル） |
-| `postfix-binding` | F 前段 | 3 | 中 | `parser.rs`・仕様・全コーパス | `postfix-binding-probe` の報告、決定 D1 |
-| `e101-suggestion-scope` | F 前段 | 4 | 低 | `parser.rs` | F3（`if` の文法が変わる） |
-| `fmt-layout` | F 前段 | 5 | 中 | `source_print.rs`・`fixes.rs`・`lexer.rs` | F3（issue に明記） |
-| `repl` | F 前段 | 6 | 低 | `main.rs`・`lexer.rs` | F3（`e as x ->` を使う） |
+| `postfix-binding` | F 前段 | 1 | 中 | `parser.rs`・仕様・全コーパス | 決定 D1（済み）。試作のブランチ `postfix-binding-probe` を土台にする |
+| `localize-message-positions` | F 前段 | 2 | 中 | `check.rs`・`parser.rs`・`project.rs`・`lsp.rs` | F1（`parser.rs`） |
+| `build-json-diagnostics` | F 前段 | 3 | 中 | `main.rs`・`project.rs` | F2（`project.rs`） |
+| `e101-suggestion-scope` | F 前段 | 4 | 低 | `parser.rs` | F1（`if` の文法が変わる） |
+| `fmt-layout` | F 前段 | 5 | 中 | `source_print.rs`・`fixes.rs`・`lexer.rs` | F1（issue に明記） |
+| `repl` | F 前段 | 6 | 低 | `main.rs`・`lexer.rs` | F1（`e as x ->` を使う） |
 
 以下、`M1` は M レーンの 1 番目を指す。
 
-最初に並行で起こすのは M1・R1・G1 の 3 本である。F レーンは `postfix-binding-probe` が進行中なので、F1 を 4 本目として足せる。
+最初に並行で起こすのは M1・R1・G1・F1 の 4 本である。F1 を F レーンの先頭に置くのは、全コーパスを書き換えるラウンドを早く着地させ、他のレーンが旧構文で足したコーパスを写し直す量を減らすため。
 
 ## 着手前に人が決めること
 
 | ID | 論点 | 推奨 | 止めるもの |
 |---|---|---|---|
 | D0 | `docs/wants.md` の低に残る「`as` パターン」（`docs/plan.md` 7 節 Q17' の保留）を消すか | 消した（2026-09-27）。`postfix-binding` で `as` を名付け専用にした。照合対象全体は `e as whole ->` で束縛できる | なし（記録の整合だけ） |
-| D1 | `postfix-binding` を採るか、`if` の閉じの規則を有力案で確定するか | 決めた（2026-09-27）。採る。`if(` は最上位の `=>` で読み分け、区切りの前の `if` は印なし、複数引数は `fn a, b => … /fn`（試作のブランチ `postfix-binding-probe`） | F3〜F6 |
+| D1 | `postfix-binding` を採るか、`if` の閉じの規則を有力案で確定するか | 決めた（2026-09-27）。採る。`if(` は最上位の `=>` で読み分け、区切りの前の `if` は印なし、複数引数は `fn a, b => … /fn`（試作のブランチ `postfix-binding-probe`） | F1・F4〜F6 |
 | D2 | `do-option-absent` の推奨（不在を効果にする）と次善のどちらか | M5・M6 の着地後、`absent-effect-draft` の実測を見て決める | M7 |
 | D3 | `dropped-spec-contracts` の案 A・B・C | 決めた（2026-09-27）。C を改めた形（針は `verify-spec-contracts.sh` に隔離、層の所属は生成物） | G1 |
 | D4 | `frozen-ledger-guard` の案 A・B・C | 決めた（2026-09-27）。A。`docs/ledger.md` と `docs/plan.md` を丸ごと凍結する | G4 |
 | D5 | `lint-docs-hardening` の案 A・B・C | 決めた（2026-09-27）。issue ごと退けた | G5 |
-| D6 | `e101-suggestion-scope` の読み | F3 の後に、新しい `if` の文法で issue を書き直してから決める | F4 |
+| D6 | `e101-suggestion-scope` の読み | F1 の後に、新しい `if` の文法で issue を書き直してから決める | F4 |
 
 ## 1 ラウンドの手順
 
@@ -67,14 +67,14 @@
 3. `docs/rounds/<slug>.md` に手順書を書く。判定には issue の完了条件をそのまま使う。
 4. 実装し、触ったところの門番を 1 本だけ回す。ラウンドの最後に `bash scripts/run-gates.sh`（層別）と `cargo test --offline` を 1 回回す。
 5. `git merge main` の後、`bash scripts/corpus-lock.sh --check` の差分を読み、main 側の変更とそのラウンドの成果物だけで説明できることを確かめてから作り直す。
-6. 同じコミットで `docs/issues/<slug>.md` を消し、push して PR を作る。着地後の全走の実測は、同じ `docs/rounds/<slug>.md` に `docs:` の PR で足す。
+6. 同じコミットで `docs/issues/<slug>.md` を消し、push して PR を作る。次の 3 つを満たせば自分でマージする: そのラウンドの門番と quick 層が緑、作った系と別のモデル系の審査で致命的な指摘が無い、仕様への疑義が無い。満たさなければそのレーンを止め、`AGENTS.md` の 5 行の形で報告する。他のレーンは進める。着地後の全走の実測は、同じ `docs/rounds/<slug>.md` に `docs:` の PR で足す。
 
 レーンの注意:
 
 - M: 5 本とも `crates/hado/src/mono.rs` を触る。M1 の推奨（本体を実際の型で下ろす）が M2・M3 の原因も消す見込みなので、M2・M3 は手順 2 の再現から始める。
 - R: R1 と R3 は `runtime/hado_runtime.c` の別の関数を触る。R3 は `Io` に `log_error` を足すので、網羅的な `handler Io` を持つ門番（`scripts/verify-r37.sh` など、issue に列挙）を同じラウンドで直す。
 - G: `docs/plan.md` の門番基盤の節と同じく、並走させない（`AGENTS.md`）。G レーンの走行中に、他のレーンが `scripts/lint-docs.sh` を触らない。
-- F: F3 は全コーパスの `let` と `do` を書き換えるので、着地の時点で走っている他のレーンは、main を取り込むときに `print-postfix`（`postfix-binding-probe` で試作）で自分の追加分を写す。F3 の着地を他のレーンに先に知らせる。
+- F: F1 は全コーパスの `let` と `do` を書き換えるので、着地の時点で走っている他のレーンは、main を取り込むときに `print-postfix`（`postfix-binding-probe` で試作）で自分の追加分を写す。F1 の着地を他のレーンに先に知らせる。
 
 ## 受け入れ条件
 
@@ -90,5 +90,4 @@
 ## 不確実性
 
 - M1 が M2・M3 の原因も消すかは未確認。消えなければ M2・M3 はそれぞれ単独のラウンドになり、M レーンが長くなる。
-- F3 が全コーパスを書き換えた後、他のレーンの追加分を `print-postfix` で写せるかは、`postfix-binding-probe` の J1（往復）の結果に依存する。
 - 中・低の issue どうしの依存は、互いの slug への言及と原因欄のファイルからしか見ていない。仕様の同じ節（§55 を R1・R2・M4 が触る）の衝突は、節が違えば `git merge` が解けると見ているが未確認。
