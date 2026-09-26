@@ -1,0 +1,2 @@
+// error: E100
+def main = do f x -> y

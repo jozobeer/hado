@@ -1,0 +1,1 @@
+def xs = [if true => 1 | let z = 0 -> z, 3]

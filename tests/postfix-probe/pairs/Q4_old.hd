@@ -1,0 +1,1 @@
+def pick (x: Bool): Int => if x => 1 | 0

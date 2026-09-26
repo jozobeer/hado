@@ -1,0 +1,2 @@
+def apply f x => f x
+def positive (n: Int): Int => if apply fn(x => x > 0) n => 1 | 0

@@ -1,3 +1,4 @@
+use hado::parser::Syntax;
 use hado::project::Project;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -44,6 +45,8 @@ struct Cli<'a> {
     show_all: bool,
     output: Option<&'a str>,
     path: Option<&'a str>,
+    second_path: Option<&'a str>,
+    syntax: Syntax,
     program_args: Vec<String>,
 }
 
@@ -59,7 +62,17 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     if !matches!(
         command,
-        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp"
+        "check"
+            | "dump-mono"
+            | "build"
+            | "run"
+            | "fmt"
+            | "test"
+            | "lsp"
+            | "print-postfix"
+            | "probe-postfix"
+            | "probe-postfix-roundtrip"
+            | "probe-postfix-compare"
     ) {
         return Err(usage_error());
     }
@@ -77,6 +90,8 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
             show_all: false,
             output: None,
             path: None,
+            second_path: None,
+            syntax: Syntax::Infix,
             program_args: Vec::new(),
         });
     }
@@ -89,6 +104,8 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
         show_all: false,
         output: None,
         path: None,
+        second_path: None,
+        syntax: Syntax::Infix,
         program_args: Vec::new(),
     };
     parse_flags(&mut cli, &args[1..])?;
@@ -130,7 +147,11 @@ fn next_token<'a>(
         return Ok(Step::Next);
     }
     if let Some(path) = positional_path(cli, arg) {
-        cli.path = Some(path);
+        if cli.path.is_none() {
+            cli.path = Some(path);
+        } else {
+            cli.second_path = Some(path);
+        }
         return Ok(Step::Next);
     }
     Err(usage_error())
@@ -152,6 +173,8 @@ fn take_option<'a>(
             enable_json(rest, index)?;
         }
         "--check" if cli.command == "fmt" => cli.check_only = true,
+        // postfix-binding-probe: 読み込みを新構文へ切り替える（既定は今の構文）。
+        "--syntax" => cli.syntax = named_syntax(value_after(rest, index)?)?,
         "-o" | "--output" if cli.command == "build" => {
             cli.output = Some(value_after(rest, index)?);
         }
@@ -177,7 +200,7 @@ fn check_option<'a>(cli: &mut Cli<'a>, arg: &'a str) -> Result<bool, ExitCode> {
 }
 
 fn positional_path<'a>(cli: &Cli<'a>, arg: &'a str) -> Option<&'a str> {
-    if arg.starts_with('-') || cli.path.is_some() {
+    if arg.starts_with('-') || (cli.path.is_some() && cli.second_path.is_some()) {
         return None;
     }
     Some(arg)
@@ -185,6 +208,14 @@ fn positional_path<'a>(cli: &Cli<'a>, arg: &'a str) -> Option<&'a str> {
 
 fn prints_diagnostics(command: &str) -> bool {
     matches!(command, "check" | "build" | "run" | "test")
+}
+
+fn named_syntax(value: &str) -> Result<Syntax, ExitCode> {
+    match value {
+        "infix" => Ok(Syntax::Infix),
+        "postfix" => Ok(Syntax::Postfix),
+        _ => Err(usage_error()),
+    }
 }
 
 fn named_type(value: &str) -> Result<&str, ExitCode> {
@@ -213,6 +244,13 @@ fn run(cli: &Cli<'_>) -> ExitCode {
     if cli.command == "lsp" {
         return ExitCode::from(hado::lsp::serve() as u8);
     }
+    match cli.command {
+        "print-postfix" => return print_postfix_command(cli),
+        "probe-postfix" => return probe_postfix_command(cli),
+        "probe-postfix-roundtrip" => return probe_roundtrip_command(cli),
+        "probe-postfix-compare" => return probe_compare_command(cli),
+        _ => {}
+    }
     let input = match input_path(cli) {
         Ok(input) => input,
         Err(code) => return code,
@@ -224,7 +262,7 @@ fn run(cli: &Cli<'_>) -> ExitCode {
         return check_with_fix(input, cli.type_name);
     }
     if cli.command == "run" {
-        return run_program(input, &cli.program_args);
+        return run_program(input, &cli.program_args, cli.syntax);
     }
     if cli.command == "test" {
         return run_tests(input);
@@ -260,7 +298,7 @@ fn run_project_command(cli: &Cli<'_>, input: &Path) -> ExitCode {
             return code;
         }
     }
-    let project = match Project::load(input) {
+    let project = match Project::load_with_syntax(input, cli.syntax) {
         Ok(project) => project,
         Err(error) => {
             eprintln!("{}", load_error_report(&error, input));
@@ -461,8 +499,8 @@ enum Outcome {
 /// Load, link into a private directory, and run the program with `args`
 /// (§58). The directory is removed before returning, so nothing is written
 /// next to the source.
-fn execute(input: &Path, args: &[String]) -> Outcome {
-    let project = match Project::load(input) {
+fn execute(input: &Path, args: &[String], syntax: Syntax) -> Outcome {
+    let project = match Project::load_with_syntax(input, syntax) {
         Ok(project) => project,
         Err(error) => return Outcome::Failed(load_error_report(&error, input)),
     };
@@ -500,7 +538,7 @@ fn run_tests(input: &Path) -> ExitCode {
     }
     let mut passed = 0;
     for (display, path) in &tests {
-        match execute(path, &[]) {
+        match execute(path, &[], Syntax::Infix) {
             Outcome::Exited(0) => {
                 println!("test: {display} ok");
                 passed += 1;
@@ -522,8 +560,8 @@ fn run_tests(input: &Path) -> ExitCode {
 }
 
 /// `run` reports the program's exit code as its own (§58).
-fn run_program(input: &Path, args: &[String]) -> ExitCode {
-    match execute(input, args) {
+fn run_program(input: &Path, args: &[String], syntax: Syntax) -> ExitCode {
+    match execute(input, args, syntax) {
         Outcome::Exited(code) => ExitCode::from(code as u8),
         Outcome::Signalled => {
             eprintln!("run: the program was terminated by a signal");
@@ -595,8 +633,334 @@ fn print_type(
     }
 }
 
+// --- postfix-binding-probe の実測用の命令 ---
+
+/// 入力根（ファイルかディレクトリ）の `.hd` を、相対パスを保って集める。
+fn probe_paths(cli: &Cli<'_>) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for candidate in [cli.path, cli.second_path].into_iter().flatten() {
+        let path = PathBuf::from(candidate);
+        if path.is_dir() {
+            files.extend(hado::project::hd_files_under(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// `print-postfix <入力根> <出力ディレクトリ>`。旧構文で読める `.hd` を後置
+/// 束縛の綴りへ変換し、入力根からの相対パスに書く。先頭に続くコメント行は
+/// そのまま写し、本文のコメントは落として行数を数える。
+fn print_postfix_command(cli: &Cli<'_>) -> ExitCode {
+    let (Some(root_arg), Some(out_arg)) = (cli.path, cli.second_path) else {
+        return usage_error();
+    };
+    let root = PathBuf::from(root_arg);
+    let out = PathBuf::from(out_arg);
+    let files = if root.is_dir() {
+        postfix_input_files(&root)
+    } else {
+        vec![root.clone()]
+    };
+    if files.is_empty() {
+        eprintln!("print-postfix: no .hd under {}", root.display());
+        return ExitCode::from(1);
+    }
+    let mut skipped = 0usize;
+    let mut dropped = 0usize;
+    for file in &files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!("print-postfix: {}: {error}", file.display());
+                return ExitCode::from(1);
+            }
+        };
+        let display = file.to_string_lossy().into_owned();
+        let ast = match hado::parser::parse_source(&text, &display) {
+            Ok(ast) => ast,
+            Err(error) => {
+                eprintln!("skip: {display}: {error}");
+                skipped += 1;
+                continue;
+            }
+        };
+        let (prefix, prefix_lines) = leading_comment_block(&text);
+        let mut output = String::new();
+        output.push_str(prefix);
+        output.push_str(&hado::parser::postfix_program(&ast));
+        dropped += text
+            .lines()
+            .enumerate()
+            .filter(|(index, line)| *index >= prefix_lines && is_comment_line(line))
+            .count();
+        let relative = if root.is_file() {
+            PathBuf::from(file.file_name().unwrap_or_default())
+        } else {
+            file.strip_prefix(&root).unwrap_or(file).to_path_buf()
+        };
+        let target = out.join(relative);
+        if let Some(parent) = target.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!("print-postfix: {}: {error}", parent.display());
+                return ExitCode::from(1);
+            }
+        }
+        if let Err(error) = std::fs::write(&target, output) {
+            eprintln!("print-postfix: {}: {error}", target.display());
+            return ExitCode::from(1);
+        }
+    }
+    let interfaces = files
+        .iter()
+        .filter(|file| file.extension().is_some_and(|extension| extension == "hdi"))
+        .count();
+    println!(
+        "print-postfix: files={} hd={} hdi={} skipped={} dropped-comments={}",
+        files.len(),
+        files.len() - interfaces,
+        interfaces,
+        skipped,
+        dropped
+    );
+    ExitCode::SUCCESS
+}
+
+/// `.hd` と `.hdi` の両方を集める。`.hdi` は新構文でも読めるよう変換する。
+fn postfix_input_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_postfix_files(root, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_postfix_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_dir() {
+        match std::fs::read_dir(path) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    collect_postfix_files(&entry.path(), out);
+                }
+            }
+            Err(error) => eprintln!("print-postfix: {}: {error}", path.display()),
+        }
+    } else if matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("hd" | "hdi")
+    ) {
+        out.push(path.to_path_buf());
+    }
+}
+
+/// `probe-postfix <入力根>`。後置構文で読んで、集まった診断（P001 を含む）を
+/// 1 行ずつ出す。診断が無ければ `ok`。
+fn probe_postfix_command(cli: &Cli<'_>) -> ExitCode {
+    let files = probe_paths(cli);
+    if files.is_empty() {
+        eprintln!("probe-postfix: no input");
+        return ExitCode::from(1);
+    }
+    let mut failed = 0usize;
+    for file in &files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) => {
+                println!("fail: {}: {error}", file.display());
+                failed += 1;
+                continue;
+            }
+        };
+        let display = file.to_string_lossy().into_owned();
+        let (_, diagnostics) = hado::parser::parse_postfix_probe(&text, &display);
+        if diagnostics.is_empty() {
+            println!("ok: {display}");
+        } else {
+            for diagnostic in &diagnostics {
+                println!(
+                    "{}: {display}: {}",
+                    diagnostic.code.clone().unwrap_or_default(),
+                    diagnostic.message
+                );
+            }
+            failed += 1;
+        }
+    }
+    if failed > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// J1（往復で同じ構文木）と J2（冪等）を、入力根の全 `.hd` で測る。
+/// 旧パーサで読めないファイルは `skip` として数える。
+fn probe_roundtrip_command(cli: &Cli<'_>) -> ExitCode {
+    let files = probe_paths(cli);
+    if files.is_empty() {
+        eprintln!("probe-postfix-roundtrip: no input");
+        return ExitCode::from(1);
+    }
+    let (mut j1_ok, mut j1_fail, mut j2_ok, mut j2_fail, mut skip) = (0, 0, 0, 0, 0);
+    for file in &files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) => {
+                println!("j1-fail: {}: {error}", file.display());
+                j1_fail += 1;
+                continue;
+            }
+        };
+        let display = file.to_string_lossy().into_owned();
+        let old = match hado::parser::parse_source(&text, &display) {
+            Ok(ast) => ast,
+            Err(_) => {
+                println!("skip: {display}");
+                skip += 1;
+                continue;
+            }
+        };
+        let printed = hado::parser::postfix_program(&old);
+        match hado::parser::parse_source_syntax(&printed, &display, Syntax::Postfix) {
+            Err(error) => {
+                println!("j1-fail: {display}: parse_new: {error}");
+                println!("j2-fail: {display}: parse_new failed");
+                j1_fail += 1;
+                j2_fail += 1;
+            }
+            Ok(new) => {
+                if same_ast(&old, &new) {
+                    j1_ok += 1;
+                } else {
+                    println!("j1-fail: {display}: ast mismatch");
+                    j1_fail += 1;
+                }
+                if hado::parser::postfix_program(&new) == printed {
+                    j2_ok += 1;
+                } else {
+                    println!("j2-fail: {display}: not idempotent");
+                    j2_fail += 1;
+                }
+            }
+        }
+    }
+    println!(
+        "roundtrip: j1-ok={j1_ok} j1-fail={j1_fail} j2-ok={j2_ok} j2-fail={j2_fail} skip={skip}"
+    );
+    if j1_fail + j2_fail > 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// `probe-postfix-compare <旧構文> <新構文>`。両者が同じ構文木になるか。
+fn probe_compare_command(cli: &Cli<'_>) -> ExitCode {
+    let (Some(old_arg), Some(new_arg)) = (cli.path, cli.second_path) else {
+        return usage_error();
+    };
+    let old_text = match std::fs::read_to_string(old_arg) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("probe-postfix-compare: {old_arg}: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    let new_text = match std::fs::read_to_string(new_arg) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("probe-postfix-compare: {new_arg}: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    let old = match hado::parser::parse_source(&old_text, old_arg) {
+        Ok(ast) => ast,
+        Err(error) => {
+            eprintln!("probe-postfix-compare: old: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    let new = match hado::parser::parse_source_syntax(&new_text, new_arg, Syntax::Postfix) {
+        Ok(ast) => ast,
+        Err(error) => {
+            eprintln!("probe-postfix-compare: new: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    if same_ast(&old, &new) {
+        println!("compare: ok");
+        ExitCode::SUCCESS
+    } else {
+        eprintln!(
+            "compare: mismatch\nold: {}\nnew: {}",
+            hado::parser::canonical_program(&old),
+            hado::parser::canonical_program(&new)
+        );
+        ExitCode::from(1)
+    }
+}
+
+/// 構文木の一致。`Node` の `PartialEq` は span を見ないので、項目の正準形と
+/// `library` の有無で比べる。
+fn same_ast(left: &hado::parser::Ast, right: &hado::parser::Ast) -> bool {
+    left.library.is_some() == right.library.is_some()
+        && hado::parser::canonical_program(left) == hado::parser::canonical_program(right)
+}
+
+/// ファイル先頭に続く、空行かコメント行だけの塊。写す綴りと、その行数。
+fn leading_comment_block(text: &str) -> (&str, usize) {
+    let mut end = 0usize;
+    let mut lines = 0usize;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            end += line.len();
+            lines += 1;
+        } else {
+            break;
+        }
+    }
+    (&text[..end], lines)
+}
+
+/// `//` のコメントを含む行か。文字列と文字リテラルの中は数えない。
+fn is_comment_line(line: &str) -> bool {
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0usize;
+    let (mut string, mut character, mut escape) = (false, false, false);
+    while index < chars.len() {
+        let current = chars[index];
+        if escape {
+            escape = false;
+        } else if string {
+            match current {
+                '\\' => escape = true,
+                '"' => string = false,
+                _ => {}
+            }
+        } else if character {
+            match current {
+                '\\' => escape = true,
+                '\'' => character = false,
+                _ => {}
+            }
+        } else {
+            match current {
+                '"' => string = true,
+                '\'' => character = true,
+                '/' if chars.get(index + 1) == Some(&'/') => return true,
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | lsp"
+        "usage: hado check [--print-type[=<name>]] [--fix] [--syntax postfix] <file> | dump-mono [--syntax postfix] <file> | build [-o <path>] [--fix] <file.hd> | run [--syntax postfix] <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | probe-postfix[-roundtrip|-compare] <args> | lsp"
     );
 }

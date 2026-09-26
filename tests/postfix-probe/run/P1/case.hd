@@ -1,0 +1,7 @@
+// needs: prelude
+// run-expect: a
+// run-expect: finish
+def main =
+  true as ok ->
+  if(ok => log "a" | log "b") ->
+  log "finish"

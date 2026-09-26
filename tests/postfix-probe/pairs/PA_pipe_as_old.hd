@@ -1,0 +1,1 @@
+def main = let ys = xs |> List.map f -> ys

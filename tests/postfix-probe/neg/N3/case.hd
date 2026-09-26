@@ -1,0 +1,2 @@
+// error: E100
+def f x => x /if

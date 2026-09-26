@@ -1,0 +1,1 @@
+def s = Some(if true => 1 | 0)

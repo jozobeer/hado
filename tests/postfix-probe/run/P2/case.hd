@@ -1,0 +1,5 @@
+// needs: prelude
+// run-expect: a
+def main =
+  true as ok ->
+  if ok => log "a" | log "b" -> log "finish" /if

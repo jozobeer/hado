@@ -1,0 +1,4 @@
+// error: E303
+// note: Option の裸の -> は E305 になった。文言の案内を見る
+def find (id: Int): Int Option => Some(id)
+def main = find 1 -> 2
