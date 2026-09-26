@@ -39,7 +39,7 @@ $ cargo run --offline -q -- run target/issue/answer-poly/main.hd
 
 ## 原因
 
-止まる場所は `crates/hado/src/mono.rs` の `interpret_outcome`（腕の型が `outgoing` と食い違う）と `done`（`done payload mismatch`）である。答え型は `handler_answers` に積まれる。単相化が handler の腕を答え型ごとに具体化していないとみられるが、未確認。型検査は同じ形を受理するので、`check` と `build` の判定が食い違う。
+止まる場所は `crates/hado/src/mono.rs` の `interpret_outcome`（腕の型が `outgoing` と食い違う）と `done`（`done payload mismatch`）である。答え型は `handler_answers` に積まれる。単相化が handler の腕を答え型ごとに具体化していないとみられるが、未確認。
 
 ## 案
 
@@ -54,4 +54,4 @@ $ cargo run --offline -q -- run target/issue/answer-poly/main.hd
 
 ## 由来
 
-2026-09-26 の実験（不在を効果にする案、`do-option-absent`）で当たった。prelude に `None` へ戻す handler を置くと、1 つの本体の中で多くの型に使われるので、その案の前提になる。§38。
+2026-09-26 の実験（不在を効果にする案、`do-option-absent`）で当たった。§38。
