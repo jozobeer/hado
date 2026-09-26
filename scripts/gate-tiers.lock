@@ -15,6 +15,7 @@ m5	core
 m6	core
 m7	core
 parallel-rounds	full
+postfix-binding	full
 prelude-tail-recursion	core
 r11	full
 r12	full
