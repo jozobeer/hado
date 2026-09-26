@@ -119,7 +119,7 @@ test reverse_over_effectful_closures_keeps_their_outcome ... FAILED
 
 ```
 $ cargo test --offline --test r26_effects
-test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.83s
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.98s
 ```
 
 全走と、触ったところに効く門番。
@@ -134,6 +134,60 @@ $ grep -cE '^test result: FAILED' /tmp/t.log
 $ bash scripts/verify-m4.sh
 reject: 27/27
 accept: 111/111
+PASSED: 140/140
+```
+
+### 入れ子 handler の内側優先（審査 1 回目）
+
+同じ効果を捕まえる handler が入れ子のとき、`answer_for_row`・`callback_answer`・
+`specialization_answer` が外側の答えを選んでいた。`handler_for` と同じく内側を
+選ぶよう `.rev()` を付ける。`crates/hado/tests/r26_effects.rs` の
+`nested_handlers_of_the_same_effect_pick_the_inner_answer`（審査の入力そのまま）
+で固定する。
+
+直す前（`.` を `rev` なしに戻す）は赤。
+
+```
+$ cargo test --offline --test r26_effects nested_handlers_of_the_same_effect_pick_the_inner_answer
+lowered return type differs from inferred signature for file0$apply
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+```
+
+直した後は緑。内側 `Catch` の答え `Int` が閉包の `$Outcome` に載ることを
+`dump-mono` で確かめる。
+
+```
+$ cargo test --offline --test r26_effects nested_handlers_of_the_same_effect_pick_the_inner_answer
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+$ cargo run --offline -q -- dump-mono target/scratch/nested/main.hd | grep -o 'Closure(\[Int\], Data("\$Outcome", \[Int, Int, Void\]))' | head -1
+Closure([Int], Data("$Outcome", [Int, Int, Void]))
+```
+
+入力は `with Outer -> with Catch -> apply fn(x => 8 / x)`、`apply` は `f 1` を
+呼ぶ。`8 / 1` は割り切れるので `Catch` の abort は走らず、内側 `Catch` の
+return 腕が `8` を返し、外側 `Outer` の return 腕が `"outer"` にして返す。
+審査の「`0` を印字」は入力の `x = 1` と `Outer` の return 腕（値を `"outer"` に
+する）のため成り立たず、`outer` が正しい出力である。内側優先は、直す前の
+`String` を選ぶ型不一致が消えて実行できることと、上の `$Outcome` の答えが
+`Int` であることで確かめる。
+
+再測（入れ子優先の後）。
+
+```
+$ cargo test --offline --test r26_effects
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.98s
+$ for d in reverse map to_list set maker; do cargo run --offline -q -- run target/scratch/$d/main.hd; done
+0
+2
+2
+3
+1
+$ cargo test --offline > /tmp/t.log 2>&1; echo "exit=$?"; grep -c '^test result: ok' /tmp/t.log; grep -cE '^test result: FAILED' /tmp/t.log; grep -oE 'ok\. [0-9]+ passed' /tmp/t.log | grep -oE '[0-9]+' | paste -sd+ | bc
+exit=0
+69
+0
+762
+$ bash scripts/verify-m4.sh
 PASSED: 140/140
 ```
 
