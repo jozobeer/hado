@@ -541,18 +541,18 @@ fn pipeline_keeps_the_left_composite_type_separate_from_its_result() {
 
 #[test]
 fn record_projections_preserve_each_intermediate_type() {
-    let source = "type Inner = { x: Int }\ntype Outer = { inner: Inner }\ndef main = let obj = { inner = { x = 3 } } -> obj.inner.x";
+    let source = "type Inner = { x: Int }\ntype Outer = { inner: Inner }\ndef main = { inner = { x = 3 } } as obj ->\n  obj.inner.x\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"inner\", result: Data(\"Inner\", [])"));
     assert!(output.contains("field: \"x\", result: Int"));
-    let source = "type T Box = { value: T }\ndef main = let box = { value = true } -> box.value";
+    let source = "type T Box = { value: T }\ndef main = { value = true } as box ->\n  box.value\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"value\", result: Bool"));
 }
 
 #[test]
 fn record_let_patterns_evaluate_the_initializer_once() {
-    let source = "type Pair = { left: Int; right: Int }\ndef pair n => { left = n; right = n + 1 }\ndef main = let { left; right = r } = pair 3 -> left + r";
+    let source = "type Pair = { left: Int; right: Int }\ndef pair n => { left = n; right = n + 1 }\ndef main = pair 3 as { left; right = r } ->\n  left + r\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("CallDirect {").count(), 1);
     assert_eq!(output.matches("RecordGet {").count(), 2);
@@ -602,7 +602,7 @@ fn record_pattern_branches_bind_fields_in_the_arm() {
 
 #[test]
 fn constructor_let_patterns_project_typed_payloads() {
-    let source = "type T Box = | Wrap(T)\ndef main = let Wrap(x) = Wrap(3) -> x + 1";
+    let source = "type T Box = | Wrap(T)\ndef main = Wrap(3) as Wrap(x) ->\n  x + 1\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("Project {"));
     assert!(output.contains("constructor: \"Wrap\", index: 0, result: Int"));
@@ -789,7 +789,7 @@ fn specialization_cache_distinguishes_result_types() {
 #[test]
 fn qualified_module_calls_resolve_to_the_exported_function() {
     let source =
-        "def main = M.inc 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
+        "def main = M.inc 2\nmodule S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef inc x => x + 1\n/implement\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.inc\""));
     assert!(output.contains(
@@ -799,7 +799,7 @@ fn qualified_module_calls_resolve_to_the_exported_function() {
 
 #[test]
 fn module_internal_calls_resolve_private_functions_in_their_module() {
-    let source = "def helper x => x + 10\ndef main = M.inc 2 + helper 3\nmodule S def inc(x: Int): Int\nimplement S as M def helper x => x + 1 def inc x => helper x";
+    let source = "def helper x => x + 10\ndef main = M.inc 2 + helper 3\nmodule S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef helper x => x + 1\ndef inc x => helper x\n/implement\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.helper\""));
     assert!(output.contains("name: \"helper\""));
@@ -832,7 +832,7 @@ fn module_exports_can_be_used_as_function_values() {
 
 #[test]
 fn sibling_module_definition_metadata_uses_distinct_paths() {
-    let source = "def main = A.run 1 + B.run 1\nmodule S def run(x: Int): Int\nimplement S as A def run x => x + 1\nimplement S as B def run x => x + 2";
+    let source = "def main = A.run 1 + B.run 1\nmodule S\ndef run (x: Int): Int\n/module\nimplement S as A\ndef run x => x + 1\n/implement\nimplement S as B\ndef run x => x + 2\n/implement\n";
     let checked = hado::check_source(source, "t").unwrap();
     assert!(checked.module_definitions.contains_key("A.run"));
     assert!(checked.module_definitions.contains_key("B.run"));

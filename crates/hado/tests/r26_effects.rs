@@ -123,7 +123,7 @@ fn abort_handler_runs_do_continuation_when_the_rhs_returns() {
     for (argument, expected) in [(0, "3"), (1, "9")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => 3\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {argument} ->\n  9\n"
+            "handler Error as Catch\nabort raise _ => 3\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main = with Catch -> f {argument} ->\n  9\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -225,7 +225,7 @@ fn abort_handler_do_continuation_may_differ_from_the_rhs_success_type() {
     for (argument, expected) in [(0, "caught"), (1, "continued")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main =\n  with Catch ->\n  do f {argument} ->\n  \"continued\"\n"
+            "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef f x => if x == 0 => raise {{ message = \"x\" }} | x\ndef main = with Catch -> f {argument} ->\n  \"continued\"\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -281,7 +281,7 @@ fn abort_handler_outside_once_still_runs_the_once_body() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Catch ->\n  with Nop ->\n  loop 3 0\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\neffect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} => if k <= 0 => acc | tick ->\n  loop (k - 1) (acc + 1)\n  /if\ndef main = with Catch -> with Nop -> loop 3 0\n",
     );
     let built = case.build("main.hd");
     assert_eq!(
@@ -304,15 +304,15 @@ fn abort_handler_outside_once_still_runs_the_once_body() {
 #[test]
 fn again_handler_outside_abort_handler_forwards_callee_raise() {
     for (body, effects, value, expected) in [
-        ("  do yield x -> x\n", "{Int Yield}", 7, "[7]"),
+        ("  yield x ->\n  x\n", "{Int Yield}", 7, "[7]"),
         (
-            "  if x == 0 => raise { message = \"x\" }\n  | do yield x -> x\n",
+            "  if x == 0 => raise { message = \"x\" } | yield x ->\n  x\n  /if\n",
             "{Int Yield, Error}",
             0,
             "[]",
         ),
         (
-            "  if x == 0 => raise { message = \"x\" }\n  | do yield x -> x\n",
+            "  if x == 0 => raise { message = \"x\" } | yield x ->\n  x\n  /if\n",
             "{Int Yield, Error}",
             7,
             "[7]",
@@ -369,7 +369,7 @@ fn transitive_callee_reuses_the_enclosing_answer_for_again() {
     for (value, expected) in [(0, "outer-abort"), (3, "outer-return")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect A\nabort a\neffect B YieldB\nagain yieldB(value: Int): Void\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B YieldB as CollectB\nagain yieldB value =>\n  let rest = resume () ->\n  rest\nreturn _ => 0\ndef g (x: Int): Int {{Int YieldB}} =>\n  do yieldB x -> x\ndef f (x: Int): Int {{A, Int YieldB}} =>\n  if x == 0 => a | g x\ndef main =\n  with OuterA ->\n  with CollectB ->\n  f {value}\n"
+            "effect A\nabort a\neffect B YieldB\nagain yieldB(value: Int): Void\nhandler A as OuterA\nabort a => \"outer-abort\"\nreturn value => \"outer-return\"\nhandler B YieldB as CollectB\nagain yieldB value => resume () as rest ->\n  rest\nreturn _ => 0\ndef g (x: Int): Int {{Int YieldB}} => yieldB x ->\n  x\ndef f (x: Int): Int {{A, Int YieldB}} => if x == 0 => a | g x\ndef main = with OuterA -> with CollectB -> f {value}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -395,7 +395,7 @@ fn nested_again_handlers_with_different_answers_align() {
     for (value, expected) in [(0, "[0]"), (3, "[]")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\neffect B YieldB\nagain yieldB(value: B): Void\nhandler B YieldB as CollectB\nagain yieldB value =>\n  let rest = resume () ->\n  rest\nreturn _ => 0\ndef f (x: Int): Int {{Int Yield, Int YieldB}} =>\n  if x == 0 => do yield x -> x\n  | do yieldB x -> x\ndef main =\n  with Collect ->\n  with CollectB ->\n  f {value}\n",
+            "{}\neffect B YieldB\nagain yieldB(value: B): Void\nhandler B YieldB as CollectB\nagain yieldB value => resume () as rest ->\n  rest\nreturn _ => 0\ndef f (x: Int): Int {{Int Yield, Int YieldB}} => if x == 0 => yield x ->\n  x | yieldB x ->\n  x\n  /if\ndef main = with Collect -> with CollectB -> f {value}\n",
             collect_handler(),
         ));
         let built = case.build("main.hd");
@@ -422,7 +422,7 @@ fn division_inside_lambda_under_handler_reaches_the_abort_arm() {
     for (body, expected) in [
         ("fn(x => 8 / x) 4", 2),
         ("fn(x => 8 / x) 0", 99),
-        ("let f = fn(x => 8 / x) -> f 0", 99),
+        ("fn(x => 8 / x) as f ->\n  f 0", 99),
     ] {
         let case = Case::new();
         case.write("main.hd", &format!(
@@ -491,7 +491,7 @@ fn direct_abort_and_yield_agree_on_the_innermost_answer() {
     for (condition, expected) in [("true", "[1]"), ("false", "[]")] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Collect ->\n  with Catch ->\n  if {condition} =>\n    do yield 1 -> 1\n  | raise {{ message = \"b\" }}\n",
+            "{}\nhandler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main = with Collect -> with Catch -> if {condition} => yield 1 ->\n  1 | raise {{ message = \"b\" }}\n  /if\n",
             collect_handler(),
         ));
         let built = case.build("main.hd");
@@ -558,7 +558,7 @@ fn mutual_recursion_forwards_a_late_raise_across_a_success_type_change() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef rec f (x: Int): String {Error} =>\n  if x > 0 =>\n    let n = g (x - 1) ->\n    Int.to_string n\n  | raise { message = \"f\" }\ndef rec g (x: Int): Int {Error} =>\n  if x == 0 =>\n    let s = f (x - 1) ->\n    String.length s\n  | raise { message = \"g\" }\ndef main =\n  with Catch ->\n  f 1\n",
+        "handler Error as Catch\nabort raise _ => \"caught\"\nreturn value => value\ndef rec f (x: Int): String {Error} => if x > 0 => g (x - 1) as n ->\n  Int.to_string n | raise { message = \"f\" }\n  /if\ndef rec g (x: Int): Int {Error} => if x == 0 => f (x - 1) as s ->\n  String.length s | raise { message = \"g\" }\n  /if\ndef main = with Catch -> f 1\n",
     );
     let built = case.build("main.hd");
     assert_eq!(
@@ -581,7 +581,7 @@ fn mutual_recursion_forwards_a_late_raise_across_a_success_type_change() {
 #[test]
 fn arm_call_does_not_reuse_a_body_specialization() {
     let case = Case::new();
-    case.write("main.hd", "effect A\nabort a\nhandler A as OuterA\nabort a => 100\nreturn value => value\nhandler Error as Catch\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {A, Error}\n| x < 0 => a\n| x == 0 => raise { message = \"f\" }\n| x\ndef main =\n  with OuterA ->\n  with Catch ->\n  do f 1 -> raise { message = \"body\" }\n");
+    case.write("main.hd", "effect A\nabort a\nhandler A as OuterA\nabort a => 100\nreturn value => value\nhandler Error as Catch\nabort raise _ => f 0\nreturn value => value\ndef f (x: Int): Int {A, Error} | x < 0 => a | x == 0 => raise { message = \"f\" } | x\ndef main = with OuterA -> with Catch -> f 1 ->\n  raise { message = \"body\" }\n");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -599,7 +599,7 @@ fn arm_call_does_not_reuse_a_body_specialization() {
 fn do_binds_a_named_again_callee_with_the_caller_continuation() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}def f (x: Int): Void {{Int Yield}} => do yield x -> ()\ndef main =\n  with Collect ->\n  do f 1 -> do yield 2 -> ()\n",
+        "{}\ndef f (x: Int): Void {{Int Yield}} => yield x ->\n  ()\ndef main = with Collect -> f 1 ->\n  yield 2 ->\n  ()\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -665,7 +665,7 @@ fn effectful_callback_runs_under_the_handler() {
     case.write(
         "main.hd",
         &format!(
-            "{}def main =\n  with Collect ->\n  List.map [1, 2] fn(x => do yield x -> x)\n",
+            "{}\ndef main = with Collect -> List.map [1, 2] fn x =>\n    yield x ->\n    x\n  /fn\n",
             collect_handler(),
         ),
     );
@@ -693,7 +693,7 @@ fn list_filter_applies_the_predicate_from_the_head() {
     case.write(
         "main.hd",
         &format!(
-            "{}def main =\n  with Collect ->\n  List.filter [1, 2, 3] fn(x => do yield x -> x != 2)\n",
+            "{}\ndef main = with Collect -> List.filter [1, 2, 3] fn x =>\n    yield x ->\n    x != 2\n  /fn\n",
             collect_handler(),
         ),
     );
@@ -719,7 +719,7 @@ fn list_filter_applies_the_predicate_from_the_head() {
     case.write(
         "main.hd",
         &format!(
-            "{}handler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main =\n  with Collect ->\n  with Catch ->\n  List.filter [0, 1] fn(x => do yield x -> 8 / x > 0)\n",
+            "{}\nhandler Error as Catch\nabort raise _ => []\nreturn value => value\ndef main = with Collect -> with Catch -> List.filter [0, 1] fn x =>\n    yield x ->\n    8 / x > 0\n  /fn\n",
             collect_handler(),
         ),
     );
@@ -745,7 +745,7 @@ fn list_filter_applies_the_predicate_from_the_head() {
 fn do_binds_a_local_closure_callee_with_the_caller_continuation() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}def main =\n  with Collect ->\n  let f = fn(x => do yield x -> ()) ->\n  do f 1 -> do yield 2 -> ()\n",
+        "{}\ndef main = with Collect -> fn x =>\n    yield x ->\n    ()\n  /fn as f ->\n  f 1 ->\n  yield 2 ->\n  ()\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -793,7 +793,7 @@ fn once_operation_with_a_handled_effect_is_lifted_in_argument_position() {
 fn late_registered_yield_composes_with_the_caller_continuation() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}def rec f (x: Int): Int {{Int Yield}} =>\n  if x == 0 => g 0\n  | do yield x -> 7\ndef rec g (x: Int): Int {{Int Yield}} => do f 1 -> 42 + x\ndef main =\n  with Collect ->\n  f 0\n",
+        "{}\ndef rec f (x: Int): Int {{Int Yield}} => if x == 0 => g 0 | yield x ->\n  7\n  /if\ndef rec g (x: Int): Int {{Int Yield}} => f 1 ->\n  42 + x\ndef main = with Collect -> f 0\n",
         collect_handler().replace("return _ => []", "return value => [value]"),
     ));
     let built = case.build("main.hd");
@@ -818,7 +818,7 @@ fn late_registered_yield_composes_with_the_caller_continuation() {
 fn do_binds_a_branch_callee_with_the_caller_continuation() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}def main =\n  with Collect ->\n  let f = fn(x => do yield x -> ()) ->\n  let g = fn(x => do yield x -> ()) ->\n  do (if true => f | g) 1 -> do yield 2 -> ()\n",
+        "{}\ndef main = with Collect -> fn x =>\n    yield x ->\n    ()\n  /fn as f ->\n  fn x =>\n    yield x ->\n    ()\n  /fn as g ->\n  if(true => f | g) 1 ->\n  yield 2 ->\n  ()\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -941,7 +941,7 @@ fn callback_passed_through_a_pure_callee_keeps_its_own_result() {
 fn do_binds_a_local_callback_passed_as_an_argument() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}def main =\n  with Collect ->\n  let cb = fn(x => do yield x -> x) ->\n  do List.map [1] cb -> do yield 2 -> ()\n",
+        "{}\ndef main = with Collect -> fn x =>\n    yield x ->\n    x\n  /fn as cb ->\n  List.map [1] cb ->\n  yield 2 ->\n  ()\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -966,7 +966,7 @@ fn do_binds_a_local_callback_passed_as_an_argument() {
 fn do_binds_a_callback_held_in_a_record_field() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}type Box = {{ run: Fn(Int => Void {{Int Yield}}) }}\ndef main =\n  with Collect ->\n  let box = {{ run = fn(x => do yield x -> ()) }} ->\n  do box.run 1 -> do yield 2 -> ()\n",
+        "{}\ntype Box = {{ run: Fn(Int => Void {{Int Yield}}) }}\ndef main = with Collect -> {{ run = fn x =>\n    yield x ->\n    ()\n  /fn }} as box ->\n  box.run 1 ->\n  yield 2 ->\n  ()\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -1036,7 +1036,7 @@ fn an_effectful_parameter_does_not_restore_the_result_of_another() {
     // f と g の論理型（outcome を外した形）が同じなので、結果型 `g` の出現を
     // f の実際の型（効果付き）へ戻してはならない。
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef select(f: Fn(Int => Int {Error}), g: Fn(Int => Int)): Fn(Int => Int) => do f 1 -> g\ndef main =\n  with Catch ->\n  let h = select fn(x => 8 / x) fn(x => x + 1) ->\n  h 1\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef select (f: Fn(Int => Int {Error}), g: Fn(Int => Int)): Fn(Int => Int) => f 1 ->\n  g\ndef main = with Catch -> select fn(x => 8 / x) fn(x => x + 1) as h ->\n  h 1\n");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1061,7 +1061,7 @@ fn an_effectful_parameter_does_not_restore_a_written_result() {
     // 出現を引数の実際の型（効果付き）へ戻してはならない。戻り値の実体は本体が
     // 組み立てる別の閉包である（`fn(x => x + 1)` は効果を持たない）。
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1 -> fn(x => x + 1)\ndef main =\n  with Catch ->\n  let h = replace fn(x => 8 / x) ->\n  h 1\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef replace (f: Fn(Int => Int {Error})): Fn(Int => Int) => f 1 ->\n  fn(x => x + 1)\ndef main = with Catch -> replace fn(x => 8 / x) as h ->\n  h 1\n");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1083,7 +1083,7 @@ fn an_effectful_parameter_does_not_restore_a_written_result() {
 #[test]
 fn an_effectful_closure_in_a_monomorphic_adt_field_keeps_its_outcome() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}))\ndef main =\n  with Catch ->\n  let Box(f) = Box(fn(x => 8 / x)) ->\n  f 0\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}))\ndef main = with Catch -> Box(fn(x => 8 / x)) as Box(f) ->\n  f 0\n");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
@@ -1128,7 +1128,7 @@ fn a_lambda_may_return_an_effectful_lambda() {
 fn a_handled_once_operation_with_a_yielding_arm_is_lifted() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}effect Fixed\nonce ask: Int {{Int Yield}}\nhandler Fixed as H\nonce ask => do yield 1 -> 4\ndef main =\n  with Collect ->\n  with H ->\n  1 + ask\n",
+        "{}\neffect Fixed\nonce ask: Int {{Int Yield}}\nhandler Fixed as H\nonce ask => yield 1 ->\n  4\ndef main = with Collect -> with H -> 1 + ask\n",
         collect_handler(),
     ));
     let built = case.build("main.hd");
@@ -1154,7 +1154,7 @@ fn once_tail_recursion_completes_ten_million_iterations() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop 20 0\n",
+        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {Tick} => if k <= 0 => acc | tick ->\n  loop (k - 1) (acc + 1)\n  /if\ndef main = with Nop -> loop 20 0\n",
     );
     let dump = case.command("dump-mono", "main.hd");
     assert_eq!(
@@ -1203,7 +1203,7 @@ struct Built {
 fn build_once_loop(n: u64) -> Built {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} =>\n  if k <= 0 => acc\n  | do tick -> loop (k - 1) (acc + 1)\ndef main =\n  with Nop ->\n  loop {n} 0\n"
+        "effect Tick\nonce tick: Void\nhandler Tick as Nop\nonce tick => ()\ndef rec loop (k: Int, acc: Int): Int {{Tick}} => if k <= 0 => acc | tick ->\n  loop (k - 1) (acc + 1)\n  /if\ndef main = with Nop -> loop {n} 0\n"
     ));
     let built = case.build("main.hd");
     assert_eq!(
@@ -1268,7 +1268,7 @@ fn generator_collects_yielded_values() {
     for values in [&[][..], &[3, 1, 4][..]] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "{}\ndef rec each (values: Int List): Void {{Int Yield}} =>\n  if values | [] => () | [head, ...tail] =>\n    do yield head ->\n    each tail\ndef main = with Collect -> each {}\n",
+            "{}\ndef rec each (values: Int List): Void {{Int Yield}} => if values | [] => () | [head, ...tail] => yield head ->\n  each tail\n  /if\ndef main = with Collect -> each {}\n",
             collect_handler(),
             list_literal(values),
         ));
@@ -1298,7 +1298,7 @@ fn generator_collects_yielded_values() {
 fn again_loop_counts_each_yield() {
     let case = Case::new();
     case.write("main.hd", &format!(
-        "{}\ndef rec loop (k: Int): Void {{Int Yield}} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = List.length (with Collect -> loop 6)\n",
+        "{}\ndef rec loop (k: Int): Void {{Int Yield}} => if k <= 0 => () | yield k ->\n  loop (k - 1)\n  /if\ndef main = List.length (with Collect -> loop 6)\n",
         collect_handler(),
     ));
     let dump = case.command("dump-mono", "main.hd");
@@ -1413,7 +1413,7 @@ fn again_arm_keeps_pure_helpers_at_their_result_type() {
     let case = Case::new();
     case.write(
         "main.hd",
-        "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value =>\n  let rest = resume () ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {Int Yield} =>\n  if k <= 0 => ()\n  | do yield k -> loop (k - 1)\ndef main = with Collect -> loop 3\n",
+        "effect A Yield\nagain yield(value: A): Void\ndef double (m: Int): Int => m * 2\nhandler A Yield as Collect\nagain yield value => resume () as rest ->\n  [double value, ...rest]\nreturn _ => []\ndef rec loop (k: Int): Void {Int Yield} => if k <= 0 => () | yield k ->\n  loop (k - 1)\n  /if\ndef main = with Collect -> loop 3\n",
     );
     let built = case.build("main.hd");
     assert_eq!(
@@ -1462,7 +1462,7 @@ fn return_arm_does_not_rewrite_a_non_tail_branch() {
     for (k, expected) in [(0, 0), (1, 12)] {
         let case = Case::new();
         case.write("main.hd", &format!(
-            "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn value => value + 1\ndef f (n: Int): Int {{Fail}} => let x = (if n > 0 => n | bail) -> x + 10\ndef main = with H -> f {k}\n"
+            "effect Fail\nabort bail\nhandler Fail as H\nabort bail => 0\nreturn value => value + 1\ndef f (n: Int): Int {{Fail}} => if(n > 0 => n | bail) as x ->\n  x + 10\ndef main = with H -> f {k}\n"
         ));
         let built = case.build("main.hd");
         assert_eq!(
@@ -1516,7 +1516,7 @@ fn return_arm_does_not_rewrite_a_pure_helper() {
 #[test]
 fn an_effectful_closure_nested_in_a_monomorphic_adt_field_arg_keeps_its_outcome() {
     let case = Case::new();
-    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}) Option)\ndef main =\n  with Catch ->\n  let Box(g) = Box(Some(fn(x => 8 / x))) ->\n  if g | Some(f) => f 0 | None => -1\n");
+    case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}) Option)\ndef main = with Catch -> Box(Some(fn(x => 8 / x))) as Box(g) ->\n  if g | Some(f) => f 0 | None => -1\n");
     let built = case.build("main.hd");
     assert_eq!(
         built.status.code(),
