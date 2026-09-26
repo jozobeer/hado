@@ -39,21 +39,25 @@ fi
 
 # ---------- J3: 印字器の変異 ----------
 printf '== J3 ==\n'
-printer=crates/hado/src/postfix_print.rs
-backup=$(mktemp)
-cp "$printer" "$backup"
+mutated=(crates/hado/src/postfix_print.rs crates/hado/src/parser.rs)
+backup_dir=$(mktemp -d)
+for file in "${mutated[@]}"; do
+    cp "$file" "$backup_dir/$(basename "$file")"
+done
 restore() {
-    cp "$backup" "$printer"
-    rm -f "$backup"
+    for file in "${mutated[@]}"; do
+        cp "$backup_dir/$(basename "$file")" "$file"
+    done
+    rm -rf "$backup_dir"
 }
 trap restore EXIT
 
 mutations=0
 caught=0
 mutate() {
-    local label=$1 old=$2 new=$3
-    cp "$backup" "$printer"
-    if ! MUT_OLD="$old" MUT_NEW="$new" python3 - "$printer" <<'PY'
+    local label=$1 file=$2 old=$3 new=$4
+    restore
+    if ! MUT_OLD="$old" MUT_NEW="$new" python3 - "$file" <<'PY'
 import os, sys
 path = sys.argv[1]
 old, new = os.environ['MUT_OLD'], os.environ['MUT_NEW']
@@ -77,15 +81,15 @@ PY
 }
 
 # `/if` を落とす。
-mutate "drop-rail-if" 'format!("if {inner}\n{pad}/if")' 'format!("if {inner}")'
+mutate "drop-rail-if" crates/hado/src/postfix_print.rs 'format!("if {inner}\n{pad}/if")' 'format!("if {inner}")'
 # Option 束縛の `?` を落とす。
-mutate "drop-option-question" 'binding(format!(" as {pat}?"), value, body, indent, tail)' 'binding(format!(" as {pat}"), value, body, indent, tail)'
+mutate "drop-option-question" crates/hado/src/postfix_print.rs 'binding(format!(" as {pat}?"), value, body, indent, tail)' 'binding(format!(" as {pat}"), value, body, indent, tail)'
 # 続きのある `if` を括弧で閉じない（`if(a => 1 | 2) + 1` を `if a => 1 | 2 + 1` と書く）。
-mutate "drop-if-parens" 'format!("if({inner})")' 'format!("if {inner}")'
+mutate "drop-if-parens" crates/hado/src/postfix_print.rs 'format!("if({inner})")' 'format!("if {inner}")'
 # 続きの無い `if` にも括弧を付ける（末尾の `if a => 1 | 2` を `if(...)` と書く）。
-mutate "add-if-parens" '        format!("if {inner}")' '        format!("if({inner})")'
+mutate "add-if-parens" crates/hado/src/postfix_print.rs '        format!("if {inner}")' '        format!("if({inner})")'
 # `if` の直後の `(` を無条件に閉じと読む（`if((a+b)*2>c => 1 | 0)` が読めなくなる）。
-mutate "always-close-if-paren" 'TokKind::Arrow if depth == 0 => return true,' 'TokKind::Arrow => return true,'
+mutate "always-close-if-paren" crates/hado/src/parser.rs 'TokKind::Arrow if depth == 0 => return true,' 'TokKind::Arrow => return true,'
 
 restore
 trap - EXIT
