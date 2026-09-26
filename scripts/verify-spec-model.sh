@@ -33,6 +33,23 @@ lock_case() {
     bash scripts/spec-lock.sh --check
 }
 
+# --- d: 文書層の検査も -O で消えない（scripts/lint-docs.sh の先頭の門） ---
+# scripts/lint-docs.sh は assert で書かれており、-O か PYTHONOPTIMIZE で検査が消えて
+# 黙って通る。先頭の門が理由を出して落ちるので、赤と理由の両方を見る
+# （docs/rounds/gate-optimize-flag.md。issue の完了条件そのもの）。
+doc_lint_optimize() {
+    local out status
+    out=$(PYTHONOPTIMIZE=1 bash scripts/lint-docs.sh 2>&1) && status=0 || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo 'lint-docs.sh under PYTHONOPTIMIZE does not fail'
+        return 1
+    fi
+    if ! printf '%s\n' "$out" | grep -qF 'lint-docs: assert が無効'; then
+        echo 'lint-docs.sh under PYTHONOPTIMIZE does not give the reason'
+        return 1
+    fi
+}
+
 # --- b・c: モデル自身の整合と文法の形 ---
 model_case() {
     python3 - <<'PY'
@@ -137,6 +154,7 @@ PY
 
 check 'docs/spec.md matches spec/ (spec-lock --check)' lock_case
 check 'the model is well formed and its sections exist' model_case
+check 'the docs layer refuses to run when assert is disabled' doc_lint_optimize
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
