@@ -146,3 +146,83 @@ $ git checkout -- spec/grammar.ebnf spec/errors.toml spec/stages.toml docs/spec.
 $ git status --short
 （空）
 ```
+
+### Green（正しい入力の出力は変えない）
+
+`spec-lock --check` は一致し、`spec/` の正本から作り直しても `docs/spec.md` は変わらない。
+門番は `PASSED: 2/2`。
+
+```
+$ bash scripts/spec-lock.sh --check
+spec-lock --check: 一致（70 エラーコード、10 文法群）
+$ bash scripts/spec-lock.sh; git status --short docs/spec.md
+（空）
+$ bash scripts/verify-spec-model.sh
+spec-lock --check: 一致（70 エラーコード、10 文法群）
+OK: docs/spec.md matches spec/ (spec-lock --check)
+70 エラーコード、10 文法群、7 段階の族、見出し 69
+OK: the model is well formed and its sections exist
+PASSED: 2/2
+```
+
+### 変異（修正後は赤になる）
+
+字下げしたフェンス行は `spec-lock` が弾き、`--check` も門番も赤になる。
+
+````
+$ python3 -c 'from pathlib import Path; p=Path("spec/grammar.ebnf"); l=p.read_text().split("\n"); l.insert(l.index("### 字句:")+1, "   "+chr(96)*3); p.write_text("\n".join(l))'
+$ bash scripts/spec-lock.sh >/dev/null 2>&1; echo exit=$?
+exit=1
+$ bash scripts/spec-lock.sh --check 2>&1 | tail -1
+spec-lock: spec/grammar.ebnf の 字句: の本文にフェンス行 '   ```'
+$ bash scripts/verify-spec-model.sh 2>&1 | tail -1
+PASSED: 1/2
+````
+
+段階の `|` は `spec-lock` が弾く（逃がさない）。
+
+```
+$ sed -i 's/stage   = "名前解決"/stage   = "名前|解決"/' spec/errors.toml
+$ sed -i 's/stages = \["名前解決"\]/stages = ["名前|解決"]/' spec/stages.toml
+$ bash scripts/spec-lock.sh 2>&1 | tail -1; echo "write exit=${PIPESTATUS[0]}"
+spec-lock: E201 の stage に `|`（表の列が増える）
+write exit=1
+$ bash scripts/spec-lock.sh --check 2>&1 | tail -1; echo "check exit=${PIPESTATUS[0]}"
+spec-lock: E201 の stage に `|`（表の列が増える）
+check exit=1
+$ bash scripts/verify-spec-model.sh 2>&1 | tail -1
+PASSED: 1/2
+```
+
+使われない族 `E8` は門番が弾く。
+
+```
+$ printf '\n[[stage]]\nfamily = "E8"\nstages = ["型"]\n' >> spec/stages.toml
+$ bash scripts/verify-spec-model.sh 2>&1 | tail -3
+AssertionError: ["family-coverage=table['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8'] vs codes['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7']"]
+NG: the model is well formed and its sections exist
+PASSED: 1/2
+```
+
+「逃がす」だけでは変異 2 は緑のままである（拒む側を採った根拠）。`field` を全セル
+`escape_pipe=True` に一時的に変えて測ると、`--check` は一致し、門番も緑である。
+
+```
+$ sed -i "s/cells = \[field(e, k) for k in ('code', 'name', 'section', 'stage')\]/cells = [field(e, k, escape_pipe=True) for k in ('code', 'name', 'section', 'stage')]/" scripts/spec-lock.sh
+$ sed -i 's/stage   = "名前解決"/stage   = "名前|解決"/' spec/errors.toml
+$ sed -i 's/stages = \["名前解決"\]/stages = ["名前|解決"]/' spec/stages.toml
+$ bash scripts/spec-lock.sh >/dev/null 2>&1; bash scripts/spec-lock.sh --check; echo exit=$?
+spec-lock --check: 一致（70 エラーコード、10 文法群）
+exit=0
+$ grep -n '| E201 |' docs/spec.md
+2037:| E201 | implicit-recursion | §9 | 名前\|解決 | 自分を参照する名前 |
+$ bash scripts/verify-spec-model.sh 2>&1 | tail -1
+PASSED: 2/2
+```
+
+```
+$ git checkout -- scripts/spec-lock.sh spec/errors.toml spec/stages.toml docs/spec.md
+$ git status --short
+（空）
+```
+
