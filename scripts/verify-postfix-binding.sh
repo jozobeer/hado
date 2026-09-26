@@ -44,13 +44,18 @@ backup_dir=$(mktemp -d)
 for file in "${mutated[@]}"; do
     cp "$file" "$backup_dir/$(basename "$file")"
 done
+# 変異のたびに元へ戻す。控えは消さない（最後の後片付けだけが消す）。
 restore() {
+    local file
     for file in "${mutated[@]}"; do
         cp "$backup_dir/$(basename "$file")" "$file"
     done
+}
+cleanup() {
+    restore
     rm -rf "$backup_dir"
 }
-trap restore EXIT
+trap cleanup EXIT
 
 mutations=0
 caught=0
@@ -69,6 +74,7 @@ PY
     then
         printf 'J3 %s: anchor error\n' "$label"
         mutations=$((mutations + 1))
+        restore
         return
     fi
     mutations=$((mutations + 1))
@@ -78,6 +84,7 @@ PY
         printf 'J3 %s: caught\n' "$label"
         caught=$((caught + 1))
     fi
+    restore
 }
 
 # `/if` を落とす。
@@ -91,7 +98,7 @@ mutate "add-if-parens" crates/hado/src/postfix_print.rs '        format!("if {in
 # `if` の直後の `(` を無条件に閉じと読む（`if((a+b)*2>c => 1 | 0)` が読めなくなる）。
 mutate "always-close-if-paren" crates/hado/src/parser.rs 'TokKind::Arrow if depth == 0 => return true,' 'TokKind::Arrow => return true,'
 
-restore
+cleanup
 trap - EXIT
 if ! cargo build --offline -q 2>/dev/null; then
     record "J3:復旧のビルド" FAIL
