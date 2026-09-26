@@ -78,3 +78,17 @@ $ git log --oneline main..（docs コミット前）  $ git status --short
 25a1d66 test: 後置束縛の探針と…        ?? docs/rounds/postfix-binding-probe.md
 dc96f07 feat: 後置束縛の試作パーサ…    （本コミットで消える）
 ```
+
+### `if(` の読み分けの改訂（2026-09-27）
+`if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。条件が `(` で
+始まる例 Q1〜Q8 と実行 Q2・Q3 を足した。旧い判定に戻すと Q1・Q2・Q4・Q5・Q6・Q8 が落ちた。
+```
+$ bash scripts/verify-postfix-binding-probe.sh 2>&1 | grep -E '^J[0-9]:|PASSED'
+J1:往復(ok=196): PASS
+J2:冪等(ok=196): PASS
+J3:受理の実行(cases=111): PASS
+J4:拒否のコード(cases=54,mismatch=3): ISSUES
+J5:手書き(cases=29): PASS
+J6:変異(cases=3): PASS
+PASSED: 5/6
+```
