@@ -17,6 +17,7 @@ static const HadoString *string(const char *text) {
     size_t length = strlen(text);
     HadoString *value = hado_alloc(sizeof(HadoString) + length);
     value->length = length;
+    value->scalars = HADO_SCALARS_UNKNOWN;
     memcpy(value->bytes, text, length);
     return value;
 }
@@ -46,15 +47,16 @@ int32_t hado_entry(void) {
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
         assert(hado_int_parse_is_valid(string(invalid[i])) == 0);
     }
-    struct { size_t length; unsigned char bytes[4]; } tail = {2, {'4', '2', '9', 'a'}};
+    struct { size_t length; size_t scalars; unsigned char bytes[4]; } tail = {2, 2, {'4', '2', '9', 'a'}};
     assert(hado_int_parse_is_valid((const HadoString *)&tail) == 1);
     assert(hado_int_parse_unchecked((const HadoString *)&tail) == 42);
-    struct { size_t length; unsigned char bytes[3]; } nul = {3, {'4', 0, '2'}};
+    struct { size_t length; size_t scalars; unsigned char bytes[3]; } nul = {3, 3, {'4', 0, '2'}};
     assert(hado_int_parse_is_valid((const HadoString *)&nul) == 0);
-    struct { size_t length; } empty = {0};
+    struct { size_t length; size_t scalars; } empty = {0, 0};
     assert(hado_int_parse_is_valid((const HadoString *)&empty) == 0);
     HadoString *zeros = hado_alloc(sizeof(HadoString) + 10001);
     zeros->length = 10001;
+    zeros->scalars = HADO_SCALARS_UNKNOWN;
     memset(zeros->bytes, '0', zeros->length);
     zeros->bytes[10000] = '5';
     assert(hado_int_parse_is_valid(zeros) == 1);

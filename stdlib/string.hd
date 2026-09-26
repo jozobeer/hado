@@ -22,19 +22,9 @@ def get s index =>
 def split s separator =>
   if length separator == 0
     => raise { message = "EmptySeparator" }
-    | split_go s separator 0 (length separator) (length s) []
-def rec split_go(s: String, separator: String, start: Int, width: Int, count: Int, acc: String List): String List {Error} =>
-  let found = __string_find s separator start ->
-  if found < 0
-    => List.reverse [slice s start count, ...acc]
-    | split_go s separator (found + width) width count [slice s start found, ...acc]
+    | Array.to_list (__string_split s separator)
 def starts_with s prefix =>
   length prefix <= length s && __string_slice s 0 (length prefix) == prefix
 def contains s part => length part == 0 || __string_find s part 0 >= 0
-def join values separator => join_go values separator ""
-def rec join_go values separator acc =>
-  if values
-  | [] => acc
-  | [value] => concat acc value
-  | [head, ...tail] => join_go tail separator (concat acc (concat head separator))
+def join values separator => __string_join (Array.of_list values) separator
 def trim s => __string_trim s

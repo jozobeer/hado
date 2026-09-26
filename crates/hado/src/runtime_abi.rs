@@ -57,6 +57,8 @@ pub enum RuntimeFunction {
     ArrayFillUnchecked,
     IoLog,
     StringTrim,
+    StringSplit,
+    StringJoin,
 }
 
 pub struct Declaration {
@@ -98,6 +100,8 @@ impl RuntimeFunction {
             Self::StringGet => Some("__string_get"),
             Self::StringFind => Some("__string_find"),
             Self::StringTrim => Some("__string_trim"),
+            Self::StringSplit => Some("__string_split"),
+            Self::StringJoin => Some("__string_join"),
             Self::BytesLength => Some("__bytes_length"),
             Self::BytesGet => Some("__bytes_get"),
             Self::BytesIsUtf8 => Some("__bytes_is_utf8"),
@@ -173,6 +177,17 @@ impl RuntimeFunction {
             Self::StringGet => (vec![Type::String, Type::Int], Type::Char),
             Self::StringFind => (vec![Type::String, Type::String, Type::Int], Type::Int),
             Self::StringTrim => (vec![Type::String], Type::String),
+            Self::StringSplit => (
+                vec![Type::String, Type::String],
+                Type::Data(crate::mono::ARRAY.to_string(), vec![Type::String]),
+            ),
+            Self::StringJoin => (
+                vec![
+                    Type::Data(crate::mono::ARRAY.to_string(), vec![Type::String]),
+                    Type::String,
+                ],
+                Type::String,
+            ),
             Self::BytesLength => (vec![Type::Bytes], Type::Int),
             Self::BytesGet => (vec![Type::Bytes, Type::Int], Type::Int),
             Self::BytesIsUtf8 => (vec![Type::Bytes], Type::Bool),
@@ -233,6 +248,8 @@ impl RuntimeFunction {
         Self::ArrayFillUnchecked,
         Self::IoLog,
         Self::StringTrim,
+        Self::StringSplit,
+        Self::StringJoin,
     ];
 
     pub fn id(self) -> u32 {
@@ -518,6 +535,18 @@ impl RuntimeFunction {
             Self::StringTrim => &Declaration {
                 symbol: "hado_string_trim",
                 parameters: &[AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::StringSplit => &Declaration {
+                symbol: "hado_string_split",
+                parameters: &[AbiType::Pointer, AbiType::Pointer],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::StringJoin => &Declaration {
+                symbol: "hado_string_join",
+                parameters: &[AbiType::Pointer, AbiType::Pointer],
                 result: Some(AbiType::Pointer),
                 may_allocate: true,
             },

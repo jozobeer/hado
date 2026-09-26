@@ -64,4 +64,5 @@ r81	full
 rustfmt	quick
 spec-contracts	core
 spec-model	quick
+string-split-linear	full
 treesitter	core

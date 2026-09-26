@@ -1,6 +1,9 @@
 /* The stack guard needs sigaction, sigaltstack, and getrlimit. Ask for the
    X/Open declarations explicitly so the file also compiles under -std=c11,
    where the default feature set does not expose them. */
+/* memmem needs the GNU declarations; the X/Open block below keeps the
+   sigaction, sigaltstack, and getrlimit declarations visible under -std=c11. */
+#define _GNU_SOURCE
 #define _XOPEN_SOURCE 700
 
 #include "hado_runtime.h"
@@ -22,6 +25,11 @@ int32_t hado_entry(void);
 static int print_failed;
 static int process_argc;
 static char **process_argv;
+
+/* Gate instrumentation (docs/rounds/string-split-linear.md). A scan over the
+   bytes of a String adds the number of bytes it looked at, so a gate can tell
+   a scan from a constant-time field read. */
+size_t hado_byte_scans;
 
 /* Stack exhaustion is a run-time diagnostic, not a signal death (spec §53.1).
    The handler fires only when the fault lands near the bottom of the stack we
@@ -336,24 +344,35 @@ int64_t hado_io_dir_count(int64_t ignored) {
 
 HadoString *hado_io_dir_get(int64_t index) { return io_names[index]; }
 
-int64_t hado_string_length(const HadoString *string) {
-  int64_t count = 0;
-  for (size_t i = 0; i < string->length; ++i) {
-    if ((string->bytes[i] & 0xc0) != 0x80) {
-      if (count == INT64_MAX) abort();
+size_t hado_scalar_count(const unsigned char *bytes, size_t length) {
+  hado_byte_scans += length;
+  size_t count = 0;
+  for (size_t i = 0; i < length; ++i) {
+    if ((bytes[i] & 0xc0) != 0x80) {
+      if (count == SIZE_MAX) abort();
       ++count;
     }
   }
   return count;
 }
 
+int64_t hado_string_length(const HadoString *string) {
+  if (string->scalars != HADO_SCALARS_UNKNOWN) return (int64_t)string->scalars;
+  /* Reaching here means a String was built without its scalar count. Fall
+     back to a scan so the value stays correct rather than reporting the
+     marker; every String-producing path is expected to have filled it. */
+  return (int64_t)hado_scalar_count(string->bytes, string->length);
+}
+
 HadoString *hado_string_concat(const HadoString *left, const HadoString *right) {
   if (left->length > SIZE_MAX - right->length) abort();
   size_t length = left->length + right->length;
   if (length > SIZE_MAX - sizeof(HadoString)) abort();
+  if (left->scalars > SIZE_MAX - right->scalars) abort();
   HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
   result->length = length;
+  result->scalars = left->scalars + right->scalars;
   memcpy(result->bytes, left->bytes, left->length);
   memcpy(result->bytes + left->length, right->bytes, right->length);
   return result;
@@ -375,16 +394,28 @@ static size_t string_byte_offset(const HadoString *string, int64_t index) {
     }
     --index;
   }
+  hado_byte_scans += offset;
   return offset;
+}
+
+static size_t scalars_between(const unsigned char *bytes, size_t start, size_t end) {
+  hado_byte_scans += end - start;
+  size_t count = 0;
+  for (size_t i = start; i < end; ++i) {
+    if ((bytes[i] & 0xc0) != 0x80) ++count;
+  }
+  return count;
 }
 
 HadoString *hado_string_slice(const HadoString *string, int64_t start, int64_t end) {
   size_t first = string_byte_offset(string, start);
   size_t length = string_byte_offset(string, end) - first;
   if (length > SIZE_MAX - sizeof(HadoString)) abort();
+  if (end < start) abort();
   HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
   result->length = length;
+  result->scalars = (size_t)(end - start);
   memcpy(result->bytes, string->bytes + first, length);
   return result;
 }
@@ -411,6 +442,105 @@ int64_t hado_string_find(const HadoString *string, const HadoString *separator, 
   return -1;
 }
 
+static HadoString *make_piece(const HadoString *string, size_t start, size_t end) {
+  size_t length = end - start;
+  if (length > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *piece = hado_alloc(sizeof(HadoString) + length);
+  if (piece == NULL) abort();
+  piece->length = length;
+  piece->scalars = hado_scalar_count(string->bytes + start, length);
+  memcpy(piece->bytes, string->bytes + start, length);
+  return piece;
+}
+
+/* Splits on non-overlapping occurrences of `separator`, which the prelude has
+   already checked to be non-empty (spec §55 maps the empty case to
+   EmptySeparator). memmem is linear in the input length, so a separator whose
+   length grows with the input cannot turn the scan quadratic; a candidate-by-
+   candidate memcmp loop can (docs/rounds/string-split-linear.md). Every piece
+   carries its scalar count, so String.length of a piece never scans. */
+HadoString *hado_string_split(const HadoString *string, const HadoString *separator) {
+  size_t width = separator->length;
+  if (width == 0) abort();
+  size_t pieces = 1;
+  size_t position = 0;
+  while (position + width <= string->length) {
+    const unsigned char *found = memmem(string->bytes + position, string->length - position,
+                                        separator->bytes, width);
+    if (found == NULL) break;
+    ++pieces;
+    position = (size_t)(found - string->bytes) + width;
+  }
+  HadoArray *array = hado_array_alloc((int64_t)pieces);
+  size_t index = 0;
+  size_t start = 0;
+  position = 0;
+  while (position + width <= string->length) {
+    const unsigned char *found = memmem(string->bytes + position, string->length - position,
+                                        separator->bytes, width);
+    if (found == NULL) break;
+    size_t end = (size_t)(found - string->bytes);
+    array->slots[index++] = (uint64_t)(uintptr_t)make_piece(string, start, end);
+    start = end + width;
+    position = start;
+  }
+  array->slots[index++] = (uint64_t)(uintptr_t)make_piece(string, start, string->length);
+  return (HadoString *)array;
+}
+
+/* Joins with the separator between elements only (spec §55): no separator for
+   an empty or single-element list. The output length is summed first and the
+   bytes are copied once, so the cost is linear in the total length. */
+HadoString *hado_string_join(const HadoArray *values, const HadoString *separator) {
+  int64_t count = values->count;
+  if (count <= 0) {
+    HadoString *empty = hado_alloc(sizeof(HadoString));
+    if (empty == NULL) abort();
+    empty->length = 0;
+    empty->scalars = 0;
+    return empty;
+  }
+  size_t total = 0;
+  size_t scalars = 0;
+  for (int64_t i = 0; i < count; ++i) {
+    const HadoString *value = (const HadoString *)(uintptr_t)values->slots[i];
+    if (value->length > SIZE_MAX - total) abort();
+    total += value->length;
+    if (value->scalars == HADO_SCALARS_UNKNOWN) {
+      scalars += hado_scalar_count(value->bytes, value->length);
+    } else {
+      if (value->scalars > SIZE_MAX - scalars) abort();
+      scalars += value->scalars;
+    }
+  }
+  if (separator->length > 0) {
+    size_t separators = (size_t)(count - 1);
+    if (separators > SIZE_MAX / separator->length) abort();
+    size_t extra = separators * separator->length;
+    if (extra > SIZE_MAX - total) abort();
+    total += extra;
+    if (separator->scalars > SIZE_MAX - scalars) abort();
+    if (separators > (SIZE_MAX - scalars) / separator->scalars) abort();
+    scalars += separators * separator->scalars;
+  }
+  if (total > SIZE_MAX - sizeof(HadoString)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + total);
+  if (result == NULL) abort();
+  result->length = total;
+  result->scalars = scalars;
+  size_t offset = 0;
+  for (int64_t i = 0; i < count; ++i) {
+    const HadoString *value = (const HadoString *)(uintptr_t)values->slots[i];
+    if (i > 0) {
+      memcpy(result->bytes + offset, separator->bytes, separator->length);
+      offset += separator->length;
+    }
+    memcpy(result->bytes + offset, value->bytes, value->length);
+    offset += value->length;
+  }
+  return result;
+}
+
 static int is_ascii_space(unsigned char byte) {
   return byte == '\t' || byte == '\n' || byte == '\v' || byte == '\f' || byte == '\r' || byte == ' ';
 }
@@ -427,6 +557,7 @@ HadoString *hado_string_trim(const HadoString *string) {
   HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
   result->length = length;
+  result->scalars = scalars_between(string->bytes, first, last);
   memcpy(result->bytes, string->bytes + first, length);
   return result;
 }
@@ -481,6 +612,7 @@ HadoString *hado_int_to_string(int64_t value) {
   HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
   if (result == NULL) abort();
   result->length = (size_t)length;
+  result->scalars = (size_t)length;
   memcpy(result->bytes, buffer, result->length);
   return result;
 }
@@ -528,6 +660,7 @@ HadoString *hado_float_to_string(double value) {
   HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
   if (result == NULL) abort();
   result->length = (size_t)length;
+  result->scalars = (size_t)length;
   memcpy(result->bytes, buffer, result->length);
   return result;
 }
@@ -538,6 +671,7 @@ HadoString *hado_char_to_string(uint32_t value) {
   HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
   result->length = length;
+  result->scalars = 1;
   memcpy(result->bytes, bytes, length);
   return result;
 }
@@ -636,6 +770,7 @@ HadoString *hado_bytes_display(const HadoString *bytes) {
   }
   result->bytes[length++] = ']';
   result->length = length;
+  result->scalars = length;
   return result;
 }
 
@@ -644,7 +779,14 @@ HadoString *hado_bytes_of_string(const HadoString *value) {
 }
 
 HadoString *hado_bytes_to_string_unchecked(const HadoString *bytes) {
-  return (HadoString *)bytes;
+  HadoString *string = (HadoString *)bytes;
+  /* The caller has already validated RFC 3629 well-formedness, so every byte
+     now stands for a scalar value. Filling the count here is what makes
+     String.length constant time after a Bytes.to_string. */
+  if (string->scalars == HADO_SCALARS_UNKNOWN) {
+    string->scalars = hado_scalar_count(string->bytes, string->length);
+  }
+  return string;
 }
 
 HadoString *hado_bytes_alloc(int64_t length) {
@@ -652,6 +794,7 @@ HadoString *hado_bytes_alloc(int64_t length) {
   HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
   if (result == NULL) abort();
   result->length = (size_t)length;
+  result->scalars = HADO_SCALARS_UNKNOWN;
   return result;
 }
 
