@@ -13,7 +13,7 @@
 ### 決定
 
 - 決定 1: 凍結した文書のハッシュを `docs/frozen-docs.sha256` に記録し、`scripts/frozen-docs-lock.sh --check` がバイト一致を見る（`scripts/corpus-lock.sh` と同じ形）。対象は `docs/ledger.md` と `docs/plan.md` の丸ごとで、節を切り出すパーサを持たない（決定 D4）。
-- 決定 2: 門番は `scripts/verify-frozen-docs.sh` の 1 本にする。`# tier: core` と `# round: frozen-ledger-guard` を宣言する。理由: 文書 2 本と lock を読むだけで、PR を回す層に要る検出力だから（`scripts/ci-run.sh` は `pull_request` を core で回す。決定 D3 が `scripts/verify-spec-contracts.sh` を core にしたのと同じ）。
+- 決定 2: 門番は `scripts/verify-frozen-docs.sh` の 1 本にする。`# tier: core` と `# round: frozen-ledger-guard` を宣言する。理由: 文書 2 本と lock を読むだけで、PR を回す層に要る検出力だから（`scripts/ci-run.sh` は `pull_request` を core で回す。決定 D3 が `scripts/verify-spec-contracts.sh` を core にしたのと同じ）。層は累積なので `--tier full` でも走る（`scripts/lib/gate-tiers.sh`）。
 - 決定 3: `docs/plan.md` 36 節の状態表は `docs/plans/spec-model.md` へ移し、36 節には現在の置き場を指す行を残す。以後 `docs/plan.md` は凍結した記録で、版ごとの決定は `docs/plans/<名前>.md` が持つ。
 
 ### 期待値の根拠
