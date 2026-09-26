@@ -656,6 +656,27 @@ print('control: the control-subtracted ratio rejects the issue example that the 
 PY
 }
 
+# --- k: R1 の完了条件のうち Char / Float の長さ（char-and-float-conversions が引き取る）---
+# R1 には Char module と正準形の Float.to_string が無く、この 2 つを測れなかった。
+# 上の c は runtime の単体テストなので、長さそのものはここで測る。
+conversion_lengths() {
+    python3 - "$workdir" "$hado_abs" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import harness
+harness.HADO = sys.argv[2]
+from harness import build, expect
+
+root = Path(sys.argv[1]) / 'k'
+root.mkdir(parents=True, exist_ok=True)
+expect(build(root, 'float_length', 'def main = String.length (Float.to_string 0.1)'), b'3\n')
+expect(build(root, 'char_length', "def main = String.length (Char.to_string 'あ')"), b'1\n')
+print('lengths: Float.to_string 0.1 is 3 scalars and Char.to_string あ is 1 scalar')
+PY
+}
+
 check 'a semantics: split and join equations and EmptySeparator' semantics
 check 'b length: String.length scans no bytes and does not slow with length' length_probe
 check 'c layout: runtime unit tests after the HadoString header migration' runtime_tests
@@ -668,6 +689,7 @@ check 'h perf: split with a growing Japanese separator is linear' \
     perf_split_growing あ い 7000000 14000000 'h'
 check 'i perf: join is linear in the element count' perf_join
 check 'j control: the subtracted ratio judge rejects the issue example' control_probe
+check 'k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ' conversion_lengths
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
