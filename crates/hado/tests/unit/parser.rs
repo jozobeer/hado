@@ -81,18 +81,52 @@ fn record_and_list_literals() {
 #[test]
 fn bindings_and_fn() {
     assert_eq!(
-        parse_expr_ok("def main = let x = 1 -> x + 1"),
+        parse_expr_ok("def main = 1 as x -> x + 1"),
         "(let x = 1 -> (x + 1))"
     );
     assert_eq!(
-        parse_expr_ok("def main = let x? = f y -> x"),
+        parse_expr_ok("def main = f y as x? -> x"),
         "(let x? = f y -> x)"
     );
-    assert_eq!(parse_expr_ok("def main = do g x -> x"), "(do g x -> x)");
+    assert_eq!(parse_expr_ok("def main = g x -> x"), "(do g x -> x)");
     assert_eq!(
         parse_expr_ok("def main = fn(x => x + 1)"),
         "fn(x => (x + 1))"
     );
+}
+
+/// §11・§34: `let` と `do` は廃止され、E100 になる。
+#[test]
+fn removed_binding_keywords_are_e100() {
+    for source in [
+        "def main = let x = 1 -> x",
+        "def main = let x? = f y -> x",
+        "def main = do g x -> x",
+    ] {
+        let d = parse_source(source, "t").unwrap_err();
+        assert_eq!(d.code.as_deref(), Some("E100"), "{source}: {d}");
+    }
+}
+
+/// §12.1: `if` の閉じは本体の `->` の有無と続きの有無で決まる。
+#[test]
+fn if_close_follows_the_rule() {
+    for source in [
+        "def main = if true => 1 | 0",
+        "def main = if true => 1 | 0 /if",
+        "def main = if(c => 1 | 2) + 1",
+        "def main = if (a + b) * 2 > c => 1 | 0",
+    ] {
+        assert!(parse_source(source, "t").is_ok(), "{source}");
+    }
+    for (source, want) in [
+        ("def main = if true => 1 | log \"a\" -> 2", "E100"),
+        ("def main = if true => 1 | 2 /if", "E100"),
+        ("def main = if true => if x | A => f(x) | 0", "E101"),
+    ] {
+        let d = parse_source(source, "t").unwrap_err();
+        assert_eq!(d.code.as_deref(), Some(want), "{source}: {d}");
+    }
 }
 
 #[test]
