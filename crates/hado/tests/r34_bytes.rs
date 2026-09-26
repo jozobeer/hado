@@ -102,12 +102,12 @@ fn write_utf8_cases(path: &std::path::Path) {
             r#"
 cases = utf8_cases(random.Random(34))
 assert cases and any(valid for _, _, valid in cases) and any(not valid for _, _, valid in cases)
-print("typedef struct { size_t length; unsigned char bytes[%d]; } Utf8Probe;" %
+print("typedef struct { size_t length; size_t scalars; unsigned char bytes[%d]; } Utf8Probe;" %
       max(len(seq) for _, seq, _ in cases))
-print("static const struct { Utf8Probe value; int accepted; const char *name; } utf8_cases[] = {")
+print("static struct { Utf8Probe value; int accepted; const char *name; } utf8_cases[] = {")
 for name, seq, accepted in cases:
-    print('  {{%d, {%s}}, %d, "%s"},' %
-          (len(seq), ", ".join(map(str, seq)) or "0", accepted, name))
+    print('  {{%d, %s, {%s}}, %d, "%s"},' %
+          (len(seq), "(size_t)-1", ", ".join(map(str, seq)) or "0", accepted, name))
 print("};")
 "#
         ))
@@ -140,30 +140,32 @@ fn bytes_is_utf8_and_display_at_the_c_level() {
 #include <stdio.h>
 #include "utf8_cases.h"
 
-static void assert_utf8_round_trip(const Utf8Probe *probe) {
+static void assert_utf8_round_trip(Utf8Probe *probe) {
     const HadoString *original = (const HadoString *)probe;
     assert(hado_bytes_is_utf8(original) == 1);
-    HadoString *result = hado_bytes_of_string(hado_bytes_to_string_unchecked(original));
+    HadoString *round_tripped = hado_bytes_to_string_unchecked(original);
+    assert(round_tripped->scalars == hado_scalar_count(probe->bytes, probe->length));
+    HadoString *result = hado_bytes_of_string(round_tripped);
     assert(result->length == probe->length);
     assert(memcmp(result->bytes, probe->bytes, probe->length) == 0);
 }
 
 int32_t hado_entry(void) {
-    struct { size_t length; unsigned char bytes[3]; } valid = {3, {0xe3, 0x81, 0x82}};
-    struct { size_t length; unsigned char bytes[2]; } two = {2, {72, 105}};
-    struct { size_t length; } empty = {0};
+    struct { size_t length; size_t scalars; unsigned char bytes[3]; } valid = {3, (size_t)-1, {0xe3, 0x81, 0x82}};
+    struct { size_t length; size_t scalars; unsigned char bytes[2]; } two = {2, (size_t)-1, {72, 105}};
+    struct { size_t length; size_t scalars; } empty = {0, 0};
     const HadoString *valid_string = (const HadoString *)&valid;
     const HadoString *empty_string = (const HadoString *)&empty;
     assert(hado_bytes_is_utf8(valid_string) == 1);
     // 長さの外にも正しい継続バイトを置き、境界検査の削除が偶然のメモリ内容で隠れないようにする。
     for (size_t length = 1; length < valid.length; ++length) {
-        struct { size_t length; unsigned char bytes[3]; } truncated = {length, {0xe3, 0x81, 0x82}};
+        struct { size_t length; size_t scalars; unsigned char bytes[3]; } truncated = {length, (size_t)-1, {0xe3, 0x81, 0x82}};
         assert(hado_bytes_is_utf8((const HadoString *)&truncated) == 0);
     }
     assert(hado_bytes_is_utf8((const HadoString *)&two) == 1);
     assert(hado_bytes_is_utf8(empty_string) == 1);
     for (size_t index = 0; index < sizeof(utf8_cases) / sizeof(utf8_cases[0]); ++index) {
-        const Utf8Probe *probe = &utf8_cases[index].value;
+        Utf8Probe *probe = &utf8_cases[index].value;
         int actual = hado_bytes_is_utf8((const HadoString *)probe);
         if (actual != utf8_cases[index].accepted) {
             fprintf(stderr, "UTF-8 %s: expected=%d actual=%d\n",
@@ -272,8 +274,8 @@ fn c_string_value(name: &str, text: &str) -> String {
         .map(|byte| byte.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    format!("struct {{ size_t length; unsigned char bytes[{}]; }} {name}_storage = {{{}, {{{}}}}};\nconst HadoString *{name} = (const HadoString *)&{name}_storage;\n",
-        text.len().max(1), text.len(), if text.is_empty() { "0" } else { &bytes })
+    format!("struct {{ size_t length; size_t scalars; unsigned char bytes[{}]; }} {name}_storage = {{{}, {}, {{{}}}}};\nconst HadoString *{name} = (const HadoString *)&{name}_storage;\n",
+        text.len().max(1), text.len(), text.chars().count(), if text.is_empty() { "0" } else { &bytes })
 }
 
 fn string_find_assertions(text: &str, boundaries: &[usize]) -> String {

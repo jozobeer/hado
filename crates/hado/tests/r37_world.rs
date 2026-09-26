@@ -204,7 +204,7 @@ int32_t hado_entry(void) {
     assert(first->length == 5 && memcmp(first->bytes, "first", 5) == 0);
     assert(hado_argv_get(1)->length == 0);
     assert(hado_argv_get(2)->length == 1 && hado_argv_get(2)->bytes[0] == 255);
-    struct { size_t length; unsigned char bytes[9]; } key = {7, "R37_KEYX"};
+    struct { size_t length; size_t scalars; unsigned char bytes[9]; } key = {7, HADO_SCALARS_UNKNOWN, "R37_KEYX"};
     assert(hado_env_has((const HadoString *)&key) == 1);
     const HadoString *value = hado_env_get((const HadoString *)&key);
     assert(value->length == 6 && memcmp(value->bytes, "copied", 6) == 0);
@@ -214,7 +214,7 @@ int32_t hado_entry(void) {
     assert(value->length == 4 && memcmp(value->bytes, "tail", 4) == 0);
     key.bytes[0] = 'Z';
     assert(hado_env_has((const HadoString *)&key) == 0);
-    struct { size_t length; unsigned char bytes[10]; } embedded = {9, "R37_KEY!X"};
+    struct { size_t length; size_t scalars; unsigned char bytes[10]; } embedded = {9, HADO_SCALARS_UNKNOWN, "R37_KEY!X"};
     embedded.bytes[7] = 0;
     assert(hado_env_has((const HadoString *)&embedded) == 0);
     value = hado_env_get((const HadoString *)&embedded);
@@ -290,7 +290,7 @@ int32_t hado_entry(void) {
     assert(io_status_from_errno(ENOTDIR) == 3);
     assert(io_status_from_errno(EISDIR) == 4);
     assert(io_status_from_errno(EIO) == 4);
-    struct { size_t length; unsigned char bytes[10]; } path = {7, "entriesXX"};
+    struct { size_t length; size_t scalars; unsigned char bytes[10]; } path = {7, HADO_SCALARS_UNKNOWN, "entriesXX"};
     assert(hado_io_read_dir((const HadoString *)&path) == 0);
     assert(hado_io_dir_count(0) == 5);
     const char *expected[] = {".hidden", "a", "m", "z", "日本語"};
@@ -310,9 +310,9 @@ int32_t hado_entry(void) {
     assert(written->length == 8 && memcmp(written->bytes, "replaced", 8) == 0);
     assert(bytes->length == 4 && memcmp(bytes->bytes, "data", 4) == 0);
     assert(hado_io_read_dir((const HadoString *)&path) == 3);
-    struct { size_t length; unsigned char bytes[16]; } keep = {4, "keep"};
+    struct { size_t length; size_t scalars; unsigned char bytes[16]; } keep = {4, HADO_SCALARS_UNKNOWN, "keep"};
     assert(hado_io_write_file((const HadoString *)&keep, bytes_from_c_string("original")) == 0);
-    struct { size_t length; unsigned char bytes[16]; } poisoned = {6, "keep!x"};
+    struct { size_t length; size_t scalars; unsigned char bytes[16]; } poisoned = {6, HADO_SCALARS_UNKNOWN, "keep!x"};
     poisoned.bytes[4] = 0;
     assert(hado_io_write_file((const HadoString *)&poisoned, bytes_from_c_string("pwned")) == 4);
     assert(hado_io_read_file((const HadoString *)&keep) == 0);

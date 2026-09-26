@@ -14,12 +14,9 @@ def length value => __string_length value
 def concat left right => __string_concat left right
 def slice s start end => if start >= 0 && start <= end && end <= length s => __string_slice s start end | raise { message = "IndexOutOfRange" }
 def get s index => if index >= 0 && index < length s => __string_get s index | raise { message = "IndexOutOfRange" }
-def split s separator => if length separator == 0 => raise { message = "EmptySeparator" } | split_go s separator 0 (length separator) (length s) []
-def rec split_go (s: String, separator: String, start: Int, width: Int, count: Int, acc: String List): String List {Error} => __string_find s separator start as found ->
-  if found < 0 => List.reverse [slice s start count, ...acc] | split_go s separator (found + width) width count [slice s start found, ...acc]
+def split s separator => if length separator == 0 => raise { message = "EmptySeparator" } | Array.to_list (__string_split s separator)
 def starts_with s prefix => length prefix <= length s && __string_slice s 0 (length prefix) == prefix
 def contains s part => length part == 0 || __string_find s part 0 >= 0
-def join values separator => join_go values separator ""
-def rec join_go values separator acc => if values | [] => acc | [value] => concat acc value | [head, ...tail] => join_go tail separator (concat acc (concat head separator))
+def join values separator => __string_join (Array.of_list values) separator
 def trim s => __string_trim s
 /implement
