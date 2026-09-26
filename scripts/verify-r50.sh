@@ -152,6 +152,14 @@ int32_t hado_entry(void) { return 0; }
 #include "hado_runtime.c"
 #undef main
 
+/* この探針は Rust の Float 整形器をリンクしない（char-and-float-conversions
+   で hado_float_to_string がそれを共有した）。整形は測らないので控えを置く。 */
+size_t hado_format_float(double value, unsigned char *bytes, size_t capacity) {
+  int written = snprintf((char *)bytes, capacity, "%.17g", value);
+  if (written < 0 || (size_t)written >= capacity) return 0;
+  return (size_t)written;
+}
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;

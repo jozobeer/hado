@@ -202,6 +202,15 @@ length_probe() {
 #include <string.h>
 #include <time.h>
 
+/* この探針は runtime を直接組み、Rust の Float 整形器をリンクしない。
+   Float の整形は測らないので、hado_runtime.c が参照する宣言だけ満たす控えを
+   置く（char-and-float-conversions で hado_float_to_string が共有した）。 */
+size_t hado_format_float(double value, unsigned char *bytes, size_t capacity) {
+  int written = snprintf((char *)bytes, capacity, "%.17g", value);
+  if (written < 0 || (size_t)written >= capacity) return 0;
+  return (size_t)written;
+}
+
 static double now_seconds(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

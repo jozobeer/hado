@@ -284,6 +284,14 @@ fn io_runtime_classifies_errno_and_copies_sorts_and_filters_directory_names() {
         r#"
 #include "hado_runtime.c"
 #include <assert.h>
+/* This probe links the C runtime without the Rust Float formatter, which
+   hado_float_to_string shares since char-and-float-conversions. It does not
+   measure Float spelling, so a stub satisfies the reference. */
+size_t hado_format_float(double value, unsigned char *bytes, size_t capacity) {
+  int written = snprintf((char *)bytes, capacity, "%.17g", value);
+  if (written < 0 || (size_t)written >= capacity) return 0;
+  return (size_t)written;
+}
 int32_t hado_entry(void) {
     assert(io_status_from_errno(ENOENT) == 1);
     assert(io_status_from_errno(EACCES) == 2);
