@@ -121,20 +121,20 @@ accepted = [0, 55295, 57344, 1114111, 12354, 128512]
 rejected = [-1, 55296, 57343, 1114112]
 values = '[' + ', '.join(str(n) for n in accepted) + ']'
 
-expect('char_roundtrip', f'def main = List.map {values} (fn n => Char.to_int (Char.of_int n))',
+expect('char_roundtrip', f'def main = List.map {values} fn(n => Char.to_int (Char.of_int n))',
        ('[' + ', '.join(str(n) for n in accepted) + ']\n').encode())
 expect('char_lengths',
-       f'def main = List.map {values} (fn n => String.length (Char.to_string (Char.of_int n)))',
+       f'def main = List.map {values} fn(n => String.length (Char.to_string (Char.of_int n)))',
        ('[' + ', '.join('1' for _ in accepted) + ']\n').encode())
 expect('char_bytes',
        'def main = List.map [12354, 128512] '
-       '(fn n => Bytes.to_list (Bytes.of_string (Char.to_string (Char.of_int n))))',
+       'fn(n => Bytes.to_list (Bytes.of_string (Char.to_string (Char.of_int n))))',
        (str([list(chr(n).encode()) for n in (12354, 128512)]) + '\n').encode())
 expect('char_to_int_literal', "def main = Char.to_int 'a'", b'97\n')
 # R1 の残り: Char.to_string の 1 文字は Unicode スカラ値 1 個である。
 expect('char_to_string_length', "def main = String.length (Char.to_string 'あ')", b'1\n')
 for n in rejected:
-    expect(f'char_invalid_{n}', f'def main = Char.of_int {n}',
+    expect(f'char_invalid_{n}', f'def main = Char.of_int ({n})',
            b'', code=1, stderr=b'InvalidScalar\n')
 print(f'char: {len(accepted)} accepted scalars, {len(rejected)} InvalidScalar, UTF-8 bytes')
 PY
@@ -230,7 +230,7 @@ for index, text in enumerate(spellings):
 # 往復: parse (to_string x) は有限値で x に戻る。文字列で比べる。
 round_trips = ['0.0', '-0.0', '0.1', '3.0', '1' + '0' * 300 + '.0']
 checks = ', '.join(
-    f'Float.to_string (Float.parse (Float.to_string {text})) == {quote(canonical(float(text)))}'
+    f'Float.to_string (Float.parse (Float.to_string ({text}))) == {quote(canonical(float(text)))}'
     for text in round_trips)
 expect('parse_roundtrip', f'def main = [{checks}]',
        ('[' + ', '.join('true' for _ in round_trips) + ']\n').encode())
@@ -284,10 +284,11 @@ values = [9007199254740992, 9007199254740993, 9007199254740995,
 # i64 の最小値はリテラルに書けない（E112）ので引き算で作る（exit-code-from-main と同じ）。
 i64_min = '0 - 9223372036854775807 - 1'
 source = ('def main = [' +
-          ', '.join(f'Float.to_string (Float.of_int {n})' for n in values) +
+          ', '.join(f'Float.to_string (Float.of_int ({n}))' for n in values) +
           f', Float.to_string (Float.of_int ({i64_min}))]\n')
 expected = [canonical(float(n)) for n in values] + [canonical(float(-9223372036854775808))]
-expect('of_int_rounding', source, ('[' + ', '.join(expected) + ']\n').encode())
+expect('of_int_rounding', source,
+       ('[' + ', '.join('"' + text + '"' for text in expected) + ']\n').encode())
 print(f'of_int: {len(values) + 1} i64 values rounded to nearest, ties to even')
 PY
 }
