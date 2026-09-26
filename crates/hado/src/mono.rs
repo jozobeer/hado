@@ -69,13 +69,17 @@ fn is_outcome(ty: &Type) -> bool {
 }
 
 // 効果を持つ関数値は mono では結果型に `$Outcome` を載せる。callee を
-// 単一化するときは source 側の結果型（成功型）に戻す。ADT の型引数や入れ子の
-// 閉包の結果に載っている場合も、内側を戻す。
+// 単一化するときは source 側の型に戻す。ADT の型引数・入れ子の閉包の結果・
+// 閉包の引数に載っている場合も、内側を戻す。本体を実際の型で下ろすと閉包の
+// 引数にも `$Outcome` が現れるので、引数の中も戻す。
 fn logical_argument(ty: &Type) -> Type {
     match ty {
         Type::Closure(parameters, result) => {
             let result = logical_argument(result);
-            Type::Closure(parameters.clone(), Box::new(strip_outcome(result)))
+            Type::Closure(
+                parameters.iter().map(logical_argument).collect(),
+                Box::new(strip_outcome(result)),
+            )
         }
         Type::Data(name, arguments) => Type::Data(
             name.clone(),
@@ -101,6 +105,55 @@ fn strip_outcome(ty: Type) -> Type {
 // `Array.of_list` のような callee は、scheme の単一化で入れ子の outcome を
 // 落とす。実際の型での単一化が通るなら、結果型はそちらから取る（下の
 // `specialize_function`）。実際の型で単一化できない形は論理型のままにする。
+
+// scheme が関数型を書いた引数は、本体がその outcome をほどいて伝播させる。
+// 単一化には、その結果型だけ `$Outcome` を外した成功型を使う。閉包の引数
+// （ドメイン）とデータの型引数は引数の実際の型のまま残す。本体はそれらを
+// 値として持ち回り、呼ぶときに実際の型で outcome をほどく。全体を論理型に
+// すると（`logical_argument`）、引数から来た値と本体が組み立てる値が食い違う。
+fn mixed_argument(parameter: &Ty, actual: &Type) -> Type {
+    match (parameter, actual) {
+        (Ty::Fn(..), Type::Closure(parameters, result)) => Type::Closure(
+            parameters.clone(),
+            Box::new(strip_outcome((**result).clone())),
+        ),
+        (Ty::Adt(name, args) | Ty::Abstract(name, args), Type::Data(actual_name, actual_args))
+            if name == actual_name =>
+        {
+            Type::Data(
+                actual_name.clone(),
+                args.iter()
+                    .zip(actual_args)
+                    .map(|(parameter, actual)| mixed_argument(parameter, actual))
+                    .collect(),
+            )
+        }
+        (
+            Ty::Adt(name, args) | Ty::Abstract(name, args),
+            Type::Abstract(actual_name, actual_args),
+        ) if name == actual_name => Type::Abstract(
+            actual_name.clone(),
+            args.iter()
+                .zip(actual_args)
+                .map(|(parameter, actual)| mixed_argument(parameter, actual))
+                .collect(),
+        ),
+        _ => actual.clone(),
+    }
+}
+
+// scheme の単一化に渡す期待する結果型。閉包は、引数（ドメイン）を実際の型の
+// まま、結果だけ `$Outcome` を外す。呼び出しの効果は scheme の効果行が表すので、
+// 結果に載せたまま単一化すると `Fn(A => Int)` と `$Outcome(Int)` が食い違う。
+fn scheme_expected(ty: &Type) -> Type {
+    match ty {
+        Type::Closure(parameters, result) => Type::Closure(
+            parameters.clone(),
+            Box::new(strip_outcome((**result).clone())),
+        ),
+        _ => ty.clone(),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
@@ -1552,6 +1605,7 @@ impl Lowerer {
         &mut self,
         callee: &crate::parser::Node,
         arguments: Vec<Expression>,
+        expected: Option<&Type>,
     ) -> Result<Expression, String> {
         if let crate::parser::NodeKind::Field(module, member) = &callee.kind {
             if let crate::parser::NodeKind::Name(module) = &module.kind {
@@ -1560,12 +1614,12 @@ impl Lowerer {
                     if self.is_value_definition(&qualified) {
                         return Expression::call_closure(self.expression(callee)?, arguments);
                     }
-                    return self.direct_call(&qualified, arguments);
+                    return self.direct_call(&qualified, arguments, expected);
                 }
             }
         }
         if let crate::parser::NodeKind::Name(name) = &callee.kind {
-            return self.direct_call(name, arguments);
+            return self.direct_call(name, arguments, expected);
         }
         Expression::call_closure(self.expression(callee)?, arguments)
     }
@@ -1574,6 +1628,7 @@ impl Lowerer {
         &mut self,
         name: &str,
         arguments: Vec<Expression>,
+        expected: Option<&Type>,
     ) -> Result<Expression, String> {
         if let Some((id, ty)) = self.scope.get(name) {
             return Expression::call_closure(
@@ -1585,7 +1640,7 @@ impl Lowerer {
             );
         }
         let types: Vec<_> = arguments.iter().map(Expression::ty).collect();
-        let (id, signature) = self.specialize_function(name, types, None)?;
+        let (id, signature) = self.specialize_function(name, types, expected)?;
         Expression::call_direct(id, &signature, arguments)
     }
 
@@ -2913,16 +2968,20 @@ impl Lowerer {
                 let expected = self
                     .composite_types
                     .get(&(node.span.line, node.span.col))
-                    .map(|ty| Type::try_from(&self.specialization.resolve(ty)))
+                    .map(|ty| self.actual_type(&self.specialization.resolve(ty)))
                     .transpose()
                     .map_err(|_| "call result type is not concrete")?;
-                let parameters = arguments.iter().map(Expression::ty).collect();
-                let (id, signature) =
-                    self.specialize_function(name, parameters, expected.as_ref())?;
-                return Expression::call_direct(id, &signature, arguments);
+                return self.direct_call(name, arguments, expected.as_ref());
             }
         }
-        self.call(callee, arguments)
+        // module 修飾の呼び出し（`Maker.make`）も、呼び出し位置の期待する結果型を
+        // 渡す。契約の member が返す閉包の引数のように、引数から決まらない型を
+        // 期待する結果型から解くため。
+        let expected = self
+            .composite_types
+            .get(&(node.span.line, node.span.col))
+            .and_then(|ty| self.actual_type(&self.specialization.resolve(ty)).ok());
+        self.call(callee, arguments, expected.as_ref())
     }
 
     fn abort_raise(
@@ -3233,6 +3292,65 @@ impl Lowerer {
             .find(|(handler, _)| handler.name == target.name && handler.effect == target.effect)
             .and_then(|(_, answer)| answer.clone())
             .ok_or_else(|| "again handler missing answer".into())
+    }
+
+    // 効果行の効果を捕まえる handler がこの文脈にあれば、その答えを返す。
+    fn answer_for_row(&self, row: &crate::types::Row) -> Option<Type> {
+        let labels = match row {
+            crate::types::Row::Closed(labels) | crate::types::Row::Open(_, labels) => labels,
+            crate::types::Row::Var(_) => return None,
+        };
+        let names: Vec<String> = labels.iter().map(crate::types::effect_ctor).collect();
+        for (index, handler) in self.handler_stack.iter().enumerate() {
+            if self.arm_handlers.contains(&index) {
+                continue;
+            }
+            if names
+                .iter()
+                .any(|label| crate::types::label_matches_effect(label, &handler.effect))
+            {
+                return self
+                    .answer_for_handler(handler)
+                    .ok()
+                    .or_else(|| self.context_answer.clone());
+            }
+        }
+        None
+    }
+
+    // checker の型を mono の実際の型にする。効果行を持つ閉包は結果に `$Outcome` を
+    // 載せる。handler が無い効果は閉包を呼ぶ側で捕まえるので、この文脈で捕まえる
+    // 効果だけを載せる。
+    fn actual_type(&self, ty: &Ty) -> Result<Type, UnresolvedType> {
+        match ty {
+            Ty::Fn(parameters, result, row) => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.actual_type(parameter))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.actual_type(result)?;
+                let result = match self.answer_for_row(row) {
+                    Some(answer) => Type::Data(OUTCOME.into(), vec![result, answer, Type::Void]),
+                    None => result,
+                };
+                Ok(Type::Closure(parameters, Box::new(result)))
+            }
+            Ty::Adt(name, arguments) => Ok(Type::Data(
+                name.clone(),
+                arguments
+                    .iter()
+                    .map(|argument| self.actual_type(argument))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Ty::Abstract(name, arguments) => Ok(Type::Abstract(
+                name.clone(),
+                arguments
+                    .iter()
+                    .map(|argument| self.actual_type(argument))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            other => Type::try_from(other),
+        }
     }
 
     fn handler_for(&self, operation: &str) -> Option<&crate::parser::HandlerDecl> {
@@ -4352,10 +4470,21 @@ impl Lowerer {
             .value_types
             .get(&(node.span.line, node.span.col))
             .ok_or("missing lambda type")?;
-        let Type::Closure(types, result) = Type::try_from(&self.specialization.resolve(ty))
-            .map_err(|_| "lambda type is not concrete")?
+        let resolved = self.specialization.resolve(ty);
+        let Type::Closure(declared_parameters, result) =
+            Type::try_from(&resolved).map_err(|_| "lambda type is not concrete")?
         else {
             return Err("expected function type".into());
+        };
+        // 引数の型に効果行があれば、その閉包も mono では結果に `$Outcome` を載せる。
+        // 本体がその引数を呼ぶときに outcome をほどけるよう、実際の型で束縛する。
+        let types = match &resolved {
+            Ty::Fn(parameters, _, _) => parameters
+                .iter()
+                .map(|parameter| self.actual_type(parameter))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "lambda type is not concrete")?,
+            _ => declared_parameters,
         };
         let signature = Signature {
             parameters: types.clone(),
@@ -5108,49 +5237,67 @@ impl Lowerer {
         }
         let outcome_answer = self.outcome_answer(&scheme, &types)?;
         let outcome = outcome_answer.is_some();
-        // 効果を持つ関数値を引数に取る callee は、その値の outcome を本体で
-        // ほどいて伝播させる。scheme の単一化には source 側の結果型（outcome を
-        // 外した形）を使い、引数の型は実際の閉包型のまま残す。
+        // 期待する結果型を渡す単一化用に、source 側の結果型（outcome を外した形）
+        // を用意する。引数から結果型が決まらない形（契約の member が返す閉包の
+        // 引数など）はこちらから取る。期待する結果型も本体が実際の型で下ろれて
+        // いるので、論理型に戻してから単一化する。
         let logical: Vec<Type> = types.iter().map(logical_argument).collect();
-        let inferred =
-            Signature::specialize_result(&scheme, &logical, expected_result.filter(|_| !outcome))?;
-        // 結果型は「実際の型」での単一化から取る。scheme が結果型を書いている
+        let inferred = Signature::specialize_result(
+            &scheme,
+            &logical,
+            expected_result
+                .filter(|_| !outcome)
+                .map(logical_argument)
+                .as_ref(),
+        )?;
+        // 本体も引数の実際の型で下ろす。scheme が関数型を書いた位置は、本体が
+        // outcome をほどいて伝播させるので、単一化にはその結果型だけ `$Outcome`
+        // を外した成功型を使う（`mixed_argument`）。引数の型とデータの型引数は
+        // 実際の型のまま残す。全体を論理型で下ろすと、引数から来た値（実際の型）
+        // と本体が組み立てる値（論理型）が食い違う。
+        let mut probe = crate::types::Inference::default();
+        let scheme_parameters = match probe.instantiate(&scheme) {
+            Ty::Fn(parameters, _, _) => parameters,
+            _ => Vec::new(),
+        };
+        let body_parameters: Vec<Type> = types
+            .iter()
+            .enumerate()
+            .map(|(index, actual)| match scheme_parameters.get(index) {
+                Some(parameter) => mixed_argument(parameter, actual),
+                None => actual.clone(),
+            })
+            .collect();
+        // 結果型は実際の型での単一化から取る。scheme が結果型を書いている
         // 位置（`Array.of_list` の `A Array`、`Array.get` の `A`）は、型変数に
         // 実際の型を束縛すれば outcome を保ったまま解ける。構造で結果型を書き換え
         // ると、`def replace(f: Fn(Int => Int {Error})): Fn(Int => Int) => do f 1
         // -> fn(x => (x + 1))` のように scheme が結果型そのものを書いている位置
         // まで引数の閉包で書き換えてしまう（戻り値の実体は別の閉包である）。
         //
-        // ただし scheme が引数の型に関数型を書いているときは論理型で単一化する。
-        // その引数の outcome は本体がほどいて伝播させるので、実際の型で束縛すると
-        // 本体が組み立てる型と食い違う（`List.map` の `Fn(A => B)`）。
-        let mut probe = crate::types::Inference::default();
-        let scheme_parameters = match probe.instantiate(&scheme) {
-            Ty::Fn(parameters, _, _) => parameters,
-            _ => Vec::new(),
-        };
-        let mixed: Vec<Type> = types
-            .iter()
-            .zip(&logical)
-            .enumerate()
-            .map(
-                |(index, (actual, logical))| match scheme_parameters.get(index) {
-                    Some(parameter) if !parameter.has_function() => actual.clone(),
-                    _ => logical.clone(),
-                },
-            )
-            .collect();
-        // 期待する結果型は渡さない。期待は論理型で書かれていて（呼び出し元の
-        // 環境も論理型で型付けされている）、実際の型で束縛した引数と食い違う
-        // （`Array.build` の `A Array`）。
-        let restored = match Signature::specialize_result(&scheme, &mixed, None) {
-            Ok(actual) => Signature {
-                parameters: inferred.parameters.clone(),
-                result: actual.result,
+        // 引数の実際の型だけで結果型が決まるならそれを先に使う。決まらない結果
+        // （契約の member が返す閉包の引数など）だけ、呼び出し位置の期待する
+        // 結果型から解く。期待は効果を `$Outcome` で持つので、scheme の効果行に
+        // 合わせて外してから渡す。
+        let body_result = match Signature::specialize_result(&scheme, &body_parameters, None) {
+            Ok(actual) => actual.result,
+            Err(_) => match Signature::specialize_result(
+                &scheme,
+                &body_parameters,
+                expected_result.map(scheme_expected).as_ref(),
+            ) {
+                Ok(actual) => actual.result,
+                Err(_) => inferred.result.clone(),
             },
-            Err(_) => inferred.clone(),
         };
-        let signature = self.outcome_signature(&types, &restored, outcome_answer.as_ref())?;
+        let signature = self.outcome_signature(
+            &types,
+            &Signature {
+                parameters: types.clone(),
+                result: body_result.clone(),
+            },
+            outcome_answer.as_ref(),
+        )?;
         let key = self.specialized_name(name);
         if let Some(function) = self.cached_specialization(&key, &types, &signature.result) {
             return Ok(function);
@@ -5165,8 +5312,8 @@ impl Lowerer {
             body,
             scheme,
             types,
-            logical,
-            inferred,
+            body_parameters,
+            body_result,
             outcome_answer,
             signature,
         })
@@ -5300,17 +5447,17 @@ impl Lowerer {
             body,
             scheme,
             types,
-            logical,
-            inferred,
+            body_parameters,
+            body_result,
             outcome_answer,
             mut signature,
         } = plan;
         let mut specialization = crate::types::Inference::default();
-        let concrete_parameters: Vec<Ty> = logical
+        let concrete_parameters: Vec<Ty> = body_parameters
             .iter()
             .map(|ty| ty_with_fresh_rows(ty, &mut specialization))
             .collect();
-        let result = ty_with_fresh_rows(&inferred.result, &mut specialization);
+        let result = ty_with_fresh_rows(&body_result, &mut specialization);
         let concrete = Ty::fn_with(concrete_parameters, result, specialization.fresh_row());
         specialization
             .unify(scheme.body(), &concrete)
@@ -5384,8 +5531,8 @@ struct SpecializationPlan {
     body: crate::parser::Node,
     scheme: crate::types::Scheme,
     types: Vec<Type>,
-    logical: Vec<Type>,
-    inferred: Signature,
+    body_parameters: Vec<Type>,
+    body_result: Type,
     outcome_answer: Option<Type>,
     signature: Signature,
 }
@@ -5464,7 +5611,7 @@ mod tests {
             (7, Type::Closure(vec![Type::Int], Box::new(Type::Bool))),
         );
         let call = lowerer
-            .direct_call("f", vec![Expression::Constant(Constant::Int(3))])
+            .direct_call("f", vec![Expression::Constant(Constant::Int(3))], None)
             .unwrap();
         assert_eq!(call.ty(), Type::Bool);
         assert!(matches!(&call, Expression::CallClosure { closure, .. }
@@ -5473,9 +5620,9 @@ mod tests {
             call.in_tail_position(),
             Expression::TailCallClosure { .. }
         ));
-        assert!(lowerer.direct_call("f", vec![]).is_err());
+        assert!(lowerer.direct_call("f", vec![], None).is_err());
         assert!(lowerer
-            .direct_call("f", vec![Expression::Constant(Constant::Bool(true))])
+            .direct_call("f", vec![Expression::Constant(Constant::Bool(true))], None)
             .is_err());
     }
 
@@ -5566,7 +5713,7 @@ mod tests {
         });
         lowerer.scope.insert("f".into(), (1, Type::Int));
         assert!(lowerer
-            .direct_call("f", vec![Expression::Constant(Constant::Int(1))])
+            .direct_call("f", vec![Expression::Constant(Constant::Int(1))], None)
             .is_err());
     }
 }
