@@ -116,29 +116,68 @@ issue の完了条件をそのまま使う。
 
 ## 実測
 
-正準形の往復と閉じの正例・負例、受理コーパスの実行を測る。
+完了条件ごとに測る。
 
 ```
 $ cargo test --offline --test postfix_close
-running 3 tests
-test close_shapes_parse ... ok
-test close_defects_are_e100 ... ok
-test corpus_is_canonical_and_round_trips ... ok
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ cargo test --offline --test corpus
-running 4 tests
-test launch_tests::isolates_work_and_stdin ... ok
-test library_corpus ... ok
-test generated_output_headers_enforce_stream_status_and_empty_output ... ok
-test corpus ... ok
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ cargo test --offline --lib
-test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo test --offline --no-fail-fast
+（70 本の判定が全て ok。合計 761 passed; 0 failed）
 ```
 
-条件が `(` で始まる `if` は、裸・`/if`・`if(...)` の 3 つを受理コーパス
-（`tests/accept/if_condition_paren_*`）が、閉じの不足・余分・食い違いを `tests/postfix-close/reject`
-が固定する。受理コーパスの `if` 全体への継続と最後の腕への継続は
-`tests/accept/if_close_whole`・`tests/accept/if_close_last_arm` が実行結果まで固定する。
+条件ごとの当て方。
+
+- 選んだ構文と旧形の E100: `tests/unit/parser.rs` の `removed_binding_keywords_are_e100`
+  が `let`・`do`・`let?`・`do?` の E100 を、`tests/postfix-close/reject` が閉じの
+  不足・余分・食い違いを固定する。仕様は §6・§11・§12.1・§56 と `spec/errors.toml`。
+- `if` 全体への継続と最後の腕への継続: `tests/accept/if_close_whole`（`if(b => 1 | 2) + 1` が
+  `2`）と `tests/accept/if_close_last_arm`（`log "a"` が `a`）が実行結果まで固定する。
+- 条件が `(` で始まる `if` の 3 つの形: `tests/accept/if_condition_paren_bare`
+  （裸・`big`）・`if_condition_paren_group`（`if(...)`・`11`）・`if_condition_paren_rail`
+  （`/if`・`7`）が実行結果まで固定する。
+- 正準形の往復: `cargo test --offline --test postfix_close` が `tests/accept`・`stdlib`・
+  `tools` の全ファイルで、印字が入力と一致し読み直しても変わらないことを見る。
+- 門番: `bash scripts/verify-postfix-binding.sh` は 4/4。`J3` は印字器と
+  `if(` の読み分けの 5 つの変異が全て赤になることを見る。
+
+```
+$ bash scripts/verify-postfix-binding.sh
+J1:往復と閉じ(ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s): PASS
+J2:コーパス(ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.57s): PASS
+J3 drop-rail-if: caught
+J3 drop-option-question: caught
+J3 drop-if-parens: caught
+J3 add-if-parens: caught
+J3 always-close-if-paren: caught
+J3:印字器の変異(cases=5): PASS
+J4:lint-docs(PASSED: 16/16): PASS
+PASSED: 4/4
+
+$ bash scripts/run-gates.sh --tier quick target/gates-quick
+TALLY: 40/40 passed; red: none
+
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+```
+
+### 写しの途中で見つけた印字器の穴
+
+`print-postfix` の出力を読み直すと、正準形が自分の構文解析を通らない綴りが
+3 つあった。いずれも直し、`tests/accept` の往復が固定する。
+
+1. `- - x` の正準形が `--x` になり、字句が `--` をコメントの印と読んで E104。
+   入れ子の `-` の被演算子を括弧で包む（`tests/accept/neg_nested`）。
+2. pattern の腕の本体が `->` を含むとき、包まずに綴ると後ろの `| 次の腕` が
+   本体の内側の腕として読まれる。`tests/accept/user_store` の
+   `| Some(user) => do … -> true | false` は旧構文では `| false` が独立の腕
+   だったが、後置の綴りでは `true` の後ろに付いていた。包んで旧構文と同じ木に戻す。
+3. 見出しの中の項目が読めないとき、`recover_declaration` が `/module`・
+   `/implement` を飛ばして木の外まで走り、「閉じていない」という別の E100 が
+   本当の誤りを位置の順で覆っていた。閉じの手前で止める。
