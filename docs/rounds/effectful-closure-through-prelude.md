@@ -86,4 +86,54 @@ issue の完了条件のとおり。`handler Error as Catch` の下で `8 / 0` �
 
 ## 実測
 
-（この節はラウンドの最後に埋める。）
+issue の 5 入力（`handler Error as Catch` の下で `8 / 0` を腕に届かせる）を
+`target/scratch/<名>/main.hd` に置いて走らせる。同じ 5 つが
+`crates/hado/tests/r26_effects.rs` のテストになっている。
+
+```
+$ for d in reverse map to_list set maker; do
+>   printf '%s: ' "$d"
+>   cargo run --offline -q -- run target/scratch/$d/main.hd
+> done
+reverse: 0
+map: 2
+to_list: 2
+set: 3
+maker: 1
+```
+
+直す前の `mono.rs`・`types.rs`（`2e32d3a`）に同じテストを当てると、5 つが赤。
+
+```
+$ git checkout 2e32d3a -- crates/hado/src/mono.rs crates/hado/src/types.rs
+$ cargo test --offline --test r26_effects
+test result: FAILED. 55 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.55s
+test array_set_of_effectful_closures_keeps_their_outcome ... FAILED
+test array_to_list_of_effectful_closures_keeps_their_outcome ... FAILED
+test contract_member_returning_a_closure_over_an_effectful_argument ... FAILED
+test map_over_effectful_closures_keeps_their_outcome ... FAILED
+test reverse_over_effectful_closures_keeps_their_outcome ... FAILED
+```
+
+直した後。
+
+```
+$ cargo test --offline --test r26_effects
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.83s
+```
+
+全走と、触ったところに効く門番。
+
+```
+$ cargo test --offline > /tmp/t.log 2>&1; echo "exit=$?"
+exit=0
+$ grep -c '^test result: ok' /tmp/t.log
+69
+$ grep -cE '^test result: FAILED' /tmp/t.log
+0
+$ bash scripts/verify-m4.sh
+reject: 27/27
+accept: 111/111
+PASSED: 140/140
+```
+
