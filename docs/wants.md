@@ -38,7 +38,6 @@ R45 で言語意味を 1 つ足した（複数の scrutinee と腕の条件列�
 17. **低** `hado --version`
 18. **中** 実行ファイルの出力先。入力の隣はコーパスを汚すので `-o` か既定を一時領域に。R48 で `build -o <path>` と `run` の一時領域を入れた（§58、`docs/rounds/r48.md`）。`build` の既定を一時領域にするかは残り
 19. **低** DWARF（`preserve_frame_pointers` は既にある）
-20. **低** REPL（JIT は計画 6 節）
 21. **低** playground（冗長が落ちるデモ。配布が目的になるまで不要）
 
 ## I/O とプロセス
