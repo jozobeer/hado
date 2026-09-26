@@ -134,9 +134,10 @@ fn generated_types_roundtrip_in_canonical_form() {
         let ast = parser::parse_source(&definition, "generated.hd")
             .unwrap_or_else(|e| panic!("{e}\n{definition}"));
         let printed = parser::canonical_program(&ast);
-        assert_eq!(printed, definition);
+        let canonical = format!("{definition}\n");
+        assert_eq!(printed, canonical);
         let restored = parser::parse_source(&printed, "restored.hd").unwrap();
-        assert_eq!(parser::canonical_program(&restored), definition);
+        assert_eq!(parser::canonical_program(&restored), canonical);
     }
 }
 
@@ -224,7 +225,7 @@ fn old_spellings_and_comparison_chains_reject_at_the_token() {
             "<",
         ),
         ("def f<A>(x: A): A => x\ndef main = f 1", "<"),
-        ("def main = fn x => x", "x =>"),
+        ("def main = fn x => x", "fn"),
         (
             "def f(x: (Int) List): Int List => x\ndef main = f [1]",
             "(Int)",

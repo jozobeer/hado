@@ -53,13 +53,13 @@ struct Program {
 fn program(contracts: usize, implementations: usize) -> Program {
     let mut program = Program::default();
     for contract in 0..contracts {
-        program
-            .sections
-            .push(format!("module Contract{contract}\ndef run(x: Int): Int"));
+        program.sections.push(format!(
+            "module Contract{contract}\ndef run(x: Int): Int\n/module"
+        ));
         for implementation in 0..implementations {
             let value = (contract * 10 + implementation) as i64;
             let offset = (contract + implementation + 1) as i64;
-            program.sections.push(format!("implement Contract{contract} as Impl{contract}_{implementation}\ndef run x => x + {offset}"));
+            program.sections.push(format!("implement Contract{contract} as Impl{contract}_{implementation}\ndef run x => x + {offset}\n/implement"));
             program
                 .calls
                 .push(format!("Impl{contract}_{implementation}.run {value}"));
@@ -105,13 +105,13 @@ fn generated_contracts_and_implementations_round_trip_and_execute_in_any_order()
 fn section_errors_preserve_namespace_and_declaration_anchors() {
     for padding in 0..2 {
         for (source, code, anchor) in [
-            ("def main = 1\nmodule Unused\ndef run(x: Int): Int", "E513", "module Unused"),
-            ("def main = 1\nmodule S\ndef run(x: Int): Int\nimplement S as Unused\ndef run x => x + 1", "E513", "implement S"),
-            ("def main = 1\nimplement Missing as M\ndef run x => x + 1", "E204", "Missing"),
-            ("def main = 1\nmodule S\ntype T = Int", "E100", "= Int"),
-            ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype U = Int\ndef run x => x + 1", "E204", "U ="),
-            ("def main = M.run 1\nmodule S\ndef run(x: Int): Bool\nimplement S as M\ndef run x => x + 1", "E602", "implement S"),
-            ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ndef dead x => x + 2\ndef run x => x + 1", "E514", "def dead"),
+            ("def main = 1\nmodule Unused\ndef run(x: Int): Int\n/module", "E513", "module Unused"),
+            ("def main = 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as Unused\ndef run x => x + 1\n/implement", "E513", "implement S"),
+            ("def main = 1\nimplement Missing as M\ndef run x => x + 1\n/implement", "E204", "Missing"),
+            ("def main = 1\nmodule S\ntype T = Int\n/module", "E100", "module S"),
+            ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as M\ntype U = Int\ndef run x => x + 1\n/implement", "E204", "U ="),
+            ("def main = M.run 1\nmodule S\ndef run(x: Int): Bool\n/module\nimplement S as M\ndef run x => x + 1\n/implement", "E602", "implement S"),
+            ("def main = M.run 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as M\ndef dead x => x + 2\ndef run x => x + 1\n/implement", "E514", "def dead"),
         ] {
             let source = format!("{}{}{}", "\n".repeat(padding % 3), " ".repeat(padding), source);
             rejected(&source, code, anchor);
@@ -134,7 +134,7 @@ fn obsolete_module_forms_are_syntax_errors_and_old_keywords_are_names() {
 
 #[test]
 fn abstract_types_are_opaque_and_local_data_names_do_not_escape() {
-    let sections = "module S\ntype T\ndef make(x: Int): T\nimplement S as M\ntype Entry = { number: Int }\ntype T = Entry\ndef make x => { number = x }";
+    let sections = "module S\ntype T\ndef make(x: Int): T\n/module\nimplement S as M\ntype Entry = { number: Int }\ntype T = Entry\ndef make x => { number = x }\n/implement";
     for (outer, code, anchor) in [
         ("def main = (M.make 1).number", "E601", ".number"),
         (
@@ -160,12 +160,12 @@ fn abstract_types_are_opaque_and_local_data_names_do_not_escape() {
         );
     }
     rejected(
-        &format!("def main = M.make 1\nmodule Bad\ndef consume(x: M.T): Int\n{sections}"),
+        &format!("def main = M.make 1\nmodule Bad\ndef consume(x: M.T): Int\n/module\n{sections}"),
         "E204",
         "M.T",
     );
-    rejected("type Entry = { number: Int }\ndef main = M.run 1\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype Entry = | Entry(Int)\ndef run x => x + 1", "E205", "Entry = |");
-    rejected("def main = M.run 1\nmodule S\ntype Entry\ndef run(x: Int): Int\nimplement S as M\ntype Entry = { number: Int }\ndef run x => x + 1", "E205", "Entry = {");
+    rejected("type Entry = { number: Int }\ndef main = M.run 1\nmodule S\ndef run(x: Int): Int\n/module\nimplement S as M\ntype Entry = | Entry(Int)\ndef run x => x + 1\n/implement", "E205", "Entry = |");
+    rejected("def main = M.run 1\nmodule S\ntype Entry\ndef run(x: Int): Int\n/module\nimplement S as M\ntype Entry = { number: Int }\ndef run x => x + 1\n/implement", "E205", "Entry = {");
 }
 
 #[test]
@@ -176,15 +176,15 @@ fn implementation_local_data_requires_a_reachable_use() {
         format!("type Dead{index} = | Dead{index}(Int)"),
         format!("type Dead{index} = | Dead{index}(Other{index}) type Other{index} = | Other{index}(Dead{index})"),
     ] {
-        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M\n{}{}\ndef run x => x + 1", " ".repeat(index), body);
+        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int /module\nimplement S as M\n{}{}\ndef run x => x + 1\n/implement", " ".repeat(index), body);
         rejected(&source, "E513", &format!("type Dead{index}"));
     }
     for body in [
-        format!("type Used{index} = {{ value{index}: Int }} def run x => let r = {{ value{index} = x }} -> r.value{index}"),
-        format!("type Used{index} = | Wrap{index}(Int) def run x => let Wrap{index}(n) = Wrap{index}(x) -> n"),
+        format!("type Used{index} = {{ value{index}: Int }} def run x => {{ value{index} = x }} as r -> r.value{index}"),
+        format!("type Used{index} = | Wrap{index}(Int) def run x => Wrap{index}(x) as Wrap{index}(n) -> n"),
     ] {
-        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M {body}");
+        let source = format!("def main = M.run 1\nmodule S def run(x: Int): Int /module\nimplement S as M {body} /implement");
         check_source(&source, "local-data.hd").unwrap();
     }
-    check_source("def main = M.get (M.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x } def get item => item.value", "local-data.hd").unwrap();
+    check_source("def main = M.get (M.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int /module\nimplement S as M type Inner = { value: Int } type T = Inner def make x => { value = x } def get item => item.value /implement", "local-data.hd").unwrap();
 }

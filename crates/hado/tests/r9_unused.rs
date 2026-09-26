@@ -6,11 +6,11 @@ fn every_user_declaration_kind_is_checked_for_reachability() {
         for declaration in [
             "def unused x => x + 1".to_owned(),
             format!("type Unused{padding} = | UnusedValue{padding}"),
-            format!("module Unused{padding} def value(x: Int): Int"),
-            format!("implement S as M{padding} def value x => x + 1"),
+            format!("module Unused{padding} def value(x: Int): Int /module"),
+            format!("implement S as M{padding} def value x => x + 1 /implement"),
         ] {
             let contract = if declaration.starts_with("implement") {
-                "module S def value(x: Int): Int"
+                "module S def value(x: Int): Int /module"
             } else {
                 ""
             };
@@ -36,8 +36,8 @@ fn references_through_modules_signatures_and_inferred_records_are_used() {
     for source in [
         "type Box = | Pack(Int)\ndef main = Pack(1)",
         "type Box = { value: Int }\ndef main = { value = 1 }",
-        "type Box = | Pack(Int)\n\n\ndef main = M.make 1\nmodule S def make(x: Int): Box\nimplement S as M def make x => Pack(x)",
-        "def add x => x + 1\n\n\ndef main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M def run x => add x",
+        "type Box = | Pack(Int)\n\n\ndef main = M.make 1\nmodule S def make(x: Int): Box /module\nimplement S as M def make x => Pack(x) /implement",
+        "def add x => x + 1\n\n\ndef main = M.run 1\nmodule S def run(x: Int): Int /module\nimplement S as M def run x => add x /implement",
         "def main = List.length [1, 2]",
         "def main = 1",
     ] {
@@ -48,7 +48,7 @@ fn references_through_modules_signatures_and_inferred_records_are_used() {
 #[test]
 fn unused_module_is_reported_even_when_its_signature_is_used() {
     let index = 0;
-    let source = format!("def main = Used.run {index}\nmodule S def run(x: Int): Int\nimplement S as Unused{index} def run x => x + 1\nimplement S as Used def run x => x + 1");
+    let source = format!("def main = Used.run {index}\nmodule S def run(x: Int): Int /module\nimplement S as Unused{index} def run x => x + 1 /implement\nimplement S as Used def run x => x + 1 /implement");
     let error = check_source(&source, "unused-module.hd").err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E513"));
     assert_eq!((error.line, error.col), (3, 1));
@@ -57,11 +57,11 @@ fn unused_module_is_reported_even_when_its_signature_is_used() {
 #[test]
 fn definitions_and_modules_follow_dependencies_in_any_source_order() {
     let declarations = [
-        "module S def run(x: Int): Int",
+        "module S def run(x: Int): Int /module",
         "def increment x => x + 1",
-        "implement S as A def run x => increment x",
+        "implement S as A def run x => increment x /implement",
         "def twice x => A.run (A.run x)",
-        "implement S as B def run x => twice x",
+        "implement S as B def run x => twice x /implement",
         "def main = B.run 40",
     ];
     for rotation in 0..3 {
@@ -89,7 +89,7 @@ fn module_calls_to_outer_definitions_execute() {
     let dir = std::env::temp_dir().join(format!("hado-outer-def-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
-    let source = "def main = M.run 20\n\ndef add x => x + 1\nimplement S as M def run x => add (add x)\nmodule S def run(x: Int): Int";
+    let source = "def main = M.run 20\n\ndef add x => x + 1\nimplement S as M def run x => add (add x) /implement\nmodule S def run(x: Int): Int /module";
     std::fs::write(&path, source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("build")

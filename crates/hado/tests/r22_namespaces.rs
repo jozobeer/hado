@@ -145,12 +145,15 @@ fn generated_member(
     );
     case.write(
         &format!("{}/contract{index}.hdi", selected[1]),
-        &format!("module S{index}\ndef run(value: {}): Int", names[0]),
+        &format!(
+            "module S{index}\ndef run(value: {}): Int\n/module",
+            names[0]
+        ),
     );
     case.write(
         &format!("{}/impl{index}.hd", selected[2]),
         &format!(
-            "implement {} as M{index}\ndef run | {constructor}(n) => n + {added}",
+            "implement {} as M{index}\ndef run | {constructor}(n) => n + {added}\n/implement",
             names[1]
         ),
     );
@@ -197,7 +200,7 @@ fn reference_case(contract_dir: &str) -> Case {
     let case = Case::new();
     case.write(
         &format!("{contract_dir}/s.hdi"),
-        "module S\ndef run(x: Int): Int",
+        "module S\ndef run(x: Int): Int\n/module",
     );
     case.write("main.hd", "def main = parent::child::M.run 7");
     case
@@ -208,7 +211,7 @@ fn parent_and_sibling_contract_names_require_absolute_paths() {
     perturb_rejection(
         &case,
         "parent/child/m.hd",
-        "implement S as M\ndef run x => x + 3",
+        "implement S as M\ndef run x => x + 3\n/implement",
         "E204",
         "S",
     );
@@ -220,7 +223,7 @@ fn parent_sibling_and_own_directory_absolute_paths_are_accepted() {
         case.write(
             "parent/child/m.hd",
             &format!(
-                "implement {} as M\ndef run x => x + 3",
+                "implement {} as M\ndef run x => x + 3\n/implement",
                 path(contract_dir, "S")
             ),
         );
@@ -230,10 +233,10 @@ fn parent_sibling_and_own_directory_absolute_paths_are_accepted() {
 #[test]
 fn own_directory_absolute_implementation_reference_is_accepted() {
     let case = Case::new();
-    case.write("store/s.hdi", "module S\ndef run(x: Int): Int");
+    case.write("store/s.hdi", "module S\ndef run(x: Int): Int\n/module");
     case.write(
         "store/m.hd",
-        "implement S as M\ndef run x => x + 3\nimplement S as N\ndef run x => store::M.run x + 4",
+        "implement S as M\ndef run x => x + 3\n/implement\nimplement S as N\ndef run x => store::M.run x + 4\n/implement",
     );
     case.write("main.hd", "def main = store::N.run 7");
     case.run("main.hd", 14);
@@ -242,7 +245,7 @@ fn own_directory_absolute_implementation_reference_is_accepted() {
 fn same_names_in_distinct_directories_remain_distinct() {
     let case = Case::new();
     for (dir, offset) in [("color", 3), ("light", 11)] {
-        case.write(&format!("{dir}/all.hd"), &format!("type Data = | Red(Int)\nmodule S\ndef run(value: Data): Int\nimplement S as M\ndef run | Red(n) => n + {offset}"));
+        case.write(&format!("{dir}/all.hd"), &format!("type Data = | Red(Int)\nmodule S\ndef run(value: Data): Int\n/module\nimplement S as M\ndef run | Red(n) => n + {offset}\n/implement"));
     }
     case.write(
         "main.hd",
@@ -254,7 +257,11 @@ fn same_names_in_distinct_directories_remain_distinct() {
 fn same_directory_duplicates_reject_the_second_declaration_in_each_space() {
     for (first, second, anchor) in [
         ("type Data = | First", "type Data = | Second", "Data"),
-        ("module S\nimplement S as M", "implement S as M", "M"),
+        (
+            "module S /module\nimplement S as M /implement",
+            "implement S as M /implement",
+            "M",
+        ),
     ] {
         let case = Case::new();
         case.write("main.hd", "def main = 1");
@@ -266,7 +273,11 @@ fn same_directory_duplicates_reject_the_second_declaration_in_each_space() {
 fn root_collisions_always_point_to_the_child_declaration_in_each_space() {
     for (root, child, anchor) in [
         ("type Data = | First", "type Data = | Second", "Data"),
-        ("module S\nimplement S as M", "implement S as M", "M"),
+        (
+            "module S /module\nimplement S as M /implement",
+            "implement S as M /implement",
+            "M",
+        ),
     ] {
         let case = Case::new();
         case.write("main.hd", "def main = 1");
@@ -331,13 +342,16 @@ fn selecting_a_child_file_makes_its_directory_the_root() {
         "main.hd",
         "type Root = | Root(Int)\ndef main = nested::deep::M.run (Root(7))",
     );
-    case.write("nested/deep/s.hdi", "module S\ndef run(value: Root): Int");
+    case.write(
+        "nested/deep/s.hdi",
+        "module S\ndef run(value: Root): Int\n/module",
+    );
     case.write(
         "nested/deep/m.hd",
-        "implement S as M\ndef run | Root(n) => n",
+        "implement S as M\ndef run | Root(n) => n\n/implement",
     );
     case.run("main.hd", 7);
-    let source = "implement S as M\ndef run | Root(n) => n";
+    let source = "implement S as M\ndef run | Root(n) => n\n/implement";
     case.reject(
         "check",
         "nested/deep/m.hd",
@@ -353,10 +367,13 @@ fn root_types_and_prelude_names_are_visible_from_nested_directories() {
         "main.hd",
         "type Root = | Root(Int)\ndef main = nested::deep::M.run (Root(7))",
     );
-    case.write("nested/deep/s.hdi", "module S\ndef run(value: Root): Int");
+    case.write(
+        "nested/deep/s.hdi",
+        "module S\ndef run(value: Root): Int\n/module",
+    );
     case.write(
         "nested/deep/m.hd",
-        "implement S as M\ndef run | Root(n) => List.length [n, n]",
+        "implement S as M\ndef run | Root(n) => List.length [n, n]\n/implement",
     );
     case.run("main.hd", 2);
 }
@@ -365,20 +382,20 @@ fn parent_and_sibling_types_implementations_and_constructors_require_paths() {
     for kind in ["type", "implementation", "constructor"] {
         let case = Case::new();
         let qualified = "parent";
-        case.write(&format!("{qualified}/all.hd"), "type Data = | Wrap(Int)\nmodule S\ndef run(value: Data): Int\nimplement S as M\ndef run | Wrap(n) => n + 3");
+        case.write(&format!("{qualified}/all.hd"), "type Data = | Wrap(Int)\nmodule S\ndef run(value: Data): Int\n/module\nimplement S as M\ndef run | Wrap(n) => n + 3\n/implement");
         case.write(
             "main.hd",
             &format!("def main = parent::child::N.run ({qualified}::Wrap(7))"),
         );
         case.write(
             "parent/child/s.hdi",
-            &format!("module Child\ndef run(value: {qualified}::Data): Int"),
+            &format!("module Child\ndef run(value: {qualified}::Data): Int\n/module"),
         );
-        case.write("parent/child/n.hd", &format!("implement Child as N\ndef run | {qualified}::Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"));
+        case.write("parent/child/n.hd", &format!("implement Child as N\ndef run | {qualified}::Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))\n/implement"));
         match kind {
-            "type" => perturb_rejection(&case, "parent/child/s.hdi", "module Child\ndef run(value: Data): Int", "E204", "Data"),
-            "implementation" => perturb_rejection(&case, "parent/child/n.hd", "implement Child as N\ndef run x => M.run x", "E204", "M.run"),
-            _ => perturb_rejection(&case, "parent/child/n.hd", &format!("implement Child as N\ndef run | Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))"), "E204", "Wrap(n)"),
+            "type" => perturb_rejection(&case, "parent/child/s.hdi", "module Child\ndef run(value: Data): Int\n/module", "E204", "Data"),
+            "implementation" => perturb_rejection(&case, "parent/child/n.hd", "implement Child as N\ndef run x => M.run x\n/implement", "E204", "M.run"),
+            _ => perturb_rejection(&case, "parent/child/n.hd", &format!("implement Child as N\ndef run | Wrap(n) => {qualified}::M.run ({qualified}::Wrap(n))\n/implement"), "E204", "Wrap(n)"),
         }
     }
 }
@@ -388,11 +405,11 @@ fn absolute_constructor_expression_pattern_and_type_paths_are_accepted() {
     case.write("parent/data.hd", "type Data = | Wrap(Int)");
     case.write(
         "parent/child/s.hdi",
-        "module S\ndef run(value: parent::Data): Int",
+        "module S\ndef run(value: parent::Data): Int\n/module",
     );
     case.write(
         "parent/child/m.hd",
-        "implement S as M\ndef run | parent::Wrap(n) => n + 3",
+        "implement S as M\ndef run | parent::Wrap(n) => n + 3\n/implement",
     );
     case.write(
         "main.hd",
@@ -405,11 +422,11 @@ fn implementation_abstract_type_paths_are_accepted_in_external_annotations() {
     let case = Case::new();
     case.write(
         "store/s.hdi",
-        "module S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int",
+        "module S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module",
     );
     case.write(
         "store/m.hd",
-        "implement S as M\ntype T = Int\ndef make x => x + 3\ndef read x => x",
+        "implement S as M\ntype T = Int\ndef make x => x + 3\ndef read x => x\n/implement",
     );
     case.write(
         "main.hd",
@@ -420,11 +437,14 @@ fn implementation_abstract_type_paths_are_accepted_in_external_annotations() {
 #[test]
 fn functor_targets_and_arguments_accept_absolute_implementation_paths() {
     let case = Case::new();
-    case.write("s.hdi", "module S\ndef run(x: Int): Int");
-    case.write("ids/i.hd", "implement S as I\ndef run x => x + 4");
+    case.write("s.hdi", "module S\ndef run(x: Int): Int\n/module");
+    case.write(
+        "ids/i.hd",
+        "implement S as I\ndef run x => x + 4\n/implement",
+    );
     case.write(
         "factory/f.hd",
-        "implement S as Make(Param: S)\ndef run x => Param.run x + 3",
+        "implement S as Make(Param: S)\ndef run x => Param.run x + 3\n/implement",
     );
     case.write(
         "main.hd",
@@ -438,20 +458,20 @@ fn valid_directory_names_allow_digits_and_trailing_underscores() {
     case.write("main.hd", "def main = a1_::M.run 7");
     case.write(
         "a1_/all.hd",
-        "module S\ndef run(x: Int): Int\nimplement S as M\ndef run x => x + 3",
+        "module S\ndef run(x: Int): Int\n/module\nimplement S as M\ndef run x => x + 3\n/implement",
     );
     case.run("main.hd", 10);
 }
 
 fn namespace_anchor_case() -> Case {
     let case = Case::new();
-    case.write("known/all.hd", "type T = | T(Int)\nmodule T\ndef read(x: T): Int\nimplement T as T\ndef read | T(n) => n + 1");
+    case.write("known/all.hd", "type T = | T(Int)\nmodule T\ndef read(x: T): Int\n/module\nimplement T as T\ndef read | T(n) => n + 1\n/implement");
     case
 }
 fn reference_template(kind: &str) -> &'static str {
     match kind {
         "type" => "def use (x: TARGET) => known::T.read x\ndef main = use (known::T(7))",
-        "contract" => "def main = A.read (known::T(7))\nimplement TARGET as C\ndef read x => known::T.read x\nimplement known::T as F(P: known::T)\ndef read x => P.read x\nimplement known::T as A = F(C)",
+        "contract" => "def main = A.read (known::T(7))\nimplement TARGET as C\ndef read x => known::T.read x\n/implement\nimplement known::T as F(P: known::T)\ndef read x => P.read x\n/implement\nimplement known::T as A = F(C)",
         "implementation" => "def main = TARGET.read (known::T(7))",
         "constructor-expression" => "def main = known::T.read (TARGET(7))",
         "constructor-pattern" => "def use | TARGET(n) => known::T.read (known::T(n))\ndef main = use (known::T(7))",

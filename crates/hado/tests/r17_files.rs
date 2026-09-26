@@ -73,12 +73,12 @@ fn generated_programs_share_types_and_contracts_across_files() {
         let mut calls = Vec::new();
         let mut expected = 0;
         for contract in 0..count {
-            let mut signature = format!("type Input{contract} = {{ value{contract}: Int }}\nmodule S{contract}\ndef run(x: Input{contract}): Int");
+            let mut signature = format!("type Input{contract} = {{ value{contract}: Int }}\nmodule S{contract}\ndef run(x: Input{contract}): Int\n/module");
             for implementation in 0..2 + random(&mut state, 3) {
                 let offset = random(&mut state, 100);
                 let value = random(&mut state, 100);
                 let name = format!("M{contract}_{implementation}");
-                let section = format!("\nimplement S{contract} as {name}\ndef run x => x.value{contract} + {offset}\n");
+                let section = format!("\nimplement S{contract} as {name}\ndef run x => x.value{contract} + {offset}\n/implement\n");
                 if random(&mut state, 2) == 0 {
                     signature.push_str(&section);
                 } else {
@@ -98,7 +98,7 @@ fn generated_programs_share_types_and_contracts_across_files() {
         case.write(
             "main.hd",
             &format!(
-                "def main = let result = {{ number = {} }} -> result.number",
+                "def main = {{ number = {} }} as result -> result.number",
                 calls.join(" + ")
             ),
         );
@@ -119,8 +119,12 @@ fn generated_programs_share_types_and_contracts_across_files() {
 fn duplicate_names_follow_entry_then_byte_path_order() {
     for padding in 0..3 {
         for (first, second, anchor) in [
-            ("module S", "module S", "S"),
-            ("implement S as M", "implement S as M", "M"),
+            ("module S /module", "module S /module", "S"),
+            (
+                "implement S as M /implement",
+                "implement S as M /implement",
+                "M",
+            ),
             ("type Data = | First", "type Data = | Second", "Data"),
         ] {
             for entry_first in [false, true] {
@@ -142,7 +146,7 @@ fn duplicate_names_follow_entry_then_byte_path_order() {
                 }
                 case.write("b_second.hd", &source);
                 if first.starts_with("implement") {
-                    case.write("contract.hdi", "module S");
+                    case.write("contract.hdi", "module S /module");
                 }
                 case.reject(
                     "check",
@@ -163,14 +167,14 @@ fn file_role_errors_keep_original_paths_and_positions() {
         for (file, invalid, anchor) in [
             (
                 "contract.hdi",
-                "implement S as M\ndef value = 1",
+                "implement S as M\ndef value = 1\n/implement",
                 "implement",
             ),
             ("contract.hdi", "def helper x => x", "def"),
         ] {
             let case = Case::new();
             let main = if invalid.starts_with("implement") {
-                "def main = M.value\nmodule S\ndef value: Int"
+                "def main = M.value\nmodule S\ndef value: Int /module"
             } else {
                 "def main = 1"
             };
@@ -258,24 +262,26 @@ fn every_source_file_is_checked_and_other_extensions_are_ignored() {
         );
     }
     std::fs::remove_file(case.0.join("nested/helper.hd")).unwrap();
-    case.write("unused.hd", "module S\nimplement S as M");
+    case.write("unused.hd", "module S /module\nimplement S as M /implement");
     case.reject(
         "check",
         "main.hd",
         "unused.hd",
-        "module S\nimplement S as M",
+        "module S /module\nimplement S as M /implement",
         "E513",
         "implement",
     );
     std::fs::remove_file(case.0.join("unused.hd")).unwrap();
-    case.write("broken.hd", "implement S as M\ndef broken = [)");
+    // A body that fails to parse inside an `implement` is reported as the
+    // unclosed `implement` at its own keyword, so the anchor is that keyword.
+    case.write("broken.hd", "implement S as M\ndef broken = [)\n/implement");
     case.reject(
         "build",
         "main.hd",
         "broken.hd",
-        "implement S as M\ndef broken = [)",
+        "implement S as M\ndef broken = [)\n/implement",
         "E100",
-        ")",
+        "implement",
     );
 }
 
@@ -285,10 +291,10 @@ fn interface_files_reject_implementation_types_and_cannot_be_entries() {
         let case = Case::new();
         case.write(
             "main.hd",
-            "def main = M.make 1\nimplement S as M type T = Int def make x => x",
+            "def main = M.make 1\nimplement S as M type T = Int def make x => x /implement",
         );
         let source = format!(
-            "module S type T def make(x: Int): T\nmodule Other def use(x: {}M.T): Int",
+            "module S type T def make(x: Int): T /module\nmodule Other def use(x: {}M.T): Int /module",
             " ".repeat(padding)
         );
         case.write("store.hdi", &source);
@@ -364,9 +370,9 @@ fn implementation_diagnostics_retain_anchors_from_each_file() {
         ] {
             let case = Case::new();
             case.write("main.hd", &format!("def main = M.run {argument}"));
-            case.write("contract.hdi", &format!("module S {contract}"));
+            case.write("contract.hdi", &format!("module S {contract} /module"));
             let source = format!(
-                "{}{}implement S as M\n{body}",
+                "{}{}implement S as M\n{body}\n/implement",
                 "\n".repeat(padding),
                 " ".repeat(padding)
             );
