@@ -5,7 +5,7 @@ fn identity_binding_reports_its_location() {
     let ast = parse_source("def f v => v as x ->\n  x\ndef main = f 1", "t").unwrap();
     let error = check::check_ast(&ast, "t").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E501"));
-    assert_eq!((error.line, error.col), (2, 3));
+    assert_eq!((error.line, error.col), (1, 12));
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn selective_none_handling_is_not_plain_repropagation() {
 fn record_binding_checks_each_bound_name() {
     let prefix = "type Pair = { a: Int; b: Int }\ndef main = ";
     for pattern in ["{ a; b }", "{ a = x; b }"] {
-        let source = format!("{prefix}let {pattern} = {{ a = 1; b = 2 }} -> b + 1");
+        let source = format!("{prefix}{{ a = 1; b = 2 }} as {pattern} -> b + 1");
         assert_eq!(
             hado::check_source(&source, "t")
                 .err()
@@ -298,7 +298,7 @@ fn record_binding_checks_each_bound_name() {
             Some("E505")
         );
     }
-    let source = format!("{prefix}let {{ a = _; b }} = {{ a = 1; b = 2 }} -> b + 1");
+    let source = format!("{prefix}{{ a = 1; b = 2 }} as {{ a = _; b }} -> b + 1");
     hado::check_source(&source, "t").unwrap();
 }
 
