@@ -124,6 +124,7 @@ $ cargo run --offline -q -- run target/scratch/listlit-three/main.hd
 ### 入れ子の要素
 
 閉包を返す閉包を並べると、型検査は通るが同じずれが残る。本ラウンドの完了条件の外。
+残件は `docs/issues/nested-outcome-closure-in-list-literal.md` に切った（2026-09-27）。
 
 ```
 $ cat target/scratch/listlit-nested/main.hd
