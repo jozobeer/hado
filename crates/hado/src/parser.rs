@@ -2003,7 +2003,7 @@ impl Parser<'_> {
         if self.kind() == &TokKind::KwDo {
             return Err(self.error(Some("E100"), "`do` is removed; discard with `e ->`"));
         }
-        let value = if self.kind() == &TokKind::KwIf && !self.next_is(&TokKind::LParen) {
+        let value = if self.kind() == &TokKind::KwIf && !self.if_paren_closes() {
             self.parse_branch()?
         } else if self.kind() == &TokKind::KwWith {
             self.parse_with()?
@@ -2288,7 +2288,7 @@ impl Parser<'_> {
 
     fn atom_start(&self) -> bool {
         if self.postfix() && self.kind() == &TokKind::KwIf {
-            return self.next_is(&TokKind::LParen);
+            return self.if_paren_closes();
         }
         matches!(
             self.kind(),
@@ -2333,7 +2333,7 @@ impl Parser<'_> {
     }
 
     fn parse_atom(&mut self) -> Result<Node, Diagnostic> {
-        if self.postfix() && self.kind() == &TokKind::KwIf && self.next_is(&TokKind::LParen) {
+        if self.postfix() && self.if_paren_closes() {
             return self.parse_branch_paren();
         }
         let span = self.span();
@@ -2815,6 +2815,41 @@ impl Parser<'_> {
         let parsed = self.parse_branch();
         self.restore_expression_state(save);
         matches!(parsed, Ok(node) if matches!(node.kind, NodeKind::BoolBranch { .. }))
+    }
+
+    /// `if(` が閉じの形か。`if` の直後の `(` から対応する `)` までの最上位に
+    /// `=>` があるときだけ閉じの開きと読み、無ければ条件の括弧と読む。空白には
+    /// 依らない。`fn(...)` の中と `fn … /fn` の中の `=>` は最上位に数えない。
+    /// 最上位で `=>` より先に `if` が来たら、入れ子の分岐（E101）として条件側に読む。
+    fn if_paren_closes(&self) -> bool {
+        if self.kind() != &TokKind::KwIf || !self.next_is(&TokKind::LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut index = self.pos + 2;
+        while let Some(token) = self.toks.get(index) {
+            let next = self.toks.get(index + 1).map(|token| &token.kind);
+            match &token.kind {
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::KwFn if next != Some(&TokKind::LParen) => depth += 1,
+                TokKind::Slash if next == Some(&TokKind::KwFn) => {
+                    depth = depth.saturating_sub(1);
+                    index += 1;
+                }
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                TokKind::Arrow if depth == 0 => return true,
+                TokKind::KwIf if depth == 0 => return false,
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
     }
 
     fn next_is(&self, kind: &TokKind) -> bool {

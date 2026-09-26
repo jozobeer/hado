@@ -365,8 +365,7 @@ fn is_comparison(op: BinOp) -> bool {
     )
 }
 
-/// `min` より弱い演算子は括弧で包む。条件や scrutinee は `min = 0` なので、
-/// 綴りの先頭が `(` にならない（`if(` の閉じの形と衝突しない）。
+/// `min` より弱い演算子は括弧で包む。
 fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
     match &node.kind {
         NodeKind::Int(n) => n.to_string(),
@@ -507,13 +506,7 @@ fn branch_text(node: &Node, indent: usize, tail: bool) -> String {
             format!("(if {inner}\n{pad}/if)")
         }
     } else if tail {
-        // 条件の綴りが `(` で始まると `if(` の閉じの形と衝突するので、
-        // そのときだけ閉じた形にする。
-        if inner.starts_with('(') {
-            format!("if({inner})")
-        } else {
-            format!("if {inner}")
-        }
+        format!("if {inner}")
     } else {
         format!("if({inner})")
     }
@@ -556,20 +549,10 @@ fn branch_inner(node: &Node, indent: usize) -> String {
     }
 }
 
-/// `if` の条件と scrutinee は、条件の位置では外側の括弧を省く。`if(` の
-/// 閉じの形と、条件を丸括弧で囲んだ形が衝突しないようにするため。
+/// `if` の条件と scrutinee。先頭が `(` でも、`)` までの最上位に `=>` が無いので
+/// `if(` の閉じの形とは読まれない（パーサの `if_paren_closes`）。
 fn condition_text(node: &Node, indent: usize) -> String {
-    let text = expr(node, indent, false);
-    if matches!(
-        node.kind,
-        NodeKind::Bin(..) | NodeKind::Pipe(..) | NodeKind::Neg(_) | NodeKind::Not(_)
-    ) && text.starts_with('(')
-        && text.ends_with(')')
-    {
-        text[1..text.len() - 1].to_string()
-    } else {
-        text
-    }
+    expr(node, indent, false)
 }
 
 fn fn_text(params: &[Param], body: &Node, indent: usize) -> String {
