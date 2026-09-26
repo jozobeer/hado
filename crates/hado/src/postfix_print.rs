@@ -373,7 +373,17 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         NodeKind::Bool(b) => b.to_string(),
         NodeKind::Void => "()".to_string(),
         NodeKind::Name(name) => name.clone(),
-        NodeKind::Neg(c) => wrap(format!("-{}", expr_prec(c, indent, false, 7)), 7, min),
+        // `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
+        // 入れ子の `-` の被演算子は括弧で包む（§7）。
+        NodeKind::Neg(c) => {
+            let inner = expr_prec(c, indent, false, 7);
+            let text = if matches!(c.kind, NodeKind::Neg(_)) {
+                format!("-({inner})")
+            } else {
+                format!("-{inner}")
+            };
+            wrap(text, 7, min)
+        }
         NodeKind::Not(c) => wrap(format!("not {}", expr_prec(c, indent, false, 7)), 7, min),
         NodeKind::Bin(op, l, r) => {
             let prec = bin_prec(*op);
