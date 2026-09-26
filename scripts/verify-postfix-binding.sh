@@ -77,9 +77,15 @@ PY
 }
 
 # `/if` を落とす。
-mutate "drop-rail-if" 'format!("{}\n{pad}/if", after_head("if", &inner))' 'after_head("if", &inner)'
+mutate "drop-rail-if" 'format!("if {inner}\n{pad}/if")' 'format!("if {inner}")'
 # Option 束縛の `?` を落とす。
-mutate "drop-option-question" 'format!(" as {pat}?")' 'format!(" as {pat}")'
+mutate "drop-option-question" 'binding(format!(" as {pat}?"), value, body, indent, tail)' 'binding(format!(" as {pat}"), value, body, indent, tail)'
+# 続きのある `if` を括弧で閉じない（`if(a => 1 | 2) + 1` を `if a => 1 | 2 + 1` と書く）。
+mutate "drop-if-parens" 'format!("if({inner})")' 'format!("if {inner}")'
+# 続きの無い `if` にも括弧を付ける（末尾の `if a => 1 | 2` を `if(...)` と書く）。
+mutate "add-if-parens" '        format!("if {inner}")' '        format!("if({inner})")'
+# `if` の直後の `(` を無条件に閉じと読む（`if((a+b)*2>c => 1 | 0)` が読めなくなる）。
+mutate "always-close-if-paren" 'TokKind::Arrow if depth == 0 => return true,' 'TokKind::Arrow => return true,'
 
 restore
 trap - EXIT
