@@ -25,6 +25,7 @@
   - [10. ローカル束縛](#10-ローカル束縛)
   - [11. 継続 `->`](#11-継続--)
   - [12. 匿名関数](#12-匿名関数)
+  - [12.1. 閉じの印](#121-閉じの印)
   - [13. 型注釈と呼び出し](#13-型注釈と呼び出し)
   - [14. パイプライン](#14-パイプライン)
 - **[第IV部 型](#第iv部-型)**
@@ -50,8 +51,8 @@
   - [32. 引数の条件列](#32-引数の条件列)
 - **[第VI部 失敗と効果](#第vi部-失敗と効果)**
   - [33. Option と失敗](#33-option-と失敗)
-  - [34. `let p? =`](#34-let-p-)
-  - [35. `do`](#35-do)
+  - [34. `as p? ->`](#34-as-p--)
+  - [35. `e ->`](#35-e--)
   - [36. 伝播と分岐](#36-伝播と分岐)
   - [37. 効果](#37-効果)
   - [38. handler と `with`](#38-handler-と-with)
@@ -121,7 +122,7 @@
 例えば、
 
 ```ocaml
-let x = value ->
+value as x ->
 x
 ```
 
@@ -237,7 +238,9 @@ Void は `()` とする。
 ->   local continuation separator
 |    branch alternative / fallback marker
 |>   data flow
-?    failure-aware binding (pattern suffix)
+as   postfix binding
+/    division / 閉じの印（`/if` `/fn` `/module` `/implement`）
+?    failure-aware binding（名前・pattern の直後に置く印）
 ...  rest of a List
 ::   namespace path separator
 .    member access / field access
@@ -272,8 +275,8 @@ if user
 > userがGuestなら `"guest"`、Memberなら名前
 
 ```ocaml
-let user? = find_user id ->
-let account? = find_account user.account_id ->
+find_user id as user? ->
+find_account user.account_id as account? ->
 Some(account)
 ```
 
@@ -296,6 +299,8 @@ Some(account)
 `&&` と `||` は短絡評価する。左辺が結果を決めるとき、右辺を評価しない。
 
 二項演算子の被演算子は左から右に評価する。適用の引数も、パイプの左辺を第1引数として、書かれた順に評価する。効果を持つ式を並べたときの順序はこれで定まる。
+
+`/` の直後に `if` を置くことはできない（E100）。`/fn` は閉じの印としてだけ読み、`/fn` で閉じる `fn` の中だけで効く。`fn` を `/` の被演算子に置くことはできない（`10 / fn(x => x)` は E100）。詳しくは第12.1節が定める。
 
 # 第III部 定義と式
 
@@ -369,23 +374,23 @@ top-level は定義順に依存しない。呼び出しグラフで異なる2つ
 
 ## 10. ローカル束縛
 
-ローカルな値の束縛には `let` を使う。
+ローカルな値の束縛には `as` を使う。
 
 ```ocaml
-let x = calculate ->
+calculate as x ->
 use x
 ```
 
-`let` は名前付きdefinitionには使わない。
+`as` は名付けに使い、名前付きdefinitionには使わない。
 
 ```text
 def = named definition
-let = local binding
+as = local binding
 ```
 
-`let` の本体は `->` の右側に続く継続である。`let` は値を束縛するために使い、成功・失敗の伝播は行わない。
+`as` の本体は `->` の右側に続く継続である。`as` は値を束縛するために使い、成功・失敗の伝播は行わない。`?` を付けた `as p? ->` は Option の伝播を行う（第34節）。
 
-プログラムの入口は、根のファイル（第50節）の外に置く `def main` である。`main` は `let` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。渡したファイルに `main` が無いとき、`hado check` はそのディレクトリをライブラリとして検査し（第52節）、`hado build` は E206 とする。
+プログラムの入口は、根のファイル（第50節）の外に置く `def main` である。`main` は `as` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。渡したファイルに `main` が無いとき、`hado check` はそのディレクトリをライブラリとして検査し（第52節）、`hado build` は E206 とする。
 
 `main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`。第55節、第37節）に限る。ユーザーが宣言した効果が `main` の型に残れば E706 とする。`main` の効果行は一般化せず、本体が持つ効果で閉じる。
 
@@ -397,44 +402,52 @@ let = local binding
 
 `->` は、型の関数矢印や分岐結果の矢印には使わない。
 
-`->` はローカルbindingの継続を示す記号としてのみ使う。
+`->` は後置の束縛の継続を示す記号としてのみ使う。
 
 ```ocaml
-let x = foo ->
-let y = bar x ->
+foo as x ->
+bar x as y ->
 baz y
 ```
 
 構造としては、
 
 ```text
-binding -> continuation
+postfix binding -> continuation
 ```
 
 となる。
 
-失敗を伝播する `let p? =` と `do` も同じ継続構文を使う。
+失敗を伝播する `as p? ->` と、値を破棄する `e ->` も同じ継続構文を使う。
 
 ```ocaml
-let user? = find_user id ->
+find_user id as user? ->
 use user
 ```
 
 ```ocaml
-do validate input ->
+validate input ->
 next
 ```
 
+束縛と破棄の左辺は `->` の直前までに置く。`as` は区切りの記号（`->`、腕の `=>`、本体の `=` か `=>`、`(`、`,`）から直後の区切りまでの全体を束縛し、最も弱く結合する。`e as p ->` の `p` には名前だけを書ける。型の強制も pattern の別名も `as` では行わない。別名が要るときは 2 回束縛する（`e as whole -> whole as Some(x)? ->`）。
+
+`let` と `do` はキーワードごと廃止した。`let` を書くと E100 とし、`` `let` is removed; bind with `e as p ->` `` を出す。`do` を書くと E100 とし、`` `do` is removed; discard with `e ->` `` を出す。
+
 `->` は、関数型の表記には使わない。関数型は第20節で定める `Fn(...)` を使う。
 
-`main` は `def main = expression` の形で、`=>` を持たない。本体は expression なので、`let` や `do` の継続を含んでよい。
+`main` は `def main = expression` の形で、`=>` を持たない。本体は expression なので、`as` や `e ->` の継続を含んでよい。
 
 ## 12. 匿名関数
 
-匿名関数には `fn` を使い、全体を括弧で閉じる。
+匿名関数には `fn` を使う。本体に `->` が無ければ `fn(...)` と `)` で閉じ、あれば `fn … /fn` と `/fn` で閉じる。閉じの規則は第12.1節が定める。
 
 ```ocaml
 fn(x => x + 1)
+```
+
+```ocaml
+fn x => log "a" -> x /fn
 ```
 
 複数引数はカンマで区切る。型注釈は引数ごとに書く。
@@ -442,6 +455,13 @@ fn(x => x + 1)
 ```ocaml
 fn(x, y => x + y)
 fn(x: Int, y: Int => x + y)
+```
+
+`/fn` の形の引数は空白で区切り、型注釈は引数ごとに書ける。
+
+```ocaml
+fn x, y => x + y /fn
+fn x: Int, y: Int => x + y /fn
 ```
 
 `=>` は、関数の引数列と本体を分ける。
@@ -454,7 +474,7 @@ def add x y => x + y
 
 `=>` は関数定義と匿名関数と関数型（第20節）においてのみ、入力と結果の対応を表す。
 
-匿名関数も、引数のパターン分岐の形（第31節）と条件列の形（第32節）を取れる。どちらも `)` で閉じる。
+匿名関数も、引数のパターン分岐の形（第31節）と条件列の形（第32節）を取れる。本体に `->` が無ければ `)` で閉じ、あれば `/fn` で閉じる。
 
 ```ocaml
 fn(
@@ -470,7 +490,30 @@ fn(x
 )
 ```
 
-括弧で閉じるので、`List.map users fn(user => user.name)` のように並置の引数へ直接置ける。
+括弧で閉じる形は、`List.map users fn(user => user.name)` のように並置の引数へ直接置ける。`/fn` で閉じる形も同じである。
+
+本体に `as` の束縛や `e ->` の破棄を置くと、その `fn` は `/fn` で閉じる。閉じの不足・余分は E100 とする（第12.1節）。
+
+## 12.1. 閉じの印
+
+`if` と `fn` は本体に `->` を置けるので、どこで終わるかを印で示す。`module` と `implement` も節の終わりを印で示す。閉じの印が足りない、余分である、形が食い違う場合は E100 とし、食い違うときは閉じのキーワードを指す。`fmt` と `--fix` は閉じの印を書き換えない（第57節、第58.1節）。
+
+`if` の閉じは本体の `->` の有無で決まる。本体（腕と fallback）のどれかに `->` があれば `/if` で閉じる。`->` が無いときは、`if` の全体に続き（`->`、`as`、`|>`、二項演算子、後続の引数）があれば `if(...)` と書いて閉じ、続きが無ければ何も書かない。`if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。`fn(...)` や `fn … /fn` の中の `=>` は数えない。`if(...)` の全体に続きが無ければ E100 とする。
+
+```ocaml
+if ok => log "a" | log "b" -> log "finish" /if
+if(ok => log "a" | log "b") -> log "finish"
+if ok => 1 | 2 |> Int.to_string
+if(ok => 1 | 2) |> Int.to_string
+```
+
+`fn` は常に閉じる。本体に `->` が無ければ `fn(...)` と `)` で閉じ、あれば `fn … /fn` と `/fn` で閉じる。
+
+`def` は閉じない。`def` の終わりは次の項目で決まる。`module` は `/module`、`implement` は `/implement` で閉じる。
+
+`,` `;` `)` `]` `}` は、その中にある `if` や `fn` の閉じも兼ねる。`[if true => 1 | 0, 2]` の `,`、`{ a = if true => 1 | 0; b = 2 }` の `;`、`Some(if true => 1 | 0)` の `)` が閉じである。
+
+`/` の直後に `if` を置くことはできない（E100）。`/fn` は `/fn` で閉じる `fn` の中だけで閉じとして読み、それ以外の `/` は除算である。`fn` を `/` の被演算子に置くことはできない（`10 / fn(x => x)` は E100。第7節）。
 
 ## 13. 型注釈と呼び出し
 
@@ -688,14 +731,14 @@ type User =
 ```ocaml
 type T = Payload { id: Int; name: String }
 def make n => Payload { id = n; name = "a" }
-def describe user => let Payload { name } = user -> name
+def describe user => user as Payload { name } -> name
 ```
 
 宣言・生成・パターンのfield区切りは `;`、末尾の区切りは置かない。宣言と生成は1つ以上のfieldを持つ。生成では宣言の全fieldを1回ずつ書き、順序は自由とする。式の評価順は書かれた順である。名前付きfieldのconstructorを `Payload(1, "a")` と呼ぶこと、位置payloadやpayload無しのconstructorを `Some { value = 1 }` や `Guest { x = 1 }` と呼ぶことは E301 とし、constructor名を指す。payloadを伴わないconstructor参照は従来どおり E301 とする。
 
 生成・パターンの未知fieldは E204（field名）、重複fieldは E205（2回目のfield名）、生成のfield不足は E301（constructor名）、field値の型不一致は E305（値の先頭）とする。宣言の重複fieldも E205 で2回目のfield名を指す。constructor名で型が決まるため、同じfield集合を持つ別型があっても E304 にはならない。
 
-パターンは `Payload { id; name = n }` と書く。fieldを1つ以上書き、同名束縛・別名・入れ子と、書かないfieldの無視はrecordパターンと同じである。名前付きfieldを持つconstructorを `Payload(...)` と位置形式で分解すること、位置payloadやpayload無しのconstructorを `{}` 形式で分解することは E301（constructor名）。payloadを持つconstructorを裸の `Payload` でパターンに書くことも E301 とする。複数constructorを持つ型の分岐網羅性とletの全域性は第28節・第34節の規則で判定する。
+パターンは `Payload { id; name = n }` と書く。fieldを1つ以上書き、同名束縛・別名・入れ子と、書かないfieldの無視はrecordパターンと同じである。名前付きfieldを持つconstructorを `Payload(...)` と位置形式で分解すること、位置payloadやpayload無しのconstructorを `{}` 形式で分解することは E301（constructor名）。payloadを持つconstructorを裸の `Payload` でパターンに書くことも E301 とする。複数constructorを持つ型の分岐網羅性と束縛の全域性は第28節・第34節の規則で判定する。
 
 constructorが1つだけで名前付きfieldを持つ型は `user.name` でfieldを参照できる。存在しないfieldは E204（field名）。参照先の型が未確定なら、通常のrecordと単一の名前付きfield constructorの型を候補とし、後続の型注釈・呼出しによる制約も反映する。全体の推論後も一意に決まらなければ E304（参照式の先頭）である。複数constructorの型は先にパターンで分解する。複数constructorの型への直接のfield参照は E204（field名）である。契約の抽象型を実装の外からfield参照すると、constructorの形によらず E601（`.`）とする。constructor付きの値を裸のrecord式・パターンからfield集合で選ぶことはしない。
 
@@ -852,6 +895,8 @@ def rec map values f =>
 
 `if` の後に続く構文によって、どの種類の分岐かを決定する。
 
+`if` がどこで終わるかは本体の `->` の有無で決まる。全体を `/if` か `if(...)` で閉じる規則は第12.1節が定める。
+
 リテラルパターン（Int / Float / Char / String / Bool）は pattern 分岐の pattern として使える。
 
 ## 24. Boolean 分岐
@@ -869,6 +914,8 @@ if x > 10 => Large | Small
 ```
 
 これはBooleanの完全な二分岐である。
+
+腕の本体に `->` が無ければ、`if` の全体に続きがあるときは `if(condition => yes | no) -> 続き` と書き、続きが無ければそのまま書く。腕の本体に `->` があれば `/if` で閉じる。いずれも第12.1節が定める。
 
 `then` / `else` は持たない。
 
@@ -907,6 +954,8 @@ if
 条件列にfallbackがない場合はコンパイルエラーとする（E401）。
 
 `if / else if / else` の構文は持たない。
+
+本体に `->` があれば `/if` で閉じ、続きがあるときは `if(...)` と書く（第12.1節）。
 
 関数の本体が条件列だけのときは、`=> if` を省いた第32節の形で書く。
 
@@ -953,6 +1002,8 @@ if left, right
 
 式の側の `=>` の後には条件列を置ける（第26.1節）。
 
+腕の本体に `->` があれば `/if` で閉じ、続きがあるときは `if(scrutinee | ...)` と書く（第12.1節）。
+
 pattern branchは、ADTの構造に基づいて網羅的でなければならない。
 
 リテラルパターンを持つ。Int / Float / Char / String / Bool と、入れ子の中で使える。Int と Float のリテラルパターンは先頭に `-` を置け、それはリテラルの一部である。Bool 以外のリテラルパターンを使う分岐は fallback 必須である。Bool の値そのものを分岐する形は第24節の Boolean branch に限る（E520）。
@@ -981,6 +1032,8 @@ if left, right
 fallback を持たない腕の条件列は、続く `|` の腕を自分の条件として読む。`| Some(x) => if | x > 0 => x | None => 0` の `None` は条件として読まれ、Bool でないので E305 になる。
 
 腕の本体に置ける分岐はこの条件列だけである。Boolean branch と pattern branch を腕に置く形、および条件列の腕の中の分岐は E101 である（第30節）。
+
+腕の本体に `as` の束縛や `e ->` の破棄、`fn … /fn` を置くと、その腕は `->` を含むので、外側の `if` は `/if` で閉じる（第12.1節）。
 
 ## 27. パターン分岐の fallback
 
@@ -1032,7 +1085,7 @@ if value
 
 非網羅branchはwarningではなくerror。
 
-`let` のパターンにも同じ規則を当てる。`?` の有無を問わない（第34節）。
+`as` の束縛のパターンにも同じ規則を当てる。`?` の有無を問わない（第34節）。
 
 ## 29. `_` の用途
 
@@ -1101,7 +1154,7 @@ pattern branch の腕の本体には条件列を置ける（第26.1節）。条�
 必要であれば、先に状態を分類する。
 
 ```ocaml
-let state = classify input ->
+classify input as state ->
 
 if state
 | A => ...
@@ -1109,7 +1162,7 @@ if state
 | C => ...
 ```
 
-ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、branch expression の腕の中に branch expression を置くことである（第26.1節の腕の条件列を除く）。腕の中の `let` の継続や、腕の中の `fn(...)` の本体に置いた branch も同じである。`fn(| ...)` と `fn(x | ...)` の腕形式は branch として数える。
+ただし、`classify` の内部で分岐を行うこと自体を禁止するものではない。禁止対象は、branch expression の腕の中に branch expression を置くことである（第26.1節の腕の条件列を除く）。腕の中の `as` の束縛の継続や、腕の中の `fn(...)` の本体に置いた branch も同じである。`fn(| ...)` と `fn(x | ...)` の腕形式は branch として数える。
 
 ## 31. 引数のパターン分岐
 
@@ -1154,7 +1207,7 @@ def classify score
 
 引数名の直後の `|` は常に条件列であり、pattern 分岐にはならない。`def unwrap x | Some(y) => y | 0` の `Some(y)` は式として読まれ、`y` が E204 になる。引数を pattern で分岐する関数は第31節の形で書く。
 
-本体が条件列ちょうどである関数を `=> if` を付けて書くことは冗長であり E517 とする。引数の数と型注釈の有無によらず当てる。`let` などの継続を挟んだ後に条件列が来る関数は対象外である。
+本体が条件列ちょうどである関数を `=> if` を付けて書くことは冗長であり E517 とする。引数の数と型注釈の有無によらず当てる。`as` などの継続を挟んだ後に条件列が来る関数は対象外である。
 
 # 第VI部 失敗と効果
 
@@ -1196,17 +1249,19 @@ abort parse_failure(failure: ParseFailure)
 
 unchecked exception も持たない。失敗は効果として型に現れ、処理しなければ呼び出し側へ伝わる。
 
-## 34. `let p? =`
+## 34. `as p? ->`
 
-Optionの成功値を使いたい場合は、パターンの末尾に `?` を付けた `let` を使う。
+Optionの成功値を使いたい場合は、名前かパターンの直後に `?` を付けた `as` を使う。
 
 ```ocaml
 def display_name user =>
-  let name? = user.name ->
+  user.name as name? ->
   name
 ```
 
-`let p? = e` は、右辺 `e` のOptionを評価し、成功値をpattern `p` に束縛する。`?` はpattern全体の末尾に 1 つ置く（`let { name }? = ...`、`let Id(n)? = ...`）。空白は意味を持たないので `let x ? = e` も同じ形である。
+`e as { name }? ->` や `e as Id(n)? ->` のように、右辺の値の Option をパターンで分解できる。
+
+`e as p? ->` は、`e` のOptionを評価し、成功値をpattern `p` に束縛する。`?` はpattern全体の末尾に 1 つ置く（`e as { name }? ->`、`e as Id(n)? ->`）。空白は意味を持たないので `e as x ? ->` も同じ形である。
 
 ```text
 Some(value)
@@ -1216,42 +1271,42 @@ None
   => Noneをそのまま伝播
 ```
 
-`?` を付けた `let` の右辺は Option 型でなければならない。そうでなければコンパイルエラーとする（E303）。
+`as p? ->` の値 `e` は Option 型でなければならない。そうでなければコンパイルエラーとする（E303）。
 
 効果による失敗には印を付けない。効果は関数の型が語るので、呼び出し位置には何も書かない（第20節）。
 
 ```ocaml
 def create_user input =>
-  let parsed = parse input ->
-  do validate parsed ->
+  parse input as parsed ->
+  validate parsed ->
   save parsed
 ```
 
 `?` の有無が Option と効果を見分ける。`?` があれば値の不在の伝播、無ければ効果の伝播である。
 
-`let` のパターンは、`?` の有無によらず、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`let Id(n) = x`）とその入れ子は一致する。
+`as` のパターンは、`?` の有無によらず、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`e as Id(n) ->`）とその入れ子は一致する。
 
-## 35. `do`
+## 35. `e ->`
 
-値を使わない式を評価して継続したい場合は `do` を使う。
+値を使わない式を評価して継続したい場合は `e ->` を使う。
 
 ```ocaml
 def publish article =>
-  do validate article ->
-  do authorize article ->
-  do persist article ->
+  validate article ->
+  authorize article ->
+  persist article ->
   ()
 ```
 
 意味は、
 
 ```text
-do expression -> continuation
+expression -> continuation
 ```
 
 で、`expression` を評価し、その値を捨てて `continuation` へ進む。
 
-`do` の右辺は効果を持つ式か Option でなければならない。純粋な値の破棄は意味を持たない（第40節）ので、どちらでもない式は E303 とする。
+`e ->` の値 `e` は効果を持つ式か Option でなければならない。純粋な値の破棄は意味を持たない（第40節）ので、どちらでもない式は E303 とする。
 
 Optionなら、
 
@@ -1263,15 +1318,9 @@ None
   => Noneを伝播
 ```
 
-であり、これは、
+であり、これは `e as _? ->` のcanonical formである。そのため `e as _? ->` は禁止（E504）。
 
-```ocaml
-let _? = ...
-```
-
-のcanonical formである。そのため `let _? = ...` は禁止（E504）。
-
-効果を持つ式なら、値を捨てて継続する。失敗は効果として伝わるので、`do` は伝播の印ではない。
+効果を持つ式なら、値を捨てて継続する。失敗は効果として伝わるので、`e ->` は伝播の印ではない。
 
 ## 36. 伝播と分岐
 
@@ -1281,12 +1330,12 @@ failure propagationにpattern branchを使わない。
 
 ```ocaml
 def create_user input =>
-  let parsed = parse input ->
-  do validate parsed ->
+  parse input as parsed ->
+  validate parsed ->
   save parsed
 ```
 
-Optionの不在は `?` と `do` で伝わる。
+Optionの不在は `?` と `e ->` で伝わる。
 
 ```ocaml
 if find_user id
@@ -1297,7 +1346,7 @@ if find_user id
 のような単なる伝播は冗長で、canonical formは、
 
 ```ocaml
-let user? = find_user id ->
+find_user id as user? ->
 ...
 ```
 
@@ -1306,18 +1355,18 @@ let user? = find_user id ->
 成功値が不要なら、
 
 ```ocaml
-do validate user ->
+validate user ->
 ...
 ```
 
 責務は明確に分ける。
 
 ```text
-効果    = 何も書かない。型が語る
-let p? = Optionのbind + 伝播
-do     = 値の破棄 + 伝播
-if     = meaningful domain branching
-handler = 失敗を別の値へ変える
+効果         = 何も書かない。型が語る
+e as p? ->   = Optionのbind + 伝播
+e ->         = 値の破棄 + 伝播
+if           = meaningful domain branching
+handler      = 失敗を別の値へ変える
 ```
 
 ただし、`if` によるOption分岐が常に禁止されるわけではない。`if` は、成功と失敗を異なるドメイン値へ変換するなど、意味のある分岐に使用できる。単に同じ `None` を再伝播するだけのbranchは冗長として拒否する（E508）。
@@ -1331,7 +1380,7 @@ if is_ready () => x | y        // E308
 canonical formは、
 
 ```ocaml
-let ready = is_ready () ->
+is_ready () as ready ->
 if ready => x | y
 ```
 
@@ -1360,7 +1409,7 @@ return value => Some(value)
 
 ## 37. 効果
 
-効果は `effect` と名前の見出しで始まり、次の見出しかファイル末尾まで続く。契約（第46節）と同じ節の形で、`end` は無く、見出しは入れ子にならない。型引数は名前の前に置く。
+効果は `effect` と名前の見出しで始まり、次の見出しかファイル末尾まで続く。`end` は無く、見出しは入れ子にならない。型引数は名前の前に置く。
 
 ```ocaml
 effect Error
@@ -1414,7 +1463,7 @@ handler は処理する効果と同じディレクトリに置く。腕が操作
 ```ocaml
 handler A Yield as Collect
 again yield value =>
-  let rest = resume () ->
+  resume () as rest ->
   [value, ...rest]
 return _ => []
 ```
@@ -1443,7 +1492,7 @@ def main =
 
 handler の腕は分岐ではないので第30節の E101 に当たらず、腕の中に `if` を 1 つ書ける。腕の中の `if` の腕にさらに `if` を置けば、その `if` が第30節に当たる。
 
-`with H -> rest` は `rest` を `H` の下で評価する。`let` や `do` と同じ継続の形で、分岐ではないので第30節には触れない。`with` を入れ子にすれば handler を重ねられる。
+`with H -> rest` は `rest` を `H` の下で評価する。`as` の束縛や `e ->` の破棄と同じ継続の形で、分岐ではないので第30節には触れない。`with` を入れ子にすれば handler を重ねられる。
 
 handler を宣言して一度も `with` に書かなければ E513 とする。
 
@@ -1456,13 +1505,13 @@ handler を宣言して一度も `with` に書かなければ E513 とする。
 禁止：
 
 ```ocaml
-let x = calculate ->
+calculate as x ->
 next
 ```
 
 `x` が継続内で使われていないならコンパイルエラー（E505）。
 
-E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第29節）。
+E505 は `as` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第29節）。
 
 引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 3 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => ()`、`def save(_: T): Void {Error} => ()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）と、handler の腕（第38節。`abort raise _ => None`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
 
@@ -1477,14 +1526,14 @@ E505 は `let` の束縛（`?` の有無によらず）、pattern で束縛し�
 禁止：
 
 ```ocaml
-let _ = calculate ->
+calculate as _ ->
 next
 ```
 
 効果を持つ式と Option の破棄には意味があるので、
 
 ```ocaml
-do validate input ->
+validate input ->
 next
 ```
 
@@ -1495,7 +1544,7 @@ next
 禁止（E501）：
 
 ```ocaml
-let x = value ->
+value as x ->
 x
 ```
 
@@ -1581,13 +1630,14 @@ result
 
 OCamlのmodule systemの思想を取り入れる。`module` は契約であり、実装（第47節）とは別に宣言する。
 
-契約は `module` と名前の見出しで始まり、次の見出し（`module` `implement` `effect` `handler`）かファイル末尾まで続く。`end` は無く、見出しは入れ子にならない。
+契約は `module` と名前の見出しで始まり、`/module` で閉じる。閉じが無ければ E100 とする。`end` は無く、見出しは入れ子にならない。
 
 ```ocaml
 module UserStore
 type T
 def find(id: Int): T Option
 def save(user: T): Void {Error}
+/module
 ```
 
 ここでの `Error` は prelude の失敗効果である（第33節）。契約の中の型名は、実装があるかどうかによらず解決される。
@@ -1600,6 +1650,7 @@ type A T
 def A empty: A T
 def A push(stack: A T, value: A): A T
 def A top(stack: A T): A Option
+/module
 ```
 
 引数を取らない member は `def name: 型` で宣言し、実装は `def name = expression` で満たす（`Stack.empty`）。
@@ -1611,6 +1662,7 @@ module UserId
 type T
 def make(value: Int): T Option
 def value(id: T): Int
+/module
 ```
 
 契約の関数は、名前の前に型変数を宣言できる。
@@ -1618,6 +1670,7 @@ def value(id: T): Int
 ```ocaml
 module Option
 def (A, B) map(value: A Option, f: Fn(A => B)): B Option
+/module
 ```
 
 宣言した型変数はその関数の型の中だけで有効で、全称量化される。実装は全ての型引数で使えなければならない。型変数の重複宣言は E205、未宣言の型名は E204、使われない型変数は E518 とする。
@@ -1628,6 +1681,7 @@ def (A, B) map(value: A Option, f: Fn(A => B)): B Option
 module UserStore
 type T
 def find(id: UserId.T): T Option        // 契約 UserId の T
+/module
 ```
 
 `val` は使わない。契約側も実装側も、
@@ -1642,7 +1696,7 @@ def = named definition
 
 ## 47. 実装
 
-実装は `implement X as Y` の見出しで始まる。`X` は満たす契約、`Y` は実装の名前で、どちらも省けない。契約と実装は別の名前空間（第49節）なので、1 対 1 の module は `implement UserStore as UserStore` と書く。契約が別のディレクトリにあれば、名前は第51節のパスで書く。
+実装は `implement X as Y` の見出しで始まり、`/implement` で閉じる。閉じが無ければ E100 とする。`X` は満たす契約、`Y` は実装の名前で、どちらも省けない。契約と実装は別の名前空間（第49節）なので、1 対 1 の module は `implement UserStore as UserStore` と書く。契約が別のディレクトリにあれば、名前は第51節のパスで書く。
 
 ```ocaml
 implement UserStore as UserStore
@@ -1651,6 +1705,7 @@ def find id =>
   ...
 def save user =>
   ...
+/implement
 ```
 
 実装は契約の全ての member と型を持ち、それぞれの型が一致し、契約の型変数に対して十分に多相でなければならない。満たさなければ E602 とし、`implement` を指す。実装は契約に載らない定義を持てる。`def` に加えて本体付きの型（ADT と record）も書け、それはその実装の中だけで見える。外から `MemoryStore.Entry` のように参照すると E204 とする。契約に載らない `def` も外からは見えない（E204）。
@@ -1665,6 +1720,7 @@ type A T = A List
 def empty = []
 def push stack value => [value, ...stack]
 def top | [] => None | [value, ..._] => Some(value)
+/implement
 ```
 
 契約が `type A T` なら実体化も型引数 1 つで、数が違えば E602 とする。右辺に現れない型変数（`type A T = Int`）は E518 とする。契約が宣言していない抽象型を実体化する `type U = Int` は E204 とし、`U` を指す。
@@ -1686,9 +1742,11 @@ def name (t: UserStore.T) => t.name
 ```ocaml
 implement Store as MemoryStore
 ...
+/implement
 
 implement Store as FileStore
 ...
+/implement
 ```
 
 参照は実装の名前で行う（`MemoryStore.find`）。`implement X as Y` の `X` に当たる契約が無ければ E204、実装 `Y` がどこからも参照されなければ E513 とする。実装を引数に取る実装（functor）は第48節が定める。
@@ -1706,6 +1764,7 @@ implement Store as MakeStore(Id: UserId)
 type T = Payload { id: Id.T; name: String }
 def create name number => Payload { id = Id.make number; name = name }
 def describe user => String.concat user.name (Int.to_string (Id.value user.id))
+/implement
 ```
 
 本文は引数の契約だけを見て 1 回検査する。`Id.T` は本文の中でも不透明で、`Id.value` を通してしか中身に触れない。契約 `Store` を満たさなければ E602 で、`implement` を指す。本文で参照されない引数は E521 とし、その引数名を指す。functor は `.hdi` に置けない（E100）。
@@ -1778,9 +1837,11 @@ app/
 // store/memory_store.hd
 implement Store as MemoryStore              // 同じディレクトリの契約
 def find id => ...id::IntId.value id...     // 別のディレクトリの実装
+/implement
 
 // store/backend/disk.hd
 implement store::Store as Disk              // 親のディレクトリでも絶対パス
+/implement
 
 // main.hd
 def main = ... store::MemoryStore.find 1 ... store::NotFound ...
@@ -1806,6 +1867,7 @@ type Error = | NotFound
 module UserStore
 type T
 def find(id: Int): T Option
+/module
 ```
 
 `library` は 1 ファイルに 1 つ、1 ディレクトリに 1 つである。2 つ目は E205 とする。`library` は `.hd` にだけ書ける。`.hdi` に書くと E100 とする。`library` を宣言したディレクトリのファイルに `main` を置くと E206 とする。ライブラリとして検査するとき、他のファイルの `main` は入口にならない。宣言の無いディレクトリでライブラリとして検査したときの `main` は普通の `def` として E513 の対象になる。外の `def` はライブラリ根のファイルにも置け、ファイルの中で使われなければ E513 である（第50節）。
@@ -1818,7 +1880,7 @@ def find(id: Int): T Option
 
 ## 53. 末尾呼び出しの保証
 
-末尾位置は、関数の本体そのものと、そこから次の規則で辿れる位置とする。`let` と `do` と `with` の継続、分岐（第24節から第27節）の腕と fallback である。`fn` の本体はその `fn` にとっての末尾位置であり、囲む関数のものではない。適用の引数、演算子の被演算子、record 式の field、分岐の条件と scrutinee は末尾位置ではない。
+末尾位置は、関数の本体そのものと、そこから次の規則で辿れる位置とする。`as` の束縛と `e ->` の破棄と `with` の継続、分岐（第24節から第27節）の腕と fallback である。`fn` の本体はその `fn` にとっての末尾位置であり、囲む関数のものではない。適用の引数、演算子の被演算子、record 式の field、分岐の条件と scrutinee は末尾位置ではない。
 
 `again` 操作（第37節）を経由しない末尾位置の関数呼び出しは、スタックを消費しない。自己再帰・相互再帰・関数値経由を含む。`def rec` が唯一のループであるため、仕様で保証する。
 
@@ -1867,7 +1929,7 @@ def find(id: Int): T Option
 
 ## 55. prelude
 
-言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Error` `Env` `Io` とする。`/` の戻り型、`let p? =` の対象、List リテラルの展開先、`main` に残せる効果に用いる。
+言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Error` `Env` `Io` とする。`/` の戻り型、`as p? ->` の対象、List リテラルの展開先、`main` に残せる効果に用いる。
 
 prelude の各 module は、外の型と `module X` と `implement X as X` を 1 ファイルに置く形で書く。第46節と第47節の規則に従う。
 
@@ -1875,10 +1937,12 @@ prelude は組み込みを次の形で包む。
 
 ```ocaml
 module String
-def length(s: String): Int Pure
+def length (s: String): Int Pure
+/module
 
 implement String as String
 def length s => __string_length s
+/implement
 ```
 
 M5 の extern 表の各項目は、hado 側の名前（`__string_length` 等）と型を持つ。
@@ -1913,37 +1977,41 @@ member の型は次のとおりとする。`A` は要素型の型変数である
 
 ```ocaml
 module String
-def length(s: String): Int Pure
-def concat(left: String, right: String): String Pure
-def slice(s: String, start: Int, end: Int): String {Error}
-def get(s: String, index: Int): Char {Error}
-def split(s: String, separator: String): String List {Error}
-def starts_with(s: String, prefix: String): Bool Pure
-def contains(s: String, part: String): Bool Pure
-def join(values: String List, separator: String): String Pure
-def trim(s: String): String Pure
+def length (s: String): Int Pure
+def concat (left: String, right: String): String Pure
+def slice (s: String, start: Int, end: Int): String {Error}
+def get (s: String, index: Int): Char {Error}
+def split (s: String, separator: String): String List {Error}
+def starts_with (s: String, prefix: String): Bool Pure
+def contains (s: String, part: String): Bool Pure
+def join (values: String List, separator: String): String Pure
+def trim (s: String): String Pure
+/module
 
 module Bytes
-def length(bytes: Bytes): Int Pure
-def get(bytes: Bytes, index: Int): Int {Error}
-def of_list(values: Int List): Bytes {Error}
-def to_list(bytes: Bytes): Int List Pure
-def to_string(bytes: Bytes): String {Error}
-def of_string(value: String): Bytes Pure
+def length (bytes: Bytes): Int Pure
+def get (bytes: Bytes, index: Int): Int {Error}
+def of_list (values: Int List): Bytes {Error}
+def to_list (bytes: Bytes): Int List Pure
+def to_string (bytes: Bytes): String {Error}
+def of_string (value: String): Bytes Pure
+/module
 
 module Array
-def A length(xs: A Array): Int Pure
-def A get(xs: A Array, index: Int): A {Error}
-def A set(xs: A Array, index: Int, value: A): A Array {Error}
-def A of_list(xs: A List): A Array Pure
-def A to_list(xs: A Array): A List Pure
+def A length (xs: A Array): Int Pure
+def A get (xs: A Array, index: Int): A {Error}
+def A set (xs: A Array, index: Int, value: A): A Array {Error}
+def A of_list (xs: A List): A Array Pure
+def A to_list (xs: A Array): A List Pure
+/module
 
 module Int
-def to_string(value: Int): String Pure
-def parse(value: String): Int {Error}
-def abs(value: Int): Int Pure
-def min(left: Int, right: Int): Int Pure
-def max(left: Int, right: Int): Int Pure
+def to_string (value: Int): String Pure
+def parse (value: String): Int {Error}
+def abs (value: Int): Int Pure
+def min (left: Int, right: Int): Int Pure
+def max (left: Int, right: Int): Int Pure
+/module
 ```
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
@@ -2018,8 +2086,8 @@ def A drop(values: A List, count: Int): A List Pure
 
 | コード | 短い名前 | 節 | 段階 | アンカー |
 |---|---|---|---|---|
-| E100 | syntax-error | 付録C | 構文 | 文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `\|` |
-| E101 | nested-branch | §30 | 構文 | 内側の `if` か `fn` |
+| E100 | syntax-error | 付録C | 構文 | 文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `\|`。閉じの不足・余分（続きの無い `if(...)` を含む）・形の食い違いは閉じの印（第12.1節） |
+| E101 | nested-branch | §30 | 構文 | 内側の `if` か `fn`。`as` の束縛や `e ->` の継続、`fn` の本体に置いた分岐も内側の `if` |
 | E102 | rec-on-value | §9 | 構文 | `rec` |
 | E103 | float-literal-form | §5 | 字句 | リテラル |
 | E104 | comment-form | §5 | 字句 | コメントの先頭（`--` `#` の 1 文字目） |
@@ -2044,24 +2112,24 @@ def A drop(values: A List, count: Int): A List Pure
 | E208 | missing-rec | §9 | 名前解決 | `rec` の無い `def` |
 | E301 | arity-mismatch | §13 | 型 | 適用の先頭 |
 | E302 | recursive-type-arg | §16 | 型 | 宣言と異なる型引数 |
-| E303 | rail-type | §34 | 型 | `let p? =` の右辺は Option、`do` の右辺は効果を持つ式か Option。どちらでもない式 |
+| E303 | rail-type | §34 | 型 | `e as p? ->` の値 `e` は Option、`e ->` の値 `e` は効果を持つ式か Option。どちらでもない式 |
 | E304 | record-ambiguous | §18 | 型 | record 式か record パターンの `{`。型が未確定の field 参照では参照式の先頭 |
 | E305 | type-mismatch | §15 | 型 | 型が食い違った式の先頭。適用の引数については下記 |
 | E306 | occurs-check | §15 | 型 | 同上 |
 | E307 | poly-recursion | §9 | 型 | 再帰呼び出しの先頭。間接呼び出しの位置を追跡できない場合は再帰関数の `def` の先頭（§9） |
 | E308 | effect-position | §36 | 型 | 許されない位置に置かれた効果を持つ式の先頭 |
 | E401 | missing-cond-fallback | §25 | 網羅性 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
-| E402 | non-exhaustive | §28 | 網羅性 | `if`。`let` ではそのパターン |
+| E402 | non-exhaustive | §28 | 網羅性 | `if`。`as` の束縛ではそのパターン |
 | E403 | unreachable-branch | §43 | 網羅性 | 到達不能な腕の `\|` |
 | E404 | fallback-not-last | §43 | 網羅性 | fallback より後の腕の `\|` |
 | E405 | duplicate-pattern | §44 | 網羅性 | 重複する 2 番目の腕の `\|` |
 | E406 | duplicate-condition | §44 | 網羅性 | 同上 |
-| E501 | identity-binding | §41 | 冗長 | `let` |
+| E501 | identity-binding | §41 | 冗長 | `as` |
 | E502 | identical-branches | §42 | 冗長 | `if`。第32節の形では `def` か `fn` |
 | E503 | catch-all-underscore | §29 | 冗長 | `_` |
-| E504 | let-question-underscore | §35 | 冗長 | `_` |
-| E505 | unused-binding | §39 | 冗長 | 束縛名 |
-| E506 | implicit-discard | §40 | 冗長 | `_` |
+| E504 | question-underscore-binding | §35 | 冗長 | `_?` の `_` |
+| E505 | unused-binding | §39 | 冗長 | `as` の束縛名 |
+| E506 | implicit-discard | §40 | 冗長 | `as` の `_` |
 | E507 | rewrap | §45 | 冗長 | `if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる |
 | E508 | repropagate | §36 | 冗長 | 再伝播する腕の `\|`。Option の再伝播に当てる |
 | E510 | list-literal-form | §22 | 冗長 | 式の `Cons` か `Nil` |
@@ -2101,12 +2169,14 @@ def A drop(values: A List, count: Int): A List Pure
 - E516（パターンの List 形）: パターンの `Nil` と `Cons` を同じ `[]` `[x, ...xs]` の形にする。
 - E517（引数の条件列）: `def f p => if | ...` の `=>` と `if` を消し、条件の腕を引数の直後に置く。
 - E515（引数のパターン分岐）: `def f x => if x | ...` の引数と `=> if x` を消し、腕を引数の直後に置く。型注釈のある引数と `fn` の形は対象外である。
-- E501（同一束縛）: `let x = v -> x` を `v` にする。分離点は本体の直前の `->` である。
+- E501（同一束縛）: `v as x -> x` を `v` にする。分離点は本体の直前の `->` である。
 - E512（変数パターンの腕）: 腕の行が変数 1 つだけの分岐は、本体の束縛を scrutinee の名前へ
   置き換えた fallback に書き換える。すべての腕が scrutinee を組み直すときは、枝ごと scrutinee に畳む
   （第26節、第57節）。畳めるのは scrutinee が単純な変数のときだけである。
 - E507（再包装）: 腕がすべて自分の pattern を組み直す分岐を scrutinee にする。第31節と第32節の形（`def f | ...` と `fn(| ...)`）は `def f value => value` と `fn(value => value)` にする。fallback を持つ形は対象外である。fallback は scrutinee の再評価なので、1 回に畳むと効果の回数が変わり得る。
-- E508（再伝播）: 分岐が `def` か `fn` の本体ちょうどのとき、`| Some(p) => body` と `| None => None` の 2 本の腕を `let p? = <scrutinee> -> <body>` にする。第31節と第32節の形では、引数を `value` と名付けた定義にする。`p` は `Some` の 1 つの引数で、その束縛名がすべて `body` で使われていなければならない（1 つも無い形と使われない形は `do` が正準形である）。本体でない位置の分岐は伝播先が違うので対象外である。`body` が `value` を自由に参照する形も対象外である（引数の名前が参照を捕捉するため）。
+- E508（再伝播）: 分岐が `def` か `fn` の本体ちょうどのとき、`| Some(p) => body` と `| None => None` の 2 本の腕を `<scrutinee> as p? -> <body>` にする。第31節と第32節の形では、引数を `value` と名付けた定義にする。`p` は `Some` の 1 つの引数で、その束縛名がすべて `body` で使われていなければならない（1 つも無い形と使われない形は `e ->` が正準形である）。本体でない位置の分岐は伝播先が違うので対象外である。`body` が `value` を自由に参照する形も対象外である（引数の名前が参照を捕捉するため）。
+
+閉じの印（§12.1）の不足・余分・食い違いは E100 であり、局所的な書き換えを持たない。`--fix` と `fmt` は閉じを書き換えない。
 
 書き換える範囲に `//` を含むときは、その書き換えを出さない。コメントを消さないためである。診断には `canonical form: <正準形>` を末尾に足す。複数の書き換えの範囲が重なるときは最も外側だけを適用する。`--fix` は報告した診断のアンカーと一致する書き換えだけを 1 回に 1 つ適用し、適用できる書き換えが尽きた時点で残った診断を印字して終了コード 1 を返す。同じ表の書き換えを、診断を待たずに一括で当てるのが `hado fmt` と `build --fix` である（§58.1）。
 
@@ -2135,7 +2205,7 @@ hado test <file.hd>
 
 既定では変更したファイルを書き、変更したファイルごとに `fmt: <入力根からの相対パス> (<n> rewrites)` を標準出力に出す。1 つも変わらなければ何も出さず終了コード 0 を返す。`--check` はファイルを書かず、変わるファイルごとに `fmt: <相対パス> is not canonical (<n> rewrites)` を出し、1 つでもあれば終了コード 1、無ければ 0 を返す。門番に使える。書き換えが尽きたソースには、`fmt` が書ける正準形違反が残っていない。もう一度 `fmt` を走らせても何も変わらない。
 
-`fmt` は検査をしない。型の検査も、局所的な書き換えを持たない正準形違反（未使用の E505 / E513 や E503 / E504 など）の報告もしない。残った違反と診断は `check` が報告する。読み書きの失敗と、書き換えが尽きないときは、その旨を標準エラーに出して終了コード 1 を返す。
+`fmt` は検査をしない。型の検査も、局所的な書き換えを持たない正準形違反（未使用の E505 / E513 や E503 / E504 など）の報告もしない。閉じの印（§12.1）の不足・余分・食い違いも書き換えを持たないので、`fmt` は直さない。残った違反と診断は `check` が報告する。読み書きの失敗と、書き換えが尽きないときは、その旨を標準エラーに出して終了コード 1 を返す。
 
 `hado build [-o <path>] [--fix] <file.hd>` の `--fix` は、作る前に `fmt` と同じ一括整形を入力根のソースへ当ててから読み直して作る。`--fix` が無ければ `build` はソースを書き換えない。
 `fmt` は局所的な書き換えに加えて、行末の空白（スペースとタブ）を消し、ファイルの終わりを改行 1 つにする。空のファイルはそのままである。字下げのタブと改行コード（CRLF）は変えない。数の綴りは書き換えと同じで、当てた変更の合計を数える。
@@ -2208,14 +2278,14 @@ hado test <file.hd>
 def
 def rec
 
-let
-let p? =
-do
+as p ->
+as p? ->
 ->
 with
 resume
 
 fn(...)
+fn … /fn
 =>
 Fn(...)
 
@@ -2227,13 +2297,17 @@ record
 Pure
 
 if
+if(...)
+/if
 |
 _
 
 |>
 
 module
+/module
 implement
+/implement
 effect
 handler
 once
@@ -2250,9 +2324,9 @@ as
 
 ```ocaml
 def create_user input =>
-  let parsed = parse input ->
-  do validate parsed ->
-  do authorize parsed ->
+  parse input as parsed ->
+  validate parsed ->
+  authorize parsed ->
   save parsed
 ```
 
@@ -2260,8 +2334,8 @@ def create_user input =>
 
 ```ocaml
 def delete_user id =>
-  let user = find_user id ->
-  do authorize_delete user ->
+  find_user id as user ->
+  authorize_delete user ->
   delete user
 ```
 
@@ -2335,12 +2409,14 @@ type T
 def find(id: Int): T Option
 def save(user: T): Void {Error}
 def delete(user: T): Void {Error}
+/module
 
 implement UserStore as UserStore
 type T = User
 def find id => ...
 def save user => ...
 def delete user => ...
+/implement
 ```
 
 Functor：
@@ -2349,6 +2425,7 @@ Functor：
 implement Store as MakeStore(Id: UserId)
 type T = Payload { id: Id.T; name: String }
 def create name number => Payload { id = Id.make number; name = name }
+/implement
 
 implement Store as PlainStore = MakeStore(IntId)
 ```
@@ -2378,6 +2455,8 @@ comment         := "//" 行末までの文字                   `--` と `#` は
 
 キーワードは `def` `rec` `let` `do` `fn` `if` `type` `module` `implement` `effect` `handler` `with` `resume` `return` `once` `abort` `again` `as` `library` `shared` `not` `true` `false` と `Fn` `Pure` である。名前には使えない。
 
+`let` と `do` は廃止した予約語で、式に現れると E100 とする（第11節）。
+
 プログラム:
 
 ```text
@@ -2389,7 +2468,7 @@ section         := module_section | implement_section | functor_section | apply_
                  | effect_section | handler_section
 ```
 
-最初の見出し（`module` `implement` `effect` `handler`）より前が「外」、以後が節の列である。見出しは式や項目の中に現れないので、節の終わりは次の見出しかファイル末尾で決まる。`program` は 1 ファイルの文法で、複数ファイルとディレクトリの結合は第50節と第51節が定める。
+最初の見出し（`module` `implement` `effect` `handler`）より前が「外」、以後が節の列である。`module` と `implement` は `/module`・`/implement` で閉じ、`effect` と `handler` は次の見出しかファイル末尾で終わる。見出しは式や項目の中に現れない。`program` は 1 ファイルの文法で、複数ファイルとディレクトリの結合は第50節と第51節が定める。
 
 名前付き定義:
 
@@ -2442,13 +2521,13 @@ path            := (name "::")+                                            名�
 module:
 
 ```text
-module_section  := "module" upper_name module_item*
+module_section  := "module" upper_name module_item* "/module"
 module_item     := "type" type_vars? upper_name                                          抽象型
                  | "def" type_vars? name ":" result                                      値 member
                  | "def" type_vars? name "(" contract_param ("," contract_param)* ")" ":" result
 contract_param  := name ":" type_expr
-implement_section := "implement" contract_ref "as" upper_name implement_item*
-functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item*
+implement_section := "implement" contract_ref "as" upper_name implement_item* "/implement"
+functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item* "/implement"
 functor_param   := upper_name ":" contract_ref
 apply_section   := "implement" contract_ref "as" upper_name "=" impl_ref "(" impl_ref ("," impl_ref)* ")"
 contract_ref    := path? upper_name
@@ -2467,7 +2546,7 @@ handler_item    := op_kind name param* "=>" expression
                  | "return" param "=>" expression
 ```
 
-契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書き、型変数は名前の前で宣言する（`def (A, B) map(...)`）。`as` はキーワードで、名前には使えない。`shared` は実体化の等式を公開する印で、契約の抽象型にだけ前置できる（第47節）。`library` は外にだけ書け、そのディレクトリをライブラリ根にする（第52節）。1 ファイルに 1 つ、1 ディレクトリに 1 つで、2 つ目は E205 とする。`functor_section` と `apply_section` は第48節が定め、`apply_section` の後に `implement_item` を置くと E100 である。
+契約の `type` は本体を持たない（E100）。契約の `def` は全ての引数と戻りに型を書き、型変数は名前の前で宣言する（`def (A, B) map(...)`）。`as` はキーワードで、名前には使えない。`shared` は実体化の等式を公開する印で、契約の抽象型にだけ前置できる（第47節）。`module` と `implement` は `/module`・`/implement` で閉じる。足りなければ E100 とし、食い違えば閉じのキーワードを指す E100 とする（第12.1節）。`library` は外にだけ書け、そのディレクトリをライブラリ根にする（第52節）。1 ファイルに 1 つ、1 ディレクトリに 1 つで、2 つ目は E205 とする。`functor_section` と `apply_section` は第48節が定め、`apply_section` の後に `implement_item` を置くと E100 である。
 
 式（優先順位の低い方から）:
 
@@ -2490,7 +2569,7 @@ primary         := int | float | char | string | bool | void
                  | constructor_expr
                  | record_expr
                  | list_expr
-                 | lambda                                                 `fn(` で始まり `)` で閉じる
+                 | lambda                                                 `fn(...)` か `fn … /fn`
                  | "resume"                                               again の腕の中に限る（第38節）
                  | "(" expression ")"
 constructor_expr := path? upper_name ["(" expression ("," expression)* ")" | record_expr]
@@ -2503,39 +2582,43 @@ constructor名に続く `()` または `{}` は空白によらずconstructorのp
 
 `...` の後は `]` まで 1 つの式である。
 
-`prefix_form` は括弧で囲めば `primary` になる。`lambda` は自分の括弧で閉じるので `primary` であり、`List.map xs fn(x => x + 1)` のように並置の引数に直接置ける。
+`prefix_form` は括弧で囲めば `primary` になる。`lambda` は本体に `->` が無ければ `fn(...)` の括弧で閉じ、あれば `fn … /fn` で閉じる。どちらも `primary` であり、`List.map xs fn(x => x + 1)` や `List.map xs fn x => log "a" -> x /fn` のように並置の引数に直接置ける。
 
 継続と匿名関数:
 
 ```text
 with_form       := "with" impl_ref with_args? "->" expression                    第38節
 with_args       := "(" expression ("," expression)* ")"
-binding         := "let" pattern "=" expression "->" expression
-rail_binding    := "let" pattern "?" "=" expression "->" expression
-rail_discard    := "do" expression "->" expression
+binding         := pipe "as" pattern "->" expression                             `as` は名付けに限る（第11節）
+rail_binding    := pipe "as" pattern "?" "->" expression                         Option の束縛（第34節）
+rail_discard    := pipe "->" expression                                          値の破棄（第35節）
 lambda          := "fn" "(" lambda_params "=>" expression ")"
                  | "fn" "(" lambda_params condition_arms ")"                     第32節
                  | "fn" "(" pattern_arms ")"                                     第31節
+                 | "fn" lambda_params "=>" expression "/fn"                      本体に `->` があるとき
 lambda_params   := param ("," param)*
                  | typed_param ("," typed_param)*
 ```
 
-`fn` の引数はカンマで区切る（`fn(x, y => x + y)`、`fn(x: Int, y: Int => x + y)`）。型注釈の有無を混ぜることはできない（E100）。3 つの形はいずれも `)` で終わるので、分岐の腕の中に置いても後続の腕を飲まない。
+`fn` の引数はカンマで区切る（`fn(x, y => x + y)`、`fn(x: Int, y: Int => x + y)`）。型注釈の有無を混ぜることはできない（E100）。`fn(...)` の 3 つの形は `)` で終わり、`fn … /fn` の形は `/fn` で終わるので、分岐の腕の中に置いても後続の腕を飲まない。`fn` は本体に `->` を持つときだけ `/fn` で閉じる（第12.1節）。
 
 分岐:
 
 ```text
 branch          := boolean_branch | condition_branch | pattern_branch
-boolean_branch  := "if" expression "=>" arm_body "|" arm_body
-condition_branch := "if" condition_arms
+boolean_branch  := "if" expression "=>" arm_body "|" arm_body ["/if"]      本体に `->` があれば `/if`
+condition_branch := "if" condition_arms ["/if"]
 condition_arms  := (condition_arm | pattern_fallback)+
 condition_arm   := "|" expression "=>" arm_body
-pattern_branch  := "if" expression ("," expression)* pattern_arms       scrutinee の列（第26節）
+pattern_branch  := "if" expression ("," expression)* pattern_arms ["/if"]       scrutinee の列（第26節）
 pattern_arms    := (pattern_arm | pattern_fallback)+
 pattern_arm     := "|" pattern ("," pattern)* "=>" (arm_body | arm_conditions)  pattern の列は scrutinee と同数（E125）
 arm_conditions  := "if" condition_arms                                    腕の条件列（第26.1節）。最初の fallback で終わる
 pattern_fallback := "|" arm_body
 arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
+# `if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。
+# 本体に `->` が無いときだけ使い、`if` の全体に続きがあるときに書く（第12.1節）。
+# `,` `;` `)` `]` `}` は中の構文も閉じる。
 ```
 
 `arm_conditions` は最初の `pattern_fallback` で終わり、その後の `|` は外側の pattern の腕である。fallback を持たない `arm_conditions` は続く `|` の腕を条件として読む（第26.1節）。`arm_body` の継続や `lambda` の本体に branch を置くことも E101 である（第30節）。`fn(| ... )` と `fn(x | ...)` の腕形式も branch であり、腕の中に置けば E101 である。文法は直接の入れ子だけを除く。腕の列は `=>` を持つ腕と持たない腕（fallback）の並びとして緩く読み、fallback が無い条件列（E401）、fallback より後の腕（E404）、2 つ目の fallback（E404）は網羅性の段階で当てる（第56節）。`=>` を持つ腕が 1 本も無い列（`if | 5`、`def f x | 5`、`fn(| 5)`）は E100 とし、先頭の `|` を指す。
@@ -2564,5 +2647,7 @@ literal_pattern := ["-"] int | ["-"] float | char | string | bool
 * `if` の直後にexpressionがあり、その後に `=>` が続く場合はBoolean branch
 * `if` の直後にexpressionがあり、その後に `| pattern =>` が続く場合はpattern branch。expression がカンマで続く場合も pattern branch
 * `if` の直後が `|` なら条件列
+
+`if` の閉じの印は第12.1節に従う。本体に `->` があれば `/if` で閉じ、無ければ `if` の全体に続きがあるときだけ `if(...)` と書く。`if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。
 
 パーサは改行を見ない。
