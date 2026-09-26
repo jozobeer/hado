@@ -263,7 +263,7 @@ fn implementation(module: &ModuleImpl) -> String {
     }
 }
 
-fn type_parameters(names: &[DeclaredName]) -> String {
+pub(crate) fn type_parameters(names: &[DeclaredName]) -> String {
     let names = names
         .iter()
         .map(|name| name.name.as_str())
@@ -332,7 +332,7 @@ fn function_tail_with_parameters(
     format!("{}{} => {}", arguments, return_type(ret), canonical(body))
 }
 
-fn parameters(params: &[Param]) -> String {
+pub(crate) fn parameters(params: &[Param]) -> String {
     if params.is_empty() {
         return String::new();
     }
@@ -360,12 +360,12 @@ fn parameters(params: &[Param]) -> String {
     format!(" ({fields})")
 }
 
-fn return_type(ty: Option<&TypeExpr>) -> String {
+pub(crate) fn return_type(ty: Option<&TypeExpr>) -> String {
     ty.map(|ty| format!(": {}", type_source(ty)))
         .unwrap_or_default()
 }
 
-fn type_source(ty: &TypeExpr) -> String {
+pub(crate) fn type_source(ty: &TypeExpr) -> String {
     let core = match &ty.kind {
         TypeKind::Name(name) => name.clone(),
         TypeKind::Apply(name, args) if name == "Fn" => {
@@ -421,7 +421,7 @@ fn type_list(types: &[TypeExpr]) -> String {
     types.iter().map(type_source).collect::<Vec<_>>().join(", ")
 }
 
-pub(super) fn literal(text: &str, delimiter: char) -> String {
+pub(crate) fn literal(text: &str, delimiter: char) -> String {
     let mut result = delimiter.to_string();
     for ch in text.chars() {
         match ch {
