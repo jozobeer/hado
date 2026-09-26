@@ -44,6 +44,8 @@ struct Cli<'a> {
     show_all: bool,
     output: Option<&'a str>,
     path: Option<&'a str>,
+    /// `print-postfix` の出力先。
+    second_path: Option<&'a str>,
     program_args: Vec<String>,
 }
 
@@ -59,7 +61,7 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     if !matches!(
         command,
-        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp"
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp" | "print-postfix"
     ) {
         return Err(usage_error());
     }
@@ -77,6 +79,7 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
             show_all: false,
             output: None,
             path: None,
+            second_path: None,
             program_args: Vec::new(),
         });
     }
@@ -89,10 +92,17 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
         show_all: false,
         output: None,
         path: None,
+        second_path: None,
         program_args: Vec::new(),
     };
     parse_flags(&mut cli, &args[1..])?;
-    if cli.path.is_none() {
+    // `print-postfix` は入力根と出力先の 2 つが要る。
+    let enough_paths = if cli.command == "print-postfix" {
+        cli.second_path.is_some()
+    } else {
+        cli.path.is_some()
+    };
+    if !enough_paths {
         return Err(usage_error());
     }
     Ok(cli)
@@ -130,7 +140,11 @@ fn next_token<'a>(
         return Ok(Step::Next);
     }
     if let Some(path) = positional_path(cli, arg) {
-        cli.path = Some(path);
+        if cli.path.is_none() {
+            cli.path = Some(path);
+        } else {
+            cli.second_path = Some(path);
+        }
         return Ok(Step::Next);
     }
     Err(usage_error())
@@ -177,10 +191,17 @@ fn check_option<'a>(cli: &mut Cli<'a>, arg: &'a str) -> Result<bool, ExitCode> {
 }
 
 fn positional_path<'a>(cli: &Cli<'a>, arg: &'a str) -> Option<&'a str> {
-    if arg.starts_with('-') || cli.path.is_some() {
+    if arg.starts_with('-') {
         return None;
     }
-    Some(arg)
+    if cli.path.is_none() {
+        return Some(arg);
+    }
+    // `print-postfix <入力根> <出力先>` だけが 2 つ目の位置引数を取る。
+    if cli.command == "print-postfix" && cli.second_path.is_none() {
+        return Some(arg);
+    }
+    None
 }
 
 fn prints_diagnostics(command: &str) -> bool {
@@ -212,6 +233,10 @@ fn run(cli: &Cli<'_>) -> ExitCode {
     // §58: the LSP reads and writes the protocol streams, not a source file.
     if cli.command == "lsp" {
         return ExitCode::from(hado::lsp::serve() as u8);
+    }
+    // `print-postfix` は入力根（ディレクトリでもよい）と出力先を取る。
+    if cli.command == "print-postfix" {
+        return print_postfix_command(cli);
     }
     let input = match input_path(cli) {
         Ok(input) => input,
@@ -595,8 +620,162 @@ fn print_type(
     }
 }
 
+/// `print-postfix <入力根> <出力ディレクトリ>`。`.hd` と `.hdi` を正準形の
+/// 綴りで写し、入力根からの相対パスに書く。先頭に続くコメント行はそのまま
+/// 写し、本文のコメントは落として行数を数える。
+fn print_postfix_command(cli: &Cli<'_>) -> ExitCode {
+    let (Some(root_arg), Some(out_arg)) = (cli.path, cli.second_path) else {
+        return usage_error();
+    };
+    let root = PathBuf::from(root_arg);
+    let out = PathBuf::from(out_arg);
+    let files = if root.is_dir() {
+        postfix_input_files(&root)
+    } else {
+        vec![root.clone()]
+    };
+    if files.is_empty() {
+        eprintln!("print-postfix: no .hd under {}", root.display());
+        return ExitCode::from(1);
+    }
+    let mut skipped = 0usize;
+    let mut dropped = 0usize;
+    for file in &files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!("print-postfix: {}: {error}", file.display());
+                return ExitCode::from(1);
+            }
+        };
+        let display = file.to_string_lossy().into_owned();
+        let ast = match hado::parser::parse_source(&text, &display) {
+            Ok(ast) => ast,
+            Err(error) => {
+                eprintln!("skip: {display}: {error}");
+                skipped += 1;
+                continue;
+            }
+        };
+        let (prefix, prefix_lines) = leading_comment_block(&text);
+        let mut output = String::new();
+        output.push_str(prefix);
+        output.push_str(&hado::parser::canonical_program(&ast));
+        dropped += text
+            .lines()
+            .enumerate()
+            .filter(|(index, line)| *index >= prefix_lines && is_comment_line(line))
+            .count();
+        let relative = if root.is_file() {
+            PathBuf::from(file.file_name().unwrap_or_default())
+        } else {
+            file.strip_prefix(&root).unwrap_or(file).to_path_buf()
+        };
+        let target = out.join(relative);
+        if let Some(parent) = target.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!("print-postfix: {}: {error}", parent.display());
+                return ExitCode::from(1);
+            }
+        }
+        if let Err(error) = std::fs::write(&target, output) {
+            eprintln!("print-postfix: {}: {error}", target.display());
+            return ExitCode::from(1);
+        }
+    }
+    let interfaces = files
+        .iter()
+        .filter(|file| file.extension().is_some_and(|extension| extension == "hdi"))
+        .count();
+    println!(
+        "print-postfix: files={} hd={} hdi={} skipped={} dropped-comments={}",
+        files.len(),
+        files.len() - interfaces,
+        interfaces,
+        skipped,
+        dropped
+    );
+    ExitCode::SUCCESS
+}
+
+/// `.hd` と `.hdi` の両方を集める。
+fn postfix_input_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_postfix_files(root, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_postfix_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_dir() {
+        match std::fs::read_dir(path) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    collect_postfix_files(&entry.path(), out);
+                }
+            }
+            Err(error) => eprintln!("print-postfix: {}: {error}", path.display()),
+        }
+    } else if matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("hd" | "hdi")
+    ) {
+        out.push(path.to_path_buf());
+    }
+}
+
+/// ファイル先頭に続く、空行かコメント行だけの塊。写す綴りと、その行数。
+fn leading_comment_block(text: &str) -> (&str, usize) {
+    let mut end = 0usize;
+    let mut lines = 0usize;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            end += line.len();
+            lines += 1;
+        } else {
+            break;
+        }
+    }
+    (&text[..end], lines)
+}
+
+/// `//` のコメントを含む行か。文字列と文字リテラルの中は数えない。
+fn is_comment_line(line: &str) -> bool {
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0usize;
+    let (mut string, mut character, mut escape) = (false, false, false);
+    while index < chars.len() {
+        let current = chars[index];
+        if escape {
+            escape = false;
+        } else if string {
+            match current {
+                '\\' => escape = true,
+                '"' => string = false,
+                _ => {}
+            }
+        } else if character {
+            match current {
+                '\\' => escape = true,
+                '\'' => character = false,
+                _ => {}
+            }
+        } else {
+            match current {
+                '"' => string = true,
+                '\'' => character = true,
+                '/' if chars.get(index + 1) == Some(&'/') => return true,
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | lsp"
+        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | lsp"
     );
 }
