@@ -440,8 +440,8 @@ fn catch_all_range(
     {
         return None;
     }
-    // A comment would be lost, and a `let` could bind the same name again.
-    if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
+    // A comment would be lost, and an `as` binding could bind the same name again.
+    if start >= end || source[start..end].contains("//") || source[start..end].contains(" as ") {
         return None;
     }
     Some(end)

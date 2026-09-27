@@ -382,7 +382,7 @@ impl Checker<'_> {
             }
             let message = match constraint.code {
                 "E308" => "effects are not allowed in branch conditions",
-                "E303" => "do requires an effect or Option",
+                "E303" => "`e ->` requires an effect or Option",
                 _ => "effect row mismatch",
             };
             self.deferred.push(self.error(
@@ -2509,7 +2509,7 @@ impl Checker<'_> {
             return self.option_propagation(pattern, &container, value, body);
         }
         if pattern.is_some() {
-            return Err(self.error(value.span, Some("E303"), "let p? = requires Option"));
+            return Err(self.error(value.span, Some("E303"), "`e as p? ->` requires Option"));
         }
         if !rhs_row.has_known_effects() {
             self.row_constraints.push(RowConstraint {
@@ -2609,7 +2609,7 @@ impl Checker<'_> {
                 let output = self.inference.fresh();
                 Ok((args[0].clone(), Ty::Adt(name, vec![output])))
             }
-            _ => Err(self.error(span, Some("E303"), "let p? = requires Option")),
+            _ => Err(self.error(span, Some("E303"), "`e as p? ->` requires Option")),
         }
     }
 
