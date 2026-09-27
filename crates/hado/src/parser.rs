@@ -3006,16 +3006,7 @@ impl Parser<'_> {
                 },
                 span: span.until(end),
             };
-            if let NodeKind::Fn { body, .. } = &node.kind {
-                if !self.converting && postfix_print::contains_continuation(body) {
-                    let canonical = postfix_print::node_text(&node);
-                    self.report_violation(
-                        span,
-                        "`fn(...)` with `->` inside; close it with `/fn`",
-                        canonical,
-                    );
-                }
-            }
+            self.report_open_fn_continuation(&node, span);
             return Ok(node);
         }
         let params = self.parse_lambda_params()?;
@@ -3065,6 +3056,23 @@ impl Parser<'_> {
             self.report_violation(span, "`fn` is not closed; close it with `/fn`", canonical);
         }
         Ok(node)
+    }
+
+    /// `fn(...)` の本体に `->` があれば `/fn` で閉じるよう促す（§12.1）。
+    fn report_open_fn_continuation(&mut self, node: &Node, span: Span) {
+        if self.converting {
+            return;
+        }
+        if let NodeKind::Fn { body, .. } = &node.kind {
+            if postfix_print::contains_continuation(body) {
+                let canonical = postfix_print::node_text(node);
+                self.report_violation(
+                    span,
+                    "`fn(...)` with `->` inside; close it with `/fn`",
+                    canonical,
+                );
+            }
+        }
     }
 
     /// 移行の入力だけが読む旧形（§11 の `let p =`）。値は `->` の後ろを取らない

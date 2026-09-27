@@ -387,31 +387,9 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         NodeKind::Name(name) => name.clone(),
         // `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
         // 入れ子の `-` の被演算子は括弧で包む（§7）。
-        NodeKind::Neg(c) => {
-            let inner = expr_prec(c, indent, false, 7);
-            let text = if matches!(c.kind, NodeKind::Neg(_)) {
-                format!("-({inner})")
-            } else {
-                format!("-{inner}")
-            };
-            wrap(text, 7, min)
-        }
+        NodeKind::Neg(c) => neg_text(c, indent, min),
         NodeKind::Not(c) => wrap(format!("not {}", expr_prec(c, indent, false, 7)), 7, min),
-        NodeKind::Bin(op, l, r) => {
-            let prec = bin_prec(*op);
-            let (left_min, right_min) = if is_comparison(*op) {
-                (prec + 1, prec + 1)
-            } else {
-                (prec, prec + 1)
-            };
-            let text = format!(
-                "{} {} {}",
-                expr_prec(l, indent, false, left_min),
-                op.as_str(),
-                expr_prec(r, indent, false, right_min)
-            );
-            wrap(text, prec, min)
-        }
+        NodeKind::Bin(op, l, r) => bin_text(*op, l, r, indent, min),
         NodeKind::Pipe(l, r) => wrap(
             format!(
                 "{} |> {}",
@@ -421,50 +399,14 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
             1,
             min,
         ),
-        NodeKind::Apply(f, args) => {
-            let mut out = expr_prec(f, indent, false, 8);
-            for argument in args {
-                out.push(' ');
-                if matches!(argument.kind, NodeKind::Apply(..))
-                    || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
-                {
-                    out.push_str(&format!("({})", expr(argument, indent, false)));
-                } else {
-                    out.push_str(&expr_prec(argument, indent, false, 9));
-                }
-            }
-            out
-        }
-        NodeKind::Call(f, args) => format!(
-            "{}({})",
-            expr_prec(f, indent, false, 9),
-            args.iter()
-                .map(|a| enclosed(a, indent))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        NodeKind::Field(l, r) => {
-            let base = if matches!(l.kind, NodeKind::Int(_)) {
-                format!("({})", expr(l, indent, false))
-            } else {
-                expr_prec(l, indent, false, 9)
-            };
-            format!("{base}.{}", r.name)
-        }
+        NodeKind::Apply(f, args) => apply_text(f, args, indent),
+        NodeKind::Call(f, args) => call_text(f, args, indent),
+        NodeKind::Field(l, r) => field_text(l, r, indent),
         NodeKind::Record(fields) => format!("{{ {} }}", fields_text(fields, indent)),
         NodeKind::NamedConstructor(name, fields) => {
             format!("{} {{ {} }}", name.name, fields_text(fields, indent))
         }
-        NodeKind::List(items, rest) => {
-            let mut parts = items
-                .iter()
-                .map(|item| enclosed(item, indent))
-                .collect::<Vec<_>>();
-            if let Some(rest) = rest {
-                parts.push(format!("...{}", enclosed(rest, indent)));
-            }
-            format!("[{}]", parts.join(", "))
-        }
+        NodeKind::List(items, rest) => list_text(items, rest.as_deref(), indent),
         NodeKind::Let { pat, value, body } => {
             binding(format!(" as {pat}"), value, body, indent, tail)
         }
@@ -480,20 +422,105 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
             handler,
             args,
             body,
-        } => {
-            let text = format!(
-                "with {}{} -> {}",
-                handler.name,
-                with_args(args, indent),
-                expr(body, indent, true)
-            );
-            if tail {
-                text
-            } else {
-                format!("({text})")
-            }
-        }
+        } => with_text(handler, args, body, indent, tail),
         NodeKind::Resume => "resume".to_string(),
+    }
+}
+
+/// `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
+/// 入れ子の `-` の被演算子は括弧で包む（§7）。
+fn neg_text(c: &Node, indent: usize, min: u8) -> String {
+    let inner = expr_prec(c, indent, false, 7);
+    let text = if matches!(c.kind, NodeKind::Neg(_)) {
+        format!("-({inner})")
+    } else {
+        format!("-{inner}")
+    };
+    wrap(text, 7, min)
+}
+
+fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8) -> String {
+    let prec = bin_prec(op);
+    let (left_min, right_min) = if is_comparison(op) {
+        (prec + 1, prec + 1)
+    } else {
+        (prec, prec + 1)
+    };
+    wrap(
+        format!(
+            "{} {} {}",
+            expr_prec(l, indent, false, left_min),
+            op.as_str(),
+            expr_prec(r, indent, false, right_min)
+        ),
+        prec,
+        min,
+    )
+}
+
+fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
+    let mut out = expr_prec(f, indent, false, 8);
+    for argument in args {
+        out.push(' ');
+        if matches!(argument.kind, NodeKind::Apply(..))
+            || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
+        {
+            out.push_str(&format!("({})", expr(argument, indent, false)));
+        } else {
+            out.push_str(&expr_prec(argument, indent, false, 9));
+        }
+    }
+    out
+}
+
+fn call_text(f: &Node, args: &[Node], indent: usize) -> String {
+    format!(
+        "{}({})",
+        expr_prec(f, indent, false, 9),
+        args.iter()
+            .map(|a| enclosed(a, indent))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn field_text(l: &Node, r: &FieldName, indent: usize) -> String {
+    let base = if matches!(l.kind, NodeKind::Int(_)) {
+        format!("({})", expr(l, indent, false))
+    } else {
+        expr_prec(l, indent, false, 9)
+    };
+    format!("{base}.{}", r.name)
+}
+
+fn list_text(items: &[Node], rest: Option<&Node>, indent: usize) -> String {
+    let mut parts = items
+        .iter()
+        .map(|item| enclosed(item, indent))
+        .collect::<Vec<_>>();
+    if let Some(rest) = rest {
+        parts.push(format!("...{}", enclosed(rest, indent)));
+    }
+    format!("[{}]", parts.join(", "))
+}
+
+fn with_text(
+    handler: &DeclaredName,
+    args: &[Node],
+    body: &Node,
+    indent: usize,
+    tail: bool,
+) -> String {
+    let text = format!(
+        "with {}{} -> {}",
+        handler.name,
+        with_args(args, indent),
+        expr(body, indent, true)
+    );
+    if tail {
+        text
+    } else {
+        format!("({text})")
     }
 }
 

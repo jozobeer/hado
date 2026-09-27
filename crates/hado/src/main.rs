@@ -641,46 +641,10 @@ fn print_postfix_command(cli: &Cli<'_>) -> ExitCode {
     let mut skipped = 0usize;
     let mut dropped = 0usize;
     for file in &files {
-        let text = match std::fs::read_to_string(file) {
-            Ok(text) => text,
-            Err(error) => {
-                eprintln!("print-postfix: {}: {error}", file.display());
-                return ExitCode::from(1);
-            }
-        };
-        let display = file.to_string_lossy().into_owned();
-        let ast = match hado::parser::parse_for_conversion(&text, &display) {
-            Ok(ast) => ast,
-            Err(error) => {
-                eprintln!("skip: {display}: {error}");
-                skipped += 1;
-                continue;
-            }
-        };
-        let (prefix, prefix_lines) = leading_comment_block(&text);
-        let mut output = String::new();
-        output.push_str(prefix);
-        output.push_str(&hado::parser::canonical_program(&ast));
-        dropped += text
-            .lines()
-            .enumerate()
-            .filter(|(index, line)| *index >= prefix_lines && is_comment_line(line))
-            .count();
-        let relative = if root.is_file() {
-            PathBuf::from(file.file_name().unwrap_or_default())
-        } else {
-            file.strip_prefix(&root).unwrap_or(file).to_path_buf()
-        };
-        let target = out.join(relative);
-        if let Some(parent) = target.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                eprintln!("print-postfix: {}: {error}", parent.display());
-                return ExitCode::from(1);
-            }
-        }
-        if let Err(error) = std::fs::write(&target, output) {
-            eprintln!("print-postfix: {}: {error}", target.display());
-            return ExitCode::from(1);
+        match convert_postfix_file(file, &root, &out) {
+            Ok(Some(count)) => dropped += count,
+            Ok(None) => skipped += 1,
+            Err(code) => return code,
         }
     }
     let interfaces = files
@@ -696,6 +660,49 @@ fn print_postfix_command(cli: &Cli<'_>) -> ExitCode {
         dropped
     );
     ExitCode::SUCCESS
+}
+
+/// 1 ファイルを正準形で書き出す。読めなければ `Err`（終了コード）、旧形で
+/// 読めなければ `Ok(None)`（飛ばした）、書ければ落としたコメント行数を返す。
+fn convert_postfix_file(file: &Path, root: &Path, out: &Path) -> Result<Option<usize>, ExitCode> {
+    let text = std::fs::read_to_string(file).map_err(|error| {
+        eprintln!("print-postfix: {}: {error}", file.display());
+        ExitCode::from(1)
+    })?;
+    let display = file.to_string_lossy().into_owned();
+    let ast = match hado::parser::parse_for_conversion(&text, &display) {
+        Ok(ast) => ast,
+        Err(error) => {
+            eprintln!("skip: {display}: {error}");
+            return Ok(None);
+        }
+    };
+    let (prefix, prefix_lines) = leading_comment_block(&text);
+    let mut output = String::new();
+    output.push_str(prefix);
+    output.push_str(&hado::parser::canonical_program(&ast));
+    let dropped = text
+        .lines()
+        .enumerate()
+        .filter(|(index, line)| *index >= prefix_lines && is_comment_line(line))
+        .count();
+    let relative = if root.is_file() {
+        PathBuf::from(file.file_name().unwrap_or_default())
+    } else {
+        file.strip_prefix(root).unwrap_or(file).to_path_buf()
+    };
+    let target = out.join(relative);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            eprintln!("print-postfix: {}: {error}", parent.display());
+            ExitCode::from(1)
+        })?;
+    }
+    std::fs::write(&target, output).map_err(|error| {
+        eprintln!("print-postfix: {}: {error}", target.display());
+        ExitCode::from(1)
+    })?;
+    Ok(Some(dropped))
 }
 
 /// `.hd` と `.hdi` の両方を集める。
@@ -750,28 +757,34 @@ fn is_comment_line(line: &str) -> bool {
         if escape {
             escape = false;
         } else if string {
-            match current {
-                '\\' => escape = true,
-                '"' => string = false,
-                _ => {}
-            }
+            string = quoted_open(current, '"', &mut escape);
         } else if character {
-            match current {
-                '\\' => escape = true,
-                '\'' => character = false,
-                _ => {}
-            }
+            character = quoted_open(current, '\'', &mut escape);
+        } else if comment_starts(current, chars.get(index + 1).copied()) {
+            return true;
         } else {
             match current {
                 '"' => string = true,
                 '\'' => character = true,
-                '/' if chars.get(index + 1) == Some(&'/') => return true,
                 _ => {}
             }
         }
         index += 1;
     }
     false
+}
+
+/// 引用の中の 1 文字。`\` の次の 1 文字は素通しし、閉じの引用符で false を返す。
+fn quoted_open(current: char, quote: char, escape: &mut bool) -> bool {
+    if current == '\\' {
+        *escape = true;
+    }
+    current != quote
+}
+
+/// 引用符の外でコメントの印 `//` が始まるか。
+fn comment_starts(current: char, next: Option<char>) -> bool {
+    current == '/' && next == Some('/')
 }
 
 fn usage() {
