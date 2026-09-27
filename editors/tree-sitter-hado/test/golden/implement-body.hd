@@ -1,3 +1,4 @@
 implement Store as S
 type T = Int
 def create name => name
+/implement

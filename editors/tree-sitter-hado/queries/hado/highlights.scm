@@ -17,8 +17,6 @@
 
 [
   "def"
-  "let"
-  "do"
   "fn"
   "if"
   "type"
@@ -36,6 +34,10 @@
   "not"
   "Fn"
   "Pure"
+  "/if"
+  "/fn"
+  "/module"
+  "/implement"
 ] @keyword
 
 (rec_keyword) @keyword
