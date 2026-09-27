@@ -66,7 +66,7 @@ texts = ['', 'a', 'hello world', 'line1\nline2', 'tab\there', 'quote"inside',
 for index, text in enumerate(texts):
     literal = json.dumps(text, ensure_ascii=False)
     source = f'def main =\n  log {literal} ->\n  0\n'
-    build_printed(sys.argv[1], f'log-ok-{index}', source, text + '\n0\n')
+    build_printed(sys.argv[1], f'log-ok-{index}', source, text + '\n')
 print(f'log success: {len(texts)} cases')
 PY
 }
@@ -181,14 +181,14 @@ def expression(value):
 
 values = [LOW, LOW + 1, -1, 0, 1, HIGH - 1, HIGH, -123456789, 987654321]
 for index, value in enumerate(values):
-    source = f'def main = Int.abs {expression(value)}\n'
+    source = f'def main = Int.to_string (Int.abs {expression(value)})\n'
     expected = str(value if value >= 0 else wrap(-value)) + '\n'
     build_printed(sys.argv[1], f'abs-{index}', source, expected)
 
 pairs = [(LOW, 0), (LOW, HIGH), (-1, 1), (0, 0), (HIGH, HIGH), (7, -3), (LOW, LOW)]
 for index, (left, right) in enumerate(pairs):
     for name, oracle in (('min', min), ('max', max)):
-        source = f'def main = Int.{name} {expression(left)} {expression(right)}\n'
+        source = f'def main = Int.to_string (Int.{name} {expression(left)} {expression(right)})\n'
         build_printed(sys.argv[1], f'{name}-{index}', source, str(oracle(left, right)) + '\n')
 print(f'int ops: {len(values)} abs, {len(pairs) * 2} min/max cases')
 PY
@@ -308,6 +308,7 @@ root.mkdir(parents=True, exist_ok=False)
 arms = ['once read_file _ => Bytes.of_string "virtual"',
         'once write_file _ _ => ()',
         'once log _ => ()',
+        'once log_error _ => ()',
         'once read_dir _ => ["virtual"]',
         'once read_stdin => Bytes.of_string "virtual"']
 full = 'handler Io as MyIo\n' + '\n'.join(arms) + '\ndef main = with MyIo -> log "virtual" -> 0\n'
@@ -328,10 +329,11 @@ def check(name, source, expected_code):
 check('full', full, None)
 check('missing-log', missing, 'E605')
 r37 = Path('scripts/verify-r37.sh').read_text()
-assert "'once log _ => ()'" in r37, 'verify-r37.sh does not model the fifth operation'
+assert "'once log _ => ()'" in r37, 'verify-r37.sh does not model the log operation'
+assert "'once log_error _ => ()'" in r37, 'verify-r37.sh does not model the log_error operation'
 world = Path('crates/hado/tests/r37_world.rs').read_text()
 assert '"log"' in world, 'r37_world.rs does not check the log default'
-print('io handler: 5 arms accepted, missing log is E605, r37 gates follow')
+print('io handler: 6 arms accepted, missing log is E605, r37 gates follow')
 PY
 }
 

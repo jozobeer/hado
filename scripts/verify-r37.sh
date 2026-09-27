@@ -87,9 +87,9 @@ for operation, expected in [('args', '["override"]'), ('env "unused"', 'Some("ov
 runtime('37-d(3) error-handler', 'handler Error as H\nabort raise e => [e.message]\ndef main = with H -> args\n', '["InvalidUtf8"]', [bad])
 for name in ('args', 'env', 'cwd'):
     for value in values:
-        add('37-b2(6) parameter', f'def f ({name}: Int): Int => {name}\ndef main = f ({value})\n', value, 'print')
-        add('37-b2(6) function', f'def inc (n: Int): Int => n + 1\ndef f ({name}: Fn(Int => Int)): Int => {name} ({value})\ndef main = f inc\n', value+1, 'print')
-        add('37-b2(6) let', f'def main = {value} as {name} -> {name} + 1\n', value+1, 'print')
+        add('37-b2(6) parameter', f'def f ({name}: Int): Int => {name}\ndef main = Int.to_string (f ({value}))\n', value, 'print')
+        add('37-b2(6) function', f'def inc (n: Int): Int => n + 1\ndef f ({name}: Fn(Int => Int)): Int => {name} ({value})\ndef main = Int.to_string (f inc)\n', value+1, 'print')
+        add('37-b2(6) let', f'def main = Int.to_string ({value} as {name} -> {name} + 1)\n', value+1, 'print')
 def reject(label, source, code, anchor, sub=False, multiple=False):
     blank, indent = rng.randrange(1, 8), rng.randrange(1, 8)
     if sub and source.startswith('def '): source = 'library\n' + source.replace('def main = 0\n', '')
@@ -202,8 +202,8 @@ for operation, path, message in failures:
         (directory/'failure-fixture').touch()
         if message=='PermissionDenied': (directory/'requires-user').touch()
 add('37-b Io', 'def main = [List.length args, Bytes.length read_stdin]\n', 'Int List {Env, Error, Io}', 'entry-type')
-io_arms = ['once read_file _ => Bytes.of_string "virtual"', 'once write_file _ _ => ()', 'once log _ => ()', 'once read_dir _ => ["virtual"]', 'once read_stdin => Bytes.of_string "virtual"']
-for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('log "virtual"', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
+io_arms = ['once read_file _ => Bytes.of_string "virtual"', 'once write_file _ _ => ()', 'once log _ => ()', 'once log_error _ => ()', 'once read_dir _ => ["virtual"]', 'once read_stdin => Bytes.of_string "virtual"']
+for operation, expected in [('Bytes.to_string (read_file "absent")', 'virtual'), ('write_file "absent/child" (Bytes.of_string "x")', ''), ('log "virtual"', ''), ('log_error "virtual"', ''), ('read_dir "absent"', '["virtual"]'), ('Bytes.to_string read_stdin', 'virtual')]:
     directory = runtime('37-d Io override', 'handler Io as MyIo\n'+'\n'.join(io_arms)+'\ndef main = with MyIo -> '+operation+'\n', expected)
     if expected=='':
         (directory/'expect').write_bytes(b'')
