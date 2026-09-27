@@ -66,14 +66,14 @@ issue の完了条件ごとの検査（門番のどの検査が測るか）。
 
 ### 許容される赤
 
-- 検査 h（速さ）は対照を引いた中央値で比べる。負荷で揺れたときは測り直し、比が負や下限割れでも速さの下限では赤にしない（`docs/issues/flaky-string-split-timing-gate.md` と同じ罠を踏まない）。
+- 検査 h（速さ）は対照を引いた差の中央値で `map_extra < bump_extra`（比が 1 より大きい）を判定する。赤になるのは、`Map` 版が `bump` 版より速くないとき、または片方の差が 0 以下で測れていないとき。負荷で偽赤を出さない形は保つ（warm-up 1 回 + 5 組、対照減算、組ごとの差の中央値）が、判定そのものは外さない（`docs/issues/flaky-string-split-timing-gate.md` の「中央値で判定し、閾値は据え置く。退行を測る力は落とさない」に従う）。
 
 ### スコープ外
 
 - 独自の順序が要る functor `MakeMap(Key: Ord)`（§48）。いまは作らない。
 - record の field 更新、参照カウント。
 - `Map` 以外の新しい prelude member。
-- 抽象型を含む契約 member の効果行の一般化（コンパイラ側。`## 実測` の「効果行」に再現を残す）。
+- 抽象型を含む契約 member の効果行の一般化（コンパイラ側）。`docs/issues/contract-member-effect-generalization.md` に切り出した。
 
 ### 中断の条件
 
@@ -136,17 +136,25 @@ PASSED: 9/9
 
 素の二分探索木の値は判定器が同じ primitive の数え方（`<` は各節で 1、`<` が偽のとき `==` が 1）で独立に計算する。昇順と降順の最後の `insert` が上限を大きく超えるので、平衡木でなければこの大きさで赤になる。
 
-検査 h（対照を引いた中央値）:
+検査 h（対照を引いた差の中央値。`map_extra < bump_extra` を門番が assert する）:
 
 ```
-bump: total 1.927s control 0.029s subtracted 1.894s
-map:  total 0.244s control 0.029s subtracted 0.214s
-ratio bump/map of the subtracted time: 8.87
+bump: total 2.036s control 0.034s subtracted 2.002s
+map:  total 0.247s control 0.034s subtracted 0.215s
+ratio bump/map of the subtracted time: 9.31
+```
+
+赤の証拠: `bump` 版と `Map` 版の実体を入れ替える一時探針（木には残していない）で回すと、判定が落ちる。
+
+```
+bump: total 0.270s control 0.036s subtracted 0.234s
+map:  total 2.154s control 0.036s subtracted 2.118s
+AssertionError: the Map CLI is not faster than the association list: bump 0.234s, map 2.118s, ratio 0.11
 ```
 
 ### 効果行（`fold` の効果多相が効かないこと）
 
-署名が抽象型 `(K, V) T` を含む契約 member は、効果行が一般化しない。`stdlib/map.hd` の `fold` に効果を持つ累算器を渡すと `main` で `E706` になる。
+署名が抽象型 `(K, V) T` を含む契約 member は、効果行が一般化しない。`stdlib/map.hd` の `fold` に効果を持つ累算器を渡すと `main` で `E706` になる。`check --print-type` だけはこの欠陥を見逃す（`build` と `check` は赤、`--print-type` は緑）ので、再現は `build` で取る。
 
 ```
 $ cat main.hd
@@ -161,11 +169,20 @@ def mark k => do yield k -> k
 def main =
   let m = Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 ->
   with Collect -> Map.fold m "" fn(acc, key, _ => String.concat acc (mark key))
-$ cargo run --offline -q -- check --print-type main.hd
+$ cargo run --offline -q -- build -o prog main.hd
 main.hd:9:1: error[E706]: main cannot have a user-defined effect
+$ cargo run --offline -q -- check --print-type main.hd
+String List {Yield}
 ```
 
-同じ形の `fold` でも、契約に抽象型を置かず型を top level で宣言すると効果行は一般化する（`String List` になり `E706` にならない）。`List.fold` が効果多相なのはこの形だからで、抽象型を隠す `Map` では成り立たない。判定器の検査 c はこの制限を避けて、非可換の String 累算器を順序の証拠にしている。§55 の「`Fn` を引数に取る member は効果多相」という規則との差なので、仕様を変えずに報告に残す。
+同じ形の `fold` でも、契約に抽象型を置かず型を top level で宣言すると効果行は一般化する。`List.fold` が効果多相なのはこの形だからで、抽象型を隠す `Map` では成り立たない。
+
+```
+$ cargo run --offline -q -- build -o prog list_fold.hd && ./prog
+["1", "2", "3"]
+```
+
+判定器の検査 c はこの制限を避けて、非可換の String 累算器を順序の証拠にしている。§55 の「`Fn` を引数に取る member は効果多相」という規則との差なので、仕様を変えずに `docs/issues/contract-member-effect-generalization.md` に切り出した。
 
 ### 単語頻度の入力
 
