@@ -123,7 +123,7 @@ fn close_defects_are_e100() {
 /// 書いた結果を読み直して検査できる。旧形の `let`・`do` を書き戻さない。
 #[test]
 fn canonical_rewrites_write_parseable_postfix() {
-    for name in ["E507", "E508", "E520"] {
+    for name in ["E504", "E506", "E507", "E508", "E520"] {
         let path = repo_root().join("tests/reject").join(name).join("main.hd");
         let source = fs::read_to_string(&path).expect("readable");
 
@@ -162,6 +162,27 @@ fn canonical_rewrites_write_parseable_postfix() {
             "{name}: fmt が冪等でない"
         );
     }
+}
+
+/// §12.1・§57: `if(...)` の閉じを持つ枝でも、E520 の書き換えは閉じ `)` ごと
+/// 置き換えて `if(...)` の綴りを保つ。開き括弧だけを残して壊さない。
+#[test]
+fn canonical_rewrites_keep_parenthesized_branch_close() {
+    let source = "def f (b: Bool): Int =>\n  if(b | true => 1 | false => 2) as v ->\n  v + 1\ndef main = f true\n";
+    let error = hado::check_source(source, "paren.hd")
+        .err()
+        .expect("E520 が出ない");
+    assert_eq!(error.code.as_deref(), Some("E520"));
+    let fix = hado::fixes::fix_at(source, "E520", error.line, error.col).expect("書き換えが無い");
+    let fixed = format!("{}{}{}", &source[..fix.start], fix.replacement, &source[fix.end..]);
+    assert!(
+        fixed.contains("if(b => 1 | 2) as v ->"),
+        "閉じを壊した: {fixed}"
+    );
+    parse_source(&fixed, "paren.hd")
+        .unwrap_or_else(|error| panic!("--fix の出力を読み直せない: {error}\n{fixed}"));
+    hado::check_source(&fixed, "paren.hd")
+        .unwrap_or_else(|error| panic!("--fix の出力が検査を通らない: {error}\n{fixed}"));
 }
 
 /// §11: 正準形の印字も後置で、旧形の `let`・`do` を出さない。

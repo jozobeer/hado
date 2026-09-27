@@ -2569,7 +2569,7 @@ impl Parser<'_> {
         let span = self.span();
         self.bump(); // `if`
         self.expect(&TokKind::LParen)?;
-        let node = self.parse_branch_after_if(span)?;
+        let mut node = self.parse_branch_after_if(span)?;
         if postfix_print::branch_has_arrow(&node) {
             let canonical = postfix_print::node_text(&node);
             self.report_violation(
@@ -2587,6 +2587,8 @@ impl Parser<'_> {
                 canonical,
             );
         }
+        // 閉じの `)` まで節点の範囲に入れる（§57 の書き換えが括弧ごと置き換えられる）。
+        node.span = span.until(self.last_end());
         Ok(node)
     }
 

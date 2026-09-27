@@ -305,12 +305,17 @@ fn boolean_branch_fix(
     if source[start..end].contains("//") {
         return None;
     }
-    let replacement = format!(
-        "if {} => {} | {}",
-        parser::canonical(&scrutinees[0]),
-        parser::canonical(then),
-        parser::canonical(or_else)
-    );
+    // `if(...)` の形は節点の範囲が閉じ `)` まで伸びる。書き換えても閉じを保つ。
+    let entry = branch_entry(node.span, branches)?;
+    let parenthesized = lines.end_offset(source, node.span) > lines.end_offset(source, entry.2);
+    let scrutinee = parser::canonical(&scrutinees[0]);
+    let then = parser::canonical(then);
+    let or_else = parser::canonical(or_else);
+    let replacement = if parenthesized {
+        format!("if({scrutinee} => {then} | {or_else})")
+    } else {
+        format!("if {scrutinee} => {then} | {or_else}")
+    };
     Some(Fix {
         code: "E520",
         line: node.span.line,
@@ -599,31 +604,37 @@ fn arm_reconstructs(
     })
 }
 
+/// §35: `e as _? -> body` は成功値を捨てるだけなので、束縛を消して `e -> body`
+/// にする。書き換えるのは値と本体の間（` as _? -> `）だけなので、本体は動かない。
 fn discard_let_fix(
-    node: &Node,
     pat: &Pattern,
     value: &Node,
+    body: &Node,
     code: &'static str,
-    canonical: &str,
     source: &str,
     lines: &LineMap,
 ) -> Option<Fix> {
     if !matches!(pat.kind, PatternKind::Underscore) {
         return None;
     }
-    let start = lines.offset(source, node.span);
-    let end = lines.offset(source, value.span);
+    let start = lines.end_offset(source, value.span);
+    let end = lines.offset(source, body.span);
     if start >= end || source[start..end].contains("//") {
         return None;
     }
+    let canonical = flatten(&format!(
+        "{} -> {}",
+        parser::canonical(value),
+        parser::canonical(body)
+    ));
     Some(Fix {
         code,
         line: pat.span.line,
         col: pat.span.col,
         start,
         end,
-        replacement: "do ".to_string(),
-        canonical: canonical.to_string(),
+        replacement: " -> ".to_string(),
+        canonical,
     })
 }
 
@@ -669,10 +680,10 @@ fn identical_bool_fix(node: &Node, then: &Node, els: &Node, walk: &Walk<'_>) -> 
     })
 }
 
-/// §40: a plain let binding that discards a pure value is redundant; the
-/// binding disappears and the body stays. Only a bare name or a literal is
-/// provably effect-free (E506 fires for effectful discards too, so anything
-/// else is left for the author to rewrite as a `do`).
+/// §40: a plain binding that discards a pure value is redundant; the binding
+/// disappears and the body stays. Only a bare name or a literal is provably
+/// effect-free (E506 fires for effectful discards too, so anything else is left
+/// for the author to rewrite as `e ->`).
 fn discard_plain_let_fix(
     node: &Node,
     pat: &Pattern,
@@ -691,8 +702,8 @@ fn discard_plain_let_fix(
     if start >= end || value_start >= end {
         return None;
     }
-    let head = source[value_start..end].trim_end();
-    let text = head.strip_suffix("->").unwrap_or(head).trim();
+    // 後置では値の後ろに ` as _ -> ` が続く。値そのものの綴りだけを見る。
+    let text = source[value_start..lines.end_offset(source, value.span)].trim();
     let bare_name = !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_');
     let literal = text.len() >= 2 && text.starts_with('"') && text.ends_with('"');
     if !bare_name && !literal {
@@ -1478,7 +1489,10 @@ fn branch_range(
         // `after` is the branch's LAST token, so its own end is the end of the
         // branch. Taking only its start would leave that token outside the
         // rewrite (`if b | true => 1 | false => 0` lost its trailing `0`).
-        trim_back(source, lines.end_offset(source, after))
+        let by_token = trim_back(source, lines.end_offset(source, after));
+        // `if(...)` の閉じ `)` は最後のトークンの外側にある。parser が節点の範囲に
+        // 入れた `)` の終端までを書き換えの範囲にする。
+        by_token.max(lines.end_offset(source, node.span))
     };
     (start <= end).then_some((start, end))
 }
@@ -1589,7 +1603,9 @@ fn walk_node(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
         NodeKind::Let {
             pat, value, body, ..
         } => walk_let(node, pat, value, body, walk, found),
-        NodeKind::LetQ { pat, value, .. } => walk_let_q(node, pat, value, walk, found),
+        NodeKind::LetQ {
+            pat, value, body, ..
+        } => walk_let_q(pat, value, body, walk, found),
         NodeKind::BoolBranch { cond, then, els } => {
             walk_bool_branch(node, cond, then, els, walk, found)
         }
@@ -1623,13 +1639,18 @@ fn walk_written_cons(callee: &Node, node: &Node, walk: &Walk<'_>, found: &mut Fo
 }
 
 /// `let?` の腕。束縛の削除と、pattern の再帰。
-fn walk_let_q(node: &Node, pat: &Pattern, value: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+fn walk_let_q(
+    pat: &Pattern,
+    value: &Node,
+    body: &Node,
+    walk: &Walk<'_>,
+    found: &mut Found<'_>,
+) {
     found.push(discard_let_fix(
-        node,
         pat,
         value,
+        body,
         "E504",
-        "do",
         walk.source,
         walk.lines,
     ));
