@@ -448,7 +448,7 @@ fn integer_to_string_preserves_signed_boundaries() {
 
 #[test]
 fn float_to_string_preserves_numeric_values() {
-    for (index, expression, expected) in [(0, "1.25", "1.25\n"), (1, "0.0", "0\n")] {
+    for (index, expression, expected) in [(0, "1.25", "1.25\n"), (1, "0.0", "0.0\n")] {
         let path =
             std::env::temp_dir().join(format!("hado-float-string-{}-{index}", std::process::id()));
         hado::build::executable(

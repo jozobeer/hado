@@ -1,0 +1,4 @@
+// spec: §55
+// expect: [97, 12354, 128512]
+// needs: prelude
+def main = List.map ['a', 'あ', '😀'] Char.to_int

@@ -1,0 +1,4 @@
+// spec: §55
+// expect-error: InvalidScalar
+// needs: prelude
+def main = Char.of_int 55296

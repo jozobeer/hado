@@ -54,6 +54,12 @@ HadoString *hado_string_join(const HadoArray *values, const HadoString *separato
    crates/hado/runtime_print.c fills the same header, and counted by
    hado_byte_scans so a gate can tell a scan from a constant-time read. */
 size_t hado_scalar_count(const unsigned char *bytes, size_t length);
+
+/* §54's canonical Float spelling. Defined by the Rust formatter in
+   crates/hado/float_format.rs and shared by Float.to_string and the printer,
+   so both print the same shortest round-tripping decimal. Returns 0 when the
+   result does not fit in `capacity`. */
+size_t hado_format_float(double value, unsigned char *bytes, size_t capacity);
 extern size_t hado_byte_scans;
 
 /* Bytes shares the HadoString layout with String. length counts bytes here,

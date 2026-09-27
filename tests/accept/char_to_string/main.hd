@@ -1,0 +1,4 @@
+// spec: §55
+// expect: ["a", "あ", "😀"]
+// needs: prelude
+def main = List.map [97, 12354, 128512] fn(n => Char.to_string (Char.of_int n))

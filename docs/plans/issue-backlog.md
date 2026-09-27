@@ -73,7 +73,7 @@
 
 - M: 5 本とも `crates/hado/src/mono.rs` を触る。M1 の推奨（本体を実際の型で下ろす）が M2・M3 の原因も消す見込みなので、M2・M3 は手順 2 の再現から始める。
 - R: R1 と R3 は `runtime/hado_runtime.c` の別の関数を触る。R3 は `Io` に `log_error` を足すので、網羅的な `handler Io` を持つ門番（`scripts/verify-r37.sh` など、issue に列挙）を同じラウンドで直す。
-- G: `docs/plan.md` の門番基盤の節と同じく、並走させない（`AGENTS.md`）。G レーンの走行中に、他のレーンが `scripts/lint-docs.sh` を触らない。
+- G: 門番基盤を触るレーンは並走させない（`AGENTS.md`。決定の置き場は `docs/plans/<名前>.md`）。G レーンの走行中に、他のレーンが `scripts/lint-docs.sh` を触らない。
 - F: F1 は全コーパスの `let` と `do` を書き換えるので、着地の時点で走っている他のレーンは、main を取り込むときに `print-postfix`（`postfix-binding-probe` で試作）で自分の追加分を写す。F1 の着地を他のレーンに先に知らせる。
 
 ## 受け入れ条件

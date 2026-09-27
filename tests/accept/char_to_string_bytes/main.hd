@@ -1,0 +1,4 @@
+// spec: §55
+// expect: [[0], [237, 159, 191], [238, 128, 128], [244, 143, 191, 191], [227, 129, 130], [240, 159, 152, 128]]
+// needs: prelude
+def main = List.map [0, 55295, 57344, 1114111, 12354, 128512] fn(n => Bytes.to_list (Bytes.of_string (Char.to_string (Char.of_int n))))

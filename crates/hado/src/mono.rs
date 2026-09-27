@@ -102,6 +102,29 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+// 呼び出しの形を callee と引数の並びに解く。`|>` は左辺を先頭に足した `Apply`
+// と同じ形にする（`lift_again_arguments` の書き換えと同じ規則）。効果の判定は
+// `Apply` と同じく callee を見るので、`|>` の target も同じ経路に載せる。
+fn call_parts(
+    node: &crate::parser::Node,
+) -> Option<(&crate::parser::Node, Vec<&crate::parser::Node>)> {
+    use crate::parser::NodeKind;
+    match &node.kind {
+        NodeKind::Apply(callee, arguments) | NodeKind::Call(callee, arguments) => {
+            Some((callee.as_ref(), arguments.iter().collect()))
+        }
+        NodeKind::Pipe(value, target) => {
+            let (callee, mut arguments) = match &target.kind {
+                NodeKind::Apply(callee, arguments) => (callee.as_ref(), arguments.iter().collect()),
+                _ => (target.as_ref(), Vec::new()),
+            };
+            arguments.insert(0, value.as_ref());
+            Some((callee, arguments))
+        }
+        _ => None,
+    }
+}
+
 // `Array.of_list` のような callee は、scheme の単一化で入れ子の outcome を
 // 落とす。実際の型での単一化が通るなら、結果型はそちらから取る（下の
 // `specialize_function`）。実際の型で単一化できない形は論理型のままにする。
@@ -606,10 +629,10 @@ impl Lowerer {
         if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
             return true;
         }
-        if let crate::parser::NodeKind::Apply(callee, arguments)
-        | crate::parser::NodeKind::Call(callee, arguments) = &node.kind
-        {
-            if self.call_carries_effects(callee, arguments) {
+        // `|>` の target も `Apply` と同じ callee として見る。書いた形が違うだけで
+        // 効果の有無が変わらないようにする。
+        if let Some((callee, arguments)) = call_parts(node) {
+            if self.call_carries_effects(callee, &arguments) {
                 return true;
             }
         }
@@ -660,7 +683,7 @@ impl Lowerer {
     fn call_carries_effects(
         &self,
         callee: &crate::parser::Node,
-        arguments: &[crate::parser::Node],
+        arguments: &[&crate::parser::Node],
     ) -> bool {
         if self.stack_needs_outcome() && self.callee_is_outcome_closure(callee) {
             return true;
@@ -911,6 +934,15 @@ impl Lowerer {
             (None, Some(element), Type::Data(name, _)) => Type::Data(name.clone(), vec![element]),
             _ => resolved,
         };
+        // 宣言側の要素型が outcome の閉包なら、効果を運ばない要素も
+        // 呼び出し側が outcome として解釈できる型に揃える。
+        let values = match &declared {
+            Some(element) => values
+                .into_iter()
+                .map(|value| self.as_outcome_closure(value, element))
+                .collect::<Result<Vec<_>, _>>()?,
+            None => values,
+        };
         Ok((list_ty, values))
     }
 
@@ -970,6 +1002,75 @@ impl Lowerer {
         arguments
             .first()
             .is_some_and(|element| element != &value.ty())
+    }
+
+    // 宣言側の要素型が outcome の閉包のとき、効果を運ばない要素の閉包は
+    // 結果を `done` で包む閉包に直す。呼び出し側は要素を outcome として
+    // 解釈する（`g 4` の結果が handler の答えになる）ので、値の側でも
+    // 同じ型に揃える。直せない不一致はそのまま返し、`cons_list` が止める。
+    fn as_outcome_closure(
+        &mut self,
+        value: Expression,
+        element: &Type,
+    ) -> Result<Expression, String> {
+        let Type::Closure(parameters, outcome) = element else {
+            return Ok(value);
+        };
+        if !is_outcome(outcome) {
+            return Ok(value);
+        }
+        let value_ty = value.ty();
+        let Type::Closure(value_parameters, value_result) = &value_ty else {
+            return Ok(value);
+        };
+        if value_parameters != parameters || **value_result == **outcome {
+            return Ok(value);
+        }
+        let (success, _, _) = outcome_parts(outcome)?;
+        if **value_result != success {
+            return Ok(value);
+        }
+        let capture = self.next;
+        self.next += 1;
+        let mut ids = Vec::with_capacity(parameters.len());
+        let mut arguments = Vec::with_capacity(parameters.len());
+        for parameter in parameters {
+            let id = self.next;
+            self.next += 1;
+            ids.push(id);
+            arguments.push(Expression::Variable {
+                id,
+                ty: parameter.clone(),
+            });
+        }
+        let call = Expression::CallClosure {
+            closure: Box::new(Expression::Variable {
+                id: capture,
+                ty: value_ty.clone(),
+            }),
+            arguments,
+            result: success,
+        };
+        let body = self.done(call, outcome)?.in_tail_position();
+        let id = FunctionId(self.next_function);
+        self.next_function += 1;
+        let signature = Signature {
+            parameters: parameters.clone(),
+            result: (**outcome).clone(),
+        };
+        self.functions.push(Function {
+            id,
+            name: format!("outcome_{}", id.0),
+            signature: signature.clone(),
+            parameters: ids,
+            captures: vec![(capture, value_ty)],
+            body,
+        });
+        Ok(Expression::MakeClosure {
+            function: id,
+            signature,
+            captures: vec![value],
+        })
     }
 
     fn name_expression(
