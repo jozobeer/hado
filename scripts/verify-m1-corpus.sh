@@ -122,11 +122,11 @@ while IFS= read -r s; do
 done <"$TMPD/sec39.txt"
 for f in tests/accept/*/main.hd; do
     [ -e "$f" ] || continue
-    if grep -qxF 'def display' "$f"; then
+    if grep -qE '^def display($|[ (])' "$f"; then
         grep -qF '| Guest => "guest"' "$f" || c2_reasons="$c2_reasons $f:missing-guest-branch"
         grep -qE '^// expect: guest$' "$f" || c2_reasons="$c2_reasons $f:missing-expect-guest"
     fi
-    if grep -qxF 'def active_names users =>' "$f"; then
+    if grep -qE '^def active_names users =>' "$f"; then
         grep -qE '^// needs: prelude$' "$f" || c2_reasons="$c2_reasons $f:missing-needs-prelude"
     fi
 done
