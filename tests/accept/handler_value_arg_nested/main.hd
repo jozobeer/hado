@@ -1,0 +1,8 @@
+// spec: §38
+// expect: 52
+effect Ask
+abort ask
+handler Ask as Take(limit: Int)
+abort ask => limit * 10
+return value => value + limit
+def main = with Take(2) -> with Take(5) -> ask

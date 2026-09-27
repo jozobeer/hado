@@ -1,0 +1,6 @@
+// spec: §38
+// needs: prelude
+// expect: 0
+handler Error as OrValue(fallback: Int)
+abort raise _ => fallback
+def main = with OrValue(0) -> Int.parse "x"

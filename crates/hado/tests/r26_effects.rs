@@ -1847,3 +1847,22 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
     );
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
 }
+
+// §38: `with` の値引数は `with` の位置で 1 回だけ評価する。`again` の腕が
+// `resume` を繰り返して `convert` が複数回走る形で、実引数に置いた `log` の
+// 出力が 1 回であることを stdout の完全一致で見る。直す前は値引数を lower して
+// 捨てるので `log` が 1 回も走らない。
+#[test]
+fn handler_value_argument_is_evaluated_once_at_the_with() {
+    runs_effectful_closure_source(
+        "effect A Yield\n\
+         again yield(value: A): Void\n\
+         handler A Yield as Take(limit: Int)\n\
+         again yield value => resume () as rest -> [limit, value, ...rest]\n\
+         return _ => []\n\
+         def noisy n => log \"arg\" -> n\n\
+         def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i -> loop (i - 1) /if\n\
+         def main = List.length (with Take(noisy 3) -> loop 3)\n",
+        "arg\n6",
+    );
+}
