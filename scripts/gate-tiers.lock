@@ -6,6 +6,7 @@ cognitive-complexity	core
 embed-runtime	full
 frozen-docs	core
 gate-cache	quick
+localize-message-positions	core
 lsp-minimal	core
 m0	core
 m1-corpus	core
