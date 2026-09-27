@@ -4172,12 +4172,15 @@ impl Lowerer {
             }],
         )?;
         let mut arguments = vec![called];
-        arguments.extend(convert.value_params.iter().map(|(id, ty)| {
-            Expression::Variable {
-                id: *id,
-                ty: ty.clone(),
-            }
-        }));
+        arguments.extend(
+            convert
+                .value_params
+                .iter()
+                .map(|(id, ty)| Expression::Variable {
+                    id: *id,
+                    ty: ty.clone(),
+                }),
+        );
         let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, arguments)?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;

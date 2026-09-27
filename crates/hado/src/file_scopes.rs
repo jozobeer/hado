@@ -93,9 +93,7 @@ impl FileScope {
         bound.extend(handler.params.iter().map(|param| param.name.clone()));
         for arm in &mut handler.arms {
             match arm {
-                HandlerArm::Operation { params, body, .. } => {
-                    self.function(params, body, &bound)
-                }
+                HandlerArm::Operation { params, body, .. } => self.function(params, body, &bound),
                 HandlerArm::Return { param, body, .. } => {
                     self.function(std::slice::from_ref(param), body, &bound)
                 }
