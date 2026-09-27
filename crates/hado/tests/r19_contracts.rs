@@ -12,7 +12,11 @@ impl Case {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&dir).unwrap();
-        std::fs::write(dir.join("main.hd"), source).unwrap();
+        let path = dir.join("main.hd");
+        std::fs::write(&path, source).unwrap();
+        if let Some(wrapped) = wrap_int_main(source) {
+            std::fs::write(&path, wrapped).unwrap();
+        }
         Self(dir)
     }
     fn command(&self, command: &str) -> Output {
@@ -64,6 +68,44 @@ impl Drop for Case {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+/// §54 makes an Int main the exit code rather than a printed line. When the
+/// program's `main` is exactly Int, wrap the trailing body in `Int.to_string`
+/// so the stdout assertions keep measuring the computed value. Returns `None`
+/// when the source does not check or its main is not Int.
+fn wrap_int_main(source: &str) -> Option<String> {
+    let checked = hado::check_source(source, "main.hd").ok()?;
+    if checked.main != hado::types::Ty::Int {
+        return None;
+    }
+    let marker = "def main =";
+    let at = source.rfind(marker)?;
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    Some(format!(
+        "{}def main = Int.to_string ({}){}",
+        &source[..at],
+        &after[..cut],
+        &after[cut..]
+    ))
+}
+
 fn random(state: &mut u64, limit: usize) -> usize {
     *state = state
         .wrapping_mul(6364136223846793005)
@@ -352,7 +394,7 @@ fn main_abstract_types_are_rejected_inside_fixed_and_generic_payloads() {
             rejected(&source, "E705", "def main");
         }
     }
-    Case::new(&format!("def main = M.get (M.make 7){suffix}")).run("7");
+    Case::new(&format!("def main = M.get (M.make 7)\n{suffix}")).run("7");
 }
 
 #[test]

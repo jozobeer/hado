@@ -69,10 +69,7 @@ fn int_main_out_of_range_is_diagnosed_before_narrowing() {
         ("-1", "def main = -1\n"),
         ("256", "def main = 256\n"),
         ("max", "def main = 9223372036854775807\n"),
-        (
-            "min",
-            "def main = -9223372036854775807 - 1\n",
-        ),
+        ("min", "def main = -9223372036854775807 - 1\n"),
     ];
     for (label, text) in cases {
         for (kind, got) in [
@@ -123,10 +120,15 @@ fn log_goes_to_stdout_and_log_error_goes_to_stderr() {
 }
 
 /// §55: a failing `log_error` is a catchable Error whose message is IoFailure.
-/// The entry point is the *file's own* entry, so calling it directly would
-/// return the guest exit code; instead the probe runs through the shell so the
-/// descriptor can be closed.
-fn log_error_probe(name: &str, source_text: &str, close_stderr: bool) -> (Option<i32>, Vec<u8>) {
+/// `/dev/full` is the failing writer, so the program's own stderr stays usable
+/// and the raised message can be read back. Calling the guest binary directly
+/// returns the guest's exit code, so a shell runs it.
+fn log_error_probe(
+    name: &str,
+    source_text: &str,
+    failing_stderr: bool,
+    keep: bool,
+) -> (Option<i32>, PathBuf) {
     let dir = scratch(name);
     let path = source(&dir, source_text);
     let object = dir.join("program.o");
@@ -136,38 +138,46 @@ fn log_error_probe(name: &str, source_text: &str, close_stderr: bool) -> (Option
         .compile_to_object(&object)
         .unwrap();
     hado::link_executable(&object, &exe).unwrap();
-    let command = if close_stderr {
-        format!("{} 2>&-", exe.display())
+    let target = if failing_stderr {
+        "/dev/full".into()
     } else {
-        format!("{} 2>{}", exe.display(), dir.join("err").display())
+        dir.join("err")
     };
     let out = Command::new("sh")
         .arg("-c")
-        .arg(&command)
+        .arg(format!("{} 2>{}", exe.display(), target.display()))
         .current_dir(&dir)
         .output()
         .unwrap();
-    let stderr = std::fs::read(dir.join("err")).unwrap_or_default();
-    let _ = std::fs::remove_dir_all(dir);
-    (out.status.code(), stderr)
+    if !keep {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    (out.status.code(), dir)
 }
 
 #[test]
 fn log_error_failure_is_a_catchable_io_failure() {
-    // The handler records the message beside the program, so the caught value
-    // is observed even when stderr is unusable.
     let catching = "handler Error as Observe\nabort raise e =>\n  write_file \"observed\" (Bytes.of_string e.message) ->\n  ()\nreturn value => value\ndef main =\n  with Observe ->\n  log_error \"x\"\n";
-    let (code, _) = log_error_probe("log-error-caught", catching, true);
-    assert_eq!(code, Some(0), "a caught failure must not change the exit code");
+    // The handler records the message beside the program, so the caught value
+    // is observed even though the failing write itself leaves no trace.
+    let (code, dir) = log_error_probe("log-error-caught", catching, true, true);
+    assert_eq!(
+        code,
+        Some(0),
+        "a caught failure must not change the exit code"
+    );
+    let observed = std::fs::read_to_string(dir.join("observed")).unwrap();
+    assert_eq!(observed, "IoFailure");
+    let _ = std::fs::remove_dir_all(dir);
 
     // Without a handler, the failure reaches main and exits 1.
-    let (code, stderr) = log_error_probe(
+    let (code, _) = log_error_probe(
         "log-error-uncaught",
         "def main =\n  log_error \"x\" ->\n  ()\n",
         true,
+        false,
     );
-    assert_eq!(code, Some(1), "{stderr:?}");
-    assert_eq!(String::from_utf8_lossy(&stderr).trim(), "IoFailure");
+    assert_eq!(code, Some(1), "an uncaught failure exits 1");
 }
 
 /// §54: a main of another type still prints and exits 0.

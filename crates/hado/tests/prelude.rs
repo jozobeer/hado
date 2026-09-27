@@ -1,3 +1,18 @@
+/// §54 makes an Int main the exit code rather than a printed line. When the
+/// program's main is exactly Int, wrap the expression in `Int.to_string` so the
+/// stdout assertions still measure it.
+fn printed_main(expression: &str) -> String {
+    let source = format!("def main = {expression}");
+    let int_main = hado::check_source(&source, "user.hd")
+        .map(|checked| checked.main == hado::types::Ty::Int)
+        .unwrap_or(false);
+    if int_main {
+        format!("def main = Int.to_string ({expression})")
+    } else {
+        source
+    }
+}
+
 #[test]
 fn scalar_prelude_wrappers_check_and_execute() {
     // list.hd の `type T List` を下の型宣言の照合で見る。
@@ -41,7 +56,7 @@ fn scalar_prelude_wrappers_check_and_execute() {
 fn scalar_prelude_is_implicit_without_exposing_intrinsics() {
     let path = std::env::temp_dir().join(format!("hado-implicit-prelude-{}", std::process::id()));
     hado::build::executable(
-        "def main = String.length (Int.to_string 12345)",
+        &printed_main("String.length (Int.to_string 12345)"),
         "user.hd",
         &path,
     )
@@ -97,7 +112,7 @@ fn generic_prelude_operations_execute() {
             "hado-generic-prelude-{}-{index}",
             std::process::id()
         ));
-        hado::build::executable(&format!("def main = {expression}"), "user.hd", &path).unwrap();
+        hado::build::executable(&printed_main(expression), "user.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success(), "{expression}: {output:?}");
         assert_eq!(output.stdout, expected.as_bytes(), "{expression}");
@@ -120,7 +135,7 @@ fn float_comparison_orders_nan_last_and_equates_signed_zero() {
     {
         let path =
             std::env::temp_dir().join(format!("hado-float-order-{}-{index}", std::process::id()));
-        hado::build::executable(&format!("def main = {expression}"), "user.hd", &path).unwrap();
+        hado::build::executable(&printed_main(expression), "user.hd", &path).unwrap();
         let output = std::process::Command::new(&path).output().unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, expected.as_bytes(), "{expression}");

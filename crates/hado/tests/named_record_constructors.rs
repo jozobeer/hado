@@ -93,11 +93,62 @@ fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
     )
 }
 const BASIC: &str = "type Data = Payload { left: Int; right: Int }";
+/// Write a case and, when its `main` is exactly `Int`, wrap the body in
+/// `Int.to_string`. §54 makes an Int main the exit code, so an unwrapped case
+/// would print nothing and the assertions below would measure nothing.
+/// Write a case and, when its `main` is exactly `Int`, wrap the body in
+/// `Int.to_string`. §54 makes an Int main the exit code, so an unwrapped case
+/// would print nothing and the assertions below would measure nothing.
 fn source_case(source: &str) -> Case {
     let case = Case::new();
     case.write("main.hd", source);
+    let printed = Command::new(env!("CARGO_BIN_EXE_hado"))
+        .args(["check", "--print-type", "main.hd"])
+        .current_dir(&case.0)
+        .output()
+        .unwrap();
+    let ty = String::from_utf8_lossy(&printed.stdout).trim().to_string();
+    if printed.status.success() && (ty == "Int" || ty == "Int {Error}") {
+        if let Some(wrapped) = wrap_main_body(source, "def main =") {
+            case.write("main.hd", &wrapped);
+        }
+    }
     case
 }
+
+/// Wrap the trailing expression of `def main = ...` in `Int.to_string (...)`,
+/// stopping at the first top-level declaration that follows it.
+fn wrap_main_body(source: &str, marker: &str) -> Option<String> {
+    let at = source.rfind(marker)?;
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    // A continuation line is indented; any other line at column 0 that starts a
+    // declaration ends the body.
+    let mut cut = after.len();
+    let mut at_line = after.find('\n').map(|i| i + 1);
+    while let Some(start) = at_line {
+        let end = after[start..]
+            .find('\n')
+            .map(|i| start + i)
+            .unwrap_or(after.len());
+        let line = &after[start..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = start;
+            break;
+        }
+        at_line = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    let body = &after[..cut];
+    let tail = &after[cut..];
+    Some(format!(
+        "{}def main = Int.to_string ({body}){tail}",
+        &source[..at]
+    ))
+}
+
 fn rejection(source: &str, code: &str, anchor: &str) {
     let case = Case::new();
     for padding in 0..5 {
