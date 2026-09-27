@@ -260,6 +260,39 @@ corpus files: 149 / goldens: 47 / extmarks: 39
 引き金を、完全一致から行頭一致 `^def display($|[ (])`・`^def active_names users =>`
 へ合わせた。見張りは狭めていない（当たるファイルは増える）。
 
+### main 取り込み後
+
+`origin/main`（`a19f6cd`、M3 `pipe-in-tail-argument`・R2 `char-and-float-conversions`・
+G4 `frozen-ledger-guard`）を取り込み、5 本の衝突を解いた。`docs/spec.md` は §55 の
+`Char`・`Float` の追記を残し、署名を正準形の綴り（`def to_int (value: Char)`）へ
+揃えた。`stdlib/env.hd`・`io.hd` は後置の綴りで M3 の `|>` を保ち、`float.hd`・
+`char.hd` は R2 の追加を正準形にした。`tests/corpus.sha256` は `--check` の差分
+140 行が全て「このラウンドが写したファイル」か「main が変えた 4 本（char・env・
+float・io）」で説明できたので作り直した。
+
+main が足した探針も後置へ写した。`verify-r33.sh` は module/implement の閉じと
+`gates_case` の `let` を直して 72/72、`crates/hado/tests/r26_effects.rs` の効果
+閉包の探針は `let` を `as` に写した。`verify-char-and-float-conversions.sh` の
+署名の期待値は正準形へ揃えた（5 つの署名を要求する強さは変えない）。
+
+```
+$ cargo test --offline
+（70 本の判定が全て ok。0 failed）
+$ bash scripts/run-gates.sh --tier quick .
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core .
+TALLY: 697/697 passed; red: none
+$ bash scripts/verify-r33.sh                      → PASSED: 72/72
+$ bash scripts/verify-char-and-float-conversions.sh → PASSED: 9/9
+$ bash scripts/verify-frozen-docs.sh              → PASSED: 1/1
+$ bash scripts/verify-r50.sh                      → PASSED: 4/4
+$ bash scripts/verify-string-split-linear.sh      → PASSED: 11/11
+$ bash scripts/corpus-lock.sh --check / gate-tiers-lock.sh --check → 差分なし rc=0
+```
+
+`string-split-linear` の `h perf: split with a growing Japanese separator` は
+1 回だけ赤になり、続く 3 回は 11/11。環境依存の揺れとして報告する。
+
 ### 写しの途中で見つけた印字器の穴
 
 `print-postfix` の出力を読み直すと、正準形が自分の構文解析を通らない綴りが
