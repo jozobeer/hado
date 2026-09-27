@@ -76,13 +76,14 @@ def expect(binary, stdout, code=0, stderr=b'', stack_kb=STACK_KB, args=()):
 
 
 def value(root, name, expression, expected, prelude=BUILD):
-    binary = build(root, name, prelude + f'def main = {expression}')
+    # §54: Int の main は印字しない。期待値は印字で測るので、ここで包む。
+    binary = build(root, name, prelude + f'def main = Int.to_string ({expression})')
     expect(binary, f'{expected}\n'.encode())
 
 
 def control(root):
     """The comparisons must reject a wrong exit code, a wrong stdout, and a wrong stderr."""
-    binary = build(root, 'control', BUILD + 'def main = List.length (build_go 100 [])')
+    binary = build(root, 'control', BUILD + 'def main = Int.to_string (List.length (build_go 100 []))')
     for kwargs in (dict(stdout=b'99\n'), dict(stdout=b'100\n', code=1),
                    dict(stdout=b'100\n', stderr=b'x\n')):
         try:
@@ -226,7 +227,7 @@ entries.mkdir(parents=True, exist_ok=True)
 for i in range(DEPTH):
     (entries / f'e{i:05d}').touch()
 value(root, 'read_dir', f'List.length (read_dir "{entries}")', DEPTH, prelude='')
-args = build(root, 'args', 'def main = List.length args')
+args = build(root, 'args', 'def main = Int.to_string (List.length args)')
 expect(args, f'{ARG_DEPTH}\n'.encode(), stack_kb=ARG_STACK_KB, args=['a'] * ARG_DEPTH)
 
 # 効果を持つ呼び出しを `|>` で書くと、末尾呼び出しの引数のリストで単相化が
