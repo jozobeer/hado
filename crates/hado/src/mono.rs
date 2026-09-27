@@ -102,6 +102,29 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+// 呼び出しの形を callee と引数の並びに解く。`|>` は左辺を先頭に足した `Apply`
+// と同じ形にする（`lift_again_arguments` の書き換えと同じ規則）。効果の判定は
+// `Apply` と同じく callee を見るので、`|>` の target も同じ経路に載せる。
+fn call_parts(
+    node: &crate::parser::Node,
+) -> Option<(&crate::parser::Node, Vec<&crate::parser::Node>)> {
+    use crate::parser::NodeKind;
+    match &node.kind {
+        NodeKind::Apply(callee, arguments) | NodeKind::Call(callee, arguments) => {
+            Some((callee.as_ref(), arguments.iter().collect()))
+        }
+        NodeKind::Pipe(value, target) => {
+            let (callee, mut arguments) = match &target.kind {
+                NodeKind::Apply(callee, arguments) => (callee.as_ref(), arguments.iter().collect()),
+                _ => (target.as_ref(), Vec::new()),
+            };
+            arguments.insert(0, value.as_ref());
+            Some((callee, arguments))
+        }
+        _ => None,
+    }
+}
+
 // `Array.of_list` のような callee は、scheme の単一化で入れ子の outcome を
 // 落とす。実際の型での単一化が通るなら、結果型はそちらから取る（下の
 // `specialize_function`）。実際の型で単一化できない形は論理型のままにする。
@@ -606,10 +629,10 @@ impl Lowerer {
         if self.is_abort_node(node) && self.handler_for_node(node).is_some() {
             return true;
         }
-        if let crate::parser::NodeKind::Apply(callee, arguments)
-        | crate::parser::NodeKind::Call(callee, arguments) = &node.kind
-        {
-            if self.call_carries_effects(callee, arguments) {
+        // `|>` の target も `Apply` と同じ callee として見る。書いた形が違うだけで
+        // 効果の有無が変わらないようにする。
+        if let Some((callee, arguments)) = call_parts(node) {
+            if self.call_carries_effects(callee, &arguments) {
                 return true;
             }
         }
@@ -660,7 +683,7 @@ impl Lowerer {
     fn call_carries_effects(
         &self,
         callee: &crate::parser::Node,
-        arguments: &[crate::parser::Node],
+        arguments: &[&crate::parser::Node],
     ) -> bool {
         if self.stack_needs_outcome() && self.callee_is_outcome_closure(callee) {
             return true;
