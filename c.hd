@@ -1,2 +1,0 @@
-def main =
-  7 as y -> y as x -> x
