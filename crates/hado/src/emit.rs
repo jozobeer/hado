@@ -1041,9 +1041,11 @@ fn emit_int_exit_code(
         .declare_function(declaration.symbol, Linkage::Import, &signature)
         .map_err(|e| e.to_string())?;
     let report = module.declare_func_in_func(id, builder.func);
-    let fits = builder
-        .ins()
-        .icmp_imm_u(cranelift_codegen::ir::condcodes::IntCC::UnsignedLessThanOrEqual, result, 255);
+    let fits = builder.ins().icmp_imm_u(
+        cranelift_codegen::ir::condcodes::IntCC::UnsignedLessThanOrEqual,
+        result,
+        255,
+    );
     let code = builder.create_block();
     let diagnose = builder.create_block();
     builder.ins().brif(fits, code, &[], diagnose, &[]);
