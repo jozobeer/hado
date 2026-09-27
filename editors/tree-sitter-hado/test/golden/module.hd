@@ -1,3 +1,4 @@
 module Store
 type T
 def create(name: String): T
+/module

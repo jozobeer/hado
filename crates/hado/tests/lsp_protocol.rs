@@ -175,7 +175,7 @@ fn library_root_walks_up_to_the_directory_declaring_library() {
     std::fs::write(base.join("main.hd"), "def use (x: Int) => x\n").unwrap();
     std::fs::write(
         base.join("api/store.hdi"),
-        "module M\ndef f (x: Int): Int\n",
+        "module M\ndef f (x: Int): Int\n/module\n",
     )
     .unwrap();
 

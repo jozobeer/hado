@@ -5,9 +5,11 @@
 def main = StringMonoid.combine (StringMonoid.of "a") "b"
 module Monoid
 type T
-def combine(left: T, right: T): T Pure
-def of(value: String): T Pure
+def combine (left: T, right: T): T Pure
+def of (value: String): T Pure
+/module
 implement Monoid as StringMonoid
 shared type T = String
 def combine left right => String.concat left right
 def of value => value
+/implement

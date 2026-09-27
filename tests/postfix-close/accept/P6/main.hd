@@ -1,0 +1,2 @@
+// spec: §12
+def main = List.map [1, 2] fn x => log "a" -> x /fn

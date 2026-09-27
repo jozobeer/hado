@@ -4,11 +4,15 @@
 def main = First.run 1 + Second.run 2
 module Value
 def value: Int
+/module
 module Store
-def run(input: Int): Int
+def run (input: Int): Int
+/module
 implement Value as Value
 def value = 10
+/implement
 implement Store as MakeStore(Id: Value)
 def run input => input + Id.value
+/implement
 implement Store as First = MakeStore(Value)
 implement Store as Second = MakeStore(Value)

@@ -278,10 +278,10 @@ fn argument_rows_are_generalized_per_call() {
 #[test]
 fn pure_signature_rejects_effectful_value_members() {
     let case = Case::new();
-    case.write("store.hdi", "module Store\ndef value: Int Pure\n");
+    case.write("store.hdi", "module Store\ndef value: Int Pure\n/module\n");
     case.write(
         "impl.hd",
-        "effect Ask\nonce ask: Int\nimplement Store as Real\ndef value = ask\n",
+        "effect Ask\nonce ask: Int\nimplement Store as Real\ndef value = ask\n/implement\n",
     );
     case.write("main.hd", "def main = Real.value\n");
     let output = case.command("check", "main.hd");
@@ -301,10 +301,10 @@ fn pure_signature_rejects_effectful_value_members() {
 #[test]
 fn matching_value_member_rows_are_kept() {
     let case = Case::new();
-    case.write("store.hdi", "module Store\ndef value: Int {Ask}\n");
+    case.write("store.hdi", "module Store\ndef value: Int {Ask}\n/module\n");
     case.write(
         "impl.hd",
-        "effect Ask\nonce ask: Int\nimplement Store as Real\ndef value = ask\n",
+        "effect Ask\nonce ask: Int\nimplement Store as Real\ndef value = ask\n/implement\n",
     );
     case.write("main.hd", "def main = Real.value\n");
     assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");

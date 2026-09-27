@@ -175,7 +175,7 @@ print('arms: the def and fn arm forms become identity functions')
 PY
 }
 
-# --- 57-c: E508 の本体ちょうどの `if` は let p? = になる ---
+# --- 57-c: E508 の本体ちょうどの `if` は `as p? ->` になる ---
 r57_repropagate_if() {
     python3 - "$workdir" "$hado" <<'PY'
 import sys
@@ -194,9 +194,9 @@ printed = f'Some({id_value + 1})'
 head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None\n'
 body = 'if find_user id\n  | Some(user) => Some(user + 1)\n  | None => None'
 source = head + f'def g (id: Int): Int Option Pure =>\n  {body}\ndef main = g {id_value}\n'
-expected = head + f'def g (id: Int): Int Option Pure =>\n  let user? = find_user id -> Some(user + 1)\ndef main = g {id_value}\n'
+expected = head + f'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g {id_value}\n'
 root = Path(sys.argv[1]) / 'c'
-check_code(root, 'some', source, 'E508', 'let user? = find_user id -> Some(user + 1)')
+check_code(root, 'some', source, 'E508', 'find_user id as user? -> Some(user + 1)')
 check_fix(root, 'some', source, expected)
 build_run(root, 'some', printed)
 fmt(root, 'some2', source, expected)
@@ -204,10 +204,10 @@ fmt_check(root, 'some', source, 1)
 
 # 不在は伝播する: 囲む関数が None を返す。
 absent = head + f'def g (id: Int): Int Option Pure =>\n  {body}\ndef main = g (-{id_value})\n'
-expected_absent = head + f'def g (id: Int): Int Option Pure =>\n  let user? = find_user id -> Some(user + 1)\ndef main = g (-{id_value})\n'
+expected_absent = head + f'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g (-{id_value})\n'
 check_fix(root, 'none', absent, expected_absent)
 build_run(root, 'none', 'None')
-print('repropagate: the tail branch becomes let p? = and None propagates')
+print('repropagate: the tail branch becomes as p? -> and None propagates')
 PY
 }
 
@@ -229,19 +229,19 @@ printed = f'Some({id_value + 1})'
 
 head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None\n'
 source = head + f'def g\n| Some(user) => Some(user + 1)\n| None => None\ndef main = g (find_user {id_value})\n'
-expected = head + f'def g value => let user? = value -> Some(user + 1)\ndef main = g (find_user {id_value})\n'
+expected = head + f'def g value => value as user? -> Some(user + 1)\ndef main = g (find_user {id_value})\n'
 root = Path(sys.argv[1]) / 'd'
-check_code(root, 'def', source, 'E508', 'def g value => let user? = value -> Some(user + 1)')
+check_code(root, 'def', source, 'E508', 'def g value => value as user? -> Some(user + 1)')
 check_fix(root, 'def', source, expected)
 build_run(root, 'def', printed)
 fmt(root, 'def2', source, expected)
 
 source = head + f'def main = (fn(| Some(user) => Some(user + 1) | None => None)) (find_user {id_value})\n'
-expected = head + f'def main = (fn(value => let user? = value -> Some(user + 1))) (find_user {id_value})\n'
-check_code(root, 'fn', source, 'E508', 'fn(value => let user? = value -> Some(user + 1))')
+expected = head + f'def main = (fn value => value as user? -> Some(user + 1) /fn) (find_user {id_value})\n'
+check_code(root, 'fn', source, 'E508', 'fn value => value as user? -> Some(user + 1) /fn')
 check_fix(root, 'fn', source, expected)
 build_run(root, 'fn', printed)
-print('repropagate arms: the parameter is named value and the body is the let form')
+print('repropagate arms: the parameter is named value and the body is the as p? -> form')
 PY
 }
 
@@ -261,18 +261,18 @@ head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None
 
 # 本体でない位置の E508: 伝播先が違うので書き換えない。
 consume = 'def unwrap_or (x: Int Option, default: Int): Int Pure => if x | Some(v) => v | default\n'
-no_rewrite(root, 'nested', head + consume + 'def g (id: Int): Int Pure =>\n  let y = if find_user id\n  | Some(user) => Some(user + 1)\n  | None => None ->\n  unwrap_or y 0\ndef main = g 1\n', 'E508')
+no_rewrite(root, 'nested', head + consume + 'def g (id: Int): Int Pure =>\n  if(find_user id\n  | Some(user) => Some(user + 1)\n  | None => None) as y ->\n  unwrap_or y 0\ndef main = g 1\n', 'E508')
 
 # fallback を持つ E507: scrutinee を 2 回評価し得る。
 no_rewrite(root, 'fallback', 'def f (x: Int Option): Int Option Pure =>\n  if x\n  | Some(v) => Some(v)\n  | x\ndef main = f (Some(1))\n', 'E507')
 
-# 束縛名が 1 つも無い E508: do が正準形になる。
+# 束縛名が 1 つも無い E508: `e ->` が正準形になる。
 no_rewrite(root, 'binderless', 'type Wrap = | Wrap\ndef f (x: Wrap Option): Int Option Pure =>\n  if x\n  | Some(Wrap) => Some(1)\n  | None => None\ndef main = f (Some(Wrap))\n', 'E508')
 
 # 本体が `value` を自由に参照する E508（第31節の形）: 引数の名前が捕捉する。
 capture = ('def merge (user: Int, rest: Int Option): Int Option Pure =>\n'
            '  if rest\n  | Some(n) => Some(user + n)\n  | None => Some(user)\n'
-           'def main =\n  let value = Some(100) ->\n  (fn(| Some(user) => merge user value | None => None)) (Some(1))\n')
+           'def main =\n  Some(100) as value ->\n  (fn(| Some(user) => merge user value | None => None)) (Some(1))\n')
 no_rewrite(root, 'capture', capture, 'E508')
 
 # 範囲にコメントを含む E507: コメントを消さない。
@@ -300,7 +300,7 @@ shapes = [
     ('def', 'def f\n| Some(v) => Some(v)\n| None => None\ndef main = f (Some(2))\n',
      'def f value => value\ndef main = f (Some(2))\n'),
     ('repropagate', head + 'def g (id: Int): Int Option Pure =>\n  if find_user id\n  | Some(user) => Some(user + 1)\n  | None => None\ndef main = g 2\n',
-     head + 'def g (id: Int): Int Option Pure =>\n  let user? = find_user id -> Some(user + 1)\ndef main = g 2\n'),
+     head + 'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g 2\n'),
 ]
 for index, (name, source, expected) in enumerate(shapes):
     by_fix = check_fix(root, f'{name}-fix', source, expected)
@@ -314,7 +314,7 @@ PY
 
 check '57-a the if form becomes its scrutinee' r57_if
 check '57-b the arm forms become identity functions' r57_arms
-check '57-c the tail E508 becomes let p? = and propagates' r57_repropagate_if
+check '57-c the tail E508 becomes as p? -> and propagates' r57_repropagate_if
 check '57-d the E508 arm forms name the parameter value' r57_repropagate_arms
 check '57-e forms without a local rewrite are left alone' r57_declines
 check '57-f check --fix, fmt and build --fix share one rewrite' r57_shared

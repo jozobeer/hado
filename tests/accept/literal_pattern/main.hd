@@ -1,8 +1,5 @@
 // spec: §26
 // expect: one
 // item: リテラルパターン
-def describe
-  | 1 => "one"
-  | 2 => "two"
-  | "other"
+def describe | 1 => "one" | 2 => "two" | "other"
 def main = describe 1

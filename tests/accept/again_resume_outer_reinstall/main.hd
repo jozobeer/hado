@@ -5,9 +5,14 @@ again z(value: Int): Void
 effect Y
 again y(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest ->
+  [value, ...rest]
 return x => x
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y 1 -> do z 2 -> do y 3 -> ()
+def main = with Outer -> with Collect -> y 1 ->
+  z 2 ->
+  y 3 ->
+  ()

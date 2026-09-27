@@ -42,7 +42,7 @@ MAIN = (
     '\n'
     'def main = if 1 > 2 => fail | reader (Int.to_string (pure (lib::Util.helper (twice identity answer))))\n'
 )
-UTIL = 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => x\n'
+UTIL = 'library\nmodule Util\ndef helper (x: Int): Int Pure\n/module\nimplement Util as Util\ndef helper x => x\n/implement\n'
 
 def run(*args, cwd=None):
     return subprocess.run([HADO, *args], capture_output=True, cwd=cwd)

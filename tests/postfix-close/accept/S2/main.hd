@@ -1,0 +1,2 @@
+// spec: §12
+def r = { a = if true => 1 | 0; b = 2 }

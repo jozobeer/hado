@@ -6,7 +6,9 @@ def describe (t: UserStore.T) => t.name
 type User = { name: String }
 module UserStore
 type T
-def make(name: String): T Pure
+def make (name: String): T Pure
+/module
 implement UserStore as UserStore
 shared type T = User
 def make name => { name = name }
+/implement

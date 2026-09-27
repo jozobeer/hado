@@ -1,6 +1,5 @@
 // spec: §35
 // error: E504
-def f x =>
-  let _? = Some(x) ->
+def f x => Some(x) as _? ->
   Some(1)
 def main = f 1

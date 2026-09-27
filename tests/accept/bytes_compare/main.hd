@@ -2,4 +2,6 @@
 // item: Bytes
 // expect: [1, -1, 0, 1]
 // needs: prelude
-def main = let left = Bytes.of_list [0, 255] -> let right = Bytes.of_list [0, 255] -> [if left == right => 1 | 0, compare (Bytes.of_list [0]) (Bytes.of_list [0, 1]), compare (Bytes.of_list []) (Bytes.of_list []), compare (Bytes.of_list [255]) (Bytes.of_list [127])]
+def main = Bytes.of_list [0, 255] as left ->
+  Bytes.of_list [0, 255] as right ->
+  [if left == right => 1 | 0, compare (Bytes.of_list [0]) (Bytes.of_list [0, 1]), compare (Bytes.of_list []) (Bytes.of_list []), compare (Bytes.of_list [255]) (Bytes.of_list [127])]

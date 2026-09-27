@@ -106,13 +106,13 @@ fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
         lead.len() + offset + padding,
     )
 }
-const CONTRACTS: &str = "module Id\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nmodule Box\ntype T\ndef make(x: Int): T\ndef read(x: T): Int";
+const CONTRACTS: &str = "module Id\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\n/module\nmodule Box\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\n/module";
 fn base() -> Case {
     let case = Case::new();
     case.write("contracts.hdi", CONTRACTS);
     case.write(
         "ids.hd",
-        "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x",
+        "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\n/implement",
     );
     case.write("functor.hd", &functor(1));
     case.write("apply.hd", "implement Box as A = Make(I)");
@@ -128,7 +128,7 @@ fn functor(arity: usize) -> String {
     let reads: Vec<_> = (0..arity)
         .map(|i| format!("(P{i}.read value.slot{i}) * {}", i + 1))
         .collect();
-    format!("implement Box as Make({})\ntype T = Payload {{ {} }}\ndef make x => Payload {{ {} }}\ndef read value => {}", params.join(", "), fields.join("; "), values.join("; "), reads.join(" + "))
+    format!("implement Box as Make({})\ntype T = | Payload {{ {} }}\ndef make x => Payload {{ {} }}\ndef read value => {}\n/implement", params.join(", "), fields.join("; "), values.join("; "), reads.join(" + "))
 }
 fn reject_shifted(case: &Case, file: &str, source: &str, code: &str, anchor: &str) {
     for padding in 0..5 {
@@ -154,7 +154,7 @@ fn generated_application(
         case.write(
             &format!("id{app}_{parameter}.hd"),
             &format!(
-                "implement Id as {name}\ntype T = Int\ndef make x => x + {added}\ndef read x => x"
+                "implement Id as {name}\ntype T = Int\ndef make x => x + {added}\ndef read x => x\n/implement"
             ),
         );
         args.push(name);
@@ -201,7 +201,7 @@ fn application_header_requires_the_functors_contract() {
     let case = base();
     case.write(
         "contracts.hdi",
-        &format!("{CONTRACTS}\nmodule Other\ntype T\ndef make(x: Int): T\ndef read(x: T): Int"),
+        &format!("{CONTRACTS}\nmodule Other\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\n/module"),
     );
     reject_shifted(
         &case,
@@ -216,9 +216,12 @@ fn application_argument_requires_its_position_contract() {
     let case = base();
     case.write(
         "contracts.hdi",
-        &format!("{CONTRACTS}\nmodule Other\ndef flag: Bool"),
+        &format!("{CONTRACTS}\nmodule Other\ndef flag: Bool\n/module"),
     );
-    case.write("ids.hd", "implement Other as I\ndef flag = true");
+    case.write(
+        "ids.hd",
+        "implement Other as I\ndef flag = true\n/implement",
+    );
     case.reject("check", "main.hd", "apply.hd", "E602", 0);
 }
 #[test]
@@ -253,7 +256,7 @@ fn repeated_argument_lists_report_the_second_implement() {
 fn reversed_argument_lists_are_distinct_and_preserve_order() {
     let case = base();
     case.write("functor.hd", &functor(2));
-    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\nimplement Id as J\ntype T = Int\ndef make x => x + 11\ndef read x => x");
+    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\n/implement\nimplement Id as J\ntype T = Int\ndef make x => x + 11\ndef read x => x\n/implement");
     case.write(
         "apply.hd",
         "implement Box as A = Make(I, J)\nimplement Box as B = Make(J, I)",
@@ -272,7 +275,7 @@ fn unused_functor_is_rejected_even_when_its_contract_has_an_implementation() {
     let case = base();
     case.write(
         "apply.hd",
-        "implement Box as A\ntype T = Int\ndef make x => x\ndef read x => x",
+        "implement Box as A\ntype T = Int\ndef make x => x\ndef read x => x\n/implement",
     );
     case.write(
         "main.hd",
@@ -283,7 +286,8 @@ fn unused_functor_is_rejected_even_when_its_contract_has_an_implementation() {
 #[test]
 fn unused_parameter_reports_its_name_under_position_perturbations() {
     let case = base();
-    let source = "implement Box as Make(P0: Id)\ntype T = Int\ndef make x => x\ndef read x => x";
+    let source =
+        "implement Box as Make(P0: Id)\ntype T = Int\ndef make x => x\ndef read x => x\n/implement";
     reject_shifted(&case, "functor.hd", source, "E521", "P0");
 }
 #[test]
@@ -302,11 +306,11 @@ fn contract_qualified_type_counts_the_application_but_not_the_functor() {
     let case = base();
     case.write(
         "consumer.hdi",
-        "module Consumer\ndef consume(x: Box.T): Int",
+        "module Consumer\ndef consume (x: Box.T): Int\n/module",
     );
     case.write(
         "consumer.hd",
-        "implement Consumer as C\ndef consume x => A.read x",
+        "implement Consumer as C\ndef consume x => A.read x\n/implement",
     );
     case.write("main.hd", "def main = C.consume (A.make 7)");
     case.run("main.hd", 10);
@@ -314,7 +318,7 @@ fn contract_qualified_type_counts_the_application_but_not_the_functor() {
 #[test]
 fn an_application_result_can_be_passed_to_another_functor() {
     let case = base();
-    case.write("wrap.hd", "implement Box as Wrap(Source: Box)\ntype T = Payload { wrapped: Source.T }\ndef make x => Payload { wrapped = Source.make x }\ndef read value => Source.read value.wrapped + 5");
+    case.write("wrap.hd", "implement Box as Wrap(Source: Box)\ntype T = | Payload { wrapped: Source.T }\ndef make x => Payload { wrapped = Source.make x }\ndef read value => Source.read value.wrapped + 5\n/implement");
     case.write("outer.hd", "implement Box as B = Wrap(A)");
     case.write("main.hd", "def main = B.read (B.make 7)");
     case.run("main.hd", 15);
@@ -335,12 +339,15 @@ fn unused_application_is_rejected() {
 #[test]
 fn two_application_results_make_contract_qualified_type_ambiguous() {
     let case = base();
-    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\nimplement Id as J\ntype T = Int\ndef make x => x + 11\ndef read x => x");
+    case.write("ids.hd", "implement Id as I\ntype T = Int\ndef make x => x + 3\ndef read x => x\n/implement\nimplement Id as J\ntype T = Int\ndef make x => x + 11\ndef read x => x\n/implement");
     case.write(
         "apply.hd",
         "implement Box as A = Make(I)\nimplement Box as B = Make(J)",
     );
-    case.write("consumer.hd", "implement Consumer as C\ndef consume _ => 1");
+    case.write(
+        "consumer.hd",
+        "implement Consumer as C\ndef consume _ => 1\n/implement",
+    );
     case.write(
         "main.hd",
         "def main = A.read (A.make 7) + B.read (B.make 8)",
@@ -348,7 +355,7 @@ fn two_application_results_make_contract_qualified_type_ambiguous() {
     reject_shifted(
         &case,
         "consumer.hdi",
-        "module Consumer\ndef consume(x: Box.T): Int",
+        "module Consumer\ndef consume (x: Box.T): Int\n/module",
         "E603",
         "Box.T",
     );
@@ -368,13 +375,16 @@ fn parameter_types_remain_opaque_even_when_actual_representations_support_the_op
         let case = Case::new();
         case.write(
             "contracts.hdi",
-            "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int",
+            "module Input\ntype T\ndef make (x: Int): T\n/module\nmodule Output\ndef run (x: Int): Int\n/module",
         );
         case.write(
             "argument.hd",
-            &format!("implement Input as Concrete\n{representation}\ndef make x => {make}"),
+            &format!(
+                "implement Input as Concrete\n{representation}\ndef make x => {make}\n/implement"
+            ),
         );
-        let source = format!("implement Output as Make(Arg: Input)\ndef run x => {body}");
+        let source =
+            format!("implement Output as Make(Arg: Input)\ndef run x => {body}\n/implement");
         case.write("functor.hd", &source);
         case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
         case.write("main.hd", "def main = Applied.run 7");
@@ -393,13 +403,13 @@ fn application_substitutes_comparison_constraints_from_the_checked_body() {
     let case = Case::new();
     case.write(
         "contracts.hdi",
-        "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int",
+        "module Input\ntype T\ndef make (x: Int): T\n/module\nmodule Output\ndef run (x: Int): Int\n/module",
     );
     case.write(
         "argument.hd",
-        "implement Input as Concrete\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)",
+        "implement Input as Concrete\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)\n/implement",
     );
-    let source = "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))";
+    let source = "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))\n/implement";
     case.write("functor.hd", source);
     case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
     case.write("main.hd", "def main = Applied.run 7");
@@ -433,11 +443,14 @@ fn a_functors_type_is_not_an_implementation_type() {
 #[test]
 fn earlier_type_errors_precede_application_contract_errors() {
     let case = Case::new();
-    case.write("contracts.hdi", "module Input\ndef id(x: Int): Int\nmodule Output\ndef run(x: Int): Int\nmodule Other\ndef run(x: Int): Int");
-    case.write("argument.hd", "implement Input as Concrete\ndef id x => x");
+    case.write("contracts.hdi", "module Input\ndef id (x: Int): Int\n/module\nmodule Output\ndef run (x: Int): Int\n/module\nmodule Other\ndef run (x: Int): Int\n/module");
+    case.write(
+        "argument.hd",
+        "implement Input as Concrete\ndef id x => x\n/implement",
+    );
     case.write(
         "functor.hd",
-        "implement Output as Make(Arg: Input)\ndef run x => Arg.id x",
+        "implement Output as Make(Arg: Input)\ndef run x => Arg.id x\n/implement",
     );
     case.write("apply.hd", "implement Other as Applied = Make(Concrete)");
     let source = "def main = true + Applied.run 7";
@@ -456,9 +469,9 @@ fn earlier_type_errors_precede_application_contract_errors() {
 #[test]
 fn a_parameter_shadows_a_global_implementation_without_reusing_its_representation() {
     let case = Case::new();
-    case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nmodule Output\ndef run(x: Int): Int");
-    case.write("arguments.hd", "implement Input as Arg\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)\ndef read f => f 1\nimplement Input as Concrete\ntype T = Int\ndef make x => x\ndef read x => x");
-    case.write("functor.hd", "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))");
+    case.write("contracts.hdi", "module Input\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\n/module\nmodule Output\ndef run (x: Int): Int\n/module");
+    case.write("arguments.hd", "implement Input as Arg\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)\ndef read f => f 1\n/implement\nimplement Input as Concrete\ntype T = Int\ndef make x => x\ndef read x => x\n/implement");
+    case.write("functor.hd", "implement Output as Make(Arg: Input)\ndef run x => compare (Arg.make x) (Arg.make (x + 1))\n/implement");
     case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
     case.write(
         "main.hd",
@@ -472,10 +485,14 @@ fn an_unknown_type_on_a_known_parameter_points_to_the_member() {
     let case = Case::new();
     case.write(
         "contracts.hdi",
-        "module Input\ntype U\nmodule Output\ntype T\ndef run(x: Int): Int",
+        "module Input\ntype U\n/module\nmodule Output\ntype T\ndef run (x: Int): Int\n/module",
     );
-    case.write("argument.hd", "implement Input as Concrete\ntype U = Int");
-    let source = "implement Output as Make(Arg: Input)\ntype T = Arg.Missing\ndef run x => x";
+    case.write(
+        "argument.hd",
+        "implement Input as Concrete\ntype U = Int\n/implement",
+    );
+    let source =
+        "implement Output as Make(Arg: Input)\ntype T = Arg.Missing\ndef run x => x\n/implement";
     case.write("functor.hd", source);
     case.write("apply.hd", "implement Output as Applied = Make(Concrete)");
     case.write("main.hd", "def main = Applied.run 7");
@@ -507,9 +524,9 @@ fn heterogeneous_applications_preserve_local_data_and_value_members() {
         ),
     ] {
         let case = Case::new();
-        case.write("contracts.hdi", "module Input\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nmodule Output\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef cached: T");
-        case.write("arguments.hd", "implement Input as Number\ntype T = Int\ndef make x => x\ndef read x => x\nimplement Input as Text\ntype T = String\ndef make x => Int.to_string x\ndef read x => String.length x");
-        case.write("functor.hd", &format!("implement Output as Make(Arg: Input)\n{data}\ntype T = Payload\ndef make x => {make}\n{read}\ndef cached = {cached}"));
+        case.write("contracts.hdi", "module Input\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\n/module\nmodule Output\ntype T\ndef make (x: Int): T\ndef read (x: T): Int\ndef cached: T\n/module");
+        case.write("arguments.hd", "implement Input as Number\ntype T = Int\ndef make x => x\ndef read x => x\n/implement\nimplement Input as Text\ntype T = String\ndef make x => Int.to_string x\ndef read x => String.length x\n/implement");
+        case.write("functor.hd", &format!("implement Output as Make(Arg: Input)\n{data}\ntype T = Payload\ndef make x => {make}\n{read}\ndef cached = {cached}\n/implement"));
         case.write(
             "apply.hd",
             "implement Output as A = Make(Number)\nimplement Output as B = Make(Text)",
@@ -522,9 +539,9 @@ fn heterogeneous_applications_preserve_local_data_and_value_members() {
 #[test]
 fn generic_abstract_types_remain_polymorphic_in_each_application() {
     let case = Case::new();
-    case.write("contracts.hdi", "module Input\ntype A T\ndef A wrap(value: A): A T\ndef A unwrap(value: A T): A\nmodule Output\ntype A T\ndef A wrap(value: A): A T\ndef A unwrap(value: A T): A");
-    case.write("arguments.hd", "implement Input as First\ntype A Payload = | Packed(A)\ntype A T = A Payload\ndef wrap value => Packed(value)\ndef unwrap | Packed(value) => value\nimplement Input as Second\ntype A Payload = | Wrapped(A)\ntype A T = A Payload\ndef wrap value => Wrapped(value)\ndef unwrap | Wrapped(value) => value");
-    case.write("functor.hd", "implement Output as Make(Arg: Input)\ntype A Container = | Container(A Arg.T)\ntype A T = A Container\ndef wrap value => Container(Arg.wrap value)\ndef unwrap | Container(value) => Arg.unwrap value");
+    case.write("contracts.hdi", "module Input\ntype A T\ndef A wrap (value: A): A T\ndef A unwrap (value: A T): A\n/module\nmodule Output\ntype A T\ndef A wrap (value: A): A T\ndef A unwrap (value: A T): A\n/module");
+    case.write("arguments.hd", "implement Input as First\ntype A Payload = | Packed(A)\ntype A T = A Payload\ndef wrap value => Packed(value)\ndef unwrap | Packed(value) => value\n/implement\nimplement Input as Second\ntype A Payload = | Wrapped(A)\ntype A T = A Payload\ndef wrap value => Wrapped(value)\ndef unwrap | Wrapped(value) => value\n/implement");
+    case.write("functor.hd", "implement Output as Make(Arg: Input)\ntype A Container = | Container(A Arg.T)\ntype A T = A Container\ndef wrap value => Container(Arg.wrap value)\ndef unwrap | Container(value) => Arg.unwrap value\n/implement");
     case.write(
         "apply.hd",
         "implement Output as A = Make(First)\nimplement Output as B = Make(Second)",
@@ -538,9 +555,10 @@ fn diagnostic_types_use_source_parameter_names() {
     for (body, code) in [("Arg.make x + 1", "E305"), ("Arg.make x x", "E301")] {
         let case = Case::new();
         let contracts =
-            "module Input\ntype T\ndef make(x: Int): T\nmodule Output\ndef run(x: Int): Int";
-        let argument = "implement Input as Concrete\ntype T = Int\ndef make x => x";
-        let functor = format!("implement Output as Make(Arg: Input)\ndef run x => {body}");
+            "module Input\ntype T\ndef make (x: Int): T\n/module\nmodule Output\ndef run (x: Int): Int\n/module";
+        let argument = "implement Input as Concrete\ntype T = Int\ndef make x => x\n/implement";
+        let functor =
+            format!("implement Output as Make(Arg: Input)\ndef run x => {body}\n/implement");
         let application = "implement Output as Applied = Make(Concrete)";
         let main = "def main = Applied.run 7";
         for (file, source) in [

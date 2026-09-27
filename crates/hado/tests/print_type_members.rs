@@ -47,7 +47,7 @@ impl Drop for Case {
     }
 }
 
-const UTIL: &str = "library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => x\n";
+const UTIL: &str = "library\nmodule Util\ndef helper (x: Int): Int Pure\n/module\nimplement Util as Util\ndef helper x => x\n/implement\n";
 
 #[test]
 fn implementation_member_is_printed_by_name() {
@@ -78,11 +78,11 @@ fn a_name_without_a_type_is_missing_not_silent() {
 }
 
 const STORE: &str =
-    "module Store\ntype T\ntype A Box\ndef A find(id: Int, x: A): T Option\ndef wrap(x: Int): Int Box\n";
+    "module Store\ntype T\ntype A Box\ndef A find (id: Int, x: A): T Option\ndef wrap (x: Int): Int Box\n/module\n";
 const MEM: &str =
-    "implement Store as Mem\ntype T = Int\ntype A Box = A List\ndef find id _ => Some(id)\ndef wrap x => [x]\n";
+    "implement Store as Mem\ntype T = Int\ntype A Box = A List\ndef find id _ => Some(id)\ndef wrap x => [x]\n/implement\n";
 const DISK: &str =
-    "implement Store as Disk\ntype T = Bool\ntype A Box = A List\ndef find _ _ => None\ndef wrap x => [x]\n";
+    "implement Store as Disk\ntype T = Bool\ntype A Box = A List\ndef find _ _ => None\ndef wrap x => [x]\n/implement\n";
 
 // A contract with no implementation still declares a type for each member
 // (§58.5: a `.hdi` opened on its own has a hover). The entry has no `main`, so
@@ -92,7 +92,7 @@ fn contract_member_without_an_implementation() {
     let case = Case::new(&[
         (
             "store.hdi",
-            "type T = | A | B\nmodule M\ndef good (x: Int): T\n",
+            "type T = | A | B\nmodule M\ndef good (x: Int): T\n/module\n",
         ),
         ("main.hd", "def use (x: T) => x\n"),
     ]);
@@ -162,7 +162,7 @@ fn nested_contract_member_is_keyed_by_its_path() {
     let case = Case::new(&[
         (
             "api/store.hdi",
-            "type T = | A | B\nmodule M\ndef good (x: Int): T\n",
+            "type T = | A | B\nmodule M\ndef good (x: Int): T\n/module\n",
         ),
         ("main.hd", "def use (x: api::T) => x\n"),
     ]);

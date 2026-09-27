@@ -1,11 +1,10 @@
 // spec: §52
 // item: ライブラリ単位
 library
-
 type Found = { value: Int }
-
 module Store
-def find(x: Int): Int
-
+def find (x: Int): Int
+/module
 implement Store as Memory
 def find x => x + 1
+/implement

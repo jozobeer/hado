@@ -9,8 +9,10 @@ once b: Int
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Outer -> with Collect -> with Inner -> do y (a + b) -> ()
+def main = with Outer -> with Collect -> with Inner -> y (a + b) ->
+  ()

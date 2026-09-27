@@ -7,6 +7,8 @@ again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y a -> ()
+def main = with Outer -> with Collect -> y a ->
+  ()

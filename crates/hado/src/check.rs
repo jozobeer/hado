@@ -788,7 +788,7 @@ fn catch_all_rows(node: &Node, path: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-/// E504: `let _? =` は `do` を使うべき位置。
+/// E504: `e as _? ->` は値を捨てるだけなので `e ->` にすべき位置。
 fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
     let NodeKind::LetQ { pat, .. } = &node.kind else {
         return Ok(());
@@ -805,11 +805,11 @@ fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: pat.span.line,
         end_col: pat.span.col,
         code: Some("E504".into()),
-        message: "use do to discard a success value".into(),
+        message: "use `->` to discard a success value".into(),
     })
 }
 
-/// E506: `let _ =` は値を捨てられない。E501: `let x = ... x` は束縛が素通し。
+/// E506: `e as _ ->` は値を捨てられない。E501: `e as x -> x` は束縛が素通し。
 fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
     let NodeKind::Let { pat, body, .. } = &node.kind else {
         return Ok(());
@@ -824,7 +824,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
             end_line: pat.span.line,
             end_col: pat.span.col,
             code: Some("E506".into()),
-            message: "a plain let binding cannot discard its value".into(),
+            message: "a plain binding cannot discard its value; write `->`".into(),
         });
     }
     let (PatternKind::Name(bound), NodeKind::Name(returned)) = (&pat.kind, &body.kind) else {
@@ -932,7 +932,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_col: body.span.col,
         code: Some("E508".into()),
         message: format!(
-            "absence bound at {}:{} is propagated unchanged; use let p? = or do",
+            "absence bound at {}:{} is propagated unchanged; use `as p? ->` or `->`",
             pattern.span.line, pattern.span.col
         ),
     })

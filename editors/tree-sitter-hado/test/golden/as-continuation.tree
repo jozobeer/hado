@@ -7,19 +7,17 @@
       )
     )
     (expression
-      (rail_discard
-        (expression
-          (pipe
-            (or
-              (and
-                (compare
-                  (additive
-                    (multiplicative
-                      (unary
-                        (postfix
-                          (primary
-                            (name)
-                          )
+      (binding
+        (pipe
+          (or
+            (and
+              (compare
+                (additive
+                  (multiplicative
+                    (unary
+                      (postfix
+                        (primary
+                          (name)
                         )
                       )
                     )
@@ -28,6 +26,9 @@
               )
             )
           )
+        )
+        (pattern
+          (name)
         )
         (expression
           (pipe

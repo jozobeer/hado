@@ -12,7 +12,4 @@ once tick => ()
 def ordered (x: Int): Int {Log, Ask} => x
 def omitted x => x
 def claimed (x: Int): Int Pure => x
-def main =
-  with HAsk ->
-  with HLog ->
-  ordered (omitted (claimed 1))
+def main = with HAsk -> with HLog -> ordered (omitted (claimed 1))

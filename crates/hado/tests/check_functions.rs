@@ -13,7 +13,7 @@ fn top_level_functions_are_polymorphic() {
 #[test]
 fn local_functions_are_monomorphic() {
     let error = check_source(
-        "def main = let id = fn(x => x) -> let a = id 1 -> (a > 0) && id true",
+        "def main = fn(x => x) as id ->\n  id 1 as a ->\n  a > 0 && id true",
         "t",
     )
     .err()
@@ -38,7 +38,7 @@ fn application_checks_arity_and_occurs() {
 #[test]
 fn parameters_and_local_bindings_have_lexical_scope() {
     let checked = check_source(
-        "def x = true\ndef f x => x\ndef main = let y = f 7 -> x && (y > 0)",
+        "def x = true\ndef f x => x\ndef main = f 7 as y ->\n  x && y > 0",
         "t",
     )
     .unwrap();
@@ -185,7 +185,7 @@ fn compare_rejects_function_values_and_containers() {
 #[test]
 fn compare_constraints_follow_local_aliases_and_pipes() {
     for source in [
-        "def inc x => x + 1\ndef main = let cmp = compare -> cmp inc inc",
+        "def inc x => x + 1\ndef main = compare as cmp ->\n  cmp inc inc",
         "def inc x => x + 1\ndef main = inc |> compare inc",
     ] {
         assert_eq!(
@@ -201,7 +201,7 @@ fn compare_constraints_follow_local_aliases_and_pipes() {
 fn equality_constraints_wait_for_local_argument_types() {
     for source in [
         "def inc x => x + 1\ndef main = fn(x => x == x) inc",
-        "def inc x => x + 1\ndef main = let eq = fn(x => x == x) -> eq inc",
+        "def inc x => x + 1\ndef main = fn(x => x == x) as eq ->\n  eq inc",
     ] {
         assert_eq!(
             check_source(source, "t").err().unwrap().code.as_deref(),

@@ -9,7 +9,7 @@ fn cli_usage_and_basic_types() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | lsp\n");
+        assert_eq!(output.stderr, b"usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | lsp\n");
     }
     let dir = std::env::temp_dir().join(format!("hado-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -72,7 +72,8 @@ fn cli_rejects_noncanonical_identity_binding() {
     let dir = std::env::temp_dir().join(format!("hado-canonical-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
-    std::fs::write(&path, "def main = let x = 1 -> x").unwrap();
+    let binding = "def main = 1 as x ->\n  x";
+    std::fs::write(&path, binding).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("check")
         .arg(&path)
@@ -81,11 +82,14 @@ fn cli_rejects_noncanonical_identity_binding() {
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
+    // 束縛の綴りが後置になったので、指す位置は綴りから数える。
     assert_eq!(
         String::from_utf8(output.stderr).unwrap(),
         format!(
-            "{}:1:12: error[E501]: binding x is returned unchanged at 1:25; canonical form: 1\n",
-            path.file_name().unwrap().to_string_lossy()
+            "{}:1:12: error[E501]: binding x is returned unchanged at {}:{}; canonical form: 1\n",
+            path.file_name().unwrap().to_string_lossy(),
+            binding.matches('\n').count() + 1,
+            binding.rsplit('\n').next().unwrap().chars().count()
         )
     );
 }

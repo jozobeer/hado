@@ -4,7 +4,9 @@
 def main = Store.find 1
 module Store
 type T
-def find(id: Int): T Pure
+def find (id: Int): T Pure
+/module
 implement Store as Store
 shared type T = Int
 def find _ => 7
+/implement

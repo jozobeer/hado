@@ -691,7 +691,25 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
     parse_tokens_partial(toks, path).finish(path)
 }
 
+/// `print-postfix` の入力。旧形（`let`・`do`）と閉じの無い `module`・
+/// `implement` も読める、移行専用の入口。既定の経路はこれを使わない。
+pub fn parse_for_conversion(src: &str, path: &str) -> Result<Ast, Diagnostic> {
+    let toks = crate::lexer::lex_full(src).map_err(|e| lex_error_to_diag(e, path))?;
+    Ok(parse_tokens_partial_with(&toks, path, true).ast)
+}
+
+/// 実測用。移行の入力で読んだ木と、集まった診断を返す。
+pub fn parse_partial_for_conversion(src: &str, path: &str) -> (Ast, Vec<Diagnostic>) {
+    let toks = crate::lexer::lex_full(src).unwrap();
+    let parsed = parse_tokens_partial_with(&toks, path, true);
+    (parsed.ast, parsed.diagnostics)
+}
+
 fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
+    parse_tokens_partial_with(toks, path, false)
+}
+
+fn parse_tokens_partial_with(toks: &[Tok], path: &str, converting: bool) -> PartialParse {
     let mut parser = Parser {
         toks,
         pos: 0,
@@ -707,6 +725,8 @@ fn parse_tokens_partial(toks: &[Tok], path: &str) -> PartialParse {
         library: None,
         diagnostics: Vec::new(),
         in_resume_scope: false,
+        fn_close_depth: 0,
+        converting,
     };
     let ast = parser.parse_program();
     PartialParse {
@@ -737,6 +757,11 @@ struct Parser<'a> {
     library: Option<Span>,
     diagnostics: Vec<Diagnostic>,
     in_resume_scope: bool,
+    /// `/fn` で閉じる `fn` を読んでいる深さ。`/`+`fn` が閉じか除算かを決める。
+    fn_close_depth: usize,
+    /// `print-postfix` の移行の入力。旧形（`let`・`do`）と閉じの無い
+    /// `module`・`implement` を受け付け、診断を出さない。
+    converting: bool,
 }
 
 /// 先読みの前に控える解析の状態。式を読むと位置のほかに、後で使う記録
@@ -882,12 +907,36 @@ impl Parser<'_> {
         matches!(self.kind(), TokKind::Eof) || section_keyword(self.kind())
     }
 
+    /// `/` の次が閉じのキーワードなら、その `/` は除算ではない。
+    fn slash_starts_close(&self) -> bool {
+        match self.toks.get(self.pos + 1).map(|token| &token.kind) {
+            // `if`・`module`・`implement` は被演算子にならないので常に閉じ。
+            Some(TokKind::KwIf | TokKind::KwModule | TokKind::KwImplement) => true,
+            // `/fn` は除算と衝突しうる。`/fn` で閉じる `fn` の中だけ閉じと読む。
+            Some(TokKind::KwFn) => self.fn_close_depth > 0,
+            _ => false,
+        }
+    }
+
+    /// 後置構文の `/module`・`/implement`。その中の項目の終わり。
+    fn at_block_close(&self) -> bool {
+        self.kind() == &TokKind::Slash
+            && matches!(
+                self.toks.get(self.pos + 1).map(|token| &token.kind),
+                Some(TokKind::KwModule) | Some(TokKind::KwImplement)
+            )
+    }
+
     fn parse_items(&mut self, context: TypeContext) -> Vec<Item> {
         let mut items = Vec::new();
         // 付録C: outer_item は最初の見出しより前にだけ現れる。
         let mut outer = context == TypeContext::TopLevel;
         while self.kind() != &TokKind::Eof {
             if context != TypeContext::TopLevel && self.section_boundary() {
+                break;
+            }
+            // `/module`・`/implement` は、その中の項目の終わり。
+            if context != TypeContext::TopLevel && self.at_block_close() {
                 break;
             }
             if outer && section_keyword(self.kind()) {
@@ -944,6 +993,12 @@ impl Parser<'_> {
         let failed_at = self.pos;
         self.pos = start;
         while self.kind() != &TokKind::Eof {
+            // `/module`・`/implement` は見出しの終わり。ここで止めて閉じを
+            // 消費しない。消費すると `expect_close` が閉じを見失い、閉じの
+            // 不足という別の E100 が本当の誤りを覆う。
+            if self.pos > start && self.at_block_close() {
+                break;
+            }
             if self.pos > start && self.pos >= failed_at && declaration_keyword(self.kind()) {
                 break;
             }
@@ -1093,12 +1148,53 @@ impl Parser<'_> {
         let name_span = self.span();
         let name = self.expect_upper_name("a contract name")?;
         let items = self.parse_items(TypeContext::Signature);
-        Ok(Item::ModuleSig(ModuleSig {
+        let item = Item::ModuleSig(ModuleSig {
             name,
             name_span,
             items,
             span,
-        }))
+        });
+        self.expect_close(&item, "module", TokKind::KwModule)?;
+        Ok(item)
+    }
+
+    /// `/module`・`/implement` の閉じ。足りなければ P001、食い違えば E100。
+    fn expect_close(
+        &mut self,
+        item: &Item,
+        what: &str,
+        expected: TokKind,
+    ) -> Result<(), Diagnostic> {
+        if self.kind() == &TokKind::Slash {
+            match self.toks.get(self.pos + 1).map(|token| &token.kind) {
+                Some(kind) if kind == &expected => {
+                    self.bump();
+                    self.bump();
+                    return Ok(());
+                }
+                Some(kind) if closing_keyword(kind) => {
+                    let text = kind.to_string();
+                    let at = self.toks[self.pos + 1].span;
+                    return Err(self.error_at(
+                        at,
+                        Some("E100"),
+                        format!("closing `/{text}` does not match the open `{what}`"),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if self.converting {
+            return Ok(());
+        }
+        let span = item_span(item);
+        let canonical = postfix_print::item_text(item).replace('\n', " ");
+        self.report_violation(
+            span,
+            &format!("`{what}` is not closed; close it with `/{what}`"),
+            canonical,
+        );
+        Ok(())
     }
 
     fn parse_implementation(&mut self) -> Result<Item, Diagnostic> {
@@ -1124,6 +1220,9 @@ impl Parser<'_> {
             }
         } else {
             module.items = self.parse_items(TypeContext::Implementation);
+            let item = Item::ModuleImpl(module);
+            self.expect_close(&item, "implement", TokKind::KwImplement)?;
+            return Ok(item);
         }
         Ok(Item::ModuleImpl(module))
     }
@@ -1851,14 +1950,102 @@ impl Parser<'_> {
 
     // --- expressions ---
 
+    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` は E100。
+    /// `e as p ->`・`e as p? ->`・`e ->` は `Let`・`LetQ`・`DoQ` へ写す。
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
-        match self.kind() {
-            TokKind::KwIf => self.parse_branch(),
-            TokKind::KwLet => self.parse_let(),
-            TokKind::KwDo => self.parse_do(),
-            TokKind::KwWith => self.parse_with(),
-            _ => self.parse_pipe(),
+        if self.converting {
+            return match self.kind() {
+                TokKind::KwLet => self.parse_let(),
+                TokKind::KwDo => self.parse_do(),
+                _ => self.parse_expr_postfix(),
+            };
         }
+        if self.kind() == &TokKind::KwLet {
+            return Err(self.error(Some("E100"), "`let` is removed; bind with `e as p ->`"));
+        }
+        if self.kind() == &TokKind::KwDo {
+            return Err(self.error(Some("E100"), "`do` is removed; discard with `e ->`"));
+        }
+        self.parse_expr_postfix()
+    }
+
+    fn parse_expr_postfix(&mut self) -> Result<Node, Diagnostic> {
+        let value = if self.kind() == &TokKind::KwIf && !self.if_paren_closes() {
+            self.parse_branch()?
+        } else if self.kind() == &TokKind::KwWith {
+            self.parse_with()?
+        } else {
+            self.parse_pipe()?
+        };
+        if self.kind() == &TokKind::KwAs {
+            self.bump();
+            let pat = self.parse_pattern()?;
+            let question = self.kind() == &TokKind::Question;
+            if question {
+                self.bump();
+            }
+            self.expect(&TokKind::DashArrow)?;
+            let body = self.parse_expr()?;
+            let span = value.span;
+            let end = self.last_end();
+            let kind = if question {
+                NodeKind::LetQ {
+                    pat,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                }
+            } else {
+                NodeKind::Let {
+                    pat,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                }
+            };
+            return Ok(Node {
+                kind,
+                span: span.until(end),
+            });
+        }
+        if self.kind() == &TokKind::DashArrow {
+            self.bump();
+            let body = self.parse_expr()?;
+            let span = value.span;
+            let end = self.last_end();
+            return Ok(Node {
+                kind: NodeKind::DoQ {
+                    value: Box::new(value),
+                    body: Box::new(body),
+                },
+                span: span.until(end),
+            });
+        }
+        Ok(value)
+    }
+
+    /// 二項演算子の被演算子に `fn` を直接置くのは E100（`10 / fn(x => x)`）。
+    fn reject_fn_operand(&self) -> Result<(), Diagnostic> {
+        if self.kind() == &TokKind::KwFn {
+            return Err(self.error(
+                Some("E100"),
+                "`fn` cannot be the operand of a binary operator",
+            ));
+        }
+        Ok(())
+    }
+
+    /// 閉じの不足を E100 として報告する。`canonical form:` に直した綴りを添える。
+    fn report_violation(&mut self, span: Span, message: &str, canonical: String) {
+        self.diagnostics.push(Diagnostic {
+            suggestion: None,
+            related: None,
+            path: self.path.to_string(),
+            line: span.line,
+            col: span.col,
+            end_line: span.end_line,
+            end_col: span.end_col,
+            code: Some("E100".into()),
+            message: format!("{message}; canonical form: {canonical}"),
+        });
     }
 
     /// Parse an expression that must not itself contain a branch
@@ -1917,6 +2104,7 @@ impl Parser<'_> {
         let mut left = self.parse_and()?;
         while self.kind() == &TokKind::OrOr {
             self.bump();
+            self.reject_fn_operand()?;
             let right = self.parse_and()?;
             left = bin_node(BinOp::Or, left, right);
         }
@@ -1927,6 +2115,7 @@ impl Parser<'_> {
         let mut left = self.parse_cmp()?;
         while self.kind() == &TokKind::AndAnd {
             self.bump();
+            self.reject_fn_operand()?;
             let right = self.parse_cmp()?;
             left = bin_node(BinOp::And, left, right);
         }
@@ -1948,6 +2137,7 @@ impl Parser<'_> {
             Some(op) => {
                 let operator = self.span();
                 self.bump();
+                self.reject_fn_operand()?;
                 let right = self.parse_add()?;
                 if matches!(op, BinOp::Eq | BinOp::Ne) {
                     self.equality_anchors
@@ -1987,6 +2177,7 @@ impl Parser<'_> {
                 _ => break,
             };
             self.bump();
+            self.reject_fn_operand()?;
             let right = self.parse_mul()?;
             left = bin_node(op, left, right);
         }
@@ -1998,11 +2189,14 @@ impl Parser<'_> {
         loop {
             let op = match self.kind() {
                 TokKind::Star => BinOp::Mul,
+                // `/if`・`/fn`・`/module`・`/implement` の `/` は除算ではない。
+                TokKind::Slash if self.slash_starts_close() => break,
                 TokKind::Slash => BinOp::Div,
                 TokKind::Percent => BinOp::Mod,
                 _ => break,
             };
             self.bump();
+            self.reject_fn_operand()?;
             let right = self.parse_unary()?;
             left = bin_node(op, left, right);
         }
@@ -2060,6 +2254,9 @@ impl Parser<'_> {
     }
 
     fn atom_start(&self) -> bool {
+        if self.kind() == &TokKind::KwIf {
+            return self.if_paren_closes();
+        }
         matches!(
             self.kind(),
             TokKind::Name(_)
@@ -2103,6 +2300,9 @@ impl Parser<'_> {
     }
 
     fn parse_atom(&mut self) -> Result<Node, Diagnostic> {
+        if self.if_paren_closes() {
+            return self.parse_branch_paren();
+        }
         let span = self.span();
         let kind = match self.kind() {
             TokKind::Int(n) => {
@@ -2316,6 +2516,11 @@ impl Parser<'_> {
     fn parse_branch(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump(); // `if`
+        let node = self.parse_branch_after_if(span)?;
+        self.finish_branch_postfix(node)
+    }
+
+    fn parse_branch_after_if(&mut self, span: Span) -> Result<Node, Diagnostic> {
         if self.kind() == &TokKind::Pipe {
             return self.parse_cond_branch(span);
         }
@@ -2357,6 +2562,137 @@ impl Parser<'_> {
                 format!("expected `=>` or `|` after `if`, found {other}"),
             )),
         }
+    }
+
+    /// `if(...)` の形。括弧は中の構文も閉じる。本体に `->` があれば P001。
+    fn parse_branch_paren(&mut self) -> Result<Node, Diagnostic> {
+        let span = self.span();
+        self.bump(); // `if`
+        self.expect(&TokKind::LParen)?;
+        let mut node = self.parse_branch_after_if(span)?;
+        if postfix_print::branch_has_arrow(&node) {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(
+                node.span,
+                "`if(...)` with `->` inside; close it with `/if`",
+                canonical,
+            );
+        }
+        self.expect(&TokKind::RParen)?;
+        if !postfix_print::branch_has_arrow(&node) && self.enclosing_close_follows() {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(
+                node.span,
+                "`if(...)` with nothing after it; write it without parentheses",
+                canonical,
+            );
+        }
+        // 閉じの `)` まで節点の範囲に入れる（§57 の書き換えが括弧ごと置き換えられる）。
+        node.span = span.until(self.last_end());
+        Ok(node)
+    }
+
+    /// 次のトークンが、中の構文も閉じる位置か（区切り・閉じ括弧・閉じの印・宣言や
+    /// handler の腕の始まり・入力の終わり）。そこに置いた `if(...)` の括弧は余分である。
+    fn enclosing_close_follows(&self) -> bool {
+        if self.at_expression_close() {
+            return true;
+        }
+        match self.kind() {
+            TokKind::Eof
+            | TokKind::KwOnce
+            | TokKind::KwAbort
+            | TokKind::KwAgain
+            | TokKind::KwReturn => true,
+            TokKind::Slash => self.slash_starts_close(),
+            kind => declaration_keyword(kind),
+        }
+    }
+
+    /// その位置の `,`・`;`・`)`・`]`・`}` が、今読んでいる式の区切りか閉じ括弧か。
+    /// 読んでいる途中で開いた括弧（`Cons(` の `(`、`[`、`{`）は数に入れない。
+    /// 数に入れると `[if a => 1 | 0, 2]` の `,` が式の区切りに見えなくなる。
+    fn at_expression_close(&self) -> bool {
+        if !matches!(
+            self.kind(),
+            TokKind::Comma
+                | TokKind::Semicolon
+                | TokKind::RParen
+                | TokKind::RBracket
+                | TokKind::RBrace
+        ) {
+            return false;
+        }
+        let mut depth = 0usize;
+        for index in (0..self.pos).rev() {
+            match &self.toks[index].kind {
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth += 1,
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                    if depth == 0 {
+                        return true;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// 後置構文の裸の `if`。本体に `->` があれば `/if` で閉じる。無ければ
+    /// 続きがあるときだけ `if(...)`、無ければ閉じない。閉じの不足・余分・
+    /// 食い違いは P001 か E100。
+    fn finish_branch_postfix(&mut self, node: Node) -> Result<Node, Diagnostic> {
+        if self.converting {
+            return Ok(node);
+        }
+        let arrow = postfix_print::branch_has_arrow(&node);
+        if self.kind() == &TokKind::Slash {
+            match self.toks.get(self.pos + 1).map(|token| &token.kind) {
+                Some(TokKind::KwIf) => {
+                    let slash = self.span();
+                    self.bump();
+                    self.bump();
+                    if !arrow {
+                        let canonical = postfix_print::node_text(&node);
+                        self.report_violation(
+                            slash,
+                            "`if` has no `->`; close it with `(...)` or nothing",
+                            canonical,
+                        );
+                    }
+                }
+                // 本体に `->` があるのに別の閉じが来たら、閉じ違い（E100）。
+                // 無いときの `/module` などは外側の閉じなので、ここでは何もしない。
+                Some(kind) if closing_keyword(kind) && arrow => {
+                    let text = kind.to_string();
+                    let at = self.toks[self.pos + 1].span;
+                    return Err(self.error_at(
+                        at,
+                        Some("E100"),
+                        format!("closing `/{text}` does not match the open `if`"),
+                    ));
+                }
+                _ => {
+                    if arrow {
+                        let canonical = postfix_print::node_text(&node);
+                        self.report_violation(
+                            node.span,
+                            "`if` has an `->` inside; close it with `/if`",
+                            canonical,
+                        );
+                    }
+                }
+            }
+        } else if arrow {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(
+                node.span,
+                "`if` has an `->` inside; close it with `/if`",
+                canonical,
+            );
+        }
+        Ok(node)
     }
 
     fn parse_arm_function(
@@ -2504,6 +2840,41 @@ impl Parser<'_> {
         matches!(parsed, Ok(node) if matches!(node.kind, NodeKind::BoolBranch { .. }))
     }
 
+    /// `if(` が閉じの形か。`if` の直後の `(` から対応する `)` までの最上位に
+    /// `=>` があるときだけ閉じの開きと読み、無ければ条件の括弧と読む。空白には
+    /// 依らない。`fn(...)` の中と `fn … /fn` の中の `=>` は最上位に数えない。
+    /// 最上位で `=>` より先に `if` が来たら、入れ子の分岐（E101）として条件側に読む。
+    fn if_paren_closes(&self) -> bool {
+        if self.kind() != &TokKind::KwIf || !self.next_is(&TokKind::LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut index = self.pos + 2;
+        while let Some(token) = self.toks.get(index) {
+            let next = self.toks.get(index + 1).map(|token| &token.kind);
+            match &token.kind {
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::KwFn if next != Some(&TokKind::LParen) => depth += 1,
+                TokKind::Slash if next == Some(&TokKind::KwFn) => {
+                    depth = depth.saturating_sub(1);
+                    index += 1;
+                }
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                TokKind::Arrow if depth == 0 => return true,
+                TokKind::KwIf if depth == 0 => return false,
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
+    }
+
     fn next_is(&self, kind: &TokKind) -> bool {
         self.toks
             .get(self.pos + 1)
@@ -2612,30 +2983,100 @@ impl Parser<'_> {
         Ok(params)
     }
 
+    /// §12・§12.1: 本体に `->` があれば `fn x => … /fn`、無ければ `fn(x => …)`。
+    /// 不足は E100、余分と食い違いは P001 か E100。
     fn parse_fun(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
-        self.bump();
-        self.expect(&TokKind::LParen)?;
-        let (params, body) = if self.kind() == &TokKind::Pipe {
-            // An anonymous `fn` has no name to read back, so the scrutinee keeps
-            // the `fn` keyword's span.
-            self.parse_arm_function(span, span)?
+        self.bump(); // `fn`
+        if self.kind() == &TokKind::LParen {
+            self.bump();
+            let (params, body) = if self.kind() == &TokKind::Pipe {
+                self.parse_arm_function(span, span)?
+            } else {
+                let params = self.parse_lambda_params()?;
+                let body = self.parse_function_body(span)?;
+                (params, body)
+            };
+            self.expect(&TokKind::RParen)?;
+            let end = self.last_end();
+            let node = Node {
+                kind: NodeKind::Fn {
+                    params,
+                    body: Box::new(body),
+                },
+                span: span.until(end),
+            };
+            self.report_open_fn_continuation(&node, span);
+            return Ok(node);
+        }
+        let params = self.parse_lambda_params()?;
+        self.expect(&TokKind::Arrow)?;
+        self.fn_close_depth += 1;
+        let body = self.parse_expr();
+        self.fn_close_depth -= 1;
+        let body = body?;
+        let arrow = postfix_print::contains_continuation(&body);
+        let closed = if self.kind() == &TokKind::Slash {
+            match self.toks.get(self.pos + 1).map(|token| &token.kind) {
+                Some(TokKind::KwFn) => {
+                    self.bump();
+                    self.bump();
+                    true
+                }
+                Some(kind) if closing_keyword(kind) => {
+                    let text = kind.to_string();
+                    let at = self.toks[self.pos + 1].span;
+                    return Err(self.error_at(
+                        at,
+                        Some("E100"),
+                        format!("closing `/{text}` does not match the open `fn`"),
+                    ));
+                }
+                _ => false,
+            }
         } else {
-            let params = self.parse_lambda_params()?;
-            let body = self.parse_function_body(span)?;
-            (params, body)
+            false
         };
-        self.expect(&TokKind::RParen)?;
         let end = self.last_end();
-        Ok(Node {
+        let node = Node {
             kind: NodeKind::Fn {
                 params,
                 body: Box::new(body),
             },
             span: span.until(end),
-        })
+        };
+        if self.converting {
+            return Ok(node);
+        }
+        if !arrow {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(span, "`fn` without `->` inside; use `fn(...)`", canonical);
+        } else if !closed {
+            let canonical = postfix_print::node_text(&node);
+            self.report_violation(span, "`fn` is not closed; close it with `/fn`", canonical);
+        }
+        Ok(node)
     }
 
+    /// `fn(...)` の本体に `->` があれば `/fn` で閉じるよう促す（§12.1）。
+    fn report_open_fn_continuation(&mut self, node: &Node, span: Span) {
+        if self.converting {
+            return;
+        }
+        if let NodeKind::Fn { body, .. } = &node.kind {
+            if postfix_print::contains_continuation(body) {
+                let canonical = postfix_print::node_text(node);
+                self.report_violation(
+                    span,
+                    "`fn(...)` with `->` inside; close it with `/fn`",
+                    canonical,
+                );
+            }
+        }
+    }
+
+    /// 移行の入力だけが読む旧形（§11 の `let p =`）。値は `->` の後ろを取らない
+    /// （後置の `e ->` と綴りが重なるので、旧形の値は `as` を持たない式に限る）。
     fn parse_let(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump();
@@ -2645,7 +3086,7 @@ impl Parser<'_> {
             self.bump();
         }
         self.expect(&TokKind::Eq)?;
-        let value = self.parse_expr()?;
+        let value = self.parse_pipe()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
         let kind = if question {
@@ -2667,10 +3108,11 @@ impl Parser<'_> {
         })
     }
 
+    /// 移行の入力だけが読む旧形（§11 の `do`）。値は `->` の後ろを取らない。
     fn parse_do(&mut self) -> Result<Node, Diagnostic> {
         let span = self.span();
         self.bump();
-        let value = self.parse_expr()?;
+        let value = self.parse_pipe()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
         let end = self.last_end();
@@ -2881,6 +3323,26 @@ fn section_keyword(kind: &TokKind) -> bool {
     )
 }
 
+/// 後置構文の閉じのキーワード（`/if`・`/fn`・`/module`・`/implement`）。
+fn closing_keyword(kind: &TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::KwIf | TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement
+    )
+}
+
+fn item_span(item: &Item) -> Span {
+    match item {
+        Item::Def(def) => def.span,
+        Item::SigDef(def) => def.span,
+        Item::TypeDef(def) => def.span,
+        Item::ModuleSig(module) => module.span,
+        Item::ModuleImpl(module) => module.span,
+        Item::Effect(effect) => effect.span,
+        Item::Handler(handler) => handler.span,
+    }
+}
+
 /// 宣言（または見出し）を始めるキーワード。回復時に次の宣言の目印になる。
 fn declaration_keyword(kind: &TokKind) -> bool {
     matches!(kind, TokKind::Def | TokKind::KwType | TokKind::KwShared) || section_keyword(kind)
@@ -3050,25 +3512,44 @@ pub fn canonical(node: &Node) -> String {
         }
         NodeKind::Record(fields) => format!("{{ {} }}", canonical_fields(fields)),
         NodeKind::List(items, tail) => canonical_list(items, tail.as_deref()),
+        // §11: 束縛は後置の `e as p ->` で書く。正準形もその綴りを出す。
         NodeKind::Let { pat, value, body } => {
-            format!("(let {pat} = {} -> {})", canonical(value), canonical(body))
+            format!("({} as {pat} -> {})", canonical(value), canonical(body))
         }
         NodeKind::LetQ { pat, value, body } => {
-            format!("(let {pat}? = {} -> {})", canonical(value), canonical(body))
+            format!("({} as {pat}? -> {})", canonical(value), canonical(body))
         }
         NodeKind::DoQ { value, body } => {
-            format!("(do {} -> {})", canonical(value), canonical(body))
+            format!("({} -> {})", canonical(value), canonical(body))
         }
+        // §12.1: 本体に `->` があれば `/fn` で閉じる。正準形も読める綴りにする。
         NodeKind::Fn { params, body } => {
-            format!("fn({})", source_print::lambda_tail(params, body))
+            if postfix_print::contains_continuation(body) {
+                format!("({})", postfix_print::node_text(node))
+            } else {
+                format!("fn({})", source_print::lambda_tail(params, body))
+            }
         }
-        NodeKind::BoolBranch { cond, then, els } => format!(
-            "(if {} => {} | {})",
-            canonical(cond),
-            canonical(then),
-            canonical(els)
-        ),
-        NodeKind::CondBranch { arms, fallback } => format_condition_column(arms, fallback, true),
+        // §12.1: 腕に `->` があれば `/if` で閉じる。正準形も読める綴りにする。
+        NodeKind::BoolBranch { cond, then, els } if !postfix_print::branch_has_arrow(node) => {
+            format!(
+                "(if {} => {} | {})",
+                canonical(cond),
+                canonical(then),
+                canonical(els)
+            )
+        }
+        NodeKind::BoolBranch { .. } => format!("({})", postfix_print::node_text(node)),
+        NodeKind::CondBranch { arms, fallback } => {
+            if postfix_print::branch_has_arrow(node) {
+                format!("({})", postfix_print::node_text(node))
+            } else {
+                format_condition_column(arms, fallback, true)
+            }
+        }
+        NodeKind::PatternBranch { .. } if postfix_print::branch_has_arrow(node) => {
+            format!("({})", postfix_print::node_text(node))
+        }
         NodeKind::PatternBranch {
             scrutinees,
             arms,
@@ -3202,7 +3683,15 @@ mod tests;
 
 #[path = "source_print.rs"]
 mod source_print;
-pub use source_print::canonical_program;
 pub(crate) use source_print::{
     arm_function as arm_function_source, item_source, list_pattern as list_pattern_source,
 };
+
+#[path = "postfix_print.rs"]
+mod postfix_print;
+/// §57・§58.1: 正準形（`fmt`・`--fix`・診断の `canonical form:`）の綴り。
+pub use postfix_print::program as canonical_program;
+/// 構文木を後置束縛の綴りで 1 行に印字する（実測に使う）。
+pub fn postfix_node_text(node: &Node) -> String {
+    postfix_print::node_text(node)
+}

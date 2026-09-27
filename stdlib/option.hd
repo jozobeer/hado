@@ -1,11 +1,14 @@
 type T Option = | None | Some(T)
 module Option
-def (A, B) map(value: A Option, f: Fn(A => B)): B Option
-def A unwrap_or(value: A Option, fallback: A): A Pure
-def A is_some(value: A Option): Bool Pure
-def A ok_or(value: A Option, error: Exception): A {Error}
+def (A, B) map (value: A Option, f: Fn(A => B)): B Option
+def A unwrap_or (value: A Option, fallback: A): A Pure
+def A is_some (value: A Option): Bool Pure
+def A ok_or (value: A Option, error: Exception): A {Error}
+/module
 implement Option as Option
-def map value f => let x? = value -> Some(f x)
+def map value f => value as x? ->
+  Some(f x)
 def unwrap_or value fallback => if value | Some(x) => x | None => fallback
 def is_some | Some(_) => true | None => false
 def ok_or value error => if value | Some(x) => x | raise error
+/implement

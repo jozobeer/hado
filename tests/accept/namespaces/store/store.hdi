@@ -1,3 +1,4 @@
 type Status = | Found(Int) | NotFound
 module Store
-def find(id: Int): Status
+def find (id: Int): Status
+/module

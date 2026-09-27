@@ -60,7 +60,7 @@ def argument_type(argument):
 
 
 def members_of(source):
-    body = only_block(rf"^module {module}[ \t]*\n(.*?)(?=^(?:module|implement)\b|\Z)", source)
+    body = only_block(rf"^module {module}[ \t]*\n(.*?)(?=^(?:module|implement|/module|/implement)\b|\Z)", source)
     members = {}
     for line in body.splitlines():
         line = line.split("//", 1)[0].strip()
@@ -92,7 +92,7 @@ assert not differences(expected, members_of(block)), "equal contracts must match
 contract_block = only_block(rf"^(module {module}[ \t]*\n.*?)(?=^module|\Z)", block)
 
 # 仕様の写しを再読して照合する。期待値を被験側から取る判定では、この対照が落ちる。
-changed, count = re.subn(r"^(def length\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", contract_block, flags=re.M)
+changed, count = re.subn(r"^(def length\s*\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", contract_block, flags=re.M)
 assert count == 1, "spec mutation must change member length exactly once"
 copy = Path(sys.argv[3]) / "spec-effect.md"
 copy.write_text(spec.replace(contract_block, changed, 1))
@@ -101,8 +101,8 @@ assert set(differences(changed_members, expected)) == {"length"}, "spec effect m
 print("   (対照: §55 の写しの member length Pure → {Error} を検出)")
 
 for pattern, replacement in (
-    (r"^(def length\([^:]+: [^)]*)(\))", r"\1 List\2"),
-    (r"^(def length\([^)]*\): \w+)", r"\1 List"),
+    (r"^(def length\s*\([^:]+: [^)]*)(\))", r"\1 List\2"),
+    (r"^(def length\s*\([^)]*\): \w+)", r"\1 List"),
 ):
     changed, count = re.subn(pattern, replacement, contract_block, flags=re.M)
     assert count == 1, "type mutation must change member length exactly once"
@@ -235,7 +235,7 @@ large_source = (
 )
 write(
     "c3",
-    large_source + f"def main = let b = Bytes.of_list (gen {large_count}) -> "
+    large_source + f"def main = Bytes.of_list (gen {large_count}) as b -> "
     "[Bytes.length b, " + ", ".join(f"Bytes.get b {index}" for index in large_indices) + "]\n",
     expect=large_expect,
 )
@@ -245,7 +245,7 @@ write(
     large_source
     + "def rec at values index => if values | [] => -1 | [head, ...tail] => at_head head tail index\n"
     "def rec at_head head tail index => if index == 0 => head | at tail (index - 1)\n"
-    f"def main = let values = Bytes.to_list (Bytes.of_list (gen {large_count})) -> "
+    f"def main = Bytes.to_list (Bytes.of_list (gen {large_count})) as values -> "
     "[List.length values, " + ", ".join(f"at values {index}" for index in large_indices) + "]\n",
     expect=large_expect,
 )
@@ -356,13 +356,13 @@ for index, (name, encoded, accepted) in enumerate(utf8_probes):
 # 34-c(4c): get の範囲外。
 write(
     "c4c_end",
-    f"def main = let b = Bytes.of_list [{lit(payload)}] -> Bytes.get b (Bytes.length b)\n",
+    f"def main = Bytes.of_list [{lit(payload)}] as b -> Bytes.get b (Bytes.length b)\n",
     expect_error="IndexOutOfRange",
 )
 add("c4c_end", "34-c(4c) get (length) は IndexOutOfRange", "error")
 write(
     "c4c_neg",
-    f"def main = let b = Bytes.of_list [{lit(payload)}] -> Bytes.get b (-1)\n",
+    f"def main = Bytes.of_list [{lit(payload)}] as b -> Bytes.get b (-1)\n",
     expect_error="IndexOutOfRange",
 )
 add("c4c_neg", "34-c(4c) get (-1) は IndexOutOfRange", "error")
@@ -370,7 +370,7 @@ add("c4c_neg", "34-c(4c) get (-1) は IndexOutOfRange", "error")
 # 34-c(4d): 負の対照（境界の内側は受理）。
 write(
     "c4d_last",
-    f"def main = let b = Bytes.of_list [{lit(payload)}] -> Bytes.get b (Bytes.length b - 1)\n",
+    f"def main = Bytes.of_list [{lit(payload)}] as b -> Bytes.get b (Bytes.length b - 1)\n",
     expect=f"{payload[-1]}\n",
 )
 add("c4d_last", "34-c(4d) 負の対照 get は境界内で受理", "print")
@@ -385,7 +385,7 @@ add("c4d_empty", "34-c(4d) 負の対照 空の to_string は受理", "print")
 write(
     "c5",
     "def make (n: Int): Bytes {Error} => Bytes.of_list [n]\n"
-    "def main = let invalid = make 255 -> with H -> Bytes.to_string invalid\n"
+    "def main = make 255 as invalid -> with H -> Bytes.to_string invalid\n"
     "handler Error as H\n"
     "abort raise e => e.message\n",
     expect="InvalidUtf8\n",
@@ -414,28 +414,28 @@ right = [random.randint(0, 255) for _ in range(random.randint(0, 6))]
 order = -1 if left < right else (0 if left == right else 1)
 write(
     "e",
-    f"def main = let x = Bytes.of_list [{lit(left)}] -> let y = Bytes.of_list [{lit(right)}] -> "
+    f"def main = Bytes.of_list [{lit(left)}] as x -> Bytes.of_list [{lit(right)}] as y -> "
     f"[if x == y => 1 | 0, if x != y => 1 | 0, compare x y]\n",
     expect=f"[{1 if left == right else 0}, {1 if left != right else 0}, {order}]\n",
 )
 add("e", "34-e == != compare がバイト列の構造比較", "print")
 write(
     "e_same",
-    f"def main = let x = Bytes.of_list [{lit(same)}] -> let y = Bytes.of_list [{lit(same)}] -> "
+    f"def main = Bytes.of_list [{lit(same)}] as x -> Bytes.of_list [{lit(same)}] as y -> "
     "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y]\n",
     expect="[1, 0, 0]\n",
 )
 add("e_same", "34-e 同内容の別インスタンスは == が真で compare 0", "print")
 write(
     "e_empty",
-    "def main = let x = Bytes.of_list [] -> let y = Bytes.of_list [] -> "
+    "def main = Bytes.of_list [] as x -> Bytes.of_list [] as y -> "
     "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y]\n",
     expect="[1, 0, 0]\n",
 )
 add("e_empty", "34-e 空列どうしは == が真で compare 0", "print")
 write(
     "e_order",
-    f"def main = let x = Bytes.of_list [{lit(same)}] -> let y = Bytes.of_list [{lit(bumped)}] -> "
+    f"def main = Bytes.of_list [{lit(same)}] as x -> Bytes.of_list [{lit(bumped)}] as y -> "
     "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y, compare y x]\n",
     expect="[0, 1, -1, 1]\n",
 )
@@ -447,7 +447,7 @@ for length in (0, random.randint(1, len(sequence) - 1)):
     kind = f"e_prefix_{length}"
     write(
         kind,
-        f"def main = let x = Bytes.of_list [{lit(prefix)}] -> let y = Bytes.of_list [{lit(sequence)}] -> "
+        f"def main = Bytes.of_list [{lit(prefix)}] as x -> Bytes.of_list [{lit(sequence)}] as y -> "
         "[compare x y, compare y x]\n",
         expect=plist([order, -order]) + "\n",
     )
@@ -464,7 +464,7 @@ for index, (left, right) in enumerate((
     kind = f"e_nul_{index}"
     write(
         kind,
-        f"def main = let x = Bytes.of_list {plist(left)} -> let y = Bytes.of_list {plist(right)} -> "
+        f"def main = Bytes.of_list {plist(left)} as x -> Bytes.of_list {plist(right)} as y -> "
         "[if x == y => 1 | 0, if x != y => 1 | 0, compare x y, "
         "if y == x => 1 | 0, if y != x => 1 | 0, compare y x]\n",
         expect=plist(expected) + "\n",
@@ -484,6 +484,7 @@ store = (
     "module Store\n"
     "type T\n"
     "def make(value: Bytes): T Pure\n"
+    "/module\n"
 )
 write(
     "f2_shared",
@@ -491,7 +492,7 @@ write(
     "def read box => Bytes.length box.value\n"
     "type Box = { value: Store.T }\n"
     + store
-    + "implement Store as Store\nshared type T = Bytes\ndef make value => value\n",
+    + "implement Store as Store\nshared type T = Bytes\ndef make value => value\n/implement\n",
     expect=f"{text_bytes}\n",
 )
 add("f2_shared", "34-f2 shared type T = Bytes が record field に届く", "print")
@@ -503,7 +504,7 @@ write(
     "def read box => Bytes.length box.value\n"
     "type Box = { value: Store.T }\n"
     + store
-    + "implement Store as Store\ntype T = Bytes\ndef make value => value\n",
+    + "implement Store as Store\ntype T = Bytes\ndef make value => value\n/implement\n",
 )
 add("f2_opaque", "34-f2 負の対照 shared 無しは E305", "code:E305")
 
@@ -1056,8 +1057,10 @@ for layout in directory library; do
             cat <<HD
 module Helper
 def pick(x: Int): String {Error}
+/module
 implement Helper as Helper
 def pick x => if x > 0 => Int.to_string x | raise { message = "$message" }
+/implement
 HD
         } >"$dir/sub/helper.hd"
         case "$mode" in

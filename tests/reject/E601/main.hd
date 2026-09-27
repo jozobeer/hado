@@ -5,8 +5,10 @@ def get_name t => t.name
 def main = get_name (M.make 3)
 module S
 type T
-def make(x: Int): T
+def make (x: Int): T
+/module
 implement S as M
 type User = { name: String; age: Int }
 type T = User
 def make x => { name = "a"; age = x }
+/implement

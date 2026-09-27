@@ -3,7 +3,9 @@
 // item: 節構文
 def main = M.inc 1
 module S
-def inc(x: Int): Int
-def dec(x: Int): Int
+def inc (x: Int): Int
+def dec (x: Int): Int
+/module
 implement S as M
 def inc x => x + 1
+/implement

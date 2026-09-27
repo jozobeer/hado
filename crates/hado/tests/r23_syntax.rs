@@ -149,7 +149,7 @@ fn resume_outside_again_is_e124_on_resume() {
 fn again_arm_may_contain_resume() {
     for source in [
         "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => resume",
-        "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => let rest = resume () -> rest",
+        "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => resume () as rest ->\n  rest",
         "effect A Yield\nagain yield(value: A): Void\nhandler A Yield as H\nagain yield value => fn(x => resume)",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));
@@ -174,7 +174,7 @@ fn effect_rows_roundtrip_in_result_position() {
         "def f (x: Int): Int Pure => x",
         "def f (x: Int): Int {Io, Error} => x",
         "def f (x: Fn(A => B {E})): Int => 1",
-        "module M\ndef run(x: Int): Int {Io}",
+        "module M\ndef run (x: Int): Int {Io}\n/module",
     ] {
         roundtrip(source);
     }
@@ -197,7 +197,7 @@ fn keywords_cannot_be_names() {
 fn once_and_again_are_the_operation_kinds() {
     for source in [
         "effect Ask\nonce ask: String\nhandler Ask as H\nonce ask => \"x\"\ndef main = with H -> ask\n",
-        "effect A Y\nagain y(value: Int): Void\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> do y 1 -> 0\n",
+        "effect A Y\nagain y(value: Int): Void\nhandler A Y as H\nagain y value => resume ()\ndef main = with H -> y 1 ->\n  0",
         "effect A Y\nagain y(value: Int): Void\ndef emit x => y x\ndef main =\n  with H ->\n  emit 1\nhandler A Y as H\nagain y value => resume ()\n",
     ] {
         parse_source(source, "generated.hd").unwrap_or_else(|error| panic!("{error}\n{source}"));

@@ -238,7 +238,7 @@ root.mkdir(parents=True, exist_ok=True)
 rejected = [
     'def main = Cons(1, Nil)\n',
     'def f x => if\n  | x > 0 => 1\n  | 0\ndef main = f 1\n',
-    'def main = let x = 5 -> x\n',
+    'def main = 5 as x -> x\n',
 ]
 for index, source in enumerate(rejected):
     path = root / f'no-write-{index}' / 'main.hd'
@@ -270,7 +270,7 @@ root.mkdir(parents=True, exist_ok=True)
 # 決めている未使用（wants.md の診断と正準形）の E505 を使う。
 path = root / 'unfixable' / 'main.hd'
 path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text('def f (x: Int): Int Pure =>\n  let y = 1 ->\n  x\ndef main = f 1\n')
+path.write_text('def f (x: Int): Int Pure =>\n  1 as y ->\n  x\ndef main = f 1\n')
 before = digest(path)
 result = check_fix(str(root), 'unfixable', path.read_text())
 assert result.returncode == 1, result.returncode

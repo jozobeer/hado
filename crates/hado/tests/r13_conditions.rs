@@ -63,7 +63,12 @@ fn generated_functions_reject_long_form_and_execute_short_form() {
                     } else {
                         names.join(", ")
                     };
-                    format!("def main = fn({params} {body}) {args}")
+                    // 本体に `->` があれば `fn … /fn`、無ければ `fn(...)` で閉じる。
+                    if body.contains("->") {
+                        format!("def main = fn {params} {body}\n/fn {args}")
+                    } else {
+                        format!("def main = fn({params} {body}) {args}")
+                    }
                 } else {
                     let ret = if typed { ": Int" } else { "" };
                     format!("def probe {params}{ret} {body}\ndef main = probe {args}")
@@ -84,7 +89,7 @@ fn generated_functions_reject_long_form_and_execute_short_form() {
             assert_round_trip(&short);
             execute(&short, expected, serial * 2 + usize::from(lambda));
             let continuation = source(&format!(
-                "=> let bound = {} + 1 -> if bound > 0 => {} | 2",
+                "=> {} + 1 as bound ->\n  if bound > 0 => {} | 2",
                 names.join(" + "),
                 names.join(" + ")
             ));
@@ -173,7 +178,8 @@ fn execute(source: &str, expected: &str, serial: usize) {
 
 #[test]
 fn long_form_provenance_survives_modules_and_printing_is_canonical() {
-    let source = "def main = M.f 2\nmodule S def f(x: Int): Int\nimplement S as M def f x => if | x > 0 => 1 | 0";
+    // 長形式（`=> if | …`）は入力として残す。E517 を測るのがこの検査の目的。
+    let source = "def main = M.f 2\nmodule S\ndef f (x: Int): Int\n/module\nimplement S as M\ndef f x => if | x > 0 => 1 | 0\n/implement";
     rejected(source, "E517", "def f x");
     let ast = parser::parse_source(source, "module.hd").unwrap();
     let printed = parser::canonical_program(&ast);

@@ -1,3 +1,4 @@
 implement Store as Memory
 def find id => id::IntId.value id + 20
 def wrap f => f.value
+/implement

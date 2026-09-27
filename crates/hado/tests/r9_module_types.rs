@@ -1,7 +1,7 @@
 use hado::{check_source, types::Ty};
 use std::process::Command;
 
-const SIGNATURE: &str = "module S type T def make(x: Int): T def get(value: T): Int";
+const SIGNATURE: &str = "module S\ntype T\ndef make (x: Int): T\ndef get (value: T): Int\n/module";
 
 fn module(name: &str, representation: &str, make: &str, get: &str) -> String {
     let realization = if representation.starts_with(['{', '|']) {
@@ -9,7 +9,7 @@ fn module(name: &str, representation: &str, make: &str, get: &str) -> String {
     } else {
         format!("type T = {representation}")
     };
-    format!("implement S as {name} {realization} def make x => {make} def get (value: T) => {get}")
+    format!("implement S as {name}\n{realization}\ndef make x => {make}\ndef get (value: T) => {get}\n/implement")
 }
 
 fn program(outer: &str, sections: &[&str], body: &str) -> String {
@@ -19,26 +19,37 @@ fn program(outer: &str, sections: &[&str], body: &str) -> String {
 #[test]
 fn cyclic_abstract_aliases_report_signature_mismatch_at_the_module() {
     for padding in 0..3 {
-        let signature = "module S type T type U def id(x: Int): Int";
+        let signature = "module S\ntype T\ntype U\ndef id (x: Int): Int\n/module";
         for body in [
             "type T = T type U = Int",
             "type T = U type U = T",
             "type T = T List type U = Int",
         ] {
+            // 後置では `implement` を閉じまで綴るので、見出しの位置は
+            // 組み立てた綴りから数える。ずれてもここで気づける。
             let implementation = format!(
-                "{}implement S as M {body} def id x => x",
+                "{}implement S as M\n{body}\ndef id x => x\n/implement",
                 " ".repeat(padding)
             );
             let source = program("", &[signature, &implementation], "M.id 1");
+            let header = source.find("implement S as M").unwrap();
+            let prefix = &source[..header];
             let error = check_source(&source, "cyclic-alias.hd").err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
-            assert_eq!((error.line, error.col), (4, padding + 1), "{error}");
+            assert_eq!(
+                (error.line, error.col),
+                (
+                    prefix.matches('\n').count() + 1,
+                    prefix.rsplit('\n').next().unwrap().chars().count() + 1
+                ),
+                "{error}"
+            );
         }
         for body in [
             "type T = U type U = Int",
             "type Data = | Done | Next(Data) type T = Data type U = Int",
         ] {
-            let implementation = format!("implement S as M {body} def id x => x");
+            let implementation = format!("implement S as M\n{body}\ndef id x => x\n/implement");
             assert_eq!(
                 check_source(
                     &program(
@@ -78,10 +89,7 @@ fn abstract_types_can_be_instantiated_with_existing_types() {
             &[SIGNATURE, &module("M", representation, make, get)],
             "M.get (M.make 7)",
         );
-        assert_eq!(
-            check_source(&source, "module-types.hd").unwrap().main,
-            Ty::Int
-        );
+        assert_eq!(check_source(&source, "").unwrap().main, Ty::Int);
     }
 }
 
@@ -97,11 +105,7 @@ fn abstract_instantiations_preserve_module_identity() {
         "N.get (M.make 7)",
     );
     assert_eq!(
-        check_source(&source, "module-types.hd")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
+        check_source(&source, "").err().unwrap().code.as_deref(),
         Some("E305")
     );
 }
@@ -166,21 +170,20 @@ fn opaque_values_cannot_hide_function_payloads_from_monomorphization() {
         ),
     ] {
         let implementation = if representation.starts_with('{') {
-            format!("implement S as M type Representation = {representation} type T = Representation def make x => {make}")
+            format!("implement S as M\ntype Representation = {representation}\ntype T = Representation\ndef make x => {make}\n/implement")
         } else {
-            format!("implement S as M type T = {representation} def make x => {make}")
+            format!("implement S as M\ntype T = {representation}\ndef make x => {make}\n/implement")
         };
         let source = program(
             "",
-            &["module S type T def make(x: Int): T", &implementation],
+            &[
+                "module S\ntype T\ndef make (x: Int): T\n/module",
+                &implementation,
+            ],
             "M.make 1",
         );
         assert_eq!(
-            check_source(&source, "module-types.hd")
-                .err()
-                .unwrap()
-                .code
-                .as_deref(),
+            check_source(&source, "").err().unwrap().code.as_deref(),
             Some("E702")
         );
     }
@@ -191,22 +194,19 @@ fn signature_type_variables_shadow_abstract_type_names() {
     let source = program(
         "",
         &[
-            "module S type T def make(x: Int): T def T identity(x: T): T",
-            "implement S as M type T = Int def make x => x def identity x => x",
+            "module S\ntype T\ndef make (x: Int): T\ndef T identity (x: T): T\n/module",
+            "implement S as M\ntype T = Int\ndef make x => x\ndef identity x => x\n/implement",
         ],
         "M.identity true",
     );
-    assert_eq!(
-        check_source(&source, "module-types.hd").unwrap().main,
-        Ty::Bool
-    );
+    assert_eq!(check_source(&source, "").unwrap().main, Ty::Bool);
 }
 
 #[test]
 fn opaque_projection_reports_the_dot() {
     for padding in 0..16 {
         let before_dot = format!("def main = (M.make 1){}", " ".repeat(padding));
-        let source = format!("{before_dot}.value\nmodule S type T def make(x: Int): T\nimplement S as M type Representation = {{ value: Int }} type T = Representation def make x => {{ value = x }}");
+        let source = format!("{before_dot}.value\nmodule S\ntype T\ndef make (x: Int): T\n/module\nimplement S as M\ntype Representation = {{ value: Int }}\ntype T = Representation\ndef make x => {{ value = x }}\n/implement");
         let error = check_source(&source, "opaque-field.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E601"));
         assert_eq!((error.line, error.col), (1, before_dot.len() + 1));
@@ -223,13 +223,13 @@ fn outer_data_can_reference_later_implementations_in_any_section_order() {
             [implementation.as_str(), SIGNATURE],
         ] {
             let body = if data.contains("Wrap") {
-                format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                format!("Wrap(M.make {index}) as Wrap(value) -> M.get value")
             } else {
-                format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                format!("{{ value = M.make {index} }} as box -> M.get box.value")
             };
             let source = program(data, &sections, &body);
             assert_eq!(
-                check_source(&source, "module-types.hd")
+                check_source(&source, "")
                     .unwrap_or_else(|error| panic!("{error}: {source}"))
                     .main,
                 Ty::Int
@@ -241,8 +241,8 @@ fn outer_data_can_reference_later_implementations_in_any_section_order() {
 #[test]
 fn abstract_types_in_data_preserve_identity_and_opacity() {
     for (body, code) in [
-        ("let box = { value = N.make 1 } -> M.get box.value", "E305"),
-        ("let box = { value = M.make 1 } -> box.value.number", "E601"),
+        ("{ value = N.make 1 } as box -> M.get box.value", "E305"),
+        ("{ value = M.make 1 } as box -> box.value.number", "E601"),
     ] {
         let source = program(
             "type Box = { value: M.T }",
@@ -253,20 +253,19 @@ fn abstract_types_in_data_preserve_identity_and_opacity() {
             ],
             body,
         );
-        let error = check_source(&source, "module-types.hd").err().unwrap();
+        let error = check_source(&source, "").err().unwrap();
         assert_eq!(error.code.as_deref(), Some(code), "{error}");
     }
     let source = program(
         "type Box = | Wrap(M.Private)",
-        &["module S", "implement S as M type Private = | Hidden"],
+        &[
+            "module S\n\n/module",
+            "implement S as M\ntype Private = | Hidden\n/implement",
+        ],
         "1",
     );
     assert_eq!(
-        check_source(&source, "module-types.hd")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
+        check_source(&source, "").err().unwrap().code.as_deref(),
         Some("E204")
     );
 }
@@ -290,9 +289,9 @@ fn native_data_payloads_use_module_abstract_representations() {
                 "type Box = | Wrap(M.T)"
             };
             let body = if record {
-                format!("let box = {{ value = M.make {index} }} -> M.get box.value")
+                format!("{{ value = M.make {index} }} as box -> M.get box.value")
             } else {
-                format!("let Wrap(value) = Wrap(M.make {index}) -> M.get value")
+                format!("Wrap(M.make {index}) as Wrap(value) -> M.get value")
             };
             let case_dir = dir.join(format!("case{case}_{record}_{index}"));
             std::fs::create_dir_all(&case_dir).unwrap();

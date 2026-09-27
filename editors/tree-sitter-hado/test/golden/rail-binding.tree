@@ -7,22 +7,17 @@
       )
     )
     (expression
-      (binding
-        (pattern
-          (name)
-        )
-        (expression
-          (pipe
-            (or
-              (and
-                (compare
-                  (additive
-                    (multiplicative
-                      (unary
-                        (postfix
-                          (primary
-                            (name)
-                          )
+      (rail_binding
+        (pipe
+          (or
+            (and
+              (compare
+                (additive
+                  (multiplicative
+                    (unary
+                      (postfix
+                        (primary
+                          (name)
                         )
                       )
                     )
@@ -31,6 +26,9 @@
               )
             )
           )
+        )
+        (pattern
+          (name)
         )
         (expression
           (pipe

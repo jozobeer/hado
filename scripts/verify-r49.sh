@@ -116,7 +116,7 @@ for index in range(6):
         source = (
             make
             + 'def main =\n'
-            + f'  let f = make "{prefix}" ->\n'
+            + f'  make "{prefix}" as f ->\n'
             + f'  f "{digits}"\n')
     build_run(str(root), f'effect-{index}', source, f'{prefix}{infix}{digits}')
 print(f'effectful value: seed {seed}, 6 definitions passed through a polymorphic function')
@@ -150,7 +150,7 @@ cases = {
         'type Box = { run: Fn(String => String {Error}) }\n'
         'def make(s: String): Fn(String => String {Error}) Pure => fn(t => String.concat s t)\n'
         'def main =\n'
-        '  let box = { run = make "a" } ->\n'
+        '  { run = make "a" } as box ->\n'
         '  box.run "b"\n',
         'ab'),
 }

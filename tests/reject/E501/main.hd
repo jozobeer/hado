@@ -1,6 +1,5 @@
 // spec: §41
 // error: E501
-def f v =>
-  let x = v ->
+def f v => v as x ->
   x
 def main = f 1

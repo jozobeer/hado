@@ -9,14 +9,11 @@ fn module_declarations_are_top_level_only() {
             "module Inner",
             "implement S as Inner def broken = )",
         ] {
-            let prefix = format!(
-                "def main = 1\nmodule S\nimplement S as Outer def run x => (\n{}",
-                " ".repeat(padding)
-            );
+            let prefix = format!("def main = 1\ndef outer x => (\n{}", " ".repeat(padding));
             let source = format!("{prefix}{nested})");
             let error = parse_source(&source, "nested-module.hd").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
-            assert_eq!((error.line, error.col), (4, padding + 1), "{error}");
+            assert_eq!((error.line, error.col), (3, padding + 1), "{error}");
         }
     }
 }
@@ -120,14 +117,14 @@ fn type_definition_contexts_are_distinct() {
         for source in [
             format!("type Alias{index} = Int"),
             format!("type Sum{index} = | Case{index}({{ field: Int }})"),
-            format!("module S{index} type T = Int"),
-            format!("module S{index} type T<A>"),
+            format!("module S{index} type T = Int\n/module"),
+            format!("module S{index} type T<A>\n/module"),
         ] {
             let error = parse_source(&source, "generated").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{source}");
         }
         let source = format!(
-            "def main = M{index}.f {index}\nmodule S{index} type T def f(x: T): Int\nimplement S{index} as M{index} type T = Int def f x => x"
+            "def main = M{index}.f {index}\nmodule S{index} type T def f(x: T): Int\n/module\nimplement S{index} as M{index} type T = Int def f x => x\n/implement"
         );
         assert!(parse_source(&source, "generated").is_ok());
     }
@@ -141,7 +138,7 @@ fn incomplete_grammar_forms_are_rejected() {
         "module S def f x",
         "module S def f(x: Int)",
         "def main = {}",
-        "def main = let {} = x -> 1",
+        "def main = x as {} -> 1",
     ] {
         assert_eq!(
             parse_source(source, "generated")
@@ -192,8 +189,8 @@ fn lambdas_may_branch_but_cannot_hide_nested_branches() {
     assert!(parse_source("def main = fn(x => if x => 1 | 0)", "generated").is_ok());
     for source in [
         "def main = if true => fn(x => if x => 1 | 0) | fn(x => x)",
-        "def main = if true => let x = 1 -> if x > 0 => 1 | 0 | 0",
-        "def main = if true => do Ok() -> if true => 1 | 0 | 0",
+        "def main = if true => 1 as x -> if x > 0 => 1 | 0 | 0",
+        "def main = if true => Ok() -> if true => 1 | 0 | 0",
     ] {
         assert_eq!(
             parse_source(source, "generated")
@@ -230,7 +227,7 @@ fn identifier_namespaces_follow_the_grammar() {
 #[test]
 fn prefix_expressions_require_grouping_inside_applications_and_operators() {
     for source in [
-        "def main = f let x = 1 -> x",
+        "def main = f if true => 1 | 0",
         "def main = 1 + if true => 2 | 3",
         "def main = - if true => 2 | 3",
     ] {
@@ -245,7 +242,7 @@ fn prefix_expressions_require_grouping_inside_applications_and_operators() {
     }
     for source in [
         "def main = f fn(x => x)",
-        "def main = f (let x = 1 -> x)",
+        "def main = f (1 as x ->\n  x)",
         "def main = 1 + (if true => 2 | 3)",
     ] {
         assert!(parse_source(source, "generated").is_ok(), "{source}");
@@ -270,7 +267,7 @@ fn implementation_aliases_only_realize_declared_abstract_types() {
         let prefix = format!("implement S{index} as M{index} type ");
         for body in ["Int", "Int List", "Fn(Int => Int)", "Other.T"] {
             let source =
-                format!("def main = 1\n{prefix}Extra{index} = {body}\nmodule S{index} type T");
+                format!("def main = 1\n{prefix}Extra{index} = {body}\n/implement\nmodule S{index} type T\n/module");
             parse_source(&source, "generated").unwrap();
             let error = hado::check_source(&source, "generated").err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
@@ -282,7 +279,7 @@ fn implementation_aliases_only_realize_declared_abstract_types() {
             "type Private = { value: Int } type T = Private",
         ] {
             let source = format!(
-                "def main = 1\nimplement S{index} as M{index} {body}\nmodule S{index} type T"
+                "def main = 1\nimplement S{index} as M{index} {body}\n/implement\nmodule S{index} type T\n/module"
             );
             parse_source(&source, "generated").unwrap_or_else(|error| panic!("{error}: {source}"));
         }
@@ -292,8 +289,8 @@ fn implementation_aliases_only_realize_declared_abstract_types() {
 #[test]
 fn abstract_aliases_reject_legacy_type_parameter_spelling() {
     for spacing in ["", "  ", "\n  "] {
-        let prefix = format!("module S type T\nimplement S as M type T{spacing}");
-        let source = format!("{prefix}<A> = A List");
+        let prefix = format!("module S type T\n/module\nimplement S as M type T{spacing}");
+        let source = format!("{prefix}<A> = A List\n/implement");
         let error = parse_source(&source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
         assert_eq!(
@@ -309,14 +306,14 @@ fn abstract_aliases_reject_legacy_type_parameter_spelling() {
 #[test]
 fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
     let prefix = "implement List as M type ";
-    let source = format!("def main = 1\n{prefix}Extra = Int");
+    let source = format!("def main = 1\n{prefix}Extra = Int\n/implement");
     let error = hado::check_source(&source, "generated").err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
     assert_eq!((error.line, error.col), (2, prefix.len() + 1));
     for (source, code) in [
-        ("def main = 1\nimplement Missing as M type T = Int", "E204"),
+        ("def main = 1\nimplement Missing as M type T = Int\n/implement", "E204"),
         (
-            "def main = 1\nmodule S type T\nmodule S\nimplement S as M type T = Int",
+            "def main = 1\nmodule S type T\n/module\nmodule S\n/module\nimplement S as M type T = Int\n/implement",
             "E205",
         ),
     ] {
@@ -329,8 +326,8 @@ fn alias_context_uses_prelude_and_preserves_signature_name_errors() {
 fn syntax_errors_precede_alias_name_errors_across_section_boundaries() {
     for signature_first in [false, true] {
         for broken in ["def broken = [)", "def broken x => [)"] {
-            let signature = "module S type T";
-            let implementation = format!("implement S as M type Extra = Int {broken}");
+            let signature = "module S type T\n/module";
+            let implementation = format!("implement S as M type Extra = Int {broken}\n/implement");
             let sections = if signature_first {
                 format!("{signature}\n{implementation}")
             } else {
@@ -350,7 +347,7 @@ fn syntax_errors_precede_alias_name_errors_across_section_boundaries() {
             );
         }
     }
-    let source = "def main = [)\nimplement List as M type Extra = Int";
+    let source = "def main = [)\nimplement List as M type Extra = Int\n/implement";
     let error = hado::check_source(source, "generated").err().unwrap();
     assert_eq!((error.line, error.col), (1, "def main = [".len() + 1));
 }
@@ -358,23 +355,24 @@ fn syntax_errors_precede_alias_name_errors_across_section_boundaries() {
 #[test]
 fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
     for source in [
-        "def broken = [)\nmodule S type T\nimplement S as M type Extra = Int",
-        "def broken = [)\nmodule Bad = struct  end\nmodule S\nmodule S type T\nimplement S as M type T = Int",
-        "def broken = [)\nmodule S def broken(x: Int) Int\nimplement S as M type Extra = Int",
+        "def broken = [)\nmodule S type T\n/module\nimplement S as M type Extra = Int\n/implement",
+        "def broken = [)\nmodule Bad = struct  end\n/module\nmodule S\n/module\nmodule S type T\n/module\nimplement S as M type T = Int\n/implement",
+        "def broken = [)\nmodule S def broken(x: Int) Int\n/module\nimplement S as M type Extra = Int\n/implement",
     ] {
         let error = parse_source(source, "generated").unwrap_err();
         assert_eq!(error.code.as_deref(), Some("E100"));
         assert_eq!((error.line, error.col), (1, 15), "{error}: {source}");
     }
-    let source = "implement S as M type T = Int\nmodule S type T def broken(x: Int) Int";
+    let source =
+        "implement S as M type T = Int /implement\nmodule S type T def broken(x: Int) Int\n/module";
     let error = parse_source(source, "generated").unwrap_err();
     assert_eq!(
         error.line, 2,
         "an incomplete signature cannot prove an alias invalid: {error}"
     );
     for source in [
-        "module S type T\nimplement S as M type T = Int def broken = [)",
-        "module S type T\nimplement S as M type T =",
+        "module S type T\n/module\nimplement S as M type T = Int def broken = [)\n/implement",
+        "module S type T\n/module\nimplement S as M type T =\n/implement",
         "def main = [)",
     ] {
         assert!(parse_source(source, "generated").is_err());
@@ -384,7 +382,7 @@ fn syntax_recovery_keeps_scopes_and_never_hides_parse_errors() {
 
 #[test]
 fn broken_heading_precedes_later_duplicate_contracts() {
-    let source = "module Bad = struct  end\n\ndef main = 1\nimplement S as M type T = Int\nmodule S\nmodule S type T";
+    let source = "module Bad = struct  end\n/module\n\ndef main = 1\nimplement S as M type T = Int\n/implement\nmodule S\n/module\nmodule S type T\n/module";
     let error = parse_source(source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
     assert_eq!((error.line, error.col), (1, "module Bad ".len() + 1));
@@ -392,13 +390,13 @@ fn broken_heading_precedes_later_duplicate_contracts() {
 
 #[test]
 fn legacy_alias_parameters_precede_a_malformed_alias_body() {
-    let prefix = "module S type T\nimplement S as M type T";
-    let source = format!("{prefix}<A> = (Int, ) List");
+    let prefix = "module S type T\n/module\nimplement S as M type T";
+    let source = format!("{prefix}<A> = (Int, ) List\n/implement");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
     assert_eq!(
         (error.line, error.col),
-        (2, prefix.rsplit('\n').next().unwrap().len() + 1),
+        (3, prefix.rsplit('\n').next().unwrap().len() + 1),
         "{error}"
     );
 }
@@ -406,7 +404,7 @@ fn legacy_alias_parameters_precede_a_malformed_alias_body() {
 #[test]
 fn malformed_alias_body_precedes_alias_name_resolution() {
     let prefix = "implement S as M type Extra =";
-    let source = format!("{prefix}(Int, ) Result\nmodule S type T");
+    let source = format!("{prefix}(Int, ) Result\n/implement\nmodule S type T\n/module");
     let error = parse_source(&source, "generated").unwrap_err();
     assert_eq!(error.code.as_deref(), Some("E100"));
     assert_eq!(
@@ -429,12 +427,18 @@ fn functor_and_application_lists_require_uppercase_nonempty_items() {
         ("implement S as A = Make(I, ", ")"),
     ] {
         for padding in 0..5 {
+            let closer = if prefix.contains(" = ") {
+                ""
+            } else {
+                "\n/implement"
+            };
             let source = format!(
-                "{}{}{}{}",
+                "{}{}{}{}{}",
                 "\n".repeat(padding % 3),
                 prefix,
                 " ".repeat(padding),
-                invalid
+                invalid,
+                closer
             );
             let error = parse_source(&source, "functor-list.hd").unwrap_err();
             assert_eq!(error.code.as_deref(), Some("E100"), "{source}: {error}");
@@ -462,9 +466,9 @@ fn applications_end_before_the_next_section_and_cannot_have_items() {
             assert_eq!((error.line, error.col), (2, padding + 1));
         }
         for section in [
-            "module Next",
-            "implement S as Next",
-            "implement S as Next(P: S)",
+            "module Next\n/module",
+            "implement S as Next\n/implement",
+            "implement S as Next(P: S)\n/implement",
             "implement S as Next = Make(J)",
         ] {
             let source = format!("{prefix}{section}");
@@ -484,7 +488,7 @@ fn functor_forms_preserve_generated_names_and_argument_order() {
         let params: Vec<_> = (0..count).map(|i| format!("P{i}: S{i}")).collect();
         let arguments: Vec<_> = (0..count).rev().map(|i| format!("I{i}")).collect();
         let source = format!(
-            "implement Result as Make({}) type T = Int\nimplement Result as Applied = Make({})",
+            "implement Result as Make({}) type T = Int\n/implement\nimplement Result as Applied = Make({})",
             params.join(", "),
             arguments.join(", ")
         );

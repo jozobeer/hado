@@ -1,30 +1,22 @@
 module String
-def length(value: String): Int Pure
-def concat(left: String, right: String): String Pure
-def slice(s: String, start: Int, end: Int): String {Error}
-def get(s: String, index: Int): Char {Error}
-def split(s: String, separator: String): String List {Error}
-def starts_with(s: String, prefix: String): Bool Pure
-def contains(s: String, part: String): Bool Pure
-def join(values: String List, separator: String): String Pure
-def trim(s: String): String Pure
+def length (value: String): Int Pure
+def concat (left: String, right: String): String Pure
+def slice (s: String, start: Int, end: Int): String {Error}
+def get (s: String, index: Int): Char {Error}
+def split (s: String, separator: String): String List {Error}
+def starts_with (s: String, prefix: String): Bool Pure
+def contains (s: String, part: String): Bool Pure
+def join (values: String List, separator: String): String Pure
+def trim (s: String): String Pure
+/module
 implement String as String
 def length value => __string_length value
 def concat left right => __string_concat left right
-def slice s start end =>
-  if start >= 0 && start <= end && end <= length s
-    => __string_slice s start end
-    | raise { message = "IndexOutOfRange" }
-def get s index =>
-  if index >= 0 && index < length s
-    => __string_get s index
-    | raise { message = "IndexOutOfRange" }
-def split s separator =>
-  if length separator == 0
-    => raise { message = "EmptySeparator" }
-    | Array.to_list (__string_split s separator)
-def starts_with s prefix =>
-  length prefix <= length s && __string_slice s 0 (length prefix) == prefix
+def slice s start end => if start >= 0 && start <= end && end <= length s => __string_slice s start end | raise { message = "IndexOutOfRange" }
+def get s index => if index >= 0 && index < length s => __string_get s index | raise { message = "IndexOutOfRange" }
+def split s separator => if length separator == 0 => raise { message = "EmptySeparator" } | Array.to_list (__string_split s separator)
+def starts_with s prefix => length prefix <= length s && __string_slice s 0 (length prefix) == prefix
 def contains s part => length part == 0 || __string_find s part 0 >= 0
 def join values separator => __string_join (Array.of_list values) separator
 def trim s => __string_trim s
+/implement

@@ -70,11 +70,11 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Collect -> with Inner -> do y $payload_a -> do y b -> ()
+def main = with Collect -> with Inner -> y $payload_a -> y b -> ()
 EOF
 )"
 
@@ -84,12 +84,12 @@ again y(value: Int): Void
 effect W
 again w(value: Int): Void
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return x => x
 handler W as Inner
-again w value => let rest = resume () -> [value + 100, ...rest]
+again w value => resume () as rest -> [value + 100, ...rest]
 return _ => []
-def main = with Collect -> with Inner -> do y $payload_a2 -> do w 2 -> ()
+def main = with Collect -> with Inner -> y $payload_a2 -> w 2 -> ()
 EOF
 )"
 
@@ -99,12 +99,12 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return x => [x]
 handler B as Inner
 once b => 2
 return _ => 42
-def main = with Collect -> with Inner -> do y 1 -> ()
+def main = with Collect -> with Inner -> y 1 -> ()
 EOF
 )"
 
@@ -114,11 +114,11 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Collect -> with Inner -> do y b -> ()
+def main = with Collect -> with Inner -> y b -> ()
 EOF
 )"
 
@@ -128,11 +128,11 @@ once a: Int
 effect Y
 again y(value: Int): Void
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler A as Inner
 once a => 1
-def main = with Collect -> with Inner -> do y 3 -> ()
+def main = with Collect -> with Inner -> y 3 -> ()
 EOF
 )"
 
@@ -144,9 +144,9 @@ again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y $payload_e -> ()
+def main = with Outer -> with Collect -> y $payload_e -> ()
 EOF
 )"
 
@@ -156,12 +156,12 @@ again y(value: Int): Void
 effect Z
 again z(value: Int): Void
 handler Y as CollectY
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Z as CollectZ
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with CollectY -> with CollectZ -> do y 3 -> ()
+def main = with CollectY -> with CollectZ -> y 3 -> ()
 EOF
 )"
 
@@ -171,12 +171,12 @@ again y(value: Int): Void
 effect E
 abort e(reason: Int)
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler E as Trap
 abort e reason => [reason]
 return _ => []
-def main = with Collect -> with Trap -> do y 7 -> ()
+def main = with Collect -> with Trap -> y 7 -> ()
 EOF
 )"
 
@@ -190,11 +190,11 @@ once b: Int
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Outer -> with Collect -> with Inner -> do y ($payload_h + a + b) -> ()
+def main = with Outer -> with Collect -> with Inner -> y ($payload_h + a + b) -> ()
 EOF
 )"
 
@@ -202,12 +202,12 @@ write_source i "$(cat <<'EOF'
 effect Y
 again y(value: Int): Void
 handler Y as CollectOuter
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return x => x
 handler Y as CollectInner
-again y value => let rest = resume () -> [value + 100, ...rest]
+again y value => resume () as rest -> [value + 100, ...rest]
 return _ => []
-def main = with CollectOuter -> with CollectInner -> do y 3 -> ()
+def main = with CollectOuter -> with CollectInner -> y 3 -> ()
 EOF
 )"
 
@@ -215,9 +215,9 @@ write_source j1 "$(cat <<'EOF'
 effect Y
 again y(value: Int): Void
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Collect -> do y 3 -> ()
+def main = with Collect -> y 3 -> ()
 EOF
 )"
 
@@ -225,9 +225,9 @@ write_source j2 "$(cat <<'EOF'
 effect Y
 again y(value: Int): Void
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Collect -> do y 1 -> do y 2 -> ()
+def main = with Collect -> y 1 -> y 2 -> ()
 EOF
 )"
 
@@ -237,12 +237,12 @@ again z(value: Int): Void
 effect Y
 again y(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y 1 -> do z 2 -> ()
+def main = with Outer -> with Collect -> y 1 -> z 2 -> ()
 EOF
 )"
 
@@ -254,14 +254,14 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
+def main = with Outer -> with Collect -> with Inner -> y b -> z 5 -> ()
 EOF
 )"
 
@@ -271,12 +271,12 @@ again z(value: Int): Void
 effect Y
 again y(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do z 4 -> ()
+def main = with Outer -> with Collect -> z 4 -> ()
 EOF
 )"
 
@@ -288,9 +288,9 @@ again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y 9 -> do y a -> ()
+def main = with Outer -> with Collect -> y 9 -> y a -> ()
 EOF
 )"
 

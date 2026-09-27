@@ -19,7 +19,7 @@ CLI = ('def usage = "usage: cli <name>"\n'
        '  | [] => raise { message = usage }\n'
        '  | [name, ..._] => name\n'
        'def main =\n'
-       '  let args = EnvDefault.args ->\n'
+       '  EnvDefault.args as args ->\n'
        '  IoDefault.log (message args)\n')
 TEST = 'def main =\n  if 1 == 1 => ()\n  | raise { message = "should not happen" }\n'
 # 正準でない腕（E505）。check --fix が有限回で受理に到達することを測る。

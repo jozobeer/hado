@@ -284,14 +284,14 @@ gates_case() {
     cp -r tools/gates/report "$base/report"
     {
         printf 'type Gate = { name: String; passed: Int; total: Int }\n\n'
-        printf 'def main =\n  let gates = ['
+        printf 'def main =\n  ['
         for triple in "$@"; do
             IFS=: read -r name p t <<<"$triple"
             [ "$first" -eq 1 ] || printf ','
             printf '\n    { name = "%s"; passed = %s; total = %s }' "$name" "$p" "$t"
             first=0
         done
-        printf '\n  ] ->\n'
+        printf '\n  ] as gates ->\n'
         printf '  report::Report.render\n'
         printf '    (List.fold gates report::Report.empty fn(tally, gate => report::Report.add tally gate.name gate.passed gate.total))\n'
     } >"$base/main.hd"
@@ -310,10 +310,10 @@ gates_case() {
 
 # 共通の探針。契約 Monoid と実装 StringMonoid。
 monoid_contract() {
-    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n'
+    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n/module\n'
 }
 monoid_realization() {
-    printf 'implement Monoid as StringMonoid\n%s type T = String\ndef combine left right => String.concat left right\ndef of value => value\n' "$1"
+    printf 'implement Monoid as StringMonoid\n%s type T = String\ndef combine left right => String.concat left right\ndef of value => value\n/implement\n' "$1"
 }
 
 # 実行で印字する値は実行時に生成し、期待値は判定器側で計算する（定数で書かない）。
@@ -355,14 +355,14 @@ mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$wo
 {
     printf 'def main = 1\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\nshared type T = | A | B\n'
+    printf '\nimplement Monoid as StringMonoid\nshared type T = | A | B\n/implement\n'
 } >"$workdir/33c1/main.hd"
 
 # 33-c (2): constructor 付き本体（record）への shared は E100、{ の位置。
 {
     printf 'def main = 1\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\nshared type T = { x: Int }\n'
+    printf '\nimplement Monoid as StringMonoid\nshared type T = { x: Int }\n/implement\n'
 } >"$workdir/33c2/main.hd"
 
 # 33-c (3): 契約に無い型への shared は E204、型名の位置。契約の T も実体化し、
@@ -370,14 +370,14 @@ mkdir -p "$workdir/33c1" "$workdir/33c2" "$workdir/33c3" "$workdir/33c3neg" "$wo
 {
     printf 'def main = StringMonoid.of "a"\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value\n'
+    printf '\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value\n/implement\n'
 } >"$workdir/33c3/main.hd"
 
 # 33-c (3) 負の対照: 契約が U を宣言していれば E204 にならない（別の欠陥は問わない）。
 {
     printf 'def main = StringMonoid.of "a"\n\n'
     monoid_contract
-    printf 'type U\ndef size(value: U): Int Pure\n\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value\ndef size _ => 0\n'
+    printf 'type U\ndef size(value: U): Int Pure\n\nimplement Monoid as StringMonoid\nshared type T = String\nshared type U = Int\ndef combine left _ => left\ndef of value => value\ndef size _ => 0\n/implement\n'
 } >"$workdir/33c3neg/main.hd"
 
 # 33-c (4): 外の shared は E100。
@@ -386,14 +386,14 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 # 33-c (5): 契約（module）の中の shared は E100。
 {
     printf 'def main = 1\n\n'
-    printf 'module Monoid\nshared type T\ndef of(value: String): T Pure\n'
+    printf 'module Monoid\nshared type T\ndef of(value: String): T Pure\n/module\n'
 } >"$workdir/33c5/main.hd"
 
 # 33-c (6): shared の後に type 以外（def）は E100。
 {
     printf 'def main = 1\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\nshared def f = 1\ndef combine left _ => left\ndef of value => value\n'
+    printf '\nimplement Monoid as StringMonoid\nshared def f = 1\ndef combine left _ => left\ndef of value => value\n/implement\n'
 } >"$workdir/33c6/main.hd"
 
 # 33-a (2): shared の等式が公開面に出て、combine/of が String で単一化する。
@@ -415,31 +415,31 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 # 33-d: 契約 Store の抽象型 T を shared type T = Int で実体化し、main が整数を返す。
 {
     printf 'def main = Store.find 1\n\n'
-    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = Int\ndef find _ => %s\n' "$rand_int"
+    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = Int\ndef find _ => %s\n/implement\n' "$rand_int"
 } >"$workdir/33d/main.hd"
 
 # 33-d 緩和なし: 印なしは E705 で def main。
 {
     printf 'def main = Store.find 1\n\n'
-    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = Int\ndef find _ => 1\n'
+    printf 'module Store\ntype T\ndef find(id: Int): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = Int\ndef find _ => 1\n/implement\n'
 } >"$workdir/33dneg/main.hd"
 
 # 33-e: shared で record に解け、実装の外の field 参照が通る。
 {
     printf 'def main = describe (UserStore.make "%s")\ndef describe (t: UserStore.T) => t.name\n\n' "$rand_name"
     printf 'type User = { name: String }\n\n'
-    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement UserStore as UserStore\nshared type T = User\ndef make name => { name = name }\n'
+    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement UserStore as UserStore\nshared type T = User\ndef make name => { name = name }\n/implement\n'
 } >"$workdir/33e/main.hd"
 
 # 33-e 緩和なし: 印なしは E601 で field 参照の `.` の位置。
 {
     printf 'def main = describe (UserStore.make "%s")\ndef describe (t: UserStore.T) => t.name\n\n' "$rand_name"
     printf 'type User = { name: String }\n\n'
-    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement UserStore as UserStore\ntype T = User\ndef make name => { name = name }\n'
+    printf 'module UserStore\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement UserStore as UserStore\ntype T = User\ndef make name => { name = name }\n/implement\n'
 } >"$workdir/33eneg/main.hd"
 
 # 33-f (2): shared type T = String の値に Int を渡すと E305、両辺に `.T` は現れない。
@@ -453,29 +453,29 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 # 33-h: 型引数付きの shared type A T = A List。push と Int Stack.T の注釈が通る。
 {
     printf 'def main = Stack.push (f [1]) 2\ndef f (s: Int Stack.T) => s\n\n'
-    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n\n'
-    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n'
+    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n/module\n\n'
+    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n/implement\n'
 } >"$workdir/33h/main.hd"
 
 # 33-i (1): shared type T = T は E602 で implement。
 {
     printf 'def main = StringMonoid.of "a"\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\nshared type T = T\ndef combine left right => left\ndef of value => value\n'
+    printf '\nimplement Monoid as StringMonoid\nshared type T = T\ndef combine left right => left\ndef of value => value\n/implement\n'
 } >"$workdir/33i1/main.hd"
 
 # 33-i (2): shared type T = U と shared type U = T は E602 で implement。
 {
     printf 'def main = StringMonoid.of "a"\n\n'
-    printf 'module Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n\n'
-    printf 'implement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left right => left\ndef of value => value\n'
+    printf 'module Monoid\ntype T\ntype U\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\n/module\n\n'
+    printf 'implement Monoid as StringMonoid\nshared type T = U\nshared type U = T\ndef combine left right => left\ndef of value => value\n/implement\n'
 } >"$workdir/33i2/main.hd"
 
 # 33-i (3) 負の対照: 印なしの type T = T も E602（変わらない）。
 {
     printf 'def main = StringMonoid.of "a"\n\n'
     monoid_contract
-    printf '\nimplement Monoid as StringMonoid\ntype T = T\ndef combine left right => left\ndef of value => value\n'
+    printf '\nimplement Monoid as StringMonoid\ntype T = T\ndef combine left right => left\ndef of value => value\n/implement\n'
 } >"$workdir/33i3/main.hd"
 
 # 33-0 構文受理: main の無い .hd はライブラリとして受理。shared 実体化があっても
@@ -490,17 +490,17 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 
 # 契約 Monoid と Fold。functor MakeFold の実体化を functor_body が作る。
 functor_contracts() {
-    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\ndef show(value: T): String Pure\n\n'
-    printf 'module Fold\ntype T\ndef fold(values: T List): T Pure\n'
+    printf 'module Monoid\ntype T\ndef combine(left: T, right: T): T Pure\ndef of(value: String): T Pure\ndef empty: T Pure\ndef show(value: T): String Pure\n/module\n\n'
+    printf 'module Fold\ntype T\ndef fold(values: T List): T Pure\n/module\n'
 }
 functor_body() {
-    printf '\nimplement Fold as MakeFold(M: Monoid)\n%s type T = M.T\ndef fold values => List.fold values M.empty M.combine\n' "$1"
+    printf '\nimplement Fold as MakeFold(M: Monoid)\n%s type T = M.T\ndef fold values => List.fold values M.empty M.combine\n/implement\n' "$1"
 }
 string_monoid() {
-    printf 'implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n'
+    printf 'implement Monoid as StringMonoid\nshared type T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n/implement\n'
 }
 opaque_monoid() {
-    printf 'implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n'
+    printf 'implement Monoid as OpaqueMonoid\ntype T = String\ndef combine left right => String.concat left right\ndef of value => value\ndef empty = ""\ndef show value => value\n/implement\n'
 }
 
 mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$workdir/33a1bneg" \
@@ -566,20 +566,20 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 両方を見る（expect_code は status=1 とコードの出現を要求する）。
 {
     printf 'def main = A.read (A.make 7)\n'
-    printf 'module Id\ntype T\ndef make(n: Int): T Pure\ndef read(value: T): Int Pure\n\n'
-    printf 'implement Id as I\nshared type T = Int\ndef make n => n\ndef read value => value\n\n'
-    printf 'implement Id as Make(Arg: Id)\nshared type T = Arg.T\ndef make n => Arg.make n\ndef read value => Arg.read value\n\n'
+    printf 'module Id\ntype T\ndef make(n: Int): T Pure\ndef read(value: T): Int Pure\n/module\n\n'
+    printf 'implement Id as I\nshared type T = Int\ndef make n => n\ndef read value => value\n/implement\n\n'
+    printf 'implement Id as Make(Arg: Id)\nshared type T = Arg.T\ndef make n => Arg.make n\ndef read value => Arg.read value\n/implement\n\n'
     printf 'implement Id as A = Make(B)\nimplement Id as B = Make(A)\n'
 } >"$workdir/33cyc/main.hd"
 
 # 33-b(1): 印なしの type T = M.T を 2 回適用すると別の抽象型（A.read (B.make 7) が E305）。
 {
     printf 'def main = A.read (B.make 7)\n'
-    printf 'module Id\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\n'
-    printf 'module Box\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n\n'
-    printf 'implement Id as I\ntype T = Int\ndef make x => x\ndef read x => x\n\n'
-    printf 'implement Id as J\ntype T = Int\ndef make x => x\ndef read x => x\n\n'
-    printf 'implement Box as Make(Arg: Id)\ntype T = Arg.T\ndef make x => Arg.make x\ndef read x => Arg.read x\n\n'
+    printf 'module Id\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n/module\n\n'
+    printf 'module Box\ntype T\ndef make(x: Int): T Pure\ndef read(x: T): Int Pure\n/module\n\n'
+    printf 'implement Id as I\ntype T = Int\ndef make x => x\ndef read x => x\n/implement\n\n'
+    printf 'implement Id as J\ntype T = Int\ndef make x => x\ndef read x => x\n/implement\n\n'
+    printf 'implement Box as Make(Arg: Id)\ntype T = Arg.T\ndef make x => Arg.make x\ndef read x => Arg.read x\n/implement\n\n'
     printf 'implement Box as A = Make(I)\nimplement Box as B = Make(J)\n'
 } >"$workdir/33b1/main.hd"
 
@@ -596,29 +596,29 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # shared type T = Int で解け、Int を直接渡せる。
 {
     printf 'def main = Store.find %s\n' "$rand_int"
-    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n\n'
-    printf 'module Store\ndef find(id: Id.T): Int Pure\n\n'
-    printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n\n'
-    printf 'implement Store as Store\ndef find id => id\n'
+    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
+    printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
+    printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n/implement\n\n'
+    printf 'implement Store as Store\ndef find id => id\n/implement\n'
 } >"$workdir/33g1/main.hd"
 
 # 33-g (2): 実装が 2 つなら E603（変わらない）。
 {
     printf 'def main = Store.find %s\n' "$rand_int"
-    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n\n'
-    printf 'module Store\ndef find(id: Id.T): Int Pure\n\n'
-    printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n\n'
-    printf 'implement Id as OtherId\nshared type T = Int\ndef make n => n\n\n'
-    printf 'implement Store as Store\ndef find id => id\n'
+    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
+    printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
+    printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n/implement\n\n'
+    printf 'implement Id as OtherId\nshared type T = Int\ndef make n => n\n/implement\n\n'
+    printf 'implement Store as Store\ndef find id => id\n/implement\n'
 } >"$workdir/33g2/main.hd"
 
 # 33-g (3): 唯一の実装が印なしなら Id.T は不透明で、Int を渡すと E305。
 {
     printf 'def main = Store.find %s\n' "$rand_int"
-    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n\n'
-    printf 'module Store\ndef find(id: Id.T): Int Pure\n\n'
-    printf 'implement Id as IntId\ntype T = Int\ndef make n => n\n\n'
-    printf 'implement Store as Store\ndef find id => id\n'
+    printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
+    printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
+    printf 'implement Id as IntId\ntype T = Int\ndef make n => n\n/implement\n\n'
+    printf 'implement Store as Store\ndef find id => id\n/implement\n'
 } >"$workdir/33g3/main.hd"
 
 # --- 工程 1 の修正: ADT payload・別実装の局所型・局所 record ---
@@ -628,45 +628,45 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 渡せる（探針 wrapper）。
 {
     printf 'def main = Box("%s")\ntype Box = | Box(Store.T)\n' "$rand_box"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33wrap/main.hd"
 
 # 負の対照: shared を外すと payload は不透明のまま E305。
 {
     printf 'def main = Box("%s")\ntype Box = | Box(Store.T)\n' "$rand_box"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33wrapneg/main.hd"
 
 # 別実装の局所型は混同されない。2 つの実装 A B が同名の局所型 Hidden を持ち、
 # どちらも shared type T = Hidden でも A.T と B.T は別の型（探針 distinct）。
 {
     printf 'def main = A.read (B.make %s)\n' "$rand_other"
-    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\n'
-    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n\n'
-    printf 'implement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n'
+    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n/module\n\n'
+    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n/implement\n\n'
+    printf 'implement Store as B\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n/implement\n'
 } >"$workdir/33dist/main.hd"
 
 # 正の対照: 同じ実装の中では局所型は一致するので受理して実行できる。
 {
     printf 'def main = A.read (A.make %s)\n' "$rand_int"
-    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n\n'
-    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n'
+    printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n/module\n\n'
+    printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n/implement\n'
 } >"$workdir/33distpos/main.hd"
 
 # 局所 record への shared は field 参照を許す（探針 localrecord）。
 {
     printf 'def main = name (Store.make "%s")\ndef name (t: Store.T) => t.name\n' "$rand_rec"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype Hidden = { name: String }\nshared type T = Hidden\ndef make name => { name = name }\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype Hidden = { name: String }\nshared type T = Hidden\ndef make name => { name = name }\n/implement\n'
 } >"$workdir/33lrec/main.hd"
 
 # 負の対照: shared を外すと局所 record でも field 参照は E601。
 {
     printf 'def main = name (Store.make "%s")\ndef name (t: Store.T) => t.name\n' "$rand_rec"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype Hidden = { name: String }\ntype T = Hidden\ndef make name => { name = name }\n/implement\n'
 } >"$workdir/33lrecneg/main.hd"
 
 # --- 工程 1 の修正 2: パターン payload と field 射影への shared の展開 ---
@@ -676,30 +676,30 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 値を String として使える（探針 pattern）。
 {
     printf 'def main = read (Box(Store.make "%s"))\ndef read | Box(value) => String.concat value "!"\ntype Box = | Box(Store.T)\n' "$rand_pat"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33pat/main.hd"
 
 # 負の対照: shared を外すとパターンで束縛した payload は不透明のまま E305。
 {
     printf 'def main = read (Box(Store.make "%s"))\ndef read | Box(value) => String.concat value "!"\ntype Box = | Box(Store.T)\n' "$rand_pat"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33patneg/main.hd"
 
 # field 射影の型を shared が展開する。record の field の型が契約修飾型 Store.T で、
 # 唯一の実装が shared type T = String のとき、射影した値を String として使える（探針 projection）。
 {
     printf 'def main = String.concat ({ name = Store.make "%s" }).name "!"\ntype Box = { name: Store.T }\n' "$rand_proj"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33proj/main.hd"
 
 # 負の対照: shared を外すと射影した field 型は不透明のまま E305。
 {
     printf 'def main = String.concat ({ name = Store.make "%s" }).name "!"\ntype Box = { name: Store.T }\n' "$rand_proj"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33projneg/main.hd"
 
 # named constructor の構築とパターンの payload の型を shared が展開する。外の ADT Box の
@@ -707,15 +707,15 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # String のとき、構築で String を渡せ、パターンで束縛した値を String として使える（探針 named）。
 {
     printf 'def main = read (Box { value = Store.make "%s" })\ndef read\n| Box { value } => String.concat value "!"\ntype Box = | Box { value: Store.T }\n' "$rand_named"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33named/main.hd"
 
 # 負の対照: shared を外すと named constructor の payload は不透明のまま E305。
 {
     printf 'def main = read (Box { value = Store.make "%s" })\ndef read\n| Box { value } => String.concat value "!"\ntype Box = | Box { value: Store.T }\n' "$rand_named"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33namedneg/main.hd"
 
 # --- 工程 1 の修正 4: 等式の収集を型と効果の登録より前に置く 4 形 ---
@@ -727,37 +727,37 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # Store.T が解けていないと box.value が不透明のまま E305 になる（探針 inferred-projection）。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read box => String.concat box.value "!"\ntype Box = { value: Store.T }\n' "$rand_ip"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33ip/main.hd"
 
 # 負 1: shared を外すと record schema の payload は不透明のまま型検査が落ちる。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read box => String.concat box.value "!"\ntype Box = { value: Store.T }\n' "$rand_ip"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33ipneg/main.hd"
 
 # 正 2 (record-pattern): record パターンで束縛した値を String に使う。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read\n| { value = v } => String.concat v "!"\ntype Box = { value: Store.T }\n' "$rand_rp"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33rp/main.hd"
 
 # 負 2: shared を外すとパターンで束縛した payload は不透明のまま型検査が落ちる。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read\n| { value = v } => String.concat v "!"\ntype Box = { value: Store.T }\n' "$rand_rp"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
 } >"$workdir/33rpneg/main.hd"
 
 # 正 3 (effect): 効果 Send の操作 send の payload が Store.T。register_effects の時点で
 # 等式が解けていないと payload が不透明になり、handler の腕の String.concat が E305。
 {
     printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
     printf 'effect Send\nagain send(value: Store.T): String\n'
     printf 'handler Send as Handle\nagain send value => resume (String.concat value "!")\n'
 } >"$workdir/33eff/main.hd"
@@ -765,8 +765,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 負 3: shared を外すと操作型の payload は不透明のまま handler の腕で落ちる。
 {
     printf 'def main = with Handle -> send (Store.make "%s")\n' "$rand_eff"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
     printf 'effect Send\nagain send(value: Store.T): String\n'
     printf 'handler Send as Handle\nagain send value => resume (String.concat value "!")\n'
 } >"$workdir/33effneg/main.hd"
@@ -775,8 +775,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 等式が解けていないと結果型が不透明になり、腕の resume value が E305。
 {
     printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = String\ndef make name => name\n/implement\n'
     printf 'effect Ask\nagain get(value: String): Store.T\n'
     printf 'handler Ask as Handle\nagain get value => resume value\n'
 } >"$workdir/33harm/main.hd"
@@ -784,8 +784,8 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 負 4: shared を外すと操作の結果型は不透明のまま腕の resume で落ちる。
 {
     printf 'def main = with Handle -> get (Store.make "%s")\n' "$rand_harm"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = String\ndef make name => name\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = String\ndef make name => name\n/implement\n'
     printf 'effect Ask\nagain get(value: String): Store.T\n'
     printf 'handler Ask as Handle\nagain get value => resume value\n'
 } >"$workdir/33harmneg/main.hd"
@@ -797,15 +797,15 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 正 1 (function-body): 未注釈の関数が record の field の関数を呼ぶ。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "!"\ntype Box = { value: Store.T }\n' "$rand_fbody"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\nshared type T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n/implement\n'
 } >"$workdir/33fn/main.hd"
 
 # 負 1: shared を外すと record schema の field は不透明のまま型検査が落ちる。
 {
     printf 'def main = read ({ value = Store.make "%s" })\ndef read box => box.value "!"\ntype Box = { value: Store.T }\n' "$rand_fbody"
-    printf 'module Store\ntype T\ndef make(name: String): T Pure\n\n'
-    printf 'implement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n'
+    printf 'module Store\ntype T\ndef make(name: String): T Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = Fn(String => String)\ndef make name => fn(suffix => String.concat name suffix)\n/implement\n'
 } >"$workdir/33fnneg/main.hd"
 
 # 正 2 (function-with-effects): 効果行を持つ関数型。go は {Error} の parse を呼び、
@@ -815,16 +815,16 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 解いていなければ（効果行を落としていれば）field の型が合わず E301 / E305 になる。
 {
     printf 'def main = with Catch -> go (read ({ value = go; tag = "%s" }))\ndef read box => box.tag\ntype Box = { value: Store.T; tag: String }\ndef go (suffix: String): String {Error} => parse suffix\ndef parse (input: String): String {Error} => raise { message = String.concat input "%s" }\n\n' "$rand_fe_suffix" "$rand_fe_message"
-    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n\n'
-    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n\n'
+    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n/module\n\n'
+    printf 'implement Store as Store\nshared type T = Fn(String => String {Error})\ndef touch _ => ()\n/implement\n\n'
     printf 'handler Error as Catch\nabort raise e => e.message\n'
 } >"$workdir/33fneff/main.hd"
 
 # 負 2: shared を外すと効果行付きの field は不透明のまま型検査が落ちる。
 {
     printf 'def main = read ({ value = go })\ndef read box => box.value "%s"\ntype Box = { value: Store.T }\ndef go (suffix: String): String {Error} => String.concat "%s" (parse suffix)\ndef parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input\n\n' "$rand_fe_suffix" "$rand_fe_prefix"
-    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n\n'
-    printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef touch _ => ()\n'
+    printf 'module Store\ntype T\ndef touch(name: String): Void Pure\n/module\n\n'
+    printf 'implement Store as Store\ntype T = Fn(String => String {Error})\ndef touch _ => ()\n/implement\n'
 } >"$workdir/33fneffneg/main.hd"
 
 # --- 工程 1 の修正 7: 契約と実体化の型引数の個数の照合 ---
@@ -834,22 +834,22 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 期待は E602 で終了 1（shared を消した対照と同じ診断）。
 {
     printf 'def main = Store.make "hi"\n'
-    printf 'module Store\ntype T\ndef make(x: String): T Pure\n'
-    printf 'implement Store as Store\nshared type A T = A List\ndef make x => [x]\n'
+    printf 'module Store\ntype T\ndef make(x: String): T Pure\n/module\n'
+    printf 'implement Store as Store\nshared type A T = A List\ndef make x => [x]\n/implement\n'
 } >"$workdir/33arity1/main.hd"
 
 # 負 2: 契約 type A T（型引数 1）に対し shared type T = Int（型引数 0）。実体化の方が
 # 少ない形でも同じ assert に到達する。
 {
-    printf 'module Stack\ntype A T\ndef A empty: A T Pure\n'
-    printf 'implement Stack as Stack\nshared type T = Int\ndef empty = 1\n'
+    printf 'module Stack\ntype A T\ndef A empty: A T Pure\n/module\n'
+    printf 'implement Stack as Stack\nshared type T = Int\ndef empty = 1\n/implement\n'
 } >"$workdir/33arity2/main.hd"
 
 # 正の対照: 個数が合う shared type A T = A List は受理され、push が実行値と一致する。
 {
     printf 'def main = Stack.push [1] %s\n' "$rand_int"
-    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n'
-    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n'
+    printf 'module Stack\ntype A T\ndef A push(stack: A T, value: A): A T Pure\ndef A empty: A T Pure\n/module\n'
+    printf 'implement Stack as Stack\nshared type A T = A List\ndef push stack value => [value, ...stack]\ndef empty = []\n/implement\n'
 } >"$workdir/33arityok/main.hd"
 
 # --- 工程 1 の修正 8: 前処理が作る抽象型の arity と functor 適用の契約 ---
@@ -857,20 +857,20 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # panic（終了 101）する形。`shared` を外した対照と同じ診断で終了 1（101 でない）を測る。
 
 # 負 1 (rhs-arity): 契約 Stack.T の arity は 1。右辺を型引数 0 で参照する。
-printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()\n' >"$workdir/33rhs1/main.hd"
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\n/module\nmodule Alias\ntype T\ndef touch: Void Pure\n/module\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\n/implement\nimplement Alias as Alias\nshared type T = Stack.T\ndef touch = ()\n/implement\n' >"$workdir/33rhs1/main.hd"
 
 # 負 2 (rhs-too-many): 右辺を型引数 2 で参照する。
-printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()\n' >"$workdir/33rhs2/main.hd"
+printf 'type Box = { value: Alias.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\n/module\nmodule Alias\ntype T\ndef touch: Void Pure\n/module\nimplement Stack as Stack\nshared type A T = A List\ndef empty = []\n/implement\nimplement Alias as Alias\nshared type T = (Int, String) Stack.T\ndef touch = ()\n/implement\n' >"$workdir/33rhs2/main.hd"
 
 # 負 3 (functor-rhs-arity): functor 本文の `shared type T = M.T`。仮引数の契約 Stack の
 # T は arity 1 だが、M.T を型引数 0 で参照する。
-printf 'type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\nmodule Alias\ntype T\ndef touch: Void Pure\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\nimplement Alias as Out = Make(Base)\n' >"$workdir/33frhs/main.hd"
+printf 'type Box = { value: Out.T }\nmodule Stack\ntype A T\ndef A empty: A T Pure\n/module\nmodule Alias\ntype T\ndef touch: Void Pure\n/module\nimplement Stack as Base\nshared type A T = A List\ndef empty = []\n/implement\nimplement Alias as Make(M: Stack)\nshared type T = M.T\ndef touch = ()\n/implement\nimplement Alias as Out = Make(Base)\n' >"$workdir/33frhs/main.hd"
 
 # 負 4 (wrong-result-contract): functor Make の結果契約は Source、適用の見出しは Target。
-printf 'type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Source as Base\nshared type T = String\ndef make x => x\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Target as Out = Make(Base)\n' >"$workdir/33wres/main.hd"
+printf 'type Box = { value: Int Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\n/module\nmodule Target\ntype A T\ndef A empty: A T Pure\n/module\nimplement Source as Base\nshared type T = String\ndef make x => x\n/implement\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\n/implement\nimplement Target as Out = Make(Base)\n' >"$workdir/33wres/main.hd"
 
 # 負 5 (wrong-argument-contract): 仮引数 M の契約は Source、引数 Base の契約は Target。
-printf 'type Box = { value: Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\nmodule Target\ntype A T\ndef A empty: A T Pure\nimplement Target as Base\nshared type A T = A List\ndef empty = []\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\nimplement Source as Out = Make(Base)\n' >"$workdir/33warg/main.hd"
+printf 'type Box = { value: Out.T }\nmodule Source\ntype T\ndef make(x: String): T Pure\n/module\nmodule Target\ntype A T\ndef A empty: A T Pure\n/module\nimplement Target as Base\nshared type A T = A List\ndef empty = []\n/implement\nimplement Source as Make(M: Source)\nshared type T = M.T\ndef make x => M.make x\n/implement\nimplement Source as Out = Make(Base)\n' >"$workdir/33warg/main.hd"
 
 # 対照は各探針から `shared` の印だけを外した写し（同じ診断になることを判定器側で照合する）。
 for pair in 33rhs1 33rhs2 33frhs 33wres 33warg; do
@@ -879,7 +879,7 @@ done
 
 # 正の対照 (nested-two-types): 二段適用・複数抽象型・二型引数。実行時に生成した文字列を
 # 二段適用した functor の抽象型に通し、List.length がそのリストの長さを印字する。
-printf 'def main = read ({ value = Second.make "%s" })\ndef read box => List.length box.value\ntype Box = { value: String Second.T }\nmodule Pair\ntype A T\ntype (A, B) U\ndef A make(x: A): A T Pure\nimplement Pair as Base\nshared type A T = A List\nshared type (A, B) U = Fn(A => B)\ndef make x => [x]\nimplement Pair as Make(M: Pair)\nshared type A T = A M.T\nshared type (A, B) U = (A, B) M.U\ndef make x => M.make x\nimplement Pair as First = Make(Base)\nimplement Pair as Second = Make(First)\n' "$rand_ne" >"$workdir/33nested/main.hd"
+printf 'def main = read ({ value = Second.make "%s" })\ndef read box => List.length box.value\ntype Box = { value: String Second.T }\nmodule Pair\ntype A T\ntype (A, B) U\ndef A make(x: A): A T Pure\n/module\nimplement Pair as Base\nshared type A T = A List\nshared type (A, B) U = Fn(A => B)\ndef make x => [x]\n/implement\nimplement Pair as Make(M: Pair)\nshared type A T = A M.T\nshared type (A, B) U = (A, B) M.U\ndef make x => M.make x\n/implement\nimplement Pair as First = Make(Base)\nimplement Pair as Second = Make(First)\n' "$rand_ne" >"$workdir/33nested/main.hd"
 
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \

@@ -1,5 +1,6 @@
 module IntId
-def value(x: Int): Int
-
+def value (x: Int): Int
+/module
 implement IntId as IntId
 def value x => x + 10
+/implement

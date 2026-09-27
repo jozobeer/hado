@@ -3,4 +3,4 @@
 type Profile = { name: String }
 type User = | Guest | Member(Profile)
 def display user => if user | Guest => "guest" | Member(m) => m.name
-def main = display Guest
+def main = display (Guest)

@@ -203,22 +203,22 @@ harness.HADO = sys.argv[2]
 from harness import CONTRACT, anchor, diagnostic, position, project, related
 
 root = Path(sys.argv[1]) / 'e'
-contract = 'module Store\ndef read (x: Int): Int\ndef write (x: Int): Int\n'
+contract = 'module Store\ndef read (x: Int): Int\ndef write (x: Int): Int\n/module\n'
 
 # 後ろの member が欠けている
-missing = 'implement Store as Store\ndef read (x: Int): Int Pure => x\ndef main = 1\n'
+missing = 'implement Store as Store\ndef read (x: Int): Int Pure => x\ndef main = 1\n/implement\n'
 found = diagnostic(project(root, 'tail', {'main.hd': missing, 'store.hdi': contract}, 'check'), 'E602')
 assert anchor(found) == ('main.hd', 1, 1), found
 assert related(found, CONTRACT) == ('store.hdi', *position(contract, 'write', 1)), found
 
 # 前の member が欠けている
-missing = 'implement Store as Store\ndef write (x: Int): Int Pure => x\ndef main = 1\n'
+missing = 'implement Store as Store\ndef write (x: Int): Int Pure => x\ndef main = 1\n/implement\n'
 found = diagnostic(project(root, 'head', {'main.hd': missing, 'store.hdi': contract}, 'check'), 'E602')
 assert related(found, CONTRACT) == ('store.hdi', *position(contract, 'read', 1)), found
 
 # member の型が違う
 mismatch = ('implement Store as Store\ndef read (x: Int): Bool Pure => true\n'
-            'def write (x: Int): Int Pure => x\ndef main = 1\n')
+            'def write (x: Int): Int Pure => x\ndef main = 1\n/implement\n')
 found = diagnostic(project(root, 'type', {'main.hd': mismatch, 'store.hdi': contract}, 'check'), 'E602')
 assert anchor(found) == ('main.hd', 1, 1), found
 assert related(found, CONTRACT) == ('store.hdi', *position(contract, 'read', 1)), found
@@ -242,8 +242,10 @@ source = ('def main = M.inc 1\n'
           'module S\n'
           'def inc (x: Int): Int\n'
           'def dec (x: Int): Int\n'
+          '/module\n'
           'implement S as M\n'
-          'def inc x => x + 1\n')
+          'def inc x => x + 1\n'
+          '/implement\n')
 found = diagnostic(project(root, 'same', {'main.hd': source}, 'check'), 'E602')
 assert anchor(found) == ('main.hd', *position(source, 'implement', 1)), found
 assert related(found, CONTRACT) == ('main.hd', *position(source, 'dec', 1)), found
@@ -271,7 +273,7 @@ assert related(found, FIRST) is None, found
 assert ' at ' not in found['message'], found
 
 # 抽象型の循環: 1 回目の宣言が無い。
-cyclic = 'def main = M.of 1\nmodule S\ntype T\ndef of (x: Int): T Pure\nimplement S as M\ntype T = T\n'
+cyclic = 'def main = M.of 1\nmodule S\ntype T\ndef of (x: Int): T Pure\n/module\nimplement S as M\ntype T = T\n/implement\n'
 found = diagnostic(project(root, 'cycle', {'main.hd': cyclic}, 'check'), 'E602')
 assert related(found, CONTRACT) is None, found
 assert ' at ' not in found['message'], found

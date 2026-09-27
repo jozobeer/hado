@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tier: full
-# R71: let _? = の破棄を do に書き換える（E504）。期待値は判定器側で導く。
+# R71: as _? -> の破棄を e -> に書き換える（E504）。期待値は判定器側で導く。
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
@@ -34,29 +34,29 @@ else
   ng "71-b fmt reaches accepted and is idempotent" "check=$first"
 fi
 
-# 71-c: 直した物の値が、手書きの do 版と同じ（期待値は再現から導く）。
+# 71-c: 直した物の値が、手書きの破棄版と同じ（期待値は再現から導く）。
 python3 - "$work" <<'PY'
 import pathlib, sys
 w = pathlib.Path(sys.argv[1])
 src = pathlib.Path('tests/reject/E504/main.hd').read_text()
-plain = src.replace('let _? = ', 'do ')
+plain = src.replace(' as _? ', ' ')
 (w / 'plain').mkdir(parents=True, exist_ok=True)
 (w / 'plain' / 'main.hd').write_text(plain)
 PY
 got=$(hado run "$work/a/main.hd" 2>&1)
 want=$(hado run "$work/plain/main.hd" 2>&1)
 if [ -n "$want" ] && [ "$got" = "$want" ]; then
-  ok "71-c the fixed file runs like the hand-written do version"
+  ok "71-c the fixed file runs like the hand-written discard version"
 else
-  ng "71-c the fixed file runs like the hand-written do version" "want=[$want] got=[$got]"
+  ng "71-c the fixed file runs like the hand-written discard version" "want=[$want] got=[$got]"
 fi
 
-# 71-d: 対象外は触らない（純粋値の let _ = と、名前のある束縛 let y? =）。
+# 71-d: 対象外は触らない（純粋値の e as _ -> と、名前のある束縛 e as y? ->）。
 mkdir -p "$work/d" && cp tests/reject/E506/main.hd "$work/d/pure.hd"
 cat > "$work/d/named.hd" <<'HD'
 // spec: §35
 def f x =>
-  let y? = Some(x) ->
+  Some(x) as y? ->
   Some(1)
 def main = f 1
 HD

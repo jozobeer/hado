@@ -2,7 +2,5 @@
 // expect: guest
 type Profile = { name: String }
 type User = | Guest | Member(Profile)
-def display
-  | Guest => "guest"
-  | Member(user) => user.name
-def main = display Guest
+def display | Guest => "guest" | Member(user) => user.name
+def main = display (Guest)

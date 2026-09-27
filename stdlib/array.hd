@@ -1,35 +1,21 @@
 module Array
-def A length(xs: A Array): Int Pure
-def A get(xs: A Array, index: Int): A {Error}
-def A set(xs: A Array, index: Int, value: A): A Array {Error}
-def A of_list(xs: A List): A Array Pure
-def A to_list(xs: A Array): A List Pure
+def A length (xs: A Array): Int Pure
+def A get (xs: A Array, index: Int): A {Error}
+def A set (xs: A Array, index: Int, value: A): A Array {Error}
+def A of_list (xs: A List): A Array Pure
+def A to_list (xs: A Array): A List Pure
+/module
 implement Array as Array
 def length xs => __array_length xs
-def get xs index =>
-  if index >= 0 && index < length xs
-    => __array_get xs index
-    | raise { message = "IndexOutOfRange" }
-def set xs index value =>
-  if index >= 0 && index < length xs
-    => to_list xs |> replace index value |> of_list
-    | raise { message = "IndexOutOfRange" }
+def get xs index => if index >= 0 && index < length xs => __array_get xs index | raise { message = "IndexOutOfRange" }
+def set xs index value => if index >= 0 && index < length xs => to_list xs |> replace index value |> of_list | raise { message = "IndexOutOfRange" }
 def of_list xs => build xs 0 (List.length xs |> __array_alloc)
 def to_list xs => elements xs (length xs - 1) []
 // target は構築中だけに閉じ込め、全 slot を埋めた後で公開する。
-def rec build xs index target =>
-  if xs
-  | [] => target
-  | [head, ...tail] => build tail (index + 1) (__array_fill_unchecked target index head)
+def rec build xs index target => if xs | [] => target | [head, ...tail] => build tail (index + 1) (__array_fill_unchecked target index head)
 // 添字を末尾から先頭へ動かし、その順に cons する。reverse は要らない。
-def rec elements xs index acc =>
-  if index < 0 => acc | elements xs (index - 1) [__array_get xs index, ...acc]
+def rec elements xs index acc => if index < 0 => acc | elements xs (index - 1) [__array_get xs index, ...acc]
 def replace xs index value => replace_go xs index value []
-def rec replace_go xs index value prefix =>
-  if xs
-  | [] => List.reverse prefix
-  | [head, ...tail] => replace_keep head tail index value prefix
-def rec replace_keep head tail index value prefix =>
-  if index == 0
-    => List.append (List.reverse prefix) [value, ...tail]
-    | replace_go tail (index - 1) value [head, ...prefix]
+def rec replace_go xs index value prefix => if xs | [] => List.reverse prefix | [head, ...tail] => replace_keep head tail index value prefix
+def rec replace_keep head tail index value prefix => if index == 0 => List.append (List.reverse prefix) [value, ...tail] | replace_go tail (index - 1) value [head, ...prefix]
+/implement

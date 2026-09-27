@@ -4,10 +4,14 @@
 def main = Applied.run 1
 module Value
 def value: Int
+/module
 module Store
-def run(input: Int): Int
+def run (input: Int): Int
+/module
 implement Value as Value
 def value = 1
+/implement
 implement Store as Ignore(Id: Value)
 def run input => input + 1
+/implement
 implement Store as Applied = Ignore(Value)

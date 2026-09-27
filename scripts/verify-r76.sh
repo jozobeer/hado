@@ -19,7 +19,7 @@ CLI = ('def usage = "usage: cli <name>"\n'
        '  | [] => raise { message = usage }\n'
        '  | [name, ..._] => name\n'
        'def main =\n'
-       '  let args = EnvDefault.args ->\n'
+       '  EnvDefault.args as args ->\n'
        '  IoDefault.log (message args)\n')
 RAISE = 'def main =\n  raise { message = "boom" }\n'
 

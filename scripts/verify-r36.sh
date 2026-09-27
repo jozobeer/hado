@@ -249,7 +249,7 @@ def argument_type(argument):
 
 
 def members_of(source):
-    body = only_block(rf"^module {module}[ \t]*\n(.*?)(?=^(?:module|implement)\b|\Z)", source)
+    body = only_block(rf"^module {module}[ \t]*\n(.*?)(?=^(?:module|implement|/module|/implement)\b|\Z)", source)
     members = {}
     for line in body.splitlines():
         line = line.split("//", 1)[0].strip()
@@ -281,7 +281,7 @@ assert not differences(expected, members_of(block)), "equal contracts must match
 contract_block = only_block(rf"^(module {module}[ \t]*\n.*?)(?=^module|\Z)", block)
 
 # 仕様の写しを再読して照合する。期待値を被験側から取る判定では、この対照が落ちる。
-changed, count = re.subn(r"^(def to_string\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", contract_block, flags=re.M)
+changed, count = re.subn(r"^(def to_string\s*\([^\n]*\):[^\n]*) Pure$", r"\1 {Error}", contract_block, flags=re.M)
 assert count == 1, "spec mutation must change member to_string exactly once"
 copy = Path(sys.argv[3]) / "spec-effect.md"
 copy.write_text(spec.replace(contract_block, changed, 1))
@@ -290,8 +290,8 @@ assert set(differences(changed_members, expected)) == {"to_string"}, "spec effec
 print("   (対照: §55 の写しの member to_string Pure → {Error} を検出)")
 
 for pattern, replacement in (
-    (r"^(def to_string\([^:]+: [^)]*)(\))", r"\1 List\2"),
-    (r"^(def to_string\([^)]*\): \w+)", r"\1 List"),
+    (r"^(def to_string\s*\([^:]+: [^)]*)(\))", r"\1 List\2"),
+    (r"^(def to_string\s*\([^)]*\): \w+)", r"\1 List"),
 ):
     changed, count = re.subn(pattern, replacement, contract_block, flags=re.M)
     assert count == 1, "type mutation must change member to_string exactly once"

@@ -3,7 +3,9 @@
 // item: module
 def main = M.used 1
 module S
-def used(x: Int): Int
+def used (x: Int): Int
+/module
 implement S as M
 def used x => x
 def dead x => x
+/implement

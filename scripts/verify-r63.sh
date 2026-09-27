@@ -158,8 +158,8 @@ check_code(sys.argv[1], 'd/rule', 'def f (b: Bool): Int => if b | true => 1 | fa
 # 枝の位置でない形も書き換わる（実測。R62 の台帳の記述は誤りだった）。
 ARGUMENT = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b | true => 1 | false => 2)\ndef main = f true\n'
 ARGUMENT_FIXED = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b => 1 | 2)\ndef main = f true\n'
-LET_VALUE = 'def f (b: Bool): Int =>\n  let v = if b | true => 1 | false => 2 ->\n  v + 1\ndef main = f true\n'
-LET_VALUE_FIXED = 'def f (b: Bool): Int =>\n  let v = if b => 1 | 2 ->\n  v + 1\ndef main = f true\n'
+LET_VALUE = 'def f (b: Bool): Int =>\n  if(b | true => 1 | false => 2) as v ->\n  v + 1\ndef main = f true\n'
+LET_VALUE_FIXED = 'def f (b: Bool): Int =>\n  if(b => 1 | 2) as v ->\n  v + 1\ndef main = f true\n'
 accepted(sys.argv[1], 'd/argument-ok', check_fix(sys.argv[1], 'd/argument-fix', ARGUMENT, ARGUMENT_FIXED))
 accepted(sys.argv[1], 'd/let-ok', check_fix(sys.argv[1], 'd/let-fix', LET_VALUE, LET_VALUE_FIXED))
 print('controls: the exclusions are accepted and other positions are rewritten too')

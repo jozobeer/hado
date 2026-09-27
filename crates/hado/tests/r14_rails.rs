@@ -28,14 +28,14 @@ fn generated_patterns_round_trip_with_an_independent_question_token() {
         format!("Box({name})"),
         format!("{{ field = Box({name}) }}"),
     ] {
-        let source = format!("def f input => let {pattern}? = input -> Some({name})");
+        let source = format!("def f input => input as {pattern}? -> Some({name})");
         let ast = parser::parse_source(&source, "rails.hd").unwrap();
         let printed = parser::canonical_program(&ast);
         assert!(!printed.contains("let?"), "{printed}");
-        assert!(printed.contains("? ="), "{printed}");
+        assert!(printed.contains(&format!("as {pattern}? ->")), "{printed}");
         let restored = parser::parse_source(&printed, "rails.hd").unwrap();
         assert_eq!(parser::canonical_program(&restored), printed);
-        let spaced = parser::parse_source(&source.replace("? =", " ? ="), "rails.hd").unwrap();
+        let spaced = parser::parse_source(&source.replace("? ->", " ? ->"), "rails.hd").unwrap();
         assert_eq!(parser::canonical_program(&spaced), printed);
     }
 }
@@ -43,10 +43,13 @@ fn generated_patterns_round_trip_with_an_independent_question_token() {
 #[test]
 fn old_rail_keywords_are_rejected_at_the_question_mark() {
     for prefix in ["", "\n\n  "] {
-        for body in ["let? x = Some(1) -> Some(x + 1)", "do? Some(1) -> Some(2)"] {
+        for (body, keyword) in [
+            ("let? x = Some(1) -> Some(x + 1)", "let"),
+            ("do? Some(1) -> Some(2)", "do"),
+        ] {
             let source = format!("{prefix}def main = {body}");
             let error = parser::parse_source(&source, "rails.hd").unwrap_err();
-            let before = &source[..source.find('?').unwrap()];
+            let before = &source[..source.find(keyword).unwrap()];
             assert_eq!(error.code.as_deref(), Some("E100"), "{error}");
             assert_eq!(
                 (error.line, error.col),
@@ -65,20 +68,16 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
     for _ in 0..2 {
         let n = random(&mut state, 1000);
         for (body, code, anchor) in [
+            (format!("{n} as x? -> Some(x + 1)"), "E303", n.to_string()),
+            (format!("{n} as _? -> Some(1)"), "E303", n.to_string()),
+            (format!("{n} -> Some(1)"), "E303", n.to_string()),
             (
-                format!("let x? = {n} -> Some(x + 1)"),
-                "E303",
-                n.to_string(),
-            ),
-            (format!("let _? = {n} -> Some(1)"), "E303", n.to_string()),
-            (format!("do {n} -> Some(1)"), "E303", n.to_string()),
-            (
-                format!("let _? = Some({n}) -> Some(1)"),
+                format!("Some({n}) as _? -> Some(1)"),
                 "E504",
                 "_".to_string(),
             ),
             (
-                format!("let Some(x)? = Some(Some({n})) -> Some(x + 1)"),
+                format!("Some(Some({n})) as Some(x)? -> Some(x + 1)"),
                 "E402",
                 "Some(x)".to_string(),
             ),
@@ -134,7 +133,7 @@ fn generated_chains_execute_success_and_each_failure_path() {
             "type Box = | Box(Int)\ntype Entry = {{ field: Box }}\n\
              def first (flag: Int): Entry {{Error}} => if flag == 1 => raise {{ message = \"f{n}\" }} | {{ field = Box({n}) }}\n\
              def step (flag: Int, stage: Int): Void {{Error}} => if flag == stage => raise {{ message = \"s{n}-{fail}\" }} | ()\n\
-             def run flag => let {{ field = Box(x) }} = first flag -> do step flag 2 -> do step flag 3 -> x + 5\n\
+             def run flag => first flag as {{ field = Box(x) }} -> step flag 2 -> step flag 3 -> x + 5\n\
              def main = run {fail}"
         );
         let (status, stdout, stderr) = run(&source, fail);
@@ -166,7 +165,7 @@ fn generated_option_chains_propagate_none_at_each_step() {
         let source = format!(
             "def first flag => if flag == 1 => None | Some({n})\n\
              def step flag stage => if flag == stage => None | Some(())\n\
-             def run flag => let x? = first flag -> do step flag 2 -> do step flag 3 -> Some(x + 5)\n\
+             def run flag => first flag as x? -> step flag 2 -> step flag 3 -> Some(x + 5)\n\
              def unwrap | Some(x) => x | None => 0\n\
              def main = unwrap (run {fail})"
         );

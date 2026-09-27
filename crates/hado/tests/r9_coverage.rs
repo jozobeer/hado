@@ -84,18 +84,18 @@ fn sole_parameter_branch_checks_all_four_conditions() {
 
 #[test]
 fn let_patterns_must_cover_the_entire_payload_type() {
-    let prefix = "def main = let ";
-    let source = format!("{prefix}Some(value) = Some(1) -> value + 1");
+    let prefix = "def main = Some(1) as ";
+    let source = format!("{prefix}Some(value) -> value + 1");
     let error = check_source(&source, "coverage.hd").err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E402"));
     assert_eq!((error.line, error.col), (1, prefix.len() + 1));
-    let source = "type Id = | Id(Int)\ndef main = let Id(value) = Id(1) -> value + 1";
+    let source = "type Id = | Id(Int)\ndef main = Id(1) as Id(value) ->\n  value + 1";
     check_source(source, "coverage.hd").unwrap();
 }
 
 #[test]
 fn do_requires_a_rail_and_records_require_a_candidate() {
-    let source = "def main = do 0 -> Some(1)";
+    let source = "def main = 0 -> Some(1)";
     assert_eq!(
         check_source(source, "coverage.hd")
             .err()
@@ -125,7 +125,7 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
     for (source, name) in [
         ("def f used unused => used + 1\ndef main = f 1 2", "unused"),
         ("def main = fn(used, unused => used + 1) 1 2", "unused"),
-        ("def f outer => let outer = 1 -> outer + 2\ndef main = f 1", "outer"),
+        ("def f outer => 1 as outer ->\n  outer + 2\ndef main = f 1", "outer"),
         ("def f | Some(unused) => 1 | 0\ndef main = f (Some(1))", "unused"),
         ("type Pair = { left: Int; right: Int }\ndef f (pair: Pair) => if pair | { left; right } => left\ndef main = f { left = 1; right = 2 }", "right }"),
     ] {
@@ -148,19 +148,19 @@ fn unused_bindings_include_parameters_and_nested_patterns() {
 
 #[test]
 fn record_patterns_resolve_the_whole_field_set() {
-    let source = "def f value => let { absent } = value -> absent + 1\ndef main = f 1";
+    let source = "def f value => value as { absent } ->\n  absent + 1\ndef main = f 1";
     let error = check_source(source, "coverage.hd").err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E304"));
     assert_eq!(error.col, source.find('{').unwrap() + 1);
-    let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => let { x; y } = value -> x + y\ndef main = f { x = 1; y = 2 } + { x = 1; z = 2 }.z + { y = 1; z = 2 }.z";
+    let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => value as { x; y } ->\n  x + y\ndef main = f { x = 1; y = 2 } + { x = 1; z = 2 }.z + { y = 1; z = 2 }.z";
     check_source(source, "coverage.hd").unwrap();
 }
 
 #[test]
 fn discarded_rail_binding_points_to_the_underscore() {
     for padding in [1, 5] {
-        let prefix = format!("def main = let{}", " ".repeat(padding + 1));
-        let source = format!("{prefix}_? = Some(1) -> Some(2)");
+        let prefix = format!("def main = Some(1) as{}", " ".repeat(padding + 1));
+        let source = format!("{prefix}_? -> Some(2)");
         let error = check_source(&source, "coverage.hd").err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E504"));
         assert_eq!((error.line, error.col), (1, prefix.len() + 1));
