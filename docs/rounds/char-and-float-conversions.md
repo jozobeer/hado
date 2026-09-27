@@ -192,3 +192,53 @@ PASSED: 11/11
 `bash scripts/corpus-lock.sh --check` の差分は `stdlib/char.hd` の追加、
 `stdlib/float.hd` の変更、`tests/accept` の `char_*` と `float_*` の 10 件だけで、
 すべてこのラウンドの成果物だった。main 側のコーパスと stdlib の変更は無い。
+
+### 審査後（指摘への対応）
+
+審査の fatal 2 件を門番と受理コーパスに足し、§55 の 1 文の曖昧さを消した。
+
+- 検査 a は `Char.to_string` の UTF-8 バイト列を、受理した 6 値（`0`・`55295`・
+  `57344`・`1114111`・`12354`・`128512`）すべてで照合する。長さだけでは、境界で
+  誤った続きバイトを出す符号化器でも通ってしまう。
+- 検査 d に `-0.(0×323)3` と `-0.(0×323)5`、検査 e に `-0.(0×323)2` を足した。
+  実装は `strtod` を符号込みで呼ぶので、加えた探針はそのままで緑だった（この
+  部分が赤だったのは実装前の門番全体 2/9 のときだけ）。較正 i にも負側の境界を
+  入れ、`parse_expected` が `-0.(0×323)2` を拒否し `-0.(0×323)5` を受理することを
+  判定器側で確かめる。
+- 受理コーパスに `char_to_string_bytes`・`float_parse_negative_min_subnormal`・
+  `float_parse_negative_underflow` の 3 件を足した。
+- §55 の `Char.to_string` の 1 文を「UTF-8 バイト列を内容とする String を返し、
+  引用符もエスケープも付けない（第54節の最上位の Char と同じ生の文字で、入れ子の
+  `'a'` の形ではない）」に直した。節番号は動かしていない。
+
+```
+$ bash scripts/verify-char-and-float-conversions.sh
+parse accepted: 14 spellings and 5 round trips
+OK: d parse accepted: grammar, round trip and correct rounding
+parse rejected: 14 grammar, 2 overflow, 6 underflow
+OK: e parse rejected: grammar, overflow and underflow are InvalidFloat
+corpus: 11 §55 cases run, errors={'InvalidScalar': 1, 'InvalidFloat': 4}
+OK: h corpus: the §55 accept cases with expect and expect-error run
+PASSED: 9/9
+
+$ bash scripts/verify-string-split-linear.sh
+join: small=0.200s large=0.397s subtracted 0.184->0.365 ratio 1.99
+OK: i perf: join is linear in the element count
+OK: k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ
+PASSED: 11/11
+（1 回目は検査 i が small=0.198s で下限 0.200s を割って赤。荷重 4.56 の下で
+  下限付近を揺れる。測り直すと上の緑。R1 の門番の「許容される赤」と同じ扱い）
+
+$ cargo test --offline
+（赤なし。0 failed）
+
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+
+$ bash scripts/corpus-lock.sh --check
+（差分は char_to_string_bytes・float_parse_negative_min_subnormal・
+  float_parse_negative_underflow の 3 件だけ。作り直す）
+```
