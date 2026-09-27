@@ -18,7 +18,7 @@ def rec lines entries acc =>
   | [entry, ...rest] => lines rest (String.concat acc (String.concat (line entry) "\n"))
 
 def main =
-  let text = Bytes.to_string (IoDefault.read_stdin) ->
-  let words = String.split text " " ->
-  let entries = List.fold words [] fn(acc, word => bump acc word) ->
+  Bytes.to_string (IoDefault.read_stdin) as text ->
+  String.split text " " as words ->
+  List.fold words [] fn(acc, word => bump acc word) as entries ->
   IoDefault.log (lines entries "")

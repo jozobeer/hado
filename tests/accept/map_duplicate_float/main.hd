@@ -6,7 +6,7 @@ def first_of
 | [] => MapEntry(0.0, "")
 | [e, ..._] => e
 def main =
-  let m = Map.insert (Map.insert Map.empty (-0.0) "neg") 0.0 "pos" ->
+  Map.insert (Map.insert Map.empty (-0.0) "neg") 0.0 "pos" as m ->
   String.join
     [ Int.to_string (List.length (Map.to_list m)),
       Option.unwrap_or (Map.find m (-0.0)) "none",

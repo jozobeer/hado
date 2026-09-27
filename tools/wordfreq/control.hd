@@ -7,6 +7,6 @@ def rec emit words acc =>
   | [word, ...rest] => emit rest (String.concat acc (String.concat word " 0\n"))
 
 def main =
-  let text = Bytes.to_string (IoDefault.read_stdin) ->
-  let words = String.split text " " ->
+  Bytes.to_string (IoDefault.read_stdin) as text ->
+  String.split text " " as words ->
   IoDefault.log (emit (List.take words 500) "")

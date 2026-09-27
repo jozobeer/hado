@@ -3,12 +3,13 @@ type (K, V) MapEntry = | MapEntry(K, V)
 module Map
 type (K, V) T
 def (K, V) empty: (K, V) T
-def (K, V) insert(map: (K, V) T, key: K, value: V): (K, V) T
-def (K, V) find(map: (K, V) T, key: K): V Option
-def (K, V) remove(map: (K, V) T, key: K): (K, V) T
-def (K, V, A) fold(map: (K, V) T, initial: A, f: Fn(A, K, V => A)): A
-def (K, V) to_list(map: (K, V) T): (K, V) MapEntry List
+def (K, V) insert (map: (K, V) T, key: K, value: V): (K, V) T
+def (K, V) find (map: (K, V) T, key: K): V Option
+def (K, V) remove (map: (K, V) T, key: K): (K, V) T
+def (K, V, A) fold (map: (K, V) T, initial: A, f: Fn(A, K, V => A)): A
+def (K, V) to_list (map: (K, V) T): (K, V) MapEntry List
 
+/module
 implement Map as Map
 // 実体は左傾赤黒木（LLRB）。色と節と削除の途中結果はこの実装の中だけに置く。
 type MapColor = | MapRed | MapBlack
@@ -264,3 +265,4 @@ def rec delete_min
 def rec delete_min_after
 | MapLeaf => MapLeaf
 | MapNode(c, l, k, v, r) => fix_up (MapNode(c, delete_min l, k, v, r))
+/implement

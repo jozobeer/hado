@@ -8,8 +8,8 @@ def rec lines entries acc =>
   | [entry, ...rest] => lines rest (String.concat acc (String.concat (line entry) "\n"))
 
 def main =
-  let text = Bytes.to_string (IoDefault.read_stdin) ->
-  let words = String.split text " " ->
-  let m = List.fold words Map.empty fn(acc, word =>
-    Map.insert acc word (Option.unwrap_or (Map.find acc word) 0 + 1)) ->
+  Bytes.to_string (IoDefault.read_stdin) as text ->
+  String.split text " " as words ->
+  List.fold words Map.empty fn(acc, word =>
+    Map.insert acc word (Option.unwrap_or (Map.find acc word) 0 + 1)) as m ->
   IoDefault.log (lines (Map.to_list m) "")

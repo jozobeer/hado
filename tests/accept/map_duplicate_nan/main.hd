@@ -2,8 +2,8 @@
 // expect: 1,second,0
 // needs: prelude
 def main =
-  let nan = 0.0 / 0.0 ->
-  let m = Map.insert (Map.insert Map.empty nan "first") nan "second" ->
+  0.0 / 0.0 as nan ->
+  Map.insert (Map.insert Map.empty nan "first") nan "second" as m ->
   String.join
     [ Int.to_string (List.length (Map.to_list m)),
       Option.unwrap_or (Map.find m nan) "none",
