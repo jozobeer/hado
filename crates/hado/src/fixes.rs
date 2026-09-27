@@ -11,7 +11,7 @@
 //! 対象は §41・§44・§46・§53 の正準形のうち、まわりの木を変えずに書ける
 //! ものだけ: E510（式の `Nil` / `Cons`）、E516（パターンの `Nil` / `Cons`）、
 //! E517（`=> if | ...` の条件列を引数の腕へ）、E507（腕がすべて自分の pattern を
-//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `let p? =`）。
+//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `e as p? ->`）。
 
 use crate::lexer::{lex_full, Span, Tok, TokKind};
 use crate::parser::{self, Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
@@ -1283,8 +1283,8 @@ fn rewrap_arm_fix(node: &Node, replacement: &str, tail: Tail, walk: &Walk<'_>) -
 }
 
 /// E508: `if E | Some(p) => body | None => None` in tail position is
-/// `let p? = E -> body` (§36). The rewrite needs a binder that the body uses:
-/// with none, or with one the body ignores, `do` is the canonical form.
+/// `E as p? -> body` (§57). The rewrite needs a binder that the body uses:
+/// with none, or with one the body ignores, `E ->` is the canonical form.
 fn repropagate_fix(
     node: &Node,
     tail: Tail,
@@ -1318,13 +1318,9 @@ fn repropagate_fix(
         "value"
     };
     let body_text = &source[lines.offset(source, body.span)..body_end];
-    let let_form = format!(
-        "let {}? = {} -> {}",
-        pattern_text(pattern),
-        value,
-        body_text
-    );
-    let replacement = repropagate_replacement(tail, def, let_form)?;
+    // §57: 正準形は `<scrutinee> as p? -> <body>`（後置の伝播）。
+    let binding = format!("{value} as {}? -> {body_text}", pattern_text(pattern));
+    let replacement = repropagate_replacement(tail, def, binding)?;
     Some(Fix {
         code: "E508",
         line: pipe.line,
@@ -1424,23 +1420,24 @@ fn repropagate_range(
     Some((pipe.span, start, end, first_pipe))
 }
 
-/// 末尾の形ごとの書き換えテキスト。`let` 形を内側に置く。
+/// 末尾の形ごとの書き換えテキスト。`as p? ->` の束縛を内側に置く。
 fn repropagate_replacement(
     tail: Tail,
     def: Option<&parser::Def>,
-    let_form: String,
+    binding: String,
 ) -> Option<String> {
     Some(match tail {
-        Tail::If => let_form,
+        Tail::If => binding,
         Tail::Def => {
             let def = def?;
             format!(
-                "def {}{} value => {let_form}",
+                "def {}{} value => {binding}",
                 if def.rec { "rec " } else { "" },
                 def.name
             )
         }
-        Tail::Fn => format!("fn(value => {let_form})"),
+        // §12.1: 本体に `->` があるので `fn ... /fn` で閉じる。
+        Tail::Fn => format!("fn value => {binding} /fn"),
     })
 }
 

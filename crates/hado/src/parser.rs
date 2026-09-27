@@ -3502,25 +3502,44 @@ pub fn canonical(node: &Node) -> String {
         }
         NodeKind::Record(fields) => format!("{{ {} }}", canonical_fields(fields)),
         NodeKind::List(items, tail) => canonical_list(items, tail.as_deref()),
+        // §11: 束縛は後置の `e as p ->` で書く。正準形もその綴りを出す。
         NodeKind::Let { pat, value, body } => {
-            format!("(let {pat} = {} -> {})", canonical(value), canonical(body))
+            format!("({} as {pat} -> {})", canonical(value), canonical(body))
         }
         NodeKind::LetQ { pat, value, body } => {
-            format!("(let {pat}? = {} -> {})", canonical(value), canonical(body))
+            format!("({} as {pat}? -> {})", canonical(value), canonical(body))
         }
         NodeKind::DoQ { value, body } => {
-            format!("(do {} -> {})", canonical(value), canonical(body))
+            format!("({} -> {})", canonical(value), canonical(body))
         }
+        // §12.1: 本体に `->` があれば `/fn` で閉じる。正準形も読める綴りにする。
         NodeKind::Fn { params, body } => {
-            format!("fn({})", source_print::lambda_tail(params, body))
+            if postfix_print::contains_continuation(body) {
+                format!("({})", postfix_print::node_text(node))
+            } else {
+                format!("fn({})", source_print::lambda_tail(params, body))
+            }
         }
-        NodeKind::BoolBranch { cond, then, els } => format!(
-            "(if {} => {} | {})",
-            canonical(cond),
-            canonical(then),
-            canonical(els)
-        ),
-        NodeKind::CondBranch { arms, fallback } => format_condition_column(arms, fallback, true),
+        // §12.1: 腕に `->` があれば `/if` で閉じる。正準形も読める綴りにする。
+        NodeKind::BoolBranch { cond, then, els } if !postfix_print::branch_has_arrow(node) => {
+            format!(
+                "(if {} => {} | {})",
+                canonical(cond),
+                canonical(then),
+                canonical(els)
+            )
+        }
+        NodeKind::BoolBranch { .. } => format!("({})", postfix_print::node_text(node)),
+        NodeKind::CondBranch { arms, fallback } => {
+            if postfix_print::branch_has_arrow(node) {
+                format!("({})", postfix_print::node_text(node))
+            } else {
+                format_condition_column(arms, fallback, true)
+            }
+        }
+        NodeKind::PatternBranch { .. } if postfix_print::branch_has_arrow(node) => {
+            format!("({})", postfix_print::node_text(node))
+        }
         NodeKind::PatternBranch {
             scrutinees,
             arms,

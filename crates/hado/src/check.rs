@@ -932,7 +932,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_col: body.span.col,
         code: Some("E508".into()),
         message: format!(
-            "absence bound at {}:{} is propagated unchanged; use let p? = or do",
+            "absence bound at {}:{} is propagated unchanged; use `as p? ->` or `->`",
             pattern.span.line, pattern.span.col
         ),
     })
