@@ -128,10 +128,13 @@ OK: 2 i64 min is diagnosed
 OK: 3 log_error writes stderr only and log writes stdout
 OK: 4 a failed log_error is a catchable IoFailure
 OK: 4 an uncaught log_error failure exits 1
+OK: 4 an uncaught stderr EPIPE exits 1, not 141
+OK: 4 a caught stderr EPIPE is an IoFailure
 OK: 4 a failed print exits 1
 OK: 4 an Int main never writes so a broken stdout does not matter
+OK: 5 every numeric // expect: entry prints its number
 OK: 7 hado test reports each guest exit code in path order
-PASSED: 19/19
+PASSED: 22/22
 ```
 
 条件ごとの当て方。
@@ -263,3 +266,63 @@ PASSED: 2/2
   `verify-r54.sh` は乱数で作った 2 値でこれを測る。
 - 想定外: `hado test` の Int のゲストは何も印字しないので、`test:` 行の
   `ok` / `failed (exit <n>)` だけが結果を伝える。§58.2 の報告はそのままで足りた。
+
+### 審査対応（2026-09-27）
+
+指摘 1（第 2 入口の棚卸し漏れ）と指摘 2（stderr の EPIPE 未測定）への対応。
+
+- 入口の洗い直し: `grep -rl '^def main' tests` の 218 本をファイル名で絞らずに見て、
+  `main.hd` 以外の入口は 10 本だった。数値の印字を期待していたのは
+  `tests/accept/two_entries/store_test.hd`（`// expect: 110`）と
+  `tests/postfix-close/run/Q2/case.hd`（`// run-expect: 7`）・
+  `tests/postfix-close/run/Q3/case.hd`（`// run-expect: 11`）の 3 本で、いずれも
+  `Int.to_string` で包み、印字の期待をそのまま保った。拒否フィクスチャの `def main`
+  は `// expect:` を持たないので対象外。
+- 棚卸しを門番にした: `scripts/verify-exit-code-from-main.sh` の検査 5 が、`tests/` と
+  `stdlib/` の数値の `// expect:`・`// run-expect:` を持つファイルをファイル名で
+  選ばずに全て build して走らせ、印字と終了コード 0 を測る。期待値はヘッダから読む。
+
+```
+$ for f in $(grep -rlE '^// (run-)?expect: [0-9]+' tests stdlib); do
+>   while IFS= read -r want; do ... done < <(grep -oE '^// (run-)?expect: [0-9]+' "$f" | awk '{print $NF}')
+> done
+RED tests/accept/two_entries/store_test.hd want=110 got= rc=110
+RED tests/postfix-close/run/Q3/case.hd want=11 got= rc=11
+RED tests/postfix-close/run/Q2/case.hd want=7 got= rc=7
+total=46 red=3
+
+（3 本を Int.to_string で包んだ後）
+total=46 red=0
+```
+
+- EPIPE: `scripts/exec-stderr-epipe.py` を足した（`exec-stdout-epipe.py` の fd 1 を
+  fd 2 にしたもの。読み手の居ないパイプへ stderr を繋ぐ）。`/dev/full`（ENOSPC）の
+  検査は置き換えずに残し、両方を測る。`runtime/hado_runtime.c` の
+  `signal(SIGPIPE, SIG_IGN)` により、捕捉すれば `IoFailure`・捕まえなければ 1
+  （141 ではない）。
+
+```
+$ bash scripts/verify-exit-code-from-main.sh
+OK: 4 a failed log_error is a catchable IoFailure
+OK: 4 an uncaught log_error failure exits 1
+OK: 4 an uncaught stderr EPIPE exits 1, not 141
+OK: 4 a caught stderr EPIPE is an IoFailure
+OK: 5 every numeric // expect: entry prints its number
+PASSED: 22/22
+```
+
+- 測り直し: `cargo test --offline` は 778 判定 / 0 failed、`bash scripts/run-gates.sh
+  --tier quick target/gates-quick3` は 41/41、`--tier core target/gates-core3` は
+  684/684（新しい 3 検査を含む）。`verify-r37.sh` 262/262・`verify-r43.sh` 10/10・
+  `verify-m1-corpus.sh` 7/7。`corpus-lock.sh --check` の差分は `store_test.hd` の
+  1 本だけで、作り直して一致。`gate-tiers-lock.sh --check` は差分なし。
+
+### 仕様への疑義（人に上げる）
+
+```
+主張:     §54 の改訂後、`Int` の `main` に `raise` が届いたときの終了コード
+再現:     `def main = if 1 == 1 => raise { message = "boom" } | 0`（型 `Int {Error}`）→ 終了コード 1・stderr `boom`
+現行:     1903 行は `raise` を「`main` の型が `Int` 以外なら」の段落で書き、1909 行も「1 は `Int` 以外の `main` で `raise` が届いた場合」と書く
+変えると: 挙動は変えない。本文を「`raise` が届いたら型に関係なく 1（stderr に message）」と改めれば、`def main = 1` との区別は stderr が空かどうかだけだと読める
+推奨:     本文にその 1 文を足す。実装（`hado_abort_error` の `exit(1)`）は既にそうで、文の穴を閉じるだけ。仕様を触るかは人が決める
+```
