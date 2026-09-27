@@ -141,11 +141,11 @@ fn canonical_rewrites_write_parseable_postfix() {
             fix.replacement,
             &source[fix.end..]
         );
-        parse_source(&fixed, name).unwrap_or_else(|error| {
-            panic!("{name}: --fix の出力を読み直せない: {error}\n{fixed}")
+        parse_source(&fixed, name)
+            .unwrap_or_else(|error| panic!("{name}: --fix の出力を読み直せない: {error}\n{fixed}"));
+        hado::check_source(&fixed, name).unwrap_or_else(|error| {
+            panic!("{name}: --fix の出力が検査を通らない: {error}\n{fixed}")
         });
-        hado::check_source(&fixed, name)
-            .unwrap_or_else(|error| panic!("{name}: --fix の出力が検査を通らない: {error}\n{fixed}"));
 
         // `fmt`: 当てられる書き換えを一括で当てる。
         let (formatted, applied) = hado::fixes::format(&source)
@@ -155,8 +155,9 @@ fn canonical_rewrites_write_parseable_postfix() {
         parse_source(&formatted, name).unwrap_or_else(|error| {
             panic!("{name}: fmt の出力を読み直せない: {error}\n{formatted}")
         });
-        hado::check_source(&formatted, name)
-            .unwrap_or_else(|error| panic!("{name}: fmt の出力が検査を通らない: {error}\n{formatted}"));
+        hado::check_source(&formatted, name).unwrap_or_else(|error| {
+            panic!("{name}: fmt の出力が検査を通らない: {error}\n{formatted}")
+        });
         assert!(
             hado::fixes::format(&formatted).expect("settles").is_none(),
             "{name}: fmt が冪等でない"
@@ -174,7 +175,12 @@ fn canonical_rewrites_keep_parenthesized_branch_close() {
         .expect("E520 が出ない");
     assert_eq!(error.code.as_deref(), Some("E520"));
     let fix = hado::fixes::fix_at(source, "E520", error.line, error.col).expect("書き換えが無い");
-    let fixed = format!("{}{}{}", &source[..fix.start], fix.replacement, &source[fix.end..]);
+    let fixed = format!(
+        "{}{}{}",
+        &source[..fix.start],
+        fix.replacement,
+        &source[fix.end..]
+    );
     assert!(
         fixed.contains("if(b => 1 | 2) as v ->"),
         "閉じを壊した: {fixed}"

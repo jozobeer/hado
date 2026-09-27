@@ -1639,13 +1639,7 @@ fn walk_written_cons(callee: &Node, node: &Node, walk: &Walk<'_>, found: &mut Fo
 }
 
 /// `let?` の腕。束縛の削除と、pattern の再帰。
-fn walk_let_q(
-    pat: &Pattern,
-    value: &Node,
-    body: &Node,
-    walk: &Walk<'_>,
-    found: &mut Found<'_>,
-) {
+fn walk_let_q(pat: &Pattern, value: &Node, body: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
     found.push(discard_let_fix(
         pat,
         value,
