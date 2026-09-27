@@ -275,9 +275,11 @@ main が足した探針も後置へ写した。`verify-r33.sh` は module/implem
 閉包の探針は `let` を `as` に写した。`verify-char-and-float-conversions.sh` の
 署名の期待値は正準形へ揃えた（5 つの署名を要求する強さは変えない）。
 
-full 層の門番は 49 本ある（`# tier: full`）。このラウンドで中身を写したのは
-r33・r36・r54・r55・r58・r69・r74 の 7 本。r33・r54・r55・r58 は埋め込み hado の
-module/implement の閉じと `let` を直し、r36 は §55 の署名が括弧前に空白を置く
+full 層の門番は 49 本ある（`# tier: full`）。このラウンドが中身を写したのは 31 本
+（`git diff main...HEAD --name-only -- 'scripts/verify-*.sh'` のうち `# tier: full` を持つ
+もの）。main を取り込んだ後に追加で写したのは r33・r36・r54・r55・r58・r69・r74 の
+7 本で、r33・r54・r55・r58 は埋め込み hado の module/implement の閉じと `let` を直し、
+r36 は §55 の署名が括弧前に空白を置く
 正準形になったので member の切り出しと変異の正規表現を合わせ、r69・r74 は
 E502・E511 の拒否コーパスが 1 行になったので期待値の導出を `if` / `|` から腕を
 取る形へ直した。r74 の赤は E511 の書き換えが 1 行の多節関数で見出しを二重に
