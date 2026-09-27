@@ -1,0 +1,1 @@
+def main = print 0.1
