@@ -1,8 +1,6 @@
 // spec: §55
 // expect: none:0
 // needs: prelude
-def main =
-  Map.empty as m ->
+def main = Map.empty as m ->
   Map.remove m "k" as removed ->
-  String.concat (Option.unwrap_or (Map.find m "k") "none")
-    (String.concat ":" (Int.to_string (List.length (Map.to_list removed))))
+  String.concat (Option.unwrap_or (Map.find m "k") "none") (String.concat ":" (Int.to_string (List.length (Map.to_list removed))))

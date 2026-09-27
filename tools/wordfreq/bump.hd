@@ -1,24 +1,10 @@
 // 単語頻度の CLI（連想リスト版）。空白区切りの語を読み、語ごとの回数を
 // `語 回数` の行にして出す。docs/rounds/map-by-builtin-compare.md の成果物。
 type Entry = { word: String; count: Int }
-
-def rec bump entries word =>
-  if entries
-  | [] => [{ word = word; count = 1 }]
-  | [entry, ...rest] =>
-    if
-    | entry.word == word => [{ word = word; count = entry.count + 1 }, ...rest]
-    | [entry, ...bump rest word]
-
+def rec bump entries word => if entries | [] => [{ word = word; count = 1 }] | [entry, ...rest] => if  | entry.word == word => [{ word = word; count = entry.count + 1 }, ...rest] | [entry, ...bump rest word]
 def line entry => String.concat entry.word (String.concat " " (Int.to_string entry.count))
-
-def rec lines entries acc =>
-  if entries
-  | [] => acc
-  | [entry, ...rest] => lines rest (String.concat acc (String.concat (line entry) "\n"))
-
-def main =
-  Bytes.to_string (IoDefault.read_stdin) as text ->
+def rec lines entries acc => if entries | [] => acc | [entry, ...rest] => lines rest (String.concat acc (String.concat (line entry) "\n"))
+def main = Bytes.to_string IoDefault.read_stdin as text ->
   String.split text " " as words ->
   List.fold words [] fn(acc, word => bump acc word) as entries ->
   IoDefault.log (lines entries "")
