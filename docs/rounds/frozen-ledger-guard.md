@@ -199,3 +199,10 @@ PASSED: 5/5
 1. 凍結する対象の一覧は `scripts/frozen-docs-lock.sh` の `frozen_docs` が唯一の正で、対象を消す変更は門番では止まらない。`scripts/verify-m3.sh` の corpus lock は期待値をディスクから導いて同じ穴を塞いでいるが、どの文書が凍結かはディスクから導けない。機構の変更は差分としてレビューで見る。
 2. `docs/ledger.md` 末尾の「設計メモ」は凍結で追記できなくなったので、仕様変更に至らなかった案の置き場を `docs/rounds.md` で `docs/plans/<名前>.md` へ寄せた。決定 D4 の「丸ごと」から出る帰結で、issue に明示は無い。
 3. `docs/ledger.md` の「設計メモ」自身が「採用した版ごとの決定は `docs/plan.md`」と書くが、凍結された本文なので直さない。読み手には `AGENTS.md` と `docs/rounds.md` の新しい記述が優先する。
+
+着地後（2026-09-27）。PR #54 は `c8dd1f9` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ gh run list --branch main --limit 12
+completed	success	Merge pull request #54 from jozobeer/frozen-ledger-guard	ci	main	push	36289181814	20m31s	2026-09-27T01:05:20Z..2026-09-27T01:25:51Z
+```

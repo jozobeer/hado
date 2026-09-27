@@ -268,3 +268,10 @@ PASSED: 2/2
 
 `verify-rustfmt` は最初の全走で 1 件赤になった（`call_parts` の腕の折り返し）。
 `cargo fmt --all` を当てて緑。整形だけなので `feat:` のコミットに畳んだ。
+
+着地後（2026-09-27）。PR #56 は `a19f6cd` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ gh run list --branch main --limit 12
+completed	success	Merge pull request #56 from jozobeer/pipe-in-tail-argument	ci	main	push	36291224783	20m08s	2026-09-27T01:48:14Z..2026-09-27T02:08:22Z
+```
