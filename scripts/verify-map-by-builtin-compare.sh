@@ -178,19 +178,32 @@ source = Path('stdlib/map.hd').read_text()
 body = source[source.index('implement Map as Map'):]
 internal_ctors = []
 internal_defs = []
+internal_types = []
 for line in body.splitlines():
     line = line.rstrip()
     if line.startswith('type ') and '|' in line:
-        for arm in line.split('=')[1].split('|'):
+        # `type MapColor = | MapRed | MapBlack` と
+        # `type (K, V) T = | MapLeaf | MapNode(...)` の両方から、型名と
+        # constructor 名を取る。
+        head, arms = line.split('=', 1)
+        declared = head[len('type '):].strip()
+        if declared.startswith('('):
+            declared = declared[declared.index(')') + 1:].strip()
+        internal_types.append(declared)
+        for arm in arms.split('|'):
             name = arm.strip().split('(')[0].strip()
             if name:
                 internal_ctors.append(name)
+    elif line.startswith('type '):
+        # constructor を持たない抽象型（`type (K, V) T`）は契約側にある。
+        pass
     elif line.startswith('def rec '):
         internal_defs.append(line[len('def rec '):].split()[0])
     elif line.startswith('def '):
         internal_defs.append(line[len('def '):].split()[0])
 assert internal_ctors, 'no internal constructors found'
 assert internal_defs, 'no internal definitions found'
+assert internal_types, 'no internal types found'
 # 内部名は公開 member と重ならない（`empty` と `insert` などは実装側にもある）。
 external = {m.split('.')[1] for m in map_members}
 internal_ctors = sorted(set(internal_ctors))
@@ -211,6 +224,24 @@ for name in internal_defs:
     code, text = check(f'def_{name}', f'def main = Map.{name} Map.empty\n')
     assert code != 0, f'Map.{name} is callable from outside'
     assert 'E204' in text, (name, text)
+
+# 内部型の名前が利用者の名前と衝突しないこと。`implement` の中の `type` も
+# root の名前空間に出る（crates/hado/src/namespaces.rs の E205 は prelude の
+# 名前も見る）ので、`Color` のような普通の名前を置くと、利用者が同じ名前の
+# 型を宣言したときに E205 になる。prelude は名前空間を借りている側なので、
+# 内部型には `Map` の前置きを付ける。契約が既に名指しする型（抽象型 `T`）は
+# 契約側の名前なので除く。
+contract_text = source[source.index('module Map'):source.index('implement Map as Map')]
+contract_names = set()
+for line in contract_text.splitlines():
+    line = line.strip()
+    if line.startswith('type '):
+        declared = line[len('type '):].strip()
+        if declared.startswith('('):
+            declared = declared[declared.index(')') + 1:].strip()
+        contract_names.add(declared)
+for name in sorted((set(internal_ctors) | set(internal_types)) - contract_names):
+    assert name.startswith('Map'), f'internal type name {name} is not prefixed with Map'
 
 # 公開 member は全部外から見える。`MapEntry` も外の型である。
 # 契約（`module Map` から `implement Map as Map` まで）の `def` の名前が §55 の

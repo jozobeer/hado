@@ -176,6 +176,23 @@ $ bash tools/wordfreq/generate-input.sh words.txt && sha256sum words.txt
 2cc095b8607dbec3f54e15a99105febd1a645ac706944d2b764d78ad747ecd95  words.txt
 ```
 
+### 内部型の名前が root の名前空間に出る
+
+`implement Map as Map` の中の `type` は、root の名前空間にそのまま出る。`type Color = | Red | Black` のような普通の名前を置くと、利用者が同じ名前の型を宣言したときに E205 になる。`cargo test --offline` の `check_adts::nullary_constructor_patterns_constrain_the_scrutinee_type` が `type Color = | Red | Blue` を使うので、この衝突が実際に赤になった。
+
+```
+$ cargo test --offline
+---- nullary_constructor_patterns_constrain_the_scrutinee_type stdout ----
+thread 'nullary_constructor_patterns_constrain_the_scrutinee_type' panicked at crates/hado/tests/check_adts.rs:96:5:
+assertion `left == right` failed
+  left: Some("E205")
+ right: Some("E305")
+```
+
+内部型と constructor に `Map` の前置きを付けて直した（`MapColor` `MapRed` `MapBlack` `MapLeaf` `MapNode` `MapStep` `MapUnchanged` `MapDeleted`）。門番の検査 a が、実装の中の内部型の名前が `Map` で始まることを見るようにして、この種類の後戻りを止める。赤の証拠は、前置きを外して検査 a を回すと `internal type name Black is not prefixed with Map` で落ちること。
+
+`MapEntry` は外に出す型なので前置きをせず、root の名前空間で一意な名前にしてある。
+
 ### コンパイラの限界（未確認）
 
 計測する最大の `n` を 4095 にすると `hado build` が「thread 'main' has overflowed its stack」で落ちる（4095 件のリスト literal）。上限を超える大きさは 1023 で足りる（素の二分探索木で 2044 > 40）ので、門番は 1023 までを測る。より大きい `n` を測るには、literal ではなく再帰で鍵の列を組む門番側の工夫か、コンパイラのスタック使用の見直しが要る。
