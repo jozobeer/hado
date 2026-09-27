@@ -52,8 +52,11 @@ def check(name, fn):
 
 # The sample is the corpus fixture itself, so there is one source of truth.
 E502 = Path('tests/reject/E502/main.hd').read_text()
-# The expectation is derived from the source: the common branch body.
-body = E502.split('=> ', 1)[1].split(' | ', 1)[0].strip()
+# The expectation is derived from the source: the common branch body. 正準形は
+# def の見出しと if が 1 行に載るので、`if ` の後ろの最初の `=> ` の先を腕として取る。
+arms = E502.split('if ', 1)[1].split('=> ', 1)[1].split(' | ', 1)
+body = arms[0].strip()
+assert body == arms[1].splitlines()[0].strip(), 'the E502 fixture must have two identical arms'
 PLAIN = 'def f x =>\n  %s\ndef main = f 1\n' % body
 
 
