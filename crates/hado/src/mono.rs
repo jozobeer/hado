@@ -502,6 +502,10 @@ struct Lowerer {
     value_types: std::collections::HashMap<(usize, usize), Ty>,
     specialization: crate::types::Inference,
     composite_types: std::collections::HashMap<(usize, usize), Ty>,
+    /// `with` の位置ごとの節点の型（`crate::WithTypes`）。同じ節点が答え型の
+    /// 違う複数の `with` に現れると span 単位の表は最後のもので上書きされる
+    /// ので、腕を lower する間だけその `with` の型に差し替える。
+    with_types: std::collections::HashMap<(usize, usize), crate::WithTypes>,
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
     default_operations: std::collections::HashMap<String, String>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
@@ -524,6 +528,12 @@ struct Lowerer {
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
     next: usize,
+}
+
+/// `with` ごとの型を差し替えるとき、元の表の値を戻せるよう控える。
+struct InstalledTypes {
+    values: Vec<((usize, usize), Option<Ty>)>,
+    composites: Vec<((usize, usize), Option<Ty>)>,
 }
 
 pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String> {
@@ -1466,6 +1476,7 @@ pub fn lower_program(
         schemes: checked.definitions.clone(),
         value_types: checked.value_types.clone(),
         composite_types: checked.composite_types.clone(),
+        with_types: checked.with_types.clone(),
         operations: checked.operations.clone(),
         default_operations: checked.default_operations.clone(),
         handlers: ast
@@ -3182,6 +3193,14 @@ impl Lowerer {
             .get(name)
             .cloned()
             .ok_or_else(|| format!("unknown handler {name}"))?;
+        // この `with` の本体と腕の節点を、この `with` が推論された型で lower
+        // する。同じ節点が答え型の違う別の `with` にも現れると span 単位の表は
+        // 最後のもので上書きされているため、ここで差し替える。
+        let installed = self
+            .with_types
+            .get(&(node.span.line, node.span.col))
+            .cloned()
+            .map(|types| self.install_with_types(&types));
         for arg in args {
             let _ = self.expression(arg)?;
         }
@@ -3213,7 +3232,47 @@ impl Lowerer {
         if answer.is_some() {
             self.again_answers.pop();
         }
+        if let Some(installed) = installed {
+            self.restore_with_types(installed);
+        }
         value
+    }
+
+    fn install_with_types(&mut self, types: &crate::WithTypes) -> InstalledTypes {
+        let values = types
+            .values
+            .iter()
+            .map(|(span, ty)| (*span, self.value_types.insert(*span, ty.clone())))
+            .collect();
+        let composites = types
+            .composites
+            .iter()
+            .map(|(span, ty)| (*span, self.composite_types.insert(*span, ty.clone())))
+            .collect();
+        InstalledTypes { values, composites }
+    }
+
+    fn restore_with_types(&mut self, installed: InstalledTypes) {
+        for (span, previous) in installed.values {
+            match previous {
+                Some(ty) => {
+                    self.value_types.insert(span, ty);
+                }
+                None => {
+                    self.value_types.remove(&span);
+                }
+            }
+        }
+        for (span, previous) in installed.composites {
+            match previous {
+                Some(ty) => {
+                    self.composite_types.insert(span, ty);
+                }
+                None => {
+                    self.composite_types.remove(&span);
+                }
+            }
+        }
     }
 
     fn default_operation(
