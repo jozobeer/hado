@@ -1739,7 +1739,7 @@ fn array_set_of_effectful_closures_keeps_their_outcome() {
 #[test]
 fn list_literal_of_closures_with_different_effects_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let fs = [fn(x => 8 / x), fn(x => x + 1)] ->\n  if fs | [_, g] => g 4 | 0\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  [fn(x => 8 / x), fn(x => x + 1)] as fs ->\n  if fs | [_, g] => g 4 | 0\n",
         "5",
     );
 }
