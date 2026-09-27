@@ -1,5 +1,6 @@
 // spec: §32
 // expect: 1
 // item: 引数の条件列
+// needs: prelude
 def sign_of (a: Int, b: Int): Int | a < b => -1 | a > b => 1 | 0
-def main = fn(x | x > 0 => sign_of x 0 | 0) 7
+def main = Int.to_string (fn(x | x > 0 => sign_of x 0 | 0) 7)

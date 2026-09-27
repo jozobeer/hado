@@ -1,6 +1,7 @@
 // spec: §50
 // expect: 42
 // item: 節構文
+// needs: prelude
 type Request = { amount: Int }
-def main = { amount = 20 } as request ->
-  MemoryStore.run { value = request.amount } + FileStore.run { value = request.amount + 1 }
+def main = Int.to_string ({ amount = 20 } as request ->
+  MemoryStore.run { value = request.amount } + FileStore.run { value = request.amount + 1 })

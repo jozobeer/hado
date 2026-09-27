@@ -11,4 +11,4 @@ return _ => []
 def rec loop (n: Int): Void {Int Yield} => if n <= 0 => () | yield n ->
   loop (n - 1)
   /if
-def main = List.length (with Collect -> loop 10000)
+def main = Int.to_string (List.length (with Collect -> loop 10000))

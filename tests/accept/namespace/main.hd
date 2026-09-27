@@ -1,7 +1,8 @@
 // spec: §49
 // expect: 3
 // item: 名前空間
-def main = M.inc 2
+// needs: prelude
+def main = Int.to_string (M.inc 2)
 module S
 def inc (x: Int): Int
 /module
