@@ -506,6 +506,10 @@ struct Lowerer {
     /// 違う複数の `with` に現れると span 単位の表は最後のもので上書きされる
     /// ので、腕を lower する間だけその `with` の型に差し替える。
     with_types: std::collections::HashMap<(usize, usize), crate::WithTypes>,
+    /// 外側の `with` が型を差し替えている深さ。handler の腕の中の内側の
+    /// `with` は定義側の 1 節点なので、`with_types` は最後の答え型のまま。
+    /// 差し替え中は内側を再適用せず、外側の snapshot を使う。
+    with_type_installs: usize,
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
     default_operations: std::collections::HashMap<String, String>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
@@ -3196,11 +3200,9 @@ impl Lowerer {
         // この `with` の本体と腕の節点を、この `with` が推論された型で lower
         // する。同じ節点が答え型の違う別の `with` にも現れると span 単位の表は
         // 最後のもので上書きされているため、ここで差し替える。
-        let installed = self
-            .with_types
-            .get(&(node.span.line, node.span.col))
-            .cloned()
-            .map(|types| self.install_with_types(&types));
+        // 内側の `with` は外側の snapshot に既に入っている。再適用すると
+        // handler 腕の共有節点が最後の答え型で上書きされる。
+        let installed = self.begin_with_types(node.span);
         for arg in args {
             let _ = self.expression(arg)?;
         }
@@ -3232,10 +3234,28 @@ impl Lowerer {
         if answer.is_some() {
             self.again_answers.pop();
         }
+        self.end_with_types(installed);
+        value
+    }
+
+    fn begin_with_types(&mut self, span: crate::parser::Span) -> Option<InstalledTypes> {
+        let installed = if self.with_type_installs == 0 {
+            self.with_types
+                .get(&(span.line, span.col))
+                .cloned()
+                .map(|types| self.install_with_types(&types))
+        } else {
+            None
+        };
+        self.with_type_installs += 1;
+        installed
+    }
+
+    fn end_with_types(&mut self, installed: Option<InstalledTypes>) {
+        self.with_type_installs -= 1;
         if let Some(installed) = installed {
             self.restore_with_types(installed);
         }
-        value
     }
 
     fn install_with_types(&mut self, types: &crate::WithTypes) -> InstalledTypes {
