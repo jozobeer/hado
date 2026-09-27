@@ -132,7 +132,7 @@ fn canonical_rewrites_write_parseable_postfix() {
             .err()
             .unwrap_or_else(|| panic!("{name}: 診断が出ない"));
         let code = error.code.clone().expect("code");
-        assert_eq!(code, name, "{name}: 別の診断が先に出た");
+        assert_eq!(code.as_ref(), name, "{name}: 別の診断が先に出た");
         let fix = hado::fixes::fix_at(&source, &code, error.line, error.col)
             .unwrap_or_else(|| panic!("{name}: 書き換えが無い"));
         let fixed = format!(

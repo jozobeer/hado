@@ -1738,7 +1738,7 @@ impl Checker<'_> {
             })
         });
         Diagnostic {
-            mentions: Vec::new(),
+            mentions: None,
             suggestion: None,
             related,
             path: self.path.into(),
@@ -1746,7 +1746,7 @@ impl Checker<'_> {
             col: span.col,
             end_line: span.line,
             end_col: span.col,
-            code: code.map(str::to_owned),
+            code: code.map(Into::into),
             message: message.into(),
         }
     }

@@ -135,7 +135,7 @@ fn unused_declarations(
                 _ => used.contains(&key),
             };
             (!referenced).then(|| Diagnostic {
-                mentions: Vec::new(),
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -175,7 +175,7 @@ fn module_diagnostics(
                 continue;
             }
             diagnostics.push(Diagnostic {
-                mentions: Vec::new(),
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -234,7 +234,7 @@ fn local_data_diagnostics(
                 return None;
             }
             Some(Diagnostic {
-                mentions: Vec::new(),
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),

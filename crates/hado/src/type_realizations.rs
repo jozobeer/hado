@@ -124,7 +124,7 @@ fn is_unknown_realization(ty: &TypeExpr, name: &str, abstracts: &HashSet<&str>) 
 
 fn realization_error(definition: &TypeDef, path: &str, code: &str, message: &str) -> Diagnostic {
     Diagnostic {
-        mentions: Vec::new(),
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),

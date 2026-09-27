@@ -177,7 +177,7 @@ fn default_definitions_are_required_and_checked_after_inference() {
         match expected {
             Some(code) => assert_eq!(
                 result.err().expect(&source).code,
-                Some(code.to_owned()),
+                Some(code.into()),
                 "{source}"
             ),
             None => assert!(result.is_ok(), "{source}: {:?}", result.err()),

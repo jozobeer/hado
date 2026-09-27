@@ -78,7 +78,8 @@ fn code(source: &str) -> String {
         Err(error) => error
             .code
             .clone()
-            .unwrap_or_else(|| panic!("uncoded diagnostic: {error:?}")),
+            .unwrap_or_else(|| panic!("uncoded diagnostic: {error:?}"))
+            .to_string(),
         Ok(_) => panic!("expected a diagnostic for {source}"),
     }
 }
