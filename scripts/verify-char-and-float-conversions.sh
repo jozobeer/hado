@@ -127,9 +127,9 @@ expect('char_lengths',
        f'def main = List.map {values} fn(n => String.length (Char.to_string (Char.of_int n)))',
        ('[' + ', '.join('1' for _ in accepted) + ']\n').encode())
 expect('char_bytes',
-       'def main = List.map [12354, 128512] '
+       f'def main = List.map {values} '
        'fn(n => Bytes.to_list (Bytes.of_string (Char.to_string (Char.of_int n))))',
-       (str([list(chr(n).encode()) for n in (12354, 128512)]) + '\n').encode())
+       (str([list(chr(n).encode()) for n in accepted]) + '\n').encode())
 expect('char_to_int_literal', "def main = Char.to_int 'a'", b'97\n')
 # R1 の残り: Char.to_string の 1 文字は Unicode スカラ値 1 個である。
 expect('char_to_string_length', "def main = String.length (Char.to_string 'あ')", b'1\n')
@@ -220,7 +220,7 @@ max_finite = '17976931348623157' + '0' * 292 + '.0'
 spellings = ['0.0', '-0.0', '0.1', '1.0', '007.5', '-012.0', '1.00',
              '9007199254740993.0', max_finite, '-' + max_finite,
              '0.' + '0' * 323 + '3', '0.' + '0' * 323 + '5',
-             '-' + '0.' + '0' * 323 + '3']
+             '-' + '0.' + '0' * 323 + '3', '-' + '0.' + '0' * 323 + '5']
 for index, text in enumerate(spellings):
     value = parse_expected(text)
     assert value is not None, text
@@ -253,7 +253,7 @@ grammar = ['', '-', '1', '1.', '.', '.5', '+1.0', '1e3', '1.0e3', ' 1.0', '1.0 '
            '0x1', '0x1.0', '1.2.3']
 overflow = ['2' + '0' * 308 + '.0', '-' + '2' + '0' * 308 + '.0']
 underflow = ['0.' + '0' * 323 + '1', '-' + '0.' + '0' * 323 + '1',
-             '0.' + '0' * 323 + '2']
+             '0.' + '0' * 323 + '2', '-' + '0.' + '0' * 323 + '2']
 # 2^-1075（最小の非正規数のちょうど半分）。ties-to-even で 0 に丸まる。
 halfway = '0.' + '0' * 323 + str(5 ** 1075)
 underflow += [halfway, '-' + halfway]
@@ -379,17 +379,20 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from harness import canonical, parse_expected
 
-samples = [0.0, -0.0, 0.1, 3.0, 1e300, -1e300, 1.7976931348623157e308, 5e-324, 2.2250738585072014e-308]
+samples = [0.0, -0.0, 0.1, 3.0, 1e300, -1e300, 1.7976931348623157e308,
+           5e-324, -5e-324, 2.2250738585072014e-308]
 for value in samples:
     text = canonical(value)
     assert 'e' not in text and 'E' not in text, text
     assert math.copysign(1.0, float(text)) == math.copysign(1.0, value), (value, text)
     assert float(text) == value, (value, text)
-accepted = ['0.0', '007.5', '1.00', '9007199254740993.0']
+accepted = ['0.0', '007.5', '1.00', '9007199254740993.0',
+            '-0.' + '0' * 323 + '3', '-0.' + '0' * 323 + '5']
 for text in accepted:
     assert parse_expected(text) is not None, text
 rejected = ['', '1', '1.', '.5', '+1.0', '1e3', '0x1', '1.2.3',
-            '2' + '0' * 308 + '.0', '0.' + '0' * 323 + '1']
+            '2' + '0' * 308 + '.0', '0.' + '0' * 323 + '1',
+            '-' + '0.' + '0' * 323 + '2']
 for text in rejected:
     assert parse_expected(text) is None, text
 print('judge: canonical round-trips, no exponent, and parse_expected agrees')
