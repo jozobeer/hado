@@ -839,15 +839,21 @@ print(f'bump: total {bump_total:.3f}s control {control_total:.3f}s '
       f'subtracted {bump_extra:.3f}s')
 print(f'map:  total {map_total:.3f}s control {control_total:.3f}s '
       f'subtracted {map_extra:.3f}s')
-# 速さの下限では赤にしない（docs/issues/flaky-string-split-timing-gate.md）。
-# ここで測るのは「対照を引いた時間が Map 版で小さいこと」で、負荷で揺れた
-# ときに赤にしない。比が 1 未満であることだけを報告する。
-if bump_extra <= 0:
-    print('bump subtracted 0 or below: the linear scan is inside the noise floor')
-elif map_extra <= 0:
-    print('map subtracted 0 or below: the tree update is inside the noise floor')
-else:
-    print(f'ratio bump/map of the subtracted time: {bump_extra / map_extra:.2f}')
+
+# 条件 5 の「Map 版が速いことを測る」。対照を引いた差の中央値で判定する
+# （docs/issues/flaky-string-split-timing-gate.md: 中央値で判定し、閾値は
+# 据え置く。退行を測る力は落とさない）。負荷で偽赤を出さない形は保つ:
+# warm-up 1 回 + 5 組、対照減算、組ごとの差の中央値。片方が対照と同じか
+# 速い（差が 0 以下）なら、それは測れていないということなので通さない。
+assert bump_extra > 0, (
+    f'the linear scan is inside the noise floor: subtracted {bump_extra:.3f}s')
+assert map_extra > 0, (
+    f'the tree update is inside the noise floor: subtracted {map_extra:.3f}s')
+ratio = bump_extra / map_extra
+assert ratio > 1.0, (
+    f'the Map CLI is not faster than the association list: '
+    f'bump {bump_extra:.3f}s, map {map_extra:.3f}s, ratio {ratio:.2f}')
+print(f'ratio bump/map of the subtracted time: {ratio:.2f}')
 PY
 }
 
