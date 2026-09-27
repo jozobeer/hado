@@ -62,6 +62,8 @@ pub enum RuntimeFunction {
     ArrayAlloc,
     ArrayFillUnchecked,
     IoLog,
+    IoLogError,
+    ExitCodeOutOfRange,
     StringTrim,
     StringSplit,
     StringJoin,
@@ -85,6 +87,7 @@ impl RuntimeFunction {
             Self::IoReadFile => Some("__io_read_file"),
             Self::IoWriteFile => Some("__io_write_file"),
             Self::IoLog => Some("__io_log"),
+            Self::IoLogError => Some("__io_log_error"),
             Self::IoReadDir => Some("__io_read_dir"),
             Self::IoReadStdin => Some("__io_read_stdin"),
             Self::IoTakeBytes => Some("__io_take_bytes"),
@@ -131,7 +134,8 @@ impl RuntimeFunction {
             | Self::PrintErrorString
             | Self::AbortError
             | Self::PrintChar
-            | Self::PrintFloat => None,
+            | Self::PrintFloat
+            | Self::ExitCodeOutOfRange => None,
         }
     }
 
@@ -156,7 +160,8 @@ impl RuntimeFunction {
             | Self::ArrayLength
             | Self::ArrayGet
             | Self::ArrayAlloc
-            | Self::ArrayFillUnchecked => return None,
+            | Self::ArrayFillUnchecked
+            | Self::ExitCodeOutOfRange => return None,
             Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
             Self::CharToInt => (vec![Type::Char], Type::Int),
             Self::CharOfIntIsValid => (vec![Type::Int], Type::Bool),
@@ -183,6 +188,7 @@ impl RuntimeFunction {
             Self::IoReadFile => (vec![Type::String], Type::Int),
             Self::IoWriteFile => (vec![Type::String, Type::Bytes], Type::Int),
             Self::IoLog => (vec![Type::String], Type::Int),
+            Self::IoLogError => (vec![Type::String], Type::Int),
             Self::IoReadDir => (vec![Type::String], Type::Int),
             Self::IoReadStdin => (vec![Type::Int], Type::Int),
             Self::IoTakeBytes => (vec![Type::Int], Type::Bytes),
@@ -271,6 +277,8 @@ impl RuntimeFunction {
         Self::ArrayAlloc,
         Self::ArrayFillUnchecked,
         Self::IoLog,
+        Self::IoLogError,
+        Self::ExitCodeOutOfRange,
         Self::StringTrim,
         Self::StringSplit,
         Self::StringJoin,
@@ -590,6 +598,18 @@ impl RuntimeFunction {
                 symbol: "hado_io_log",
                 parameters: &[AbiType::Pointer],
                 result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::IoLogError => &Declaration {
+                symbol: "hado_io_log_error",
+                parameters: &[AbiType::Pointer],
+                result: Some(AbiType::I64),
+                may_allocate: false,
+            },
+            Self::ExitCodeOutOfRange => &Declaration {
+                symbol: "hado_exit_code_out_of_range",
+                parameters: &[],
+                result: None,
                 may_allocate: false,
             },
             Self::StringTrim => &Declaration {
