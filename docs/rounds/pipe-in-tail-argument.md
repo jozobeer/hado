@@ -207,9 +207,8 @@ OK: h docs: spec and corpus
 PASSED: 8/8
 ```
 
-`|>` を戻した後の `verify-r37.sh` は `37-i full corpus lock` だけが赤。
-`stdlib/` を変えたので `tests/corpus.sha256` が古い。lock は着地の直前に
-作り直す（AGENTS.md）。他の 259 件は緑。
+`|>` を戻した直後の `verify-r37.sh` は `37-i full corpus lock` だけが赤だった。
+`stdlib/` を変えたので `tests/corpus.sha256` が古い。lock を作り直した後は緑。
 
 ```
 $ bash scripts/verify-r37.sh > target/scratch/r37.log 2>&1; echo "exit=$?"; grep -n "NG:" target/scratch/r37.log
@@ -218,3 +217,54 @@ exit=1
 $ tail -1 target/scratch/r37.log
 PASSED: 259/260
 ```
+
+lock を作り直す前の `--check` の差分。変わる行は `stdlib/env.hd` と
+`stdlib/io.hd` の 2 行だけで、どちらもこのラウンドの成果物である。
+
+```
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+--- tests/corpus.sha256	2026-09-27 10:10:47.417738111 +0900
++++ /tmp/tmp.e2CWSKEWtS	2026-09-27 10:24:55.313422686 +0900
+@@ -1,11 +1,11 @@
+ 8cab964491d747f6b2280f9ee51810fdf73c49dcfd37cfe9b47425b963b518c3  stdlib/array.hd
+ 8f40e22e2dc1dd4536a7f5ce4f476f6328b73062294cf73119eec642ce3c1849  stdlib/bytes.hd
+ 3fca3c48816294c7a1766dcb546d05ca0eff8740e7bf758c1694edee96f035a7  stdlib/char.hd
+-67bb1080d67a68d2a48baf1dabdbeb2704d96c5b2eb5ef5d9e294e9d2fdd8f71  stdlib/env.hd
++e04481671a5640f9b5ec246bbc2c8cf384827fc834f622f9ba58c68b108b13b6  stdlib/env.hd
+ 3b2a0f6605ca571b70546f3a572b4974647b43690840e0b0646ffe03e819cd93  stdlib/error.hd
+ 1d9bf10266423fb75fedcdd6fa08d444c1ef836519e49d216493b8e8d1e1f294  stdlib/float.hd
+ 22b252e3ad1fa7f9555fec52bb310e4dc2f7e3e377d46c2358e4a549005e9ada  stdlib/int.hd
+-c9ff7427ae7d49e891013cc32d05b4f51b35e715ad705e631a77681f52dfdd58  stdlib/io.hd
++9e44ce3ef35a90cffadc1a68b7b21e5cbc25368decf2aa60652aff67c7447cdd  stdlib/io.hd
+ c78a1bd83d5a5cd0ee6d3d2a85970b1663d4ea5c4509fbe8634b8d0860f51878  stdlib/list.hd
+ 021092574d9835fd4ea865a8ad3e9a2b3a7e80a061e0464d77ac400762762976  stdlib/option.hd
+ a951b6e909818c3d2ccfe93f64f8b858824c0838480acf1551c888bb1ed971c8  stdlib/string.hd
+exit=1
+$ grep -cE '^[+-][0-9a-f]' target/scratch/lock-check.log
+4
+```
+
+### ラウンド最後の全走
+
+`git merge main`（`main` は `origin/main` と同じ `e9e2352` で、取り込む変更は
+無かった）と `bash scripts/corpus-lock.sh` の後。
+
+```
+$ cargo test --offline > target/final-cargo-test.log 2>&1; echo "exit=$?"
+exit=0
+$ grep -c '^test result: ok' target/final-cargo-test.log
+69
+$ grep -cE '^test result: FAILED' target/final-cargo-test.log
+0
+$ bash scripts/run-gates.sh --tier quick target/gates-quick | tail -1
+TALLY: 41/41 passed; red: none
+$ bash scripts/verify-r37.sh | tail -1
+PASSED: 260/260
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh | tail -1
+PASSED: 2/2
+```
+
+`verify-rustfmt` は最初の全走で 1 件赤になった（`call_parts` の腕の折り返し）。
+`cargo fmt --all` を当てて緑。整形だけなので `feat:` のコミットに畳んだ。
