@@ -213,3 +213,57 @@ assertion `left == right` failed
 ### コンパイラの限界（未確認）
 
 計測する最大の `n` を 4095 にすると `hado build` が「thread 'main' has overflowed its stack」で落ちる（4095 件のリスト literal）。上限を超える大きさは 1023 で足りる（素の二分探索木で 2044 > 40）ので、門番は 1023 までを測る。より大きい `n` を測るには、literal ではなく再帰で鍵の列を組む門番側の工夫か、コンパイラのスタック使用の見直しが要る。
+
+### F1（postfix-binding）の取り込み後
+
+main（`e0a06a7`）を取り込み、旧構文が E100 になったので成果物を後置へ写した。`docs/spec.md` は自分の §55 の `Map` の節と main の `Char` の閉じが同じ場所で衝突したので、両方を残して後置の綴り（`def 名前 (引数)` と `/module`）で書いた。`tests/corpus.sha256` は main 側を採り、写しの後に作り直した。
+
+写したのは 10 本（`stdlib/map.hd`、受理コーパス 6 本、`tools/wordfreq/` の `bump.hd` `control.hd` `map.hd`）と、門番に埋め込んだ入力と §55 を読む正規表現。正準形は `hado fmt` で作った（手で整えた行は `postfix_close::corpus_is_canonical_and_round_trips` に赤くされた）。
+
+```
+$ for d in tests/accept/map_*; do cargo run --offline -q -- run $d/main.hd; done
+none:2
+1,pos,pos,-0.0,none,0
+1,second,0
+none:0
+[a][b][c]
+0001,0002,0003
+```
+
+6 本とも `// expect:` と一致する。wordfreq の 3 本は 200000 語の入力で頻度表が一致する（`bump==map True bump==ind True map==ind True entries 500 sum 200000`）。
+
+```
+$ cargo test --offline
+（全 suite とも 0 failed。passed=776 failed=0）
+$ bash scripts/verify-map-by-builtin-compare.sh
+PASSED: 9/9
+$ bash scripts/run-gates.sh --tier quick target/gates-quick2
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core4
+TALLY: 709/709 passed; red: none
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/verify-m1-corpus.sh
+PASSED: 7/7
+```
+
+`bash scripts/corpus-lock.sh --check` の差分は「main 側の変更」と「このラウンドの成果物」だけで説明できたので作り直した（248 行）。`bash scripts/gate-tiers-lock.sh --check` は差分なし。
+
+#### 正準形は `print-postfix` が作る（`fmt` ではない）
+
+`postfix_close::corpus_is_canonical_and_round_trips` は `parser::canonical_program` の印字と入力が一致することを求める。`fmt` は `fixes::format` を通る別の経路で、この一致を作らない。手で整えた行は赤くなり、`print-postfix` の出力（`def main =` の行に最初の束縛を続け、パターンの腕を 1 行に畳む）が正準形だった。
+
+```
+$ cargo test --offline --test postfix_close
+test corpus_is_canonical_and_round_trips ... FAILED
+assertion `left == right` failed: tests/accept/map_absent_find_remove/main.hd: 正準形ではない
+  left: "def main =\n  Map.insert ... as m ->\n  ..."
+ right: "def main = Map.insert ... as m ->\n  ..."
+$ cargo run --offline -q -- print-postfix <根> <出力先>   # この出力を採る
+$ cargo test --offline --test postfix_close
+test result: ok. 6 passed; 0 failed
+```
+
+`print-postfix` はコメントを落とす（`stdlib/map.hd` で 18 個）。写した後に、コメント塊を元の錨（次に現れる定義）の位置へ戻した。18 個とも残っていることを確かめてある。
