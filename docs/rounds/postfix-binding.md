@@ -121,16 +121,10 @@ issue の完了条件をそのまま使う。
 
 ```
 $ cargo test --offline --test postfix_close
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-
-$ cargo test --offline --test corpus
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-
-$ cargo test --offline --lib
-test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ cargo test --offline --no-fail-fast
-（70 本の判定が全て ok。合計 761 passed; 0 failed）
+（70 本の判定が全て ok。0 failed。レビューの指摘を閉じたあとに測り直した）
 ```
 
 条件ごとの当て方。
@@ -150,8 +144,8 @@ $ cargo test --offline --no-fail-fast
 
 ```
 $ bash scripts/verify-postfix-binding.sh
-J1:往復と閉じ(ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s): PASS
-J2:コーパス(ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.57s): PASS
+J1:往復と閉じ(ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s): PASS
+J2:コーパス(ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.22s): PASS
 J3 drop-rail-if: caught
 J3 drop-option-question: caught
 J3 drop-if-parens: caught
@@ -162,11 +156,109 @@ J4:lint-docs(PASSED: 16/16): PASS
 PASSED: 4/4
 
 $ bash scripts/run-gates.sh --tier quick target/gates-quick
-TALLY: 40/40 passed; red: none
+TALLY: 41/41 passed; red: none
+
+$ bash scripts/run-gates.sh --tier core target/gates-core
+TALLY: 661/661 passed; red: none
+
+$ bash scripts/verify-treesitter.sh
+PASSED: 5/5
+corpus files: 149 / goldens: 47 / extmarks: 39
+
+$ bash scripts/verify-m1-corpus.sh
+PASSED: 7/7
+
+$ bash scripts/verify-m7.sh
+PASSED: 2/2
 
 $ bash scripts/lint-docs.sh
 PASSED: 16/16
+
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+
+$ bash scripts/corpus-lock.sh --check
+（差分なし、rc=0。作り直しの差分は受理コーパス 6 本の `// item:` を外した
+ハッシュだけで、いずれもこのラウンドの成果物）
+
+$ bash scripts/gate-tiers-lock.sh --check
+（差分なし、rc=0）
 ```
+
+### 指摘 1（局所修正が旧構文を書く）の実測
+
+`crates/hado/src/fixes.rs` の E504・E506・E520 の置換と `parser::canonical` を後置へ
+写し、`crates/hado/tests/postfix_close.rs` の `canonical_rewrites_write_parseable_postfix`
+が `E504`・`E506`・`E507`・`E508`・`E520` の `check --fix` と `fmt` の出力を
+**読み直して検査**する（`--fix` と `fmt` の往復）。`canonical_rewrites_keep_parenthesized_branch_close`
+が `if(...) as v ->` の閉じ `)` を保つことを固定する。
+
+```
+$ cargo test --offline --test postfix_close
+test result: ok. 6 passed; 0 failed
+```
+
+診断の `canonical form:` も同じ綴りを使う。実測:
+
+```
+$ cargo run --offline -q -- check tests/reject/E504/main.hd
+main.hd:3:23: error[E504]: use `->` to discard a success value; canonical form: Some(x) -> Some(1)
+
+$ cargo run --offline -q -- check tests/reject/E506/main.hd
+main.hd:3:17: error[E506]: a plain binding cannot discard its value; write `->`; canonical form: （束縛を削除）
+```
+
+E303 の案内も `e ->`・`e as p? ->` へ写した。`fmt` は閉じの印を足さない
+（上の「仕様への疑義」の決定）。
+
+### 指摘 2（門番が旧構文を埋め込む）の実測
+
+触った full の門番は全て 1 本ずつ回し、緑を確かめた。
+
+```
+prelude-tail-recursion 8/8   r30 16/16   r31 25/25   r32 45/45   r34 1360/1360
+r35 714/714   r37 260/260   r43 10/10   r46 5/5   r47 4/4   r48 5/5
+r49 2/2   r50 4/4   r52 5/5   r53 5/5   r62 4/4   r63 4/4   r71 4/4
+r72 4/4   r73 4/4   r75 4/4   r76 4/4   r77 5/5
+```
+
+`r37` は入れ子で `verify-m1-corpus.sh` を回す。旧構文を埋め込む門番のほかに、
+`verify-m7.sh`（core）と `scripts/lsp-check.py` の入力・契約も後置へ写した
+（`E504`・`E506` の書き換えの比較対象、`module` の `/module`、未保存テキストの
+`1 as unused ->`）。`verify-lsp-minimal.sh`（core）はこの 3 件で 8/11 だったのが
+11/11 になった。
+
+core 層を回すと、このラウンドが書いた `postfix_print.rs` の `expr_prec` と
+`parser.rs` の `parse_fun`、`main.rs` の `print_postfix_command`・`is_comment_line`
+が `verify-cognitive-complexity.sh` の閾値 7 を超えていた（8/7・14/7・8/7・9/7）。
+入れ子を補助関数へ出して 3/3。往復（J1・J2）と `cargo test` は緑のまま。
+
+`string-split-linear` の `i perf: join` は、機械が速いと小さい方の中央値が
+較正の下限 `0.200s` を割って赤になる（`0.193s`〜`0.198s`）。同じ木で
+10/10 が 3 回、9/10 が 3 回で、`String.join` の実装も門番の入力もこのラウンドで
+変えていない。門番は緩めず、環境依存の揺れとして報告する。
+
+### 指摘 3（tree-sitter が追随しない）の実測
+
+`editors/tree-sitter-hado/grammar.js` に `e as p ->`・`e as p? ->`・`e ->` と
+`/if`・`/fn`・`/module`・`/implement` の閉じを足し、golden とハイライトを追随させた。
+
+```
+$ bash scripts/verify-treesitter.sh
+PASSED: 5/5
+corpus files: 149 / goldens: 47 / extmarks: 39
+```
+
+### 仕様と実装の食い違い（記録）
+
+正準形の印字器は `def` の本体の最初の一歩を見出し行へ連結し、括弧付き引数の
+`(` の前に空白を置く。付録B と §55 の例はこの綴りへ写した（`m1-corpus` の
+突き合わせと `verify-m7` の署名）。付録B の `def display`・`def active_names users =>`
+は本体と一体の 1 行になったので、`verify-m1-corpus.sh` の検査 2 の二次の見張り
+（`def display` を含むファイルに `| Guest => "guest"` と `// expect: guest` を、
+`def active_names users =>` を含むファイルに `// needs: prelude` を要求する）の
+引き金を、完全一致から行頭一致 `^def display($|[ (])`・`^def active_names users =>`
+へ合わせた。見張りは狭めていない（当たるファイルは増える）。
 
 ### 写しの途中で見つけた印字器の穴
 
