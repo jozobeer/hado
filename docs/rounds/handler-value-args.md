@@ -153,3 +153,25 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 67 filtered out; fin
 - 設計に還元したこと: `with` の実引数の評価は `with_params` に寄せた。`mono.rs` に新しい束縛の仕組みを足さず、腕の引数と同じ経路で 1 回評価と `Let` を手に入れている。`interpret_outcome` は `scope` から値引数を読み、腕の lower の間だけ convert の引数へ向け直す。
 - 周辺: 実引数の個数違いは E301（アンカーは handler 名）、型違いは E305（アンカーは食い違った実引数）で止まる。値引数を使わない handler（`HAsk(unused: Int)`）も通る。`file_scopes` を直す前は、腕の参照が file-local 名へ付け替えられていた。
 
+### ラウンド最後の全走
+
+```
+$ cargo test --offline
+test result: ok. ... 0 failed （70 本の test result 行、777 passed、FAILED 0）
+$ bash scripts/run-gates.sh --tier quick target/gates-quick2
+TALLY: 41/41 passed; red: none
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+```
+
+`--tier core` の 1 回目は 716/721 で、赤は `verify-m0`・`verify-m2`・`verify-m3`・`verify-m7` の 4 本だった。いずれも (a) 受理コーパスの正準形（`handler_value_arg_effect` などの腕を改行していなかった）と (b) `tests/corpus.sha256` が新しい 5 本をまだ持たないこと、の 2 つに還元できた。両方を直した後、その 4 本だけを回し直して緑を確かめた。
+
+```
+$ bash scripts/run-gates.sh target/gates-red verify-m0 verify-m2 verify-m3 verify-m7
+TALLY: 29/29 passed; red: none
+```
+
+corpus lock の `--check` 差分は、追加した 5 本の `+` 行だけで、main 側の変更は無かった（`origin/main` は基点の `bb44419` のまま）。
+
