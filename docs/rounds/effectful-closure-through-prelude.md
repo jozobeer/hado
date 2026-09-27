@@ -195,3 +195,10 @@ $ bash scripts/verify-m4.sh
 PASSED: 140/140
 ```
 
+
+着地後（2026-09-27）。PR #47 は `77e0359` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ gh run list --branch main --limit 8
+completed	success	Merge pull request #47 from jozobeer/effectful-closure-through-prelude	ci	main	push	36271660931	39m18s	2026-09-26T21:04:10Z..2026-09-26T21:43:28Z
+```

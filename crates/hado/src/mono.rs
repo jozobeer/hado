@@ -911,6 +911,15 @@ impl Lowerer {
             (None, Some(element), Type::Data(name, _)) => Type::Data(name.clone(), vec![element]),
             _ => resolved,
         };
+        // 宣言側の要素型が outcome の閉包なら、効果を運ばない要素も
+        // 呼び出し側が outcome として解釈できる型に揃える。
+        let values = match &declared {
+            Some(element) => values
+                .into_iter()
+                .map(|value| self.as_outcome_closure(value, element))
+                .collect::<Result<Vec<_>, _>>()?,
+            None => values,
+        };
         Ok((list_ty, values))
     }
 
@@ -970,6 +979,75 @@ impl Lowerer {
         arguments
             .first()
             .is_some_and(|element| element != &value.ty())
+    }
+
+    // 宣言側の要素型が outcome の閉包のとき、効果を運ばない要素の閉包は
+    // 結果を `done` で包む閉包に直す。呼び出し側は要素を outcome として
+    // 解釈する（`g 4` の結果が handler の答えになる）ので、値の側でも
+    // 同じ型に揃える。直せない不一致はそのまま返し、`cons_list` が止める。
+    fn as_outcome_closure(
+        &mut self,
+        value: Expression,
+        element: &Type,
+    ) -> Result<Expression, String> {
+        let Type::Closure(parameters, outcome) = element else {
+            return Ok(value);
+        };
+        if !is_outcome(outcome) {
+            return Ok(value);
+        }
+        let value_ty = value.ty();
+        let Type::Closure(value_parameters, value_result) = &value_ty else {
+            return Ok(value);
+        };
+        if value_parameters != parameters || **value_result == **outcome {
+            return Ok(value);
+        }
+        let (success, _, _) = outcome_parts(outcome)?;
+        if **value_result != success {
+            return Ok(value);
+        }
+        let capture = self.next;
+        self.next += 1;
+        let mut ids = Vec::with_capacity(parameters.len());
+        let mut arguments = Vec::with_capacity(parameters.len());
+        for parameter in parameters {
+            let id = self.next;
+            self.next += 1;
+            ids.push(id);
+            arguments.push(Expression::Variable {
+                id,
+                ty: parameter.clone(),
+            });
+        }
+        let call = Expression::CallClosure {
+            closure: Box::new(Expression::Variable {
+                id: capture,
+                ty: value_ty.clone(),
+            }),
+            arguments,
+            result: success,
+        };
+        let body = self.done(call, outcome)?.in_tail_position();
+        let id = FunctionId(self.next_function);
+        self.next_function += 1;
+        let signature = Signature {
+            parameters: parameters.clone(),
+            result: (**outcome).clone(),
+        };
+        self.functions.push(Function {
+            id,
+            name: format!("outcome_{}", id.0),
+            signature: signature.clone(),
+            parameters: ids,
+            captures: vec![(capture, value_ty)],
+            body,
+        });
+        Ok(Expression::MakeClosure {
+            function: id,
+            signature,
+            captures: vec![value],
+        })
     }
 
     fn name_expression(

@@ -1734,6 +1734,16 @@ fn array_set_of_effectful_closures_keeps_their_outcome() {
     );
 }
 
+// 効果の違う閉包を 1 つのリストリテラルに並べても、§36 の型では受理される。
+// 効果を持たない要素も outcome の閉包に直さないと、`Cons` の要素型が食い違う。
+#[test]
+fn list_literal_of_closures_with_different_effects_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  let fs = [fn(x => 8 / x), fn(x => x + 1)] ->\n  if fs | [_, g] => g 4 | 0\n",
+        "5",
+    );
+}
+
 #[test]
 fn contract_member_returning_a_closure_over_an_effectful_argument() {
     runs_effectful_closure_source(

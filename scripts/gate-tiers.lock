@@ -4,6 +4,7 @@ ci	quick
 clippy	core
 cognitive-complexity	core
 embed-runtime	full
+frozen-docs	core
 gate-cache	quick
 lsp-minimal	core
 m0	core

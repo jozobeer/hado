@@ -63,7 +63,8 @@ AGENTS.md         守る規則と読む順
 
 - `docs/getting-started.md` — 最初のプログラム
 - `docs/spec.md` — 言語仕様。§56 にエラーコード表と検査の段階順
-- `docs/plan.md` — 開発計画。決定記録、ラウンドの手順書、判断の解説
+- `docs/plan.md` — 凍結した開発計画（版ごとの決定記録）。以後の計画は `docs/plans/`
+- `docs/plans/` — 版をまたぐ計画と版ごとの決定
 - `docs/rounds.md` `docs/rounds/` — ラウンドの識別子・ファイルの形・門番の宣言行。1 ラウンド 1 ファイル
 - `docs/corpus.md` — コーパスの規約と門番の設計
 - `docs/ledger.md` — R81 までのラウンドの実行記録（凍結）
