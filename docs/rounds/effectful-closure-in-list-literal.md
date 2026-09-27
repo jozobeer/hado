@@ -160,3 +160,10 @@ PASSED: 16/16
 $ bash scripts/verify-spec-contracts.sh
 PASSED: 2/2
 ```
+
+着地後（2026-09-27）。PR #52 は `3247613` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ gh run list --branch main --limit 8
+completed	success	Merge pull request #52 from jozobeer/effectful-closure-in-list-literal	ci	main	push	36281233911	12m21s	2026-09-27T00:01:38Z..2026-09-27T00:13:59Z
+```

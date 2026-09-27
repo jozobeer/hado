@@ -214,3 +214,18 @@ issue の完了条件が「検査を消さずに理由を出して非 0」と理
   両方を 1 本で回す形は quick の予算に合わない。
 - assert で書いた門番すべてに同じ門を測る一般化は、このラウンドの外である（門番を増やすか、
   既存の 2 本に足すかを含めて、次の候補にする）。
+
+着地後（2026-09-27）。PR #50 は `1425789` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。**この走行は赤だった。**
+
+```
+$ gh run list --branch main --limit 8
+completed	failure	Merge pull request #50 from jozobeer/gate-optimize-flag	ci	main	push	36272319919	42m55s	2026-09-26T21:15:43Z..2026-09-26T21:58:38Z
+$ gh run view --job=108488487550 --log | grep -a TALLY
+TALLY: 3748/3749 passed; red: verify-string-split-linear.log
+$ gh run download 36272319919 -n gate-logs -D /tmp/gate-logs && tail -6 /tmp/gate-logs/verify-string-split-linear.log
+AssertionError: h: control-subtracted ratio 2.74 > 2.5 (small=0.216s large=0.591s)
+NG: h perf: split with a growing Japanese separator is linear
+PASSED: 9/10
+```
+
+赤はこのラウンドの成果物ではなく、R1 が入れた timing の門番 `scripts/verify-string-split-linear.sh` の検査 h が高負荷で偽赤を出したもの。同じ木を含む `14be875`（run 36272426720, success）と `3247613`（run 36281233911, success）では緑に戻っている。手元（空いた計算機）では同じ検査が ratio 1.88 で緑。負荷依存の判定なので、頑健化は `docs/issues/flaky-string-split-timing-gate.md` に切った。
