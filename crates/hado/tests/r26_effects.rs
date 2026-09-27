@@ -1764,3 +1764,15 @@ fn nested_handlers_of_the_same_effect_pick_the_inner_answer() {
         "outer",
     );
 }
+
+// 効果を持つ呼び出しを `|>` で書いた要素を末尾呼び出しの引数のリストに置いても、
+// 直接適用と同じ outcome の継続に載る。`|>` の target が module 修飾
+// （`Bytes.to_string`）だと、親の ANF が効果を見落として `Cons` の要素型が
+// `$Outcome` のまま食い違っていた。
+#[test]
+fn pipe_in_a_tail_call_argument_keeps_the_callees_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as H\nabort raise e => e.message\nreturn _ => \"ok\"\ndef rec go (values: String List, acc: String List): String List {Error} =>\n  if values | [] => acc\n  | [head, ...tail] => go tail [Bytes.of_string head |> Bytes.to_string, ...acc]\ndef main = with H -> go [\"x\"] []\n",
+        "ok",
+    );
+}
