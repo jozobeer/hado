@@ -275,6 +275,15 @@ main が足した探針も後置へ写した。`verify-r33.sh` は module/implem
 閉包の探針は `let` を `as` に写した。`verify-char-and-float-conversions.sh` の
 署名の期待値は正準形へ揃えた（5 つの署名を要求する強さは変えない）。
 
+full 層の門番は 49 本ある（`# tier: full`）。このラウンドで中身を写したのは
+r33・r36・r54・r55・r58・r69・r74 の 7 本。r33・r54・r55・r58 は埋め込み hado の
+module/implement の閉じと `let` を直し、r36 は §55 の署名が括弧前に空白を置く
+正準形になったので member の切り出しと変異の正規表現を合わせ、r69・r74 は
+E502・E511 の拒否コーパスが 1 行になったので期待値の導出を `if` / `|` から腕を
+取る形へ直した。r74 の赤は E511 の書き換えが 1 行の多節関数で見出しを二重に
+する印字器の穴でもあったので、`literal_replacement` が見出しの後ろだけを前置きに
+残すよう直した（`fix:`）。full 層は 49 本全てを `--tier full` の 1 回で回した。
+
 ```
 $ cargo test --offline
 （70 本の判定が全て ok。0 failed）
@@ -282,16 +291,20 @@ $ bash scripts/run-gates.sh --tier quick .
 TALLY: 41/41 passed; red: none
 $ bash scripts/run-gates.sh --tier core .
 TALLY: 697/697 passed; red: none
+$ bash scripts/run-gates.sh --tier full .        # full 49 本
+TALLY: 3806/3807 passed; red: verify-string-split-linear.log
 $ bash scripts/verify-r33.sh                      → PASSED: 72/72
+$ bash scripts/verify-r36.sh                      → PASSED: 384/384
+$ bash scripts/verify-r54.sh / r55.sh / r58.sh    → PASSED: 5/5, 5/5, 8/8
+$ bash scripts/verify-r69.sh / r74.sh             → PASSED: 4/4, 4/4
 $ bash scripts/verify-char-and-float-conversions.sh → PASSED: 9/9
-$ bash scripts/verify-frozen-docs.sh              → PASSED: 1/1
-$ bash scripts/verify-r50.sh                      → PASSED: 4/4
-$ bash scripts/verify-string-split-linear.sh      → PASSED: 11/11
 $ bash scripts/corpus-lock.sh --check / gate-tiers-lock.sh --check → 差分なし rc=0
 ```
 
-`string-split-linear` の `h perf: split with a growing Japanese separator` は
-1 回だけ赤になり、続く 3 回は 11/11。環境依存の揺れとして報告する。
+full 層の唯一の赤は `verify-string-split-linear` の検査 i（join）で
+`small median 0.179s is below the 0.200s floor`。既知の計時揺れ
+（`docs/issues/flaky-string-split-timing-gate.md` が、検査 i は下限を割ると赤に
+なり単独再測で緑に戻ると記録する）。門番は緩めていない。
 
 ### 写しの途中で見つけた印字器の穴
 
