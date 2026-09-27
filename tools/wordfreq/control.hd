@@ -1,0 +1,12 @@
+// 単語頻度の速さの対照。同じ入力・同じ分割・同じ出力の整形を行い、頻度の
+// 更新だけを行わない（先頭 500 語を回数 0 で出す）。bump 版と Map 版で
+// 同じものを使う。docs/rounds/map-by-builtin-compare.md の成果物。
+def rec emit words acc =>
+  if words
+  | [] => acc
+  | [word, ...rest] => emit rest (String.concat acc (String.concat word " 0\n"))
+
+def main =
+  let text = Bytes.to_string (IoDefault.read_stdin) ->
+  let words = String.split text " " ->
+  IoDefault.log (emit (List.take words 500) "")

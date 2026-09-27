@@ -1,0 +1,17 @@
+// spec: §55
+// expect: 1,pos,pos,-0.0,none,0
+// needs: prelude
+def key_of | MapEntry(k, _) => k
+def first_of
+| [] => MapEntry(0.0, "")
+| [e, ..._] => e
+def main =
+  let m = Map.insert (Map.insert Map.empty (-0.0) "neg") 0.0 "pos" ->
+  String.join
+    [ Int.to_string (List.length (Map.to_list m)),
+      Option.unwrap_or (Map.find m (-0.0)) "none",
+      Option.unwrap_or (Map.find m 0.0) "none",
+      Float.to_string (key_of (first_of (Map.to_list m))),
+      Option.unwrap_or (Map.find (Map.remove m 0.0) (-0.0)) "none",
+      Int.to_string (List.length (Map.to_list (Map.remove m (-0.0)))) ]
+    ","

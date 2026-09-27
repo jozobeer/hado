@@ -1,0 +1,15 @@
+// 単語頻度の CLI（prelude の Map 版）。読み方も出す形も bump.hd と同じで、
+// 頻度の更新だけを Map に置き換える。docs/rounds/map-by-builtin-compare.md の成果物。
+def line | MapEntry(word, count) => String.concat word (String.concat " " (Int.to_string count))
+
+def rec lines entries acc =>
+  if entries
+  | [] => acc
+  | [entry, ...rest] => lines rest (String.concat acc (String.concat (line entry) "\n"))
+
+def main =
+  let text = Bytes.to_string (IoDefault.read_stdin) ->
+  let words = String.split text " " ->
+  let m = List.fold words Map.empty fn(acc, word =>
+    Map.insert acc word (Option.unwrap_or (Map.find acc word) 0 + 1)) ->
+  IoDefault.log (lines (Map.to_list m) "")
