@@ -106,3 +106,160 @@ issue の完了条件をそのまま使う。8 項目。
 | §58.2 | `test: <相対パス> failed (exit <n>)` はゲストの終了コード | 実行 | — | `verify-r54.sh` |
 
 ## 実測
+
+完了条件ごとに測る。境界の値は仕様から選び、生成した実行ファイルと `hado run` の
+両方で測る。
+
+```
+$ bash scripts/verify-exit-code-from-main.sh
+OK: 1 Int 0 is the exit code and prints nothing
+OK: 1 Int 1 is the exit code and prints nothing
+OK: 1 Int 3 is the exit code and prints nothing
+OK: 1 Int 42 is the exit code and prints nothing
+OK: 1 Int 255 is the exit code and prints nothing
+OK: 1 String main prints and exits 0
+OK: 1 Bool main prints and exits 0
+OK: 1 Void main prints nothing and exits 0
+OK: 1 raise reaching main exits 1 with the message
+OK: 2 -1 is diagnosed
+OK: 2 256 is diagnosed
+OK: 2 i64 max is diagnosed
+OK: 2 i64 min is diagnosed
+OK: 3 log_error writes stderr only and log writes stdout
+OK: 4 a failed log_error is a catchable IoFailure
+OK: 4 an uncaught log_error failure exits 1
+OK: 4 a failed print exits 1
+OK: 4 an Int main never writes so a broken stdout does not matter
+OK: 7 hado test reports each guest exit code in path order
+PASSED: 19/19
+```
+
+条件ごとの当て方。
+
+- 条件 1・2: 門番の 1・2 が、0・1・3・42・255 の終了コードと、-1・256・i64 の
+  両端の診断を、build と `hado run` の両方で測る。i64 の最小値はリテラルに
+  書けない（E112）ので `(-9223372036854775807 - 1)` で作る。`raise` が届く経路は
+  1 のまま。
+- 条件 3: 門番の 3 が `log_error` の stdout 空・stderr `x`（改行 1 つ）と、`log` の
+  stdout を同じ門番で対照する。`crates/hado/tests/exit_code.rs` の
+  `log_goes_to_stdout_and_log_error_goes_to_stderr` が同じ 3 経路を持つ。
+- 条件 4: 門番の 4 が、`/dev/full` へ落ちる `log_error` を `handler` が
+  `IoFailure` として捕まえること（終了コード 0）と、捕まえない場合の終了コード 1 を
+  測る。`crates/hado/tests/exit_code.rs` の
+  `log_error_failure_is_a_catchable_io_failure` が同じ 2 経路を持つ。§55 の失敗の表に
+  `log_error` の行を足した。
+- 条件 5: 43 本の `tests/accept/*/main.hd` の `def main` を `Int.to_string` で包み、
+  35 本に `// needs: prelude` を足した。`// item:` `// spec:` `// expect:` `// error:`
+  `// short-circuit:` は 1 行も変えていない。
+
+```
+$ for f in $(git ls-tree -r --name-only main -- tests/accept); do
+>   diff <(git show main:$f | grep -E '^// (item|spec|expect|error|short-circuit):' | sort) \
+>        <(git show HEAD:$f | grep -E '^// (item|spec|expect|error|short-circuit):' | sort) \
+>     || echo "DIFF $f"
+> done
+header-diffs=0
+
+$ bash scripts/verify-m1-corpus.sh
+OK: 7 protected-files-unchanged
+PASSED: 7/7
+```
+
+- 条件 6: 実行する `main` が `Int` を印字に使っていた非コーパスの門番とテストを
+  移した。`crates/hado/tests/` は `walk.rs`・`run_cli.rs`・`build_cli.rs`・
+  `emit_mono.rs`・`prelude.rs`・`named_record_constructors.rs`・`r9_module_types.rs`・
+  `r9_unused.rs`・`r35_array.rs`・`parse_corpus.rs` と生成器の検査、`scripts/` は
+  `verify-r29.sh`・`verify-r43.sh`・`verify-r54.sh`・`verify-m0.sh`・
+  `verify-char-and-float-conversions.sh`・`verify-prelude-tail-recursion.sh`・
+  `verify-r38.sh`。`verify-m0.sh` の `walk.rs` の針は `"3"`（印字）から
+  `"def main = 1 + 2", 3`（終了コード）へ変え、判別力を保った。`verify-r38.sh` の
+  `Int.parse` の受理 probe は `Int.to_string` で包み、拒否 probe は raise のまま
+  終了コード 1 を測る。prelude を付けない `compile_source_to_object` の経路は
+  `Int.to_string` を使えないので、`crates/hado/tests/corpus.rs` の成功例は
+  `def main = "<n>"` へ、`emit_mono.rs` と `r35_array.rs` の Int は
+  `__int_to_string` へ寄せた。
+
+```
+$ cargo test --offline
+（778 判定が全て ok。0 failed）
+
+$ bash scripts/run-gates.sh --tier quick target/gates-quick2
+TALLY: 41/41 passed; red: none
+
+$ bash scripts/run-gates.sh --tier core target/gates-core2
+TALLY: 681/681 passed; red: none
+```
+
+- 条件 7: `scripts/verify-r54.sh` の 54-a が、2 以上 255 以下のゲスト終了コードを
+  乱数で 2 本作り（`code` と `other`）、`test: a_test.hd failed (exit code)`・
+  `test: b_test.hd failed (exit other)`・`test: c_test.hd ok` と `1/3 passed`、
+  集約の終了コード 1 を測る。54-b は `raise` と `def main = 1` の経路を
+  `failed (exit 1)` のまま保つ。
+
+```
+$ bash scripts/verify-r54.sh
+OK: 54-e only the root directory is selected
+PASSED: 5/5
+```
+
+- 条件 8: `scripts/verify-r37.sh` の `io_arms` を 6 腕（`log_error` 込み）にし、
+  腕を欠かすと E605 になる `37-d(4) missing-arm` を保つ。`scripts/verify-r43.sh` の
+  固定腕も 6 にし、`io handler: 6 arms accepted, missing log is E605` を測る。腕は
+  減らしていない。§54 の表の Int の行を「10 進。ただし `main` の型が `Int` のときは
+  印字せず、その値を終了コードにする（上記）」へ、本文を新しい規則に書き直した。
+  旧文の針 `終了コードは 0 と 1 の二値` は落ちた門番 r76 のもので、
+  `scripts/verify-spec-contracts.sh` の針を新しい規範文
+  `その値がそのまま終了コードである` へ移した。仕様の節番号は動かしていない。
+
+```
+$ bash scripts/verify-r37.sh
+main.hd:2:8: error[E605]: handler operations do not match the effect
+OK: 37-d(4) missing-arm
+PASSED: 262/262
+
+$ bash scripts/verify-r43.sh
+io handler: 6 arms accepted, missing log is E605, r37 gates follow
+OK: 43-h Io handler and r37 follow-up
+PASSED: 10/10
+
+$ bash scripts/verify-r29.sh
+PASSED: 24/24
+```
+
+- 着地前の corpus lock: `git merge main`（`b2587d1`）の後、`--check` の差分 44 行は
+  すべて `stdlib/io.hd` と受理コーパスの `Int.to_string` 包み・`// needs: prelude` で
+  説明でき、main 側の変更の説明を要する行は無かった。作り直した後の照合は一致する。
+
+```
+$ bash scripts/corpus-lock.sh --check | grep -E '^[+-][0-9a-f]{64}' | awk '{print $2}' | sort -u | wc -l
+44
+$ bash scripts/corpus-lock.sh && bash scripts/corpus-lock.sh --check && echo LOCK_OK
+LOCK_OK
+
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+
+$ bash scripts/verify-spec-contracts.sh
+OK: the spec body keeps the needles of the dropped gates
+OK: the gate tier lock matches the membership derived from # tier:
+PASSED: 2/2
+```
+
+### 実装から分かったこと
+
+- 仮説どおり、終了コードの判定は `emit.rs` の entry に閉じた。`program.entry.ty()`
+  を `define_entry` へ渡し、`Int` のときだけ範囲判定の分岐を選ぶ。非 `Int` は
+  今までどおり `hado_print` を通る。`verify-m5.sh` の `dump-mono` への懸念は空振りで、
+  m5 は core 層で緑のまま。
+- 仮説どおり、`log_error` は `log` の写し（`stdlib/io.hd` の 3 箇所・
+  `runtime_abi.rs`・`hado_runtime.c`）で足り、mono と emitter は intrinsic 表から
+  追随した。intrinsic 名 `__io_log_error` もそのまま解決した。
+- 仮説「項目被覆はタグだけを見るので動かない」は当たり。ただし `Int.to_string` を
+  使う受理ファイルには `// needs: prelude` が要った。
+- 想定外: 非コーパスの門番が issue の挙げた 3 例より広く、core 層に 5 本の赤
+  （m0・char-and-float-conversions・prelude-tail-recursion・r38・spec-contracts）が
+  出た。いずれも Int の印字か spec の針への依存で、条件 6 の棚卸しで閉じた。
+- 想定外: `hado test` の `failed (exit <n>)` の `n` がゲストの値そのものになった。
+  `verify-r54.sh` は乱数で作った 2 値でこれを測る。
+- 想定外: `hado test` の Int のゲストは何も印字しないので、`test:` 行の
+  `ok` / `failed (exit <n>)` だけが結果を伝える。§58.2 の報告はそのままで足りた。
