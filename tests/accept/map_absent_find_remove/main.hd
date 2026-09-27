@@ -1,0 +1,6 @@
+// spec: §55
+// expect: none:2
+// needs: prelude
+def main = Map.insert (Map.insert Map.empty "b" "2") "a" "1" as m ->
+  Map.remove m "zzz" as removed ->
+  String.concat (Option.unwrap_or (Map.find m "zzz") "none") (String.concat ":" (Int.to_string (List.length (Map.to_list removed))))

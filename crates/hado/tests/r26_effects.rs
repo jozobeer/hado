@@ -1821,3 +1821,74 @@ fn pipe_in_a_tail_call_argument_keeps_the_callees_outcome() {
         "ok",
     );
 }
+
+// §38 は handler に答え型の制限を置かない。1 つの本体が同じ handler を、
+// 答え型の違う 2 つの `with` に使える。handler の腕は with ごとの答え型で
+// 具体化される。直す前は `handler arms disagree on the answer type` で赤。
+#[test]
+fn one_body_uses_a_handler_at_two_answer_types() {
+    runs_effectful_closure_source(
+        "handler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\ntype R = { a: Int Option; b: String Option }\ndef main = { a = with ToOption -> Int.parse \"1\"; b = with ToOption -> String.slice \"ab\" 0 1 }\n",
+        "{ a = Some(1); b = Some(\"a\") }",
+    );
+}
+
+// 入れ子にした 4 つの形を単独で動かした値。判定器はこの表を独立に持ち、
+// 入れ子どうしの一致では通さない。
+const ABSENT_NESTING: &str = "effect Absent\nabort absent\n\ndef risky (n: Int): Int {Absent, Error} =>\n  if n == 0 => absent | raise { message = \"boom\" }\n\nhandler Absent as Maybe\nabort absent => None\nreturn value => Some(value)\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n";
+const NESTED_SINGLE_RUNS: [(&str, u32, &str); 4] = [
+    ("with Maybe -> with ToOption -> ", 0, "None"),
+    ("with Maybe -> with ToOption -> ", 1, "Some(None)"),
+    ("with ToOption -> with Maybe -> ", 0, "Some(None)"),
+    ("with ToOption -> with Maybe -> ", 1, "None"),
+];
+
+// Absent と Error の handler を入れ子にした 4 つの形の単独実行。
+#[test]
+fn nested_handler_orders_run_alone() {
+    for (nesting, argument, expected) in NESTED_SINGLE_RUNS {
+        runs_effectful_closure_source(
+            &format!("{ABSENT_NESTING}def main = {nesting}risky {argument}\n"),
+            expected,
+        );
+    }
+}
+
+// 両方の順序を同じ本体に並べても、それぞれ単独で動かした値のまま。
+// 直す前は `done payload mismatch` で赤。
+#[test]
+fn nested_handler_orders_in_one_body_match_their_single_runs() {
+    let source = format!(
+        "{ABSENT_NESTING}type R = {{ a: Int Option Option; b: Int Option Option }}\ndef main = {{ a = {}risky {}; b = {}risky {} }}\n",
+        NESTED_SINGLE_RUNS[0].0,
+        NESTED_SINGLE_RUNS[0].1,
+        NESTED_SINGLE_RUNS[2].0,
+        NESTED_SINGLE_RUNS[2].1
+    );
+    let expected = format!(
+        "{{ a = {}; b = {} }}",
+        NESTED_SINGLE_RUNS[0].2, NESTED_SINGLE_RUNS[2].2
+    );
+    runs_effectful_closure_source(&source, &expected);
+}
+
+// 4 つの形を 1 つの record にまとめても、それぞれ単独の値のまま。
+#[test]
+fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
+    let names = ["mo_abs", "mo_err", "eo_abs", "eo_err"];
+    let fields: Vec<String> = names
+        .iter()
+        .zip(NESTED_SINGLE_RUNS)
+        .map(|(name, (nesting, argument, _))| format!("{name} = {nesting}risky {argument}"))
+        .collect();
+    let expected: Vec<String> = names
+        .iter()
+        .zip(NESTED_SINGLE_RUNS)
+        .map(|(name, (_, _, value))| format!("{name} = {value}"))
+        .collect();
+    let source = format!(
+        "{ABSENT_NESTING}type R = {{ mo_abs: Int Option Option; mo_err: Int Option Option; eo_abs: Int Option Option; eo_err: Int Option Option }}\ndef main = {{ {} }}\n",
+        fields.join("; ")
+    );
+    runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
+}

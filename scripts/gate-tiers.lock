@@ -17,6 +17,7 @@ m4	core
 m5	core
 m6	core
 m7	core
+map-by-builtin-compare	full
 parallel-rounds	full
 postfix-binding	full
 prelude-tail-recursion	core

@@ -1,1 +1,0 @@
-def main = String.length (Float.to_string 0.1)

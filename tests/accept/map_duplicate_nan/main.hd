@@ -1,0 +1,6 @@
+// spec: §55
+// expect: 1,second,0
+// needs: prelude
+def main = 0.0 / 0.0 as nan ->
+  Map.insert (Map.insert Map.empty nan "first") nan "second" as m ->
+  String.join [Int.to_string (List.length (Map.to_list m)), Option.unwrap_or (Map.find m nan) "none", Int.to_string (List.length (Map.to_list (Map.remove m nan)))] ","
