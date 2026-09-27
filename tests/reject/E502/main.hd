@@ -1,5 +1,4 @@
 // spec: §42
 // error: E502
-def f x =>
-  if x > 1 => x | x
+def f x => if x > 1 => x | x
 def main = f 1

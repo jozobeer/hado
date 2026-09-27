@@ -3,7 +3,7 @@ use hado::{check_source, types::Ty};
 #[test]
 fn signature_matching_exports_only_declared_values() {
     let prefix =
-        "module S def inc(x: Int): Int\nimplement S as M def hidden = 2 def inc x => x + hidden";
+        "module S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef hidden = 2\ndef inc x => x + hidden\n/implement";
     assert_eq!(
         check_source(&format!("def main = M.inc 1\n{prefix}"), "t")
             .unwrap()
@@ -22,7 +22,7 @@ fn signature_matching_exports_only_declared_values() {
 
 #[test]
 fn abstract_types_hide_record_representation() {
-    let prefix = "module S type T def make(x: Int): T\nimplement S as M type Representation = { value: Int } type T = Representation def make x => { value = x }";
+    let prefix = "module S\ntype T\ndef make (x: Int): T\n/module\nimplement S as M\ntype Representation = { value: Int }\ntype T = Representation\ndef make x => { value = x }\n/implement";
     assert_eq!(
         check_source(&format!("def main = M.make 1\n{prefix}"), "t")
             .err()
@@ -31,7 +31,7 @@ fn abstract_types_hide_record_representation() {
             .as_deref(),
         Some("E705")
     );
-    let source = format!("def main = let item = M.make 1 -> item.value\n{prefix}");
+    let source = format!("def main = M.make 1 as item ->\n  item.value\n{prefix}");
     assert_eq!(
         check_source(&source, "t").err().unwrap().code.as_deref(),
         Some("E601")
@@ -41,7 +41,7 @@ fn abstract_types_hide_record_representation() {
 
 #[test]
 fn recursive_type_restrictions_apply_inside_modules() {
-    let source = "def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M type T Nest = | Leaf(T) | Next(T List Nest) def value x => x";
+    let source = "def main = M.value 1\nmodule S\ndef value (x: Int): Int\n/module\nimplement S as M\ntype T Nest = | Leaf(T) | Next(T List Nest)\ndef value x => x\n/implement";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E302")
@@ -55,7 +55,7 @@ fn duplicate_module_members_are_not_silently_overwritten() {
         "type T = { x: Int } type T = { y: Int } def value x => x",
     ] {
         let source = format!(
-            "def main = M.value 1\nmodule S def value(x: Int): Int\nimplement S as M {body}"
+            "def main = M.value 1\nmodule S\ndef value (x: Int): Int\n/module\nimplement S as M\n{body}\n/implement"
         );
         assert!(check_source(&source, "t").is_err(), "{source}");
     }
@@ -63,7 +63,7 @@ fn duplicate_module_members_are_not_silently_overwritten() {
 
 #[test]
 fn qualified_abstract_annotations_preserve_module_identity() {
-    let prefix = "module S type T def make(x: Int): T\nimplement S as M type Representation = { x: Int } type T = Representation def make x => { x = x }\nimplement S as N type Representation = { x: Int } type T = Representation def make x => { x = x }";
+    let prefix = "module S\ntype T\ndef make (x: Int): T\n/module\nimplement S as M\ntype Representation = { x: Int }\ntype T = Representation\ndef make x => { x = x }\n/implement\nimplement S as N\ntype Representation = { x: Int }\ntype T = Representation\ndef make x => { x = x }\n/implement";
     let source = format!("def accept (x: M.T) => x == M.make 1 def main = accept (M.make 1) && N.make 1 == N.make 1\n{prefix}");
     assert_eq!(check_source(&source, "t").unwrap().main, Ty::Bool);
     let source =
@@ -76,8 +76,8 @@ fn qualified_abstract_annotations_preserve_module_identity() {
 
 #[test]
 fn nested_modules_are_rejected_before_name_resolution() {
-    let source =
-        "def main = (implement S as Inner def run x => x + 1)\nmodule S def run(x: Int): Int";
+    // `implement` を式の中に置いた入れ子は、名前解決より前に E100 で落ちる。
+    let source = "def main = (implement S as Inner\ndef run x => x + 1\n/implement)\nmodule S\ndef run (x: Int): Int\n/module";
     assert_eq!(
         check_source(source, "nested.hd")
             .err()
@@ -90,7 +90,7 @@ fn nested_modules_are_rejected_before_name_resolution() {
 
 #[test]
 fn signature_specialization_preserves_comparison_constraints() {
-    let source = "def inc x => x + 1\ndef main = M.equal inc\nmodule S def equal(f: Fn(Int => Int)): Bool\nimplement S as M def equal f => f == f";
+    let source = "def inc x => x + 1\ndef main = M.equal inc\nmodule S\ndef equal (f: Fn(Int => Int)): Bool\n/module\nimplement S as M\ndef equal f => f == f\n/implement";
     assert_eq!(
         check_source(source, "t").err().unwrap().code.as_deref(),
         Some("E703")
@@ -99,20 +99,20 @@ fn signature_specialization_preserves_comparison_constraints() {
 
 #[test]
 fn checked_modules_retain_separate_internal_record_schemas() {
-    let source = "def main = A.make 1 == A.make 1 && B.make 1 == B.make 1\nmodule S type T def make(x: Int): T\nimplement S as A type Representation = { first: Int } type T = Representation def make x => { first = x }\nimplement S as B type Representation = { second: Int } type T = Representation def make x => { second = x }";
+    let source = "def main = A.make 1 == A.make 1 && B.make 1 == B.make 1\nmodule S\ntype T\ndef make (x: Int): T\n/module\nimplement S as A\ntype Representation = { first: Int }\ntype T = Representation\ndef make x => { first = x }\n/implement\nimplement S as B\ntype Representation = { second: Int }\ntype T = Representation\ndef make x => { second = x }\n/implement";
     let checked = check_source(source, "t").unwrap();
     assert_eq!(checked.module_records["A.Representation"].0, vec!["first"]);
     assert_eq!(checked.module_records["B.Representation"].0, vec!["second"]);
     assert!(!checked.records.contains_key("T"));
 
-    let source = "def main = A.make 1 == A.make 1 && B.make 1 == B.make 1\nmodule S type T def make(x: Int): T\nimplement S as A type Representation = | Empty | Wrap(Int) type T = Representation def make x => Wrap(x)\nimplement S as B type Representation = | Wrap(Int) | Empty type T = Representation def make x => Wrap(x)";
+    let source = "def main = A.make 1 == A.make 1 && B.make 1 == B.make 1\nmodule S\ntype T\ndef make (x: Int): T\n/module\nimplement S as A\ntype Representation = | Empty | Wrap(Int)\ntype T = Representation\ndef make x => Wrap(x)\n/implement\nimplement S as B\ntype Representation = | Wrap(Int) | Empty\ntype T = Representation\ndef make x => Wrap(x)\n/implement";
     let checked = check_source(source, "t").unwrap();
     assert_eq!(checked.module_constructors["A.Wrap"].0, 1);
     assert_eq!(checked.module_constructors["B.Wrap"].0, 0);
     assert_eq!(checked.module_constructors["A.Empty"].0, 0);
     assert!(!checked.constructors.contains_key("Wrap"));
 
-    let source = "def main = A.get (A.make 1)\nmodule S type T def make(x: Int): T def get(value: T): Int\nimplement S as A type Representation = { value: Int } type T = Representation def make x => { value = x } def get item => item.value";
+    let source = "def main = A.get (A.make 1)\nmodule S\ntype T\ndef make (x: Int): T\ndef get (value: T): Int\n/module\nimplement S as A\ntype Representation = { value: Int }\ntype T = Representation\ndef make x => { value = x }\ndef get item => item.value\n/implement";
     let checked = check_source(source, "t").unwrap();
     let mut inference = hado::types::Inference::default();
     let ty = inference.instantiate(&checked.module_records["A.Representation"].1);
@@ -134,18 +134,18 @@ fn checked_modules_retain_separate_internal_record_schemas() {
 
 #[test]
 fn abstract_annotations_match_exported_function_types_across_modules() {
-    let source = "def main = Outer.run 42\nmodule S type T def make(x: Int): T def get(value: T): Int\nmodule API def run(x: Int): Int\nimplement S as Inner type Representation = { value: Int } type T = Representation def make x => { value = x } def get item => item.value\nimplement API as Outer\ndef consume (item: Inner.T) => Inner.get item\ndef run x => consume (Inner.make x)";
+    let source = "def main = Outer.run 42\nmodule S\ntype T\ndef make (x: Int): T\ndef get (value: T): Int\n/module\nmodule API\ndef run (x: Int): Int\n/module\nimplement S as Inner\ntype Representation = { value: Int }\ntype T = Representation\ndef make x => { value = x }\ndef get item => item.value\n/implement\nimplement API as Outer\ndef consume (item: Inner.T) => Inner.get item\ndef run x => consume (Inner.make x)\n/implement";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }
 
 #[test]
 fn generic_signatures_require_independent_type_parameters() {
     for source in [
-        "def main = 0\nmodule S def A id(x: A): A\nimplement S as M def id x => x + 1",
-        "def main = 0\nmodule S def (A, B) convert(x: A): B\nimplement S as M def convert x => x",
+        "def main = 0\nmodule S\ndef A id (x: A): A\n/module\nimplement S as M\ndef id x => x + 1\n/implement",
+        "def main = 0\nmodule S\ndef (A, B) convert (x: A): B\n/module\nimplement S as M\ndef convert x => x\n/implement",
     ] {
         assert!(check_source(source, "t").is_err(), "{source}");
     }
-    let source = "def main = if M.id true => M.id 42 | 0\nmodule S def A id(x: A): A\nimplement S as M def id x => x";
+    let source = "def main = if M.id true => M.id 42 | 0\nmodule S\ndef A id (x: A): A\n/module\nimplement S as M\ndef id x => x\n/implement";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::Int);
 }

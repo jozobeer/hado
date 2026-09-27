@@ -11,7 +11,7 @@
 //! 対象は §41・§44・§46・§53 の正準形のうち、まわりの木を変えずに書ける
 //! ものだけ: E510（式の `Nil` / `Cons`）、E516（パターンの `Nil` / `Cons`）、
 //! E517（`=> if | ...` の条件列を引数の腕へ）、E507（腕がすべて自分の pattern を
-//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `let p? =`）。
+//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `e as p? ->`）。
 
 use crate::lexer::{lex_full, Span, Tok, TokKind};
 use crate::parser::{self, Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
@@ -305,12 +305,17 @@ fn boolean_branch_fix(
     if source[start..end].contains("//") {
         return None;
     }
-    let replacement = format!(
-        "if {} => {} | {}",
-        parser::canonical(&scrutinees[0]),
-        parser::canonical(then),
-        parser::canonical(or_else)
-    );
+    // `if(...)` の形は節点の範囲が閉じ `)` まで伸びる。書き換えても閉じを保つ。
+    let entry = branch_entry(node.span, branches)?;
+    let parenthesized = lines.end_offset(source, node.span) > lines.end_offset(source, entry.2);
+    let scrutinee = parser::canonical(&scrutinees[0]);
+    let then = parser::canonical(then);
+    let or_else = parser::canonical(or_else);
+    let replacement = if parenthesized {
+        format!("if({scrutinee} => {then} | {or_else})")
+    } else {
+        format!("if {scrutinee} => {then} | {or_else}")
+    };
     Some(Fix {
         code: "E520",
         line: node.span.line,
@@ -435,8 +440,8 @@ fn catch_all_range(
     {
         return None;
     }
-    // A comment would be lost, and a `let` could bind the same name again.
-    if start >= end || source[start..end].contains("//") || source[start..end].contains("let") {
+    // A comment would be lost, and an `as` binding could bind the same name again.
+    if start >= end || source[start..end].contains("//") || source[start..end].contains(" as ") {
         return None;
     }
     Some(end)
@@ -599,31 +604,37 @@ fn arm_reconstructs(
     })
 }
 
+/// §35: `e as _? -> body` は成功値を捨てるだけなので、束縛を消して `e -> body`
+/// にする。書き換えるのは値と本体の間（` as _? -> `）だけなので、本体は動かない。
 fn discard_let_fix(
-    node: &Node,
     pat: &Pattern,
     value: &Node,
+    body: &Node,
     code: &'static str,
-    canonical: &str,
     source: &str,
     lines: &LineMap,
 ) -> Option<Fix> {
     if !matches!(pat.kind, PatternKind::Underscore) {
         return None;
     }
-    let start = lines.offset(source, node.span);
-    let end = lines.offset(source, value.span);
+    let start = lines.end_offset(source, value.span);
+    let end = lines.offset(source, body.span);
     if start >= end || source[start..end].contains("//") {
         return None;
     }
+    let canonical = flatten(&format!(
+        "{} -> {}",
+        parser::canonical(value),
+        parser::canonical(body)
+    ));
     Some(Fix {
         code,
         line: pat.span.line,
         col: pat.span.col,
         start,
         end,
-        replacement: "do ".to_string(),
-        canonical: canonical.to_string(),
+        replacement: " -> ".to_string(),
+        canonical,
     })
 }
 
@@ -669,10 +680,10 @@ fn identical_bool_fix(node: &Node, then: &Node, els: &Node, walk: &Walk<'_>) -> 
     })
 }
 
-/// §40: a plain let binding that discards a pure value is redundant; the
-/// binding disappears and the body stays. Only a bare name or a literal is
-/// provably effect-free (E506 fires for effectful discards too, so anything
-/// else is left for the author to rewrite as a `do`).
+/// §40: a plain binding that discards a pure value is redundant; the binding
+/// disappears and the body stays. Only a bare name or a literal is provably
+/// effect-free (E506 fires for effectful discards too, so anything else is left
+/// for the author to rewrite as `e ->`).
 fn discard_plain_let_fix(
     node: &Node,
     pat: &Pattern,
@@ -691,8 +702,8 @@ fn discard_plain_let_fix(
     if start >= end || value_start >= end {
         return None;
     }
-    let head = source[value_start..end].trim_end();
-    let text = head.strip_suffix("->").unwrap_or(head).trim();
+    // 後置では値の後ろに ` as _ -> ` が続く。値そのものの綴りだけを見る。
+    let text = source[value_start..lines.end_offset(source, value.span)].trim();
     let bare_name = !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_');
     let literal = text.len() >= 2 && text.starts_with('"') && text.ends_with('"');
     if !bare_name && !literal {
@@ -735,8 +746,17 @@ fn identity_let_fix(
     if start >= body_start || value_start >= body_start {
         return None;
     }
+    // §11: 後置では `e as p ->` が束縛の綴りなので、値の後ろの `as p ->` ごと
+    // 落とす。値そのものを残す（`g 4 as x -> x` は `g 4` になる）。
     let head = source[value_start..body_start].trim_end();
-    let text = head.strip_suffix("->").unwrap_or(head).trim().to_string();
+    let text = head
+        .strip_suffix("->")
+        .map(str::trim_end)
+        .and_then(|head| head.rsplit_once(" as "))
+        .map_or_else(
+            || head.strip_suffix("->").unwrap_or(head).trim().to_string(),
+            |(value, _)| value.trim_end().to_string(),
+        );
     if text.is_empty() {
         return None;
     }
@@ -792,7 +812,7 @@ fn literal_pattern_fix(
     if prefix.len() + 1 >= head.len() {
         return None;
     }
-    let replacement = literal_replacement(&cuts, prefix, source, end, first)?;
+    let replacement = literal_replacement(&cuts, prefix, start + head.len(), source, end, first)?;
     Some(Fix {
         code: "E511",
         line: node.span.line,
@@ -853,15 +873,19 @@ fn literal_prefix<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 fn literal_replacement(
     cuts: &[(usize, usize)],
     prefix: &str,
+    head_end: usize,
     source: &str,
     end: usize,
     first: usize,
 ) -> Option<String> {
     let line_start = source[..first].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    // 正準形は `def` の見出しと最初の腕が同じ行に載る。そのとき行頭から腕までを
+    // そのまま前置きにすると見出しが二重になるので、見出しの後ろだけを残す。
+    let lead_start = line_start.max(head_end);
     let mut replacement = String::new();
     replacement.push_str(prefix);
     replacement.push('\n');
-    replacement.push_str(&source[line_start..first]);
+    replacement.push_str(&source[lead_start..first]);
     let mut cursor = first;
     for (cut_start, cut_end) in cuts {
         if *cut_start < cursor || *cut_end > end {
@@ -1274,8 +1298,8 @@ fn rewrap_arm_fix(node: &Node, replacement: &str, tail: Tail, walk: &Walk<'_>) -
 }
 
 /// E508: `if E | Some(p) => body | None => None` in tail position is
-/// `let p? = E -> body` (§36). The rewrite needs a binder that the body uses:
-/// with none, or with one the body ignores, `do` is the canonical form.
+/// `E as p? -> body` (§57). The rewrite needs a binder that the body uses:
+/// with none, or with one the body ignores, `E ->` is the canonical form.
 fn repropagate_fix(
     node: &Node,
     tail: Tail,
@@ -1309,13 +1333,9 @@ fn repropagate_fix(
         "value"
     };
     let body_text = &source[lines.offset(source, body.span)..body_end];
-    let let_form = format!(
-        "let {}? = {} -> {}",
-        pattern_text(pattern),
-        value,
-        body_text
-    );
-    let replacement = repropagate_replacement(tail, def, let_form)?;
+    // §57: 正準形は `<scrutinee> as p? -> <body>`（後置の伝播）。
+    let binding = format!("{value} as {}? -> {body_text}", pattern_text(pattern));
+    let replacement = repropagate_replacement(tail, def, binding)?;
     Some(Fix {
         code: "E508",
         line: pipe.line,
@@ -1415,23 +1435,24 @@ fn repropagate_range(
     Some((pipe.span, start, end, first_pipe))
 }
 
-/// 末尾の形ごとの書き換えテキスト。`let` 形を内側に置く。
+/// 末尾の形ごとの書き換えテキスト。`as p? ->` の束縛を内側に置く。
 fn repropagate_replacement(
     tail: Tail,
     def: Option<&parser::Def>,
-    let_form: String,
+    binding: String,
 ) -> Option<String> {
     Some(match tail {
-        Tail::If => let_form,
+        Tail::If => binding,
         Tail::Def => {
             let def = def?;
             format!(
-                "def {}{} value => {let_form}",
+                "def {}{} value => {binding}",
                 if def.rec { "rec " } else { "" },
                 def.name
             )
         }
-        Tail::Fn => format!("fn(value => {let_form})"),
+        // §12.1: 本体に `->` があるので `fn ... /fn` で閉じる。
+        Tail::Fn => format!("fn value => {binding} /fn"),
     })
 }
 
@@ -1472,7 +1493,10 @@ fn branch_range(
         // `after` is the branch's LAST token, so its own end is the end of the
         // branch. Taking only its start would leave that token outside the
         // rewrite (`if b | true => 1 | false => 0` lost its trailing `0`).
-        trim_back(source, lines.end_offset(source, after))
+        let by_token = trim_back(source, lines.end_offset(source, after));
+        // `if(...)` の閉じ `)` は最後のトークンの外側にある。parser が節点の範囲に
+        // 入れた `)` の終端までを書き換えの範囲にする。
+        by_token.max(lines.end_offset(source, node.span))
     };
     (start <= end).then_some((start, end))
 }
@@ -1583,7 +1607,9 @@ fn walk_node(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
         NodeKind::Let {
             pat, value, body, ..
         } => walk_let(node, pat, value, body, walk, found),
-        NodeKind::LetQ { pat, value, .. } => walk_let_q(node, pat, value, walk, found),
+        NodeKind::LetQ {
+            pat, value, body, ..
+        } => walk_let_q(pat, value, body, walk, found),
         NodeKind::BoolBranch { cond, then, els } => {
             walk_bool_branch(node, cond, then, els, walk, found)
         }
@@ -1617,13 +1643,12 @@ fn walk_written_cons(callee: &Node, node: &Node, walk: &Walk<'_>, found: &mut Fo
 }
 
 /// `let?` の腕。束縛の削除と、pattern の再帰。
-fn walk_let_q(node: &Node, pat: &Pattern, value: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
+fn walk_let_q(pat: &Pattern, value: &Node, body: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
     found.push(discard_let_fix(
-        node,
         pat,
         value,
+        body,
         "E504",
-        "do",
         walk.source,
         walk.lines,
     ));

@@ -10,7 +10,7 @@ fn run_main(body: &str, expected: &[i64]) {
     ));
     std::fs::create_dir(&dir).unwrap();
     let source = format!(
-        "effect Y\nagain y(value: Int): Void\nhandler Y as Keep\nagain y value => let rest = resume () -> [value, ...rest]\nreturn x => x\n{body}\n"
+        "effect Y\nagain y(value: Int): Void\nhandler Y as Keep\nagain y value => resume () as rest -> [value, ...rest]\nreturn x => x\n{body}\n"
     );
     std::fs::write(dir.join("main.hd"), &source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado"))
@@ -51,7 +51,7 @@ fn payloads() -> (i64, i64) {
 fn branch_result_is_bound_after_the_selected_again() {
     let (a, b) = payloads();
     run_main(&format!(
-        "def f u => if u == () => [7] | []\ndef main = with Keep -> let u = if true => y {a} | y {b} -> f u"
+        "def f u => if u == () => [7] | []\ndef main = with Keep -> if(true => y {a} | y {b}) as u -> f u"
     ), &[a, 7]);
 }
 
@@ -59,13 +59,13 @@ fn branch_result_is_bound_after_the_selected_again() {
 fn short_circuit_takes_the_right_branch_only_when_needed() {
     let (a, b) = payloads();
     run_main(&format!(
-        "def g u => if u == () => true | false\ndef main = with Keep -> let b = false && g (y {a}) -> if b => [] | [{b}]"
+        "def g u => if u == () => true | false\ndef main = with Keep -> false && g (y {a}) as b -> if b => [] | [{b}]"
     ), &[b]);
     run_main(&format!(
-        "def g u => if u == () => true | false\ndef main = with Keep -> let b = true && g (y {a}) -> if b => [{b}] | []"
+        "def g u => if u == () => true | false\ndef main = with Keep -> true && g (y {a}) as b -> if b => [{b}] | []"
     ), &[a, b]);
     run_main(&format!(
-        "def g u => if u == () => false | true\ndef main = with Keep -> let b = false || g (y {a}) -> if b => [] | [{b}]"
+        "def g u => if u == () => false | true\ndef main = with Keep -> false || g (y {a}) as b -> if b => [] | [{b}]"
     ), &[a, b]);
 }
 
@@ -73,7 +73,7 @@ fn short_circuit_takes_the_right_branch_only_when_needed() {
 fn compound_do_keeps_the_following_computation() {
     let (a, b) = payloads();
     run_main(
-        &format!("def g (u: Void) => u\ndef main = with Keep -> do g (y {a}) -> [{b}]"),
+        &format!("def g (u: Void) => u\ndef main = with Keep -> g (y {a}) -> [{b}]"),
         &[a, b],
     );
 }
@@ -90,9 +90,7 @@ fn pattern_scrutinee_is_evaluated_before_its_arm() {
 fn again_arguments_are_evaluated_before_the_outer_operation() {
     let (a, b) = payloads();
     run_main(
-        &format!(
-            "def n u => if u == () => {b} | 0\ndef main = with Keep -> do y (n (y {a})) -> [7]"
-        ),
+        &format!("def n u => if u == () => {b} | 0\ndef main = with Keep -> y (n (y {a})) -> [7]"),
         &[a, b, 7],
     );
 }

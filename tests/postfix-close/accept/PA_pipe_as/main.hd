@@ -1,0 +1,2 @@
+// spec: §12
+def main = xs |> List.map f as ys -> ys

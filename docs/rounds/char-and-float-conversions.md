@@ -242,3 +242,10 @@ $ bash scripts/corpus-lock.sh --check
 （差分は char_to_string_bytes・float_parse_negative_min_subnormal・
   float_parse_negative_underflow の 3 件だけ。作り直す）
 ```
+
+着地後（2026-09-27）。PR #53 は `e9e2352` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。
+
+```
+$ gh run list --branch main --limit 12
+completed	success	Merge pull request #53 from jozobeer/char-and-float-conversions	ci	main	push	36290062210	32m13s	2026-09-27T01:10:05Z..2026-09-27T01:42:18Z
+```

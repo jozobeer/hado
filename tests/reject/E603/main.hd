@@ -1,20 +1,25 @@
 // spec: §46
 // error: E603
 // item: 契約の拡張
-def main = (Store.find (FirstId.make 1)) + (SecondId.value (SecondId.make 2))
+def main = Store.find (FirstId.make 1) + SecondId.value (SecondId.make 2)
 module UserId
 type T
-def make(value: Int): T
-def value(id: T): Int
+def make (value: Int): T
+def value (id: T): Int
+/module
 module UserStore
-def find(id: UserId.T): Int
+def find (id: UserId.T): Int
+/module
 implement UserId as FirstId
 type T = Int
 def make value => value
 def value id => id
+/implement
 implement UserId as SecondId
 type T = Int
 def make value => value
 def value id => id
+/implement
 implement UserStore as Store
 def find _ => 1
+/implement

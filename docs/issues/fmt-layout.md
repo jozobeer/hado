@@ -30,7 +30,7 @@ $ grep -rhE '\)\)+\s*$' tests/accept stdlib tools --include=*.hd | wc -l
 
 ## 原因
 
-`crates/hado/src/fixes.rs` の `format` が書き換えの後に呼ぶ `layout` は、行末の空白とファイル末尾の改行だけを整える。§58.1 が字下げと改行を変えないと定めている。全体を印字し直す関数は `crates/hado/src/source_print.rs` の `canonical_program` にあるが、`crates/hado/src/lexer.rs` の `lex_full` がコメントを読み飛ばすので構文木にコメントが無く、印字し直すとコメントが消える。§57 は書き換えがコメントを消さないと定めている。
+`crates/hado/src/fixes.rs` の `format` が書き換えの後に呼ぶ `layout` は、行末の空白とファイル末尾の改行だけを整える。§58.1 が字下げと改行を変えないと定めている。全体を印字し直す関数は `crates/hado/src/postfix_print.rs` の `program`（`parser::canonical_program`）にあるが、`crates/hado/src/lexer.rs` の `lex_full` がコメントを読み飛ばすので構文木にコメントが無く、印字し直すとコメントが消える。§57 は書き換えがコメントを消さないと定めている。
 
 ## 案
 

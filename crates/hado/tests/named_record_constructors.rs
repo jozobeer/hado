@@ -120,7 +120,7 @@ fn generated_fields_preserve_names_when_construction_order_changes() {
             format!("left = {left}; right = {right}")
         };
         for pipe in ["", "| "] {
-            let source = format!("type Data = {pipe}Payload {{ left: Int; right: Int }}\ndef main = let value = Payload {{ {fields} }} -> value.left * 1000 + value.right");
+            let source = format!("type Data = {pipe}Payload {{ left: Int; right: Int }}\ndef main = Payload {{ {fields} }} as value -> value.left * 1000 + value.right");
             source_case(&source).run(&(left * 1000 + right).to_string());
         }
     }
@@ -144,13 +144,13 @@ fn generic_named_fields_support_different_type_arguments() {
     let mut state = 0x100012;
     for _ in 0..5 {
         let value = random(&mut state, 100);
-        let source = format!("type (A, B) Pair = PairValue {{ first: A; second: B }}\ndef main = let one = PairValue {{ second = \"abc\"; first = {value} }} -> let two = PairValue {{ first = true; second = {value} }} -> one.first + String.length one.second + (if two.first => two.second | 0)");
+        let source = format!("type (A, B) Pair = PairValue {{ first: A; second: B }}\ndef main = PairValue {{ second = \"abc\"; first = {value} }} as one -> PairValue {{ first = true; second = {value} }} as two -> one.first + String.length one.second + (if two.first => two.second | 0)");
         source_case(&source).run(&(value * 2 + 3).to_string());
     }
 }
 #[test]
 fn identical_field_sets_do_not_make_constructor_selection_ambiguous() {
-    source_case("type FirstType = First { value: Int }\ntype SecondType = Second { value: Int }\ndef main = let a = First { value = 7 } -> let b = Second { value = 11 } -> a.value * 100 + b.value").run("711");
+    source_case("type FirstType = First { value: Int }\ntype SecondType = Second { value: Int }\ndef main = First { value = 7 } as a -> Second { value = 11 } as b -> a.value * 100 + b.value").run("711");
 }
 #[test]
 fn named_and_positional_payloads_can_share_an_adt() {
@@ -158,7 +158,7 @@ fn named_and_positional_payloads_can_share_an_adt() {
 }
 #[test]
 fn named_patterns_support_shorthand_renaming_omission_and_nesting() {
-    let source = format!("{BASIC}\ntype Envelope = Wrap {{ inner: Data; extra: Int }}\ndef main = let Wrap {{ inner = Payload {{ left; right = r }}; extra }} = Wrap {{ extra = 5; inner = Payload {{ right = 3; left = 7 }} }} -> let Payload {{ left = copy }} = Payload {{ left = 11; right = 99 }} -> left + r + extra + copy");
+    let source = format!("{BASIC}\ntype Envelope = Wrap {{ inner: Data; extra: Int }}\ndef main = Wrap {{ extra = 5; inner = Payload {{ right = 3; left = 7 }} }} as Wrap {{ inner = Payload {{ left; right = r }}; extra }} -> Payload {{ left = 11; right = 99 }} as Payload {{ left = copy }} -> left + r + extra + copy");
     source_case(&source).run("26");
 }
 #[test]
@@ -167,7 +167,7 @@ fn missing_variant_in_a_branch_is_non_exhaustive() {
 }
 #[test]
 fn let_pattern_must_cover_every_constructor() {
-    rejection("type Choice = | Payload { left: Int } | Empty\ndef main = let Payload { left } = Payload { left = 7 } -> left + 1", "E402", "Payload { left }");
+    rejection("type Choice = | Payload { left: Int } | Empty\ndef main = Payload { left = 7 } as Payload { left } -> left + 1", "E402", "Payload { left }");
 }
 #[test]
 fn unknown_fields_in_construction_and_patterns_are_rejected() {
@@ -176,7 +176,7 @@ fn unknown_fields_in_construction_and_patterns_are_rejected() {
         "E204",
         "absent",
     );
-    rejection(&format!("{BASIC}\ndef main = let Payload {{ absent = n }} = Payload {{ left = 1; right = 2 }} -> n + 1"), "E204", "absent");
+    rejection(&format!("{BASIC}\ndef main = Payload {{ left = 1; right = 2 }} as Payload {{ absent = n }} -> n + 1"), "E204", "absent");
 }
 #[test]
 fn duplicate_fields_in_declarations_construction_and_patterns_point_to_second_name() {
@@ -190,7 +190,7 @@ fn duplicate_fields_in_declarations_construction_and_patterns_point_to_second_na
         "E205",
         "left = 3",
     );
-    rejection(&format!("{BASIC}\ndef main = let Payload {{ left; left = other }} = Payload {{ left = 1; right = 2 }} -> left + other"), "E205", "left = other");
+    rejection(&format!("{BASIC}\ndef main = Payload {{ left = 1; right = 2 }} as Payload {{ left; left = other }} -> left + other"), "E205", "left = other");
 }
 #[test]
 fn missing_fields_and_bare_constructor_references_are_arity_errors() {
@@ -217,7 +217,7 @@ fn positional_and_named_constructor_forms_cannot_be_interchanged() {
         "Payload(1",
     );
     rejection("def main = Some { value = 1 }", "E301", "Some");
-    rejection(&format!("{BASIC}\ndef main = let Payload(left, right) = Payload {{ left = 1; right = 2 }} -> left + right"), "E301", "Payload(left");
+    rejection(&format!("{BASIC}\ndef main = Payload {{ left = 1; right = 2 }} as Payload(left, right) -> left + right"), "E301", "Payload(left");
 }
 #[test]
 fn named_field_forms_require_nonempty_lists_and_no_trailing_separator() {
@@ -226,8 +226,8 @@ fn named_field_forms_require_nonempty_lists_and_no_trailing_separator() {
         "type Data = Payload { left: Int; }\ndef main = 1",
         "type Data = Payload { left: Int }\ndef main = Payload {}",
         "type Data = Payload { left: Int }\ndef main = Payload { left = 1; }",
-        "type Data = Payload { left: Int }\ndef main = let Payload {} = Payload { left = 1 } -> 2",
-        "type Data = Payload { left: Int }\ndef main = let Payload { left; } = Payload { left = 1 } -> left + 1",
+        "type Data = Payload { left: Int }\ndef main = Payload { left = 1 } as Payload {} -> 2",
+        "type Data = Payload { left: Int }\ndef main = Payload { left = 1 } as Payload { left; } -> left + 1",
     ] {
         let offset = source.find("{}").map(|offset| offset + 1).or_else(|| source.find("; }").map(|offset| offset + 2)).unwrap();
         let case = source_case(source);
@@ -239,7 +239,7 @@ fn multiple_constructor_types_cannot_be_accessed_as_records() {
     rejection("def main = (choose 7).left\ntype Choice = | Payload { left: Int } | Empty\ndef choose n => Payload { left = n }", "E204", "left");
 }
 fn implementation_source(main: &str) -> String {
-    format!("def main = {main}\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement S as M\ntype T = Payload {{ left: Int; right: Int }}\ndef make x => Payload {{ right = 3; left = x }}\ndef read value => value.left + value.right")
+    format!("def main = {main}\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module\nimplement S as M\ntype T = Payload {{ left: Int; right: Int }}\ndef make x => Payload {{ right = 3; left = x }}\ndef read value => value.left + value.right\n/implement")
 }
 #[test]
 fn constructor_backed_abstract_realizations_work_through_public_members() {
@@ -248,7 +248,7 @@ fn constructor_backed_abstract_realizations_work_through_public_members() {
 #[test]
 fn abstract_realizations_stay_opaque_outside_the_implementation() {
     rejection(
-        &implementation_source("let value = M.make 7 -> value.left"),
+        &implementation_source("M.make 7 as value -> value.left"),
         "E601",
         ".left",
     );
@@ -271,7 +271,7 @@ fn old_positional_constructor_lists_still_require_a_leading_pipe() {
 }
 #[test]
 fn functor_applications_keep_named_field_abstract_types_distinct() {
-    let common = "module Id\ndef value(x: Int): Int\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement Id as I\ndef value x => x + 3\nimplement Id as J\ndef value x => x + 11\nimplement S as Make(Param: Id)\ntype T = Payload { value: Int }\ndef make x => Payload { value = Param.value x }\ndef read x => x.value\nimplement S as A = Make(I)\nimplement S as B = Make(J)";
+    let common = "module Id\ndef value(x: Int): Int\n/module\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module\nimplement Id as I\ndef value x => x + 3\n/implement\nimplement Id as J\ndef value x => x + 11\n/implement\nimplement S as Make(Param: Id)\ntype T = Payload { value: Int }\ndef make x => Payload { value = Param.value x }\ndef read x => x.value\n/implement\nimplement S as A = Make(I)\nimplement S as B = Make(J)";
     source_case(&format!(
         "def main = A.read (A.make 7) * 100 + B.read (B.make 7)\n{common}"
     ))
@@ -304,7 +304,7 @@ fn leading_pipe_omission_is_limited_to_one_named_constructor() {
     );
 }
 fn positional_realization(main: &str) -> String {
-    format!("def main = {main}\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement S as M\ntype T = | Payload(Int)\ndef make x => Payload(x)\ndef read | Payload(n) => n + 3")
+    format!("def main = {main}\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module\nimplement S as M\ntype T = | Payload(Int)\ndef make x => Payload(x)\ndef read | Payload(n) => n + 3\n/implement")
 }
 #[test]
 fn positional_constructor_can_directly_realize_an_abstract_type() {
@@ -313,7 +313,7 @@ fn positional_constructor_can_directly_realize_an_abstract_type() {
 #[test]
 fn positional_constructor_realization_stays_opaque_and_private() {
     rejection(
-        &positional_realization("let value = M.make 7 -> value.left"),
+        &positional_realization("M.make 7 as value -> value.left"),
         "E601",
         ".left",
     );
@@ -321,7 +321,7 @@ fn positional_constructor_realization_stays_opaque_and_private() {
 }
 #[test]
 fn constructorless_record_still_conflicts_with_same_named_abstract_type() {
-    rejection("def main = M.read (M.make 7)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement S as M\ntype T = { value: Int }\ndef make x => { value = x }\ndef read x => x.value", "E205", "T = {");
+    rejection("def main = M.read (M.make 7)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module\nimplement S as M\ntype T = { value: Int }\ndef make x => { value = x }\ndef read x => x.value\n/implement", "E205", "T = {");
 }
 #[test]
 fn payloadless_and_positional_constructors_reject_named_payloads() {
@@ -331,7 +331,7 @@ fn payloadless_and_positional_constructors_reject_named_payloads() {
         "Guest { value",
     );
     rejection(
-        "def main = let Some { value = n } = Some(7) -> n",
+        "def main = Some(7) as Some { value = n } -> n",
         "E301",
         "Some { value",
     );
@@ -339,9 +339,9 @@ fn payloadless_and_positional_constructors_reject_named_payloads() {
 #[test]
 fn payload_constructor_cannot_be_a_bare_pattern() {
     rejection(
-        &format!("{BASIC}\ndef main = let Payload = Payload {{ left = 7; right = 3 }} -> 1"),
+        &format!("{BASIC}\ndef main = Payload {{ left = 7; right = 3 }} as Payload -> 1"),
         "E301",
-        "Payload = Payload",
+        "Payload -> 1",
     );
 }
 
@@ -386,7 +386,7 @@ fn identical_named_field_sets_do_not_unify_distinct_nominal_types() {
 }
 #[test]
 fn bare_record_pattern_does_not_destructure_a_named_constructor_value() {
-    rejection(&format!("{BASIC}\ndef main = let {{ left; right }} = Payload {{ left = 7; right = 3 }} -> left + right"), "E305", "{ left; right }");
+    rejection(&format!("{BASIC}\ndef main = Payload {{ left = 7; right = 3 }} as {{ left; right }} -> left + right"), "E305", "{ left; right }");
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn local_constructor_names_shadow_outer_payload_forms_and_restore_them() {
             } else {
                 "def read | Payload(y) => y"
             };
-            source_case(&format!("type Data = {outer_type}\n{outer_read}\ndef main = root ({outer_value}) + M.read (M.make 2) + root ({outer_value})\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\nimplement S as M\ntype T = {inner_type}\ndef make x => {inner_value}\n{inner_read}")).run("4");
+            source_case(&format!("type Data = {outer_type}\n{outer_read}\ndef main = root ({outer_value}) + M.read (M.make 2) + root ({outer_value})\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\n/module\nimplement S as M\ntype T = {inner_type}\ndef make x => {inner_value}\n{inner_read}\n/implement")).run("4");
         }
     }
 }
@@ -440,15 +440,15 @@ fn local_constructor_names_shadow_outer_payload_forms_and_restore_them() {
 #[test]
 fn shadowing_a_constructor_keeps_outer_named_type_projections() {
     for parameter in ["x", "(x: Root)"] {
-        source_case(&format!("type Root = Payload {{ x: Int }}\ndef main = M.read_root (Payload {{ x = 5 }}) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload {{ y: Int }}\ndef make x => Payload {{ y = x }}\ndef read x => x.y\ndef read_root {parameter} => x.x")).run("7");
+        source_case(&format!("type Root = Payload {{ x: Int }}\ndef main = M.read_root (Payload {{ x = 5 }}) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\n/module\nimplement S as M\ntype T = Payload {{ y: Int }}\ndef make x => Payload {{ y = x }}\ndef read x => x.y\ndef read_root {parameter} => x.x\n/implement")).run("7");
     }
 }
 #[test]
 fn shadowing_a_constructor_keeps_outer_type_coverage_requirements() {
-    rejection("type Root = | Payload { x: Int } | Other(Int)\ndef main = M.read_root (Other(5)) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload { y: Int }\ndef make x => Payload { y = x }\ndef read x => x.y\ndef read_root\n| Other(x) => x", "E402", "def read_root\n");
+    rejection("type Root = | Payload { x: Int } | Other(Int)\ndef main = M.read_root (Other(5)) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\n/module\nimplement S as M\ntype T = Payload { y: Int }\ndef make x => Payload { y = x }\ndef read x => x.y\ndef read_root\n| Other(x) => x\n/implement", "E402", "def read_root\n");
 }
 
 #[test]
 fn contract_constraints_resolve_shadowed_types_with_identical_field_names() {
-    source_case("type Root = Payload { x: Int }\ndef main = M.read_root (Payload { x = 5 }) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\nimplement S as M\ntype T = Payload { x: Int }\ndef make x => Payload { x = x }\ndef read x => x.x\ndef read_root x => x.x").run("7");
+    source_case("type Root = Payload { x: Int }\ndef main = M.read_root (Payload { x = 5 }) + M.read (M.make 2)\nmodule S\ntype T\ndef make(x: Int): T\ndef read(x: T): Int\ndef read_root(x: Root): Int\n/module\nimplement S as M\ntype T = Payload { x: Int }\ndef make x => Payload { x = x }\ndef read x => x.x\ndef read_root x => x.x\n/implement").run("7");
 }

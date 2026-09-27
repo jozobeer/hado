@@ -1,6 +1,4 @@
 // spec: §28
 // error: E402
-def f x =>
-  if x
-  | Some(v) => v
-def main = f (Some(1))
+def f x => if x | Some(v) => v
+def main = f Some(1)

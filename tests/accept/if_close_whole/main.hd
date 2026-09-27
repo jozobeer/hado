@@ -1,0 +1,4 @@
+// spec: §12
+// expect: 2
+def keep (b: Bool): Int => if(b => 1 | 2) + 1
+def main = keep true

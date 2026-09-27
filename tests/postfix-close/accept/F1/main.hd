@@ -1,0 +1,6 @@
+// spec: §12
+def apply2 f => f 1 2
+def total = apply2 fn a, b =>
+    a + b as s ->
+    s * 2
+  /fn

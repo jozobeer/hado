@@ -2,7 +2,7 @@ use hado::{check_source, types::Ty};
 
 #[test]
 fn nominal_record_construction_and_projection() {
-    let source = "type User = { name: String; age: Int }\ndef main = let user = { age = 3; name = \"a\" } -> user.name";
+    let source = "type User = { name: String; age: Int }\ndef main = { age = 3; name = \"a\" } as user -> user.name";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::String);
     let source = "type User = { name: String; age: Int }\ndef main = { age = true; name = \"a\" }";
     assert_eq!(
@@ -25,7 +25,7 @@ fn record_construction_requires_unique_field_set() {
 fn typed_record_patterns_bind_field_types() {
     let source = "type User = { name: String; age: Int }\ndef name (user: User) => if user | { name = n } => n\ndef main = name { name = \"a\"; age = 3 }";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::String);
-    let source = "type User = { name: String }\ndef main = let { name } = { name = \"a\" } -> name";
+    let source = "type User = { name: String }\ndef main = { name = \"a\" } as { name } -> name";
     assert_eq!(check_source(source, "t").unwrap().main, Ty::String);
 }
 

@@ -4,9 +4,7 @@ effect Tick
 once tick: Void
 handler Tick as Nop
 once tick => ()
-def rec loop (n: Int, acc: Int): Int {Tick} =>
-  if n <= 0 => acc
-  | do tick -> loop (n - 1) (acc + 1)
-def main =
-  with Nop ->
-  loop 10000000 0
+def rec loop (n: Int, acc: Int): Int {Tick} => if n <= 0 => acc | tick ->
+  loop (n - 1) (acc + 1)
+  /if
+def main = with Nop -> loop 10000000 0

@@ -1,6 +1,5 @@
 // spec: §39
 // error: E505
-def f x =>
-  let unused = 1 ->
+def f x => 1 as unused ->
   x
 def main = f 2

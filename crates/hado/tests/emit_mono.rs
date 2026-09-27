@@ -69,7 +69,7 @@ fn direct_calls_import_the_fixed_signature() {
 #[test]
 fn recursive_tail_positions_emit_return_call() {
     let source =
-        "def rec down n => if n == 0 => 0 | let next = n - 1 -> down next\ndef main = down 3";
+        "def rec down n => if n == 0 => 0 | n - 1 as next ->\n  down next\n  /if\ndef main = down 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -94,12 +94,12 @@ fn closures_execute_direct_values_and_captured_environments() {
     for (index, source, expected) in [
         (
             0,
-            "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3",
+            "def main = 7 as offset ->\n  fn(x => x + offset) as f ->\n  f 3",
             "10\n",
         ),
         (
             1,
-            "def main = let offset = 7 -> let f = fn(x => x + offset) -> (f 3) + (f 5)",
+            "def main = 7 as offset ->\n  fn(x => x + offset) as f ->\n  f 3 + f 5",
             "22\n",
         ),
     ] {
@@ -115,7 +115,7 @@ fn closures_execute_direct_values_and_captured_environments() {
 
 #[test]
 fn records_execute_with_declared_layout() {
-    let source = "type Pair = { enabled: Bool; left: Int; right: Int }\ndef make n => { right = n + 1; enabled = true; left = n }\ndef main = let p = make 20 -> if p.enabled => p.left + p.right | 0";
+    let source = "type Pair = { enabled: Bool; left: Int; right: Int }\ndef make n => { right = n + 1; enabled = true; left = n }\ndef main = make 20 as p ->\n  if p.enabled => p.left + p.right | 0";
     let path = std::env::temp_dir().join(format!("hado-record-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
@@ -126,7 +126,7 @@ fn records_execute_with_declared_layout() {
 
 #[test]
 fn constructor_payloads_execute_with_tagged_layout() {
-    let source = "type T Box = | Wrap(T)\ndef main = let Wrap(x) = Wrap(40) -> x + 2";
+    let source = "type T Box = | Wrap(T)\ndef main = Wrap(40) as Wrap(x) ->\n  x + 2";
     let path = std::env::temp_dir().join(format!("hado-constructor-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();
@@ -141,8 +141,8 @@ fn constructor_switches_execute_immediate_and_boxed_variants() {
         (0, "type Flag = | On | Off\ndef choose | On => 17 | Off => 29\ndef main = choose Off", "29\n"),
         (1, "def choose | Some(n) => n + 1 | None => 9\ndef main = choose (Some(41))", "42\n"),
         (2, "def choose (option: Int Option) => if option | Some(n) => n + 1 | None => 9\ndef main = choose None", "9\n"),
-        (3, "def main = let option = Some(40) -> (if option | Some(n) => n | None => 9) + 2", "42\n"),
-        (4, "def main = let option = None -> (if option | Some(n) => n | None => 9) + 2", "11\n"),
+        (3, "def main = Some(40) as option ->\n  if(option | Some(n) => n | None => 9) + 2", "42\n"),
+        (4, "def main = None as option ->\n  if(option | Some(n) => n | None => 9) + 2", "11\n"),
     ] {
         let path = std::env::temp_dir().join(format!("hado-switch-{}-{index}", std::process::id()));
         hado::build::executable(source, "t", &path).unwrap();
@@ -188,7 +188,7 @@ fn integer_division_handles_zero_and_wrapping_boundary() {
 #[test]
 fn nested_literal_patterns_merge_values_without_reaching_impossible_paths() {
     for (index, argument, expected) in [(0, "Some(true)", "42\n"), (1, "None", "2\n")] {
-        let source = format!("def main = let option = {argument} -> (if option | Some(true) => 40 | Some(false) => 9 | None => 0) + 2");
+        let source = format!("def main = {argument} as option ->\n  if(option | Some(true) => 40 | Some(false) => 9 | None => 0) + 2");
         let path = std::env::temp_dir().join(format!(
             "hado-nested-pattern-{}-{index}",
             std::process::id()
@@ -203,7 +203,7 @@ fn nested_literal_patterns_merge_values_without_reaching_impossible_paths() {
 
 #[test]
 fn string_literals_are_linked_as_static_data() {
-    let source = "type Item = { text: String; value: Int }\ndef main = let item = { text = \"あ😀\"; value = 42 } -> item.value";
+    let source = "type Item = { text: String; value: Int }\ndef main = { text = \"あ😀\"; value = 42 } as item ->\n  item.value";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -568,7 +568,7 @@ fn functions_can_reference_top_level_values() {
 
 #[test]
 fn module_value_thunks_preserve_lexical_scope() {
-    let source = "def main = A.add 10 + B.add 20\nmodule S def add(x: Int): Int\nimplement S as A def offset = 2 def add x => x + offset\nimplement S as B def offset = 5 def add x => x + offset";
+    let source = "def main = A.add 10 + B.add 20\nmodule S def add(x: Int): Int\n/module\nimplement S as A def offset = 2 def add x => x + offset\n/implement\nimplement S as B def offset = 5 def add x => x + offset\n/implement";
     let path = std::env::temp_dir().join(format!("hado-module-values-{}", std::process::id()));
     hado::build::executable(source, "t", &path).unwrap();
     let output = std::process::Command::new(&path).output().unwrap();

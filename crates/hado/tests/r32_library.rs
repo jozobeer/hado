@@ -40,7 +40,7 @@ impl Drop for Case {
     }
 }
 
-const LIBRARY: &str = "def helper value => value + 1\n\nmodule Store\ndef read(value: Int): Int\n\nimplement Store as Memory\ndef read value => helper value";
+const LIBRARY: &str = "def helper value => value + 1\nmodule Store\ndef read (value: Int): Int\n/module\nimplement Store as Memory\ndef read value => helper value\n/implement";
 
 #[test]
 fn load_decides_inspection_from_the_entry_file() {
@@ -98,7 +98,7 @@ fn library_may_be_followed_by_outer_items_and_sections() {
     for source in [
         "library\ndef main = 1",
         "library\ntype T = | Case",
-        "library\nmodule M\ndef f(x: Int): Int",
+        "library\nmodule M\ndef f (x: Int): Int\n/module",
         "library\neffect E\nabort fail",
     ] {
         assert!(parse(source).library.is_some(), "{source}");
@@ -184,14 +184,17 @@ fn paths_resolve_from_the_innermost_library_root() {
     case.write("app/main.hd", "def main = lib::inner::M.go 7");
     case.write("app/lib/lib.hd", "library");
     case.write("app/lib/inner/inner.hd", "library");
-    case.write("app/lib/inner/leaf/l.hdi", "module L\ndef go(x: Int): Int");
+    case.write(
+        "app/lib/inner/leaf/l.hdi",
+        "module L\ndef go (x: Int): Int\n/module",
+    );
     case.write(
         "app/lib/inner/leaf/lm.hd",
-        "implement L as LM\ndef go x => x + 3",
+        "implement L as LM\ndef go x => x + 3\n/implement",
     );
     case.write(
         "app/lib/inner/m.hd",
-        "implement leaf::L as M\ndef go x => leaf::LM.go x",
+        "implement leaf::L as M\ndef go x => leaf::LM.go x\n/implement",
     );
     let project = hado::project::Project::load(&case.0.join("app/main.hd")).unwrap();
     project.check().unwrap();
@@ -202,7 +205,7 @@ fn library_directory_rejects_an_argument_main_in_a_separate_file() {
     // §52: 禁止は定義の形によらない。値定義だけを探してはいけない。
     let case = Case::new();
     case.write("lib.hd", "library");
-    let source = "\n\ndef main x => x\n\nmodule S\ndef read(value: Int): Int\n\nimplement S as Memory\ndef read value => main value";
+    let source = "def main x => x\nmodule S\ndef read (value: Int): Int\n/module\nimplement S as Memory\ndef read value => main value\n/implement";
     case.write("main.hd", source);
     let line = source[..source.find("def main").unwrap()]
         .matches('\n')
@@ -258,11 +261,11 @@ fn a_library_root_conflicts_with_its_subdirectories() {
     contracts.write("app/main.hd", "def main = 1");
     contracts.write(
         "app/lib/lib.hd",
-        "library\n\nmodule Store\ndef read(x: Int): Int",
+        "library\nmodule Store\ndef read (x: Int): Int\n/module",
     );
     contracts.write(
         "app/lib/store/store.hd",
-        "module Store\ndef read(x: Int): Int",
+        "module Store\ndef read (x: Int): Int\n/module",
     );
     let project = hado::project::Project::load(&contracts.0.join("app/main.hd")).unwrap();
     let error = match project.check() {

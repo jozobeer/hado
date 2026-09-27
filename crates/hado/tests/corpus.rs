@@ -116,9 +116,9 @@ mod launch_tests {
         hado::compile_source_to_object(
             "type Observation = { stdin: Int; same: Bool }\n\
              def main =\n\
-               let input = Bytes.length read_stdin ->\n\
-               let contents = read_file \"fixture\" ->\n\
-               do write_file \"written\" contents ->\n\
+               Bytes.length read_stdin as input ->\n\
+               read_file \"fixture\" as contents ->\n\
+               write_file \"written\" contents ->\n\
                { stdin = input; same = read_file \"written\" == contents }\n",
             "main.hd",
             &object,

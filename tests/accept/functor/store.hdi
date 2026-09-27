@@ -1,4 +1,5 @@
 module Store
 type T
-def create(name: String, number: Int): T
-def describe(user: T): String
+def create (name: String, number: Int): T
+def describe (user: T): String
+/module

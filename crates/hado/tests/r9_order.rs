@@ -85,12 +85,12 @@ fn code(source: &str) -> String {
 
 #[test]
 fn types_precede_redundancy() {
-    assert_eq!(code("def main = let x = 1 + \"bad\" -> x"), "E305");
+    assert_eq!(code("def main = 1 + \"bad\" as x -> x"), "E305");
 }
 
 #[test]
 fn redundancy_precedes_monomorphization() {
-    assert_eq!(code("def main = let unused = 1 -> []"), "E505");
+    assert_eq!(code("def main = 1 as unused -> []"), "E505");
 }
 
 #[test]
@@ -116,14 +116,14 @@ fn name_cycles_precede_type_errors() {
 
 #[test]
 fn later_coverage_errors_precede_earlier_redundancy() {
-    let source = "def a = let x = 1 -> x\ndef z x => if | x > 0 => 2\ndef main = a + z 1";
+    let source = "def a = 1 as x -> x\ndef z x => if | x > 0 => 2\ndef main = a + z 1";
     assert_eq!(code(source), "E401");
 }
 
 #[test]
 fn redundancy_uses_source_order_across_definitions() {
-    let first = "def a = let x = 1 -> x";
-    let second = "def z = let unused = 2 -> 3";
+    let first = "def a = 1 as x -> x";
+    let second = "def z = 2 as unused -> 3";
     for (left, right, expected) in [(first, second, "E501"), (second, first, "E505")] {
         let source = format!("{left}\n{right}\ndef main = a + z");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -283,7 +283,7 @@ fn broken_dependencies_do_not_create_earlier_type_errors() {
         "later + 1",
         "later 1",
         "later.value",
-        "let x? = later -> Some(x + 1)",
+        "later as x? -> Some(x + 1)",
     ] {
         let source = format!("def first = {use_site}\ndef later = 1 + \"bad\"\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -302,7 +302,7 @@ fn invalid_function_bodies_preserve_known_call_arity() {
 
 #[test]
 fn failed_patterns_do_not_leak_shadowing_bindings() {
-    let source = "type A = { good: Int }\ntype B = { bad: Int }\ntype (X, Y) Pair = | Pair(X, Y)\ndef main = let x = { good = 1 } -> (let Pair(x, Some(n)) = Pair({ bad = 1 }, 2) -> n) + x.good";
+    let source = "type A = { good: Int }\ntype B = { bad: Int }\ntype (X, Y) Pair = | Pair(X, Y)\ndef main = { good = 1 } as x -> (Pair({ bad = 1 }, 2) as Pair(x, Some(n)) -> n) + x.good";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E305"), "{error}");
 }
@@ -348,7 +348,7 @@ fn invalid_module_bodies_do_not_fake_polymorphism_errors() {
         ("def rec f x => f [x]", "E307"),
     ] {
         let source =
-            format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
+            format!("def main = M.f 1\nmodule S def A f(x: A): A\n/module\nimplement S as M {definition} /implement");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some(expected), "{source}: {error}");
     }
@@ -362,10 +362,10 @@ fn invalid_module_bodies_retain_explicit_signature_mismatches() {
         "def f = fn(x, y => x + y + true)",
     ] {
         let source =
-            format!("def main = M.f 1\nmodule S def A f(x: A): A\nimplement S as M {definition}");
+            format!("def main = M.f 1\nmodule S def A f(x: A): A\n/module\nimplement S as M {definition} /implement");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
-        assert_eq!((error.line, error.col), (3, 1));
+        assert_eq!((error.line, error.col), (4, 1));
     }
 }
 
@@ -381,7 +381,7 @@ fn deferred_numeric_errors_use_source_order_not_record_schema_order() {
 
 #[test]
 fn invalid_recursive_groups_do_not_leave_unresolved_projections() {
-    let source = "type A = { value: Int }\ntype B = { value: Bool }\ndef rec later x => let ignored = x.value -> later [x]\ndef main = later 1";
+    let source = "type A = { value: Int }\ntype B = { value: Bool }\ndef rec later x => x.value as ignored -> later [x]\ndef main = later 1";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E307"), "{error}");
 }
@@ -414,7 +414,7 @@ fn deferred_non_record_projection_keeps_the_receiver_position() {
 fn module_type_errors_do_not_stop_earlier_type_checks() {
     for padding in 0..20 {
         for implementation in ["def run x => true", "def other x => x"] {
-            let source = format!("def first = {}true + M.run 1\n\n\ndef main = first\nmodule S def run(x: Int): Int\nimplement S as M {implementation}", " ".repeat(padding));
+            let source = format!("def first = {}true + M.run 1\n\n\ndef main = first\nmodule S def run(x: Int): Int\n/module\nimplement S as M {implementation} /implement", " ".repeat(padding));
             let error = check_source(&source, SOURCE_PATH).err().unwrap();
             assert_eq!(error.code.as_deref(), Some("E305"), "{source}: {error}");
             assert_eq!((error.line, error.col), (1, 13 + padding));
@@ -429,29 +429,29 @@ fn failed_modules_retain_public_contracts_without_fake_names() {
         ("type T def make(x: Int): T", "def make x => x", "M.make 1"),
         ("def A id(x: A): A", "def id x => x + 1", "M.id true"),
     ] {
-        let source = format!("def first = {use_site}\n\n\ndef main = first\nmodule S {signature}\nimplement S as M {implementation}");
+        let source = format!("def first = {use_site}\n\n\ndef main = first\nmodule S {signature}\n/module\nimplement S as M {implementation}\n/implement");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E602"), "{source}: {error}");
-        assert_eq!((error.line, error.col), (6, 1));
+        assert_eq!((error.line, error.col), (7, 1));
     }
 }
 
 #[test]
 fn failed_modules_roll_back_shared_inference_and_pending_projections() {
-    let source = "def main = M.run 1 + get { value = 1 }\ntype A = { value: Int }\ntype B = { value: Bool; extra: Int }\ndef get x => x.value\nmodule S def run(x: Int): Int\nimplement S as M def run x => get { value = x > 0; extra = x }";
+    let source = "def main = M.run 1 + get { value = 1 }\ntype A = { value: Int }\ntype B = { value: Bool; extra: Int }\ndef get x => x.value\nmodule S def run(x: Int): Int /module\nimplement S as M def run x => get { value = x > 0; extra = x } /implement";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
     assert_eq!((error.line, error.col), (6, 1));
 
-    let source = "type A = { value: Int }\ntype B = { value: Bool }\n\n\ndef main = M.run 1\nmodule S def run(x: Int): Int\nimplement S as M def run x y => let ignored = x.value -> y";
+    let source = "type A = { value: Int }\ntype B = { value: Bool }\n\n\ndef main = M.run 1\nmodule S def run(x: Int): Int\n/module\nimplement S as M def run x y => x.value as ignored -> y /implement";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
-    assert_eq!((error.line, error.col), (7, 1));
+    assert_eq!((error.line, error.col), (8, 1));
 }
 
 #[test]
 fn module_errors_follow_source_order_even_with_outer_dependencies() {
-    let source = "def helper x => x > 0\ndef main = M.run 1 + N.run 1\nimplement S as M def run x => helper x\nimplement S as N def run x => true\nmodule S def run(x: Int): Int";
+    let source = "def helper x => x > 0\ndef main = M.run 1 + N.run 1\nimplement S as M def run x => helper x /implement\nimplement S as N def run x => true /implement\nmodule S def run(x: Int): Int /module";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E602"), "{error}");
     assert_eq!((error.line, error.col), (3, 1));
@@ -526,7 +526,7 @@ fn later_type_changing_recursive_calls_are_not_general_occurs_checks() {
 fn recursive_call_anchors_follow_bindings_and_mutual_calls() {
     for (prefix, call, suffix) in [
         (
-            "def rec poly x => let invoke = poly -> ",
+            "def rec poly x => poly as invoke -> ",
             "invoke [x]",
             "\ndef main = poly 1",
         ),
@@ -561,7 +561,7 @@ fn indirect_polymorphic_recursion_points_to_its_definition() {
             ("", format!("fn(invoke => invoke [x]) {name}")),
             (
                 "",
-                format!("let call = fn(invoke => invoke [x]) -> call {name}"),
+                format!("fn(invoke => invoke [x]) as call -> call {name}"),
             ),
             ("def apply f x => f x\n", format!("apply {name} [x]")),
             ("def identity x => x\n", format!("(identity {name}) [x]")),
@@ -613,7 +613,7 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
     for (prefix, expression, suffix, code) in [
         ("def equal x y => x ", "== y", "\ndef alias = equal\ndef identity x => x\ndef main = alias identity identity", "E703"),
         ("def cmp x y => ", "compare x y", "\ndef alias = cmp\ndef identity x => x\ndef main = alias identity identity", "E704"),
-        ("def identity x => x\ndef main = M.equal identity identity\nmodule S def T equal(x: T, y: T): Bool\nimplement S as M def equal x y => x", "== y", "", "E703"),
+        ("def identity x => x\ndef main = M.equal identity identity\nmodule S def T equal(x: T, y: T): Bool\n/module\nimplement S as M def equal x y => x", "== y", "\n/implement", "E703"),
         ("def identity x => x\ndef main = (identity ", "== identity)", " == true", "E703"),
     ] {
         let source = format!("{prefix}{expression}{suffix}");
@@ -624,7 +624,7 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
     for source in [
         "def equal x y => x == y\ndef alias = equal\ndef main = alias 1 2",
         "def cmp x y => compare x y\ndef alias = cmp\ndef main = alias 1 2",
-        "def main = M.equal 1 2\nmodule S def T equal(x: T, y: T): Bool\nimplement S as M def equal x y => x == y",
+        "def main = M.equal 1 2\nmodule S def T equal(x: T, y: T): Bool /module\nimplement S as M def equal x y => x == y /implement",
     ] {
         check_source(source, SOURCE_PATH).unwrap_or_else(|error| panic!("{source}: {error}"));
     }
@@ -699,7 +699,7 @@ fn ambiguous_declarations_do_not_create_speculative_field_errors() {
     for source in [
         "type R = { known: Int }\ndef early = dup.missing\ndef dup = 1\ndef dup = { known = 1 }\ndef main = early",
         "def early (x: Dup) => x.missing\ntype Dup = { known: Int }\ntype Dup = { missing: Int }\ndef main = early",
-        "type R = { known: Int }\ndef early = let Same(x) = Same({ known = 1 }) -> x.missing\ntype First = | Same(R)\ntype Second = | Same(Int)\ndef main = early",
+        "type R = { known: Int }\ndef early = Same({ known = 1 }) as Same(x) -> x.missing\ntype First = | Same(R)\ntype Second = | Same(Int)\ndef main = early",
     ] {
         let error = check_source(source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
@@ -709,9 +709,9 @@ fn ambiguous_declarations_do_not_create_speculative_field_errors() {
 #[test]
 fn duplicate_recovery_respects_module_scopes() {
     let cases = [
-        "def main = 1\nmodule S\nimplement S as M\n type R = { known: Int }\n def field (x: R) => x.missing\n def dup = 1\n def dup = 2",
+        "def main = 1\nmodule S\n/module\nimplement S as M\n/implement\n type R = { known: Int }\n def field (x: R) => x.missing\n def dup = 1\n def dup = 2",
 
-        "type R = { known: Int }\ndef field (x: R) => x.missing + M.get 1\n\n\ndef main = field { known = 1 }\nmodule S def get(x: Int): Int\nimplement S as M type Private = | First type Private = | Second def get x => x",
+        "type R = { known: Int }\ndef field (x: R) => x.missing + M.get 1\n\n\ndef main = field { known = 1 }\nmodule S def get(x: Int): Int /module\nimplement S as M type Private = | First type Private = | Second def get x => x /implement",
     ];
     for source in cases {
         let before = &source[..source.find("missing").unwrap()];
@@ -730,7 +730,7 @@ fn duplicate_recovery_respects_module_scopes() {
 
 #[test]
 fn outer_duplicates_precede_implementation_local_field_errors() {
-    let source = "type R = | First\ntype R = | Second\ndef main = 1\nmodule S\nimplement S as M type Local = { known: Int } def field (x: Local) => x.missing";
+    let source = "type R = | First\ntype R = | Second\ndef main = 1\nmodule S\n/module\nimplement S as M type Local = { known: Int } def field (x: Local) => x.missing /implement";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E205"));
     assert_eq!((error.line, error.col), (2, 6));
@@ -762,9 +762,9 @@ fn duplicate_bodies_still_report_independent_field_errors() {
 fn ambiguous_module_interfaces_do_not_choose_a_return_type() {
     let prefix = "type A = { ok: Int }\ntype B = { bad: Int }\ndef early = (M.make 1).ok\n";
     for declarations in [
-        "module S def make(x: Int): A\nmodule S def make(x: Int): B\nimplement S as M def make x => { ok = x }",
-        "module SA def make(x: Int): A\nmodule SB def make(x: Int): B\nimplement SA as M def make x => { ok = x }\nimplement SB as M def make x => { bad = x }",
-        "module S def make(x: Int): A def make(x: Int): B\nimplement S as M def make x => { ok = x }",
+        "module S def make(x: Int): A /module\nmodule S def make(x: Int): B /module\nimplement S as M def make x => { ok = x } /implement",
+        "module SA def make(x: Int): A /module\nmodule SB def make(x: Int): B /module\nimplement SA as M def make x => { ok = x } /implement\nimplement SB as M def make x => { bad = x } /implement",
+        "module S def make(x: Int): A def make(x: Int): B /module\nimplement S as M def make x => { ok = x } /implement",
     ] {
         let source = format!("{prefix}def main = early\n{declarations}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
@@ -775,8 +775,8 @@ fn ambiguous_module_interfaces_do_not_choose_a_return_type() {
 #[test]
 fn ambiguous_interfaces_keep_possible_member_and_type_names() {
     for source in [
-        "def main = M.first 1\nmodule S def first(x: Int): Int\nmodule S def second(x: Int): Int\nimplement S as M def first x => x",
-        "type Box = | Wrap(M.T)\n\n\n\ndef main = 1\nmodule S type T\nmodule S\nimplement S as M type T = Int",
+        "def main = M.first 1\nmodule S def first(x: Int): Int /module\nmodule S def second(x: Int): Int /module\nimplement S as M def first x => x /implement",
+        "type Box = | Wrap(M.T)\n\n\n\ndef main = 1\nmodule S type T /module\nmodule S /module\nimplement S as M type T = Int /implement",
     ] {
         let error = check_source(source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E205"), "{error}");
@@ -785,9 +785,12 @@ fn ambiguous_interfaces_keep_possible_member_and_type_names() {
 
 #[test]
 fn ambiguous_module_bodies_retain_independent_diagnostics() {
-    for suffix in ["module S\nmodule S", "module S\nimplement S as M"] {
+    for suffix in [
+        "module S\n/module\nmodule S\n/module",
+        "module S\n/module\nimplement S as M\n/implement",
+    ] {
         let prefix =
-            "def main = 1\nimplement S as M\n type R = { known: Int }\n def bad (x: R) => x.";
+            "def main = 1\nimplement S as M\n/implement\n type R = { known: Int }\n def bad (x: R) => x.";
         let source = format!("{prefix}missing\n{suffix}");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();
         assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
@@ -804,7 +807,7 @@ fn ambiguous_module_bodies_retain_independent_diagnostics() {
 
 #[test]
 fn ambiguous_interfaces_still_reject_names_absent_from_every_candidate() {
-    let source = "def main = M.missing 1\nmodule SA def first(x: Int): Int\nmodule SB def second(x: Int): Int\nimplement SA as M def first x => x\nimplement SB as M def second x => x";
+    let source = "def main = M.missing 1\nmodule SA def first(x: Int): Int /module\nmodule SB def second(x: Int): Int /module\nimplement SA as M def first x => x /implement\nimplement SB as M def second x => x /implement";
     let error = check_source(source, SOURCE_PATH).err().unwrap();
     assert_eq!(error.code.as_deref(), Some("E204"), "{error}");
     assert_eq!(

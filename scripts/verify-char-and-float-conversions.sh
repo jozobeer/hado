@@ -316,11 +316,11 @@ for line in block.group(1).splitlines():
 assert set(required.get('Char', [])) == {'to_int', 'of_int', 'to_string'}, required.get('Char')
 assert {'to_string', 'parse', 'of_int'} <= set(required.get('Float', [])), required.get('Float')
 signatures = [
-    'def to_int(value: Char): Int Pure',
-    'def of_int(value: Int): Char {Error}',
-    'def to_string(value: Char): String Pure',
-    'def parse(value: String): Float {Error}',
-    'def of_int(value: Int): Float Pure',
+    'def to_int (value: Char): Int Pure',
+    'def of_int (value: Int): Char {Error}',
+    'def to_string (value: Char): String Pure',
+    'def parse (value: String): Float {Error}',
+    'def of_int (value: Int): Float Pure',
 ]
 for signature in signatures:
     assert signature in section, signature

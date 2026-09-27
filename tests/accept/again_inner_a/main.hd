@@ -5,8 +5,10 @@ once a: Int
 effect Y
 again y(value: Int): Void
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
 handler A as Inner
 once a => 1
-def main = with Collect -> with Inner -> do y 3 -> ()
+def main = with Collect -> with Inner -> y 3 ->
+  ()

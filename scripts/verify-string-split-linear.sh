@@ -509,12 +509,12 @@ from harness import assert_linear, build, medians
 root = Path(sys.argv[1]) / 'e'
 root.mkdir(parents=True, exist_ok=True)
 control = ('def main =\n'
-           '  let bytes = IoDefault.read_stdin ->\n'
-           '  let text = Bytes.to_string bytes ->\n'
+           '  IoDefault.read_stdin as bytes ->\n'
+           '  Bytes.to_string bytes as text ->\n'
            '  String.length text |> Int.to_string |> IoDefault.log\n')
 target = ('def main =\n'
-          '  let bytes = IoDefault.read_stdin ->\n'
-          '  let values = Bytes.to_string bytes |> String.split "\\n" ->\n'
+          '  IoDefault.read_stdin as bytes ->\n'
+          '  Bytes.to_string bytes |> String.split "\\n" as values ->\n'
           '  values |> List.length |> Int.to_string |> IoDefault.log\n')
 
 
@@ -544,12 +544,12 @@ from harness import assert_linear, build, medians
 root = Path(sys.argv[1]) / 'f'
 root.mkdir(parents=True, exist_ok=True)
 control = ('def main =\n'
-           '  let bytes = IoDefault.read_stdin ->\n'
-           '  let text = Bytes.to_string bytes ->\n'
+           '  IoDefault.read_stdin as bytes ->\n'
+           '  Bytes.to_string bytes as text ->\n'
            '  String.length text |> Int.to_string |> IoDefault.log\n')
 target = ('def main =\n'
-          '  let bytes = IoDefault.read_stdin ->\n'
-          '  let values = Bytes.to_string bytes |> String.split "、" ->\n'
+          '  IoDefault.read_stdin as bytes ->\n'
+          '  Bytes.to_string bytes |> String.split "、" as values ->\n'
           '  values |> List.length |> Int.to_string |> IoDefault.log\n')
 
 
@@ -581,8 +581,8 @@ subject, tail, small, large, label = sys.argv[3], sys.argv[4], int(sys.argv[5]),
 root = Path(sys.argv[1]) / label
 root.mkdir(parents=True, exist_ok=True)
 control = ('def main =\n'
-           '  let bytes = IoDefault.read_stdin ->\n'
-           '  let text = Bytes.to_string bytes ->\n'
+           '  IoDefault.read_stdin as bytes ->\n'
+           '  Bytes.to_string bytes as text ->\n'
            '  String.length text |> Int.to_string |> IoDefault.log\n')
 
 
@@ -590,10 +590,10 @@ def target_source(width):
     # 区切りは本文と同じ文字の連続のあとに tail を 1 つ。長さは入力長に比例する。
     # 入力の末尾がその区切り 1 回だけになるので、slice で取り出して split に渡す。
     return ('def main =\n'
-            '  let bytes = IoDefault.read_stdin ->\n'
-            '  let text = Bytes.to_string bytes ->\n'
-            '  let total = String.length text ->\n'
-            f'  let separator = String.slice text (total - {width // 2}) total ->\n'
+            '  IoDefault.read_stdin as bytes ->\n'
+            '  Bytes.to_string bytes as text ->\n'
+            '  String.length text as total ->\n'
+            f'  String.slice text (total - {width // 2}) total as separator ->\n'
             '  String.split text separator |> List.length |> Int.to_string |> IoDefault.log\n')
 
 
@@ -632,10 +632,10 @@ root.mkdir(parents=True, exist_ok=True)
 element = 'x' * 800
 build_prefix = f'def rec build n acc => if n == 0 => acc | build (n - 1) ["{element}", ...acc]\n'
 control_source = (lambda count: build_prefix + 'def main =\n'
-                  f'  let values = build {count} [] ->\n'
+                  f'  build {count} [] as values ->\n'
                   '  values |> List.length |> Int.to_string |> IoDefault.log\n')
 target_source = (lambda count: build_prefix + 'def main =\n'
-                 f'  let values = build {count} [] ->\n'
+                 f'  build {count} [] as values ->\n'
                  '  String.join values "," |> String.length |> Int.to_string |> IoDefault.log\n')
 small_control_binary = build(root, 'control-small', control_source(300000))
 large_control_binary = build(root, 'control-large', control_source(600000))

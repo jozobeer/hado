@@ -7,11 +7,15 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest ->
+  [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
+def main = with Outer -> with Collect -> with Inner -> y b ->
+  z 5 ->
+  ()

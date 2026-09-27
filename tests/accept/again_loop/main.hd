@@ -5,11 +5,10 @@
 effect A Yield
 again yield(value: A): Void
 handler A Yield as Collect
-again yield value =>
-  let rest = resume () ->
+again yield value => resume () as rest ->
   [value, ...rest]
 return _ => []
-def rec loop (n: Int): Void {Int Yield} =>
-  if n <= 0 => ()
-  | do yield n -> loop (n - 1)
+def rec loop (n: Int): Void {Int Yield} => if n <= 0 => () | yield n ->
+  loop (n - 1)
+  /if
 def main = List.length (with Collect -> loop 10000)

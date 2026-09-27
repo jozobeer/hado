@@ -1,0 +1,2 @@
+// spec: §12
+def main = if(true => 1 | 2) |> Int.to_string

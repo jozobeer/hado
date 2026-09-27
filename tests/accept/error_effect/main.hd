@@ -1,6 +1,5 @@
 // spec: §33
 // expect: ok
 // item: 失敗の効果
-def parse (input: String): String {Error} =>
-  if input == "" => raise { message = "empty" } | input
+def parse (input: String): String {Error} => if input == "" => raise { message = "empty" } | input
 def main = parse "ok"

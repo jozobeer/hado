@@ -4,6 +4,8 @@
 // needs: prelude
 def main = [Null.save 42, ...List.map [1, 2, 3] fn(_ => 0)]
 module Store
-def save(value: Int): Int
+def save (value: Int): Int
+/module
 implement Store as Null
 def save _ => 0
+/implement

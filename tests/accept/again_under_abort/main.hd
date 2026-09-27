@@ -5,9 +5,11 @@ again y(value: Int): Void
 effect E
 abort e(reason: Int)
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest ->
+  [value, ...rest]
 return _ => []
 handler E as Trap
 abort e reason => [reason]
 return _ => []
-def main = with Collect -> with Trap -> do y 7 -> ()
+def main = with Collect -> with Trap -> y 7 ->
+  ()

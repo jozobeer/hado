@@ -6,3 +6,4 @@ def f = 1
 
 module M
 type T
+/module

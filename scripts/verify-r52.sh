@@ -115,7 +115,7 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
-source = 'def f x => x + 1\ndef main = f true\ndef g = let y = 5 -> y\n'
+source = 'def f x => x + 1\ndef main = f true\ndef g = 5 as y -> y\n'
 # 2 つを別の入力根に置く。`fmt` は入力根のソース全部を見るので、同じ根に
 # 並べると片方を整形したときにもう片方も直ってしまう。
 root = Path(sys.argv[1]) / 'b'
@@ -157,7 +157,7 @@ dry = run('fmt', '--check', str(canonical / 'main.hd'))
 assert dry.returncode == 0, (dry.returncode, dry.stdout, dry.stderr)
 assert dry.stdout == b'', dry.stdout
 
-source = 'def main = let x = 7 -> x\n'
+source = 'def main = 7 as x -> x\n'
 dirty = project(root / 'dirty', {'main.hd': source})
 dry = run('fmt', '--check', str(dirty / 'main.hd'))
 assert dry.returncode == 1, (dry.returncode, dry.stdout)
@@ -192,7 +192,7 @@ from harness import project, run
 
 root = project(Path(sys.argv[1]) / 'd', {
     'main.hd': 'def main = lib::Util.helper 3\n',
-    'lib/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => let y = x -> y\n',
+    'lib/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n/module\n\nimplement Util as Util\ndef helper x => x as y -> y\n/implement\n',
 })
 before = (root / 'lib/util.hd').read_text()
 result = run('fmt', str(root / 'main.hd'))
@@ -217,7 +217,7 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
-source = 'def main = let value = 42 -> value\n'
+source = 'def main = 42 as value -> value\n'
 root = Path(sys.argv[1]) / 'e'
 plain = project(root / 'plain', {'main.hd': source})
 refused = run('build', str(plain / 'main.hd'))

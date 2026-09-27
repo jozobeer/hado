@@ -1,3 +1,4 @@
 module Store
 type T
+/module
 library

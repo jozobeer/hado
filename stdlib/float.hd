@@ -1,11 +1,10 @@
 module Float
-def to_string(value: Float): String Pure
-def parse(value: String): Float {Error}
-def of_int(value: Int): Float Pure
+def to_string (value: Float): String Pure
+def parse (value: String): Float {Error}
+def of_int (value: Int): Float Pure
+/module
 implement Float as Float
 def to_string value => __float_to_string value
-def parse value =>
-  if __float_parse_is_valid value
-    => __float_parse_unchecked value
-    | raise { message = "InvalidFloat" }
+def parse value => if __float_parse_is_valid value => __float_parse_unchecked value | raise { message = "InvalidFloat" }
 def of_int value => __int_to_float value
+/implement

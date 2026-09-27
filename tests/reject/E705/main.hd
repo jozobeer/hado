@@ -4,7 +4,9 @@
 def main = Store.find 1
 module Store
 type T
-def find(id: Int): T Option
+def find (id: Int): T Option
+/module
 implement Store as Store
 type T = Int
 def find id => Some(id)
+/implement

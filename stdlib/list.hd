@@ -1,16 +1,17 @@
 type T List = | Nil | Cons(T, T List)
 module List
-def (A, B) map(values: A List, f: Fn(A => B)): B List
-def A filter(values: A List, predicate: Fn(A => Bool)): A List
-def (A, B) fold(values: A List, initial: B, f: Fn(B, A => B)): B
-def A length(values: A List): Int Pure
-def A reverse(values: A List): A List Pure
-def A append(left: A List, right: A List): A List Pure
-def A sort(values: A List, comparator: Fn(A, A => Int Pure)): A List Pure
-def A head(values: A List): A Option Pure
-def A nth(values: A List, index: Int): A Option Pure
-def A take(values: A List, count: Int): A List Pure
-def A drop(values: A List, count: Int): A List Pure
+def (A, B) map (values: A List, f: Fn(A => B)): B List
+def A filter (values: A List, predicate: Fn(A => Bool)): A List
+def (A, B) fold (values: A List, initial: B, f: Fn(B, A => B)): B
+def A length (values: A List): Int Pure
+def A reverse (values: A List): A List Pure
+def A append (left: A List, right: A List): A List Pure
+def A sort (values: A List, comparator: Fn(A, A => Int Pure)): A List Pure
+def A head (values: A List): A Option Pure
+def A nth (values: A List, index: Int): A Option Pure
+def A take (values: A List, count: Int): A List Pure
+def A drop (values: A List, count: Int): A List Pure
+/module
 implement List as List
 // acc は逆順に積み、公開する直前に reverse する。自己呼び出しを末尾位置に置く（§53）。
 def rec map_go values f acc => if values | [] => reverse acc | [head, ...tail] => map_go tail f [f head, ...acc]
@@ -29,34 +30,17 @@ def rec odds_go values acc => if values | [] => reverse acc | [head] => reverse 
 def rec evens_go values acc => if values | [] => reverse acc | [_] => reverse acc | [_, next, ...tail] => evens_go tail [next, ...acc]
 def odds values => odds_go values []
 def evens values => evens_go values []
-def rec merge left right comparator acc =>
-  if left, right
-  | [], _ => append (reverse acc) right
-  | _, [] => append (reverse acc) left
-  | [a, ...rest_a], [b, ...rest_b] => if
-    | comparator a b <= 0 => merge rest_a right comparator [a, ...acc]
-    | merge left rest_b comparator [b, ...acc]
-def rec merge_sort values comparator =>
-  if values
-  | [] => []
-  | [_] => values
-  | [_, _, ..._] => merge (merge_sort (odds values) comparator) (merge_sort (evens values) comparator) comparator []
+def rec merge left right comparator acc => if left, right | [], _ => append (reverse acc) right | _, [] => append (reverse acc) left | [a, ...rest_a], [b, ...rest_b] => if  | comparator a b <= 0 => merge rest_a right comparator [a, ...acc] | merge left rest_b comparator [b, ...acc]
+def rec merge_sort values comparator => if values | [] => [] | [_] => values | [_, _, ..._] => merge (merge_sort (odds values) comparator) (merge_sort (evens values) comparator) comparator []
 def sort values comparator => merge_sort values comparator
-def head
-| [] => None
-| [value, ..._] => Some(value)
+def head | [] => None | [value, ..._] => Some(value)
 def nth values index | index < 0 => None | nth_from values index
-def rec nth_from values index =>
-  if values
-  | [] => None
-  | [head, ...tail] => nth_more head tail index
+def rec nth_from values index => if values | [] => None | [head, ...tail] => nth_more head tail index
 def rec nth_more head tail remaining | remaining <= 0 => Some(head) | nth_from tail (remaining - 1)
 def rec take_go values count acc => if count <= 0 => reverse acc | take_more values count acc
 def rec take_more values count acc => if values | [] => reverse acc | [head, ...tail] => take_go tail (count - 1) [head, ...acc]
 def take values count => take_go values count []
 def drop values count | count <= 0 => values | drop_from values count
-def rec drop_from values count =>
-  if values
-  | [] => []
-  | [_, ...tail] => drop_more tail (count - 1)
+def rec drop_from values count => if values | [] => [] | [_, ...tail] => drop_more tail (count - 1)
 def rec drop_more tail remaining | remaining <= 0 => tail | drop_from tail remaining
+/implement

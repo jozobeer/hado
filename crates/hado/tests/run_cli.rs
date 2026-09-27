@@ -39,10 +39,7 @@ fn run_prints_the_main_value_and_leaves_no_binary() {
 #[test]
 fn run_forwards_the_arguments_after_the_separator() {
     let dir = scratch("args");
-    let source = write(
-        &dir,
-        "def main =\n  let argv = args ->\n  List.length argv\n",
-    );
+    let source = write(&dir, "def main = args as argv ->\n  List.length argv");
     let output = hado()
         .arg("run")
         .arg(&source)
@@ -59,7 +56,7 @@ fn run_passes_standard_input_through() {
     let dir = scratch("stdin");
     let source = write(
         &dir,
-        "def main =\n  let bytes = read_stdin ->\n  Bytes.to_string bytes\n",
+        "def main = read_stdin as bytes ->\n  Bytes.to_string bytes",
     );
     let mut child = hado()
         .arg("run")
@@ -115,7 +112,7 @@ fn build_writes_to_the_requested_output() {
 #[test]
 fn build_reports_the_canonical_form() {
     let dir = scratch("canonical");
-    let source = write(&dir, "def main = let x = 1 -> x\n");
+    let source = write(&dir, "def main = 1 as x ->\n  x\n");
     let built = hado().arg("build").arg(&source).output().unwrap();
     assert_eq!(built.status.code(), Some(1), "{built:?}");
     let stderr = String::from_utf8_lossy(&built.stderr);
@@ -132,7 +129,7 @@ fn run_discovers_namespaces_beside_embedded_compiler_sources() {
     std::fs::create_dir_all(dir.join("store")).unwrap();
     std::fs::write(
         dir.join("store/all.hd"),
-        "module S\ndef run(x: Int): Int\nimplement S as M\ndef run x => x + 3\n",
+        "module S\ndef run (x: Int): Int\n/module\nimplement S as M\ndef run x => x + 3\n/implement",
     )
     .unwrap();
     let source = write(&dir, "def main = store::M.run 7\n");

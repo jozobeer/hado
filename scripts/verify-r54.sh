@@ -179,7 +179,7 @@ from harness import project, run
 root = project(Path(sys.argv[1]) / 'e', {
     'main.hd': 'def main = 0\n',
     'main_test.hd': 'def main = sub::Util.helper 7\n',
-    'sub/util_test.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => x\n',
+    'sub/util_test.hd': 'library\nmodule Util\ndef helper (x: Int): Int Pure\n/module\nimplement Util as Util\ndef helper x => x\n/implement\n',
 })
 result = run('test', str(root / 'main.hd'))
 assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)

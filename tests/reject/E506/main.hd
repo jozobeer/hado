@@ -1,6 +1,5 @@
 // spec: §40
 // error: E506
-def f x =>
-  let _ = x ->
+def f x => x as _ ->
   x
 def main = f 2

@@ -1,7 +1,5 @@
 // spec: §25
 // error: E401
 // item: 条件列の判別
-def grade score
-  | score >= 90 => 3
-  | score >= 70 => 2
+def grade score | score >= 90 => 3 | score >= 70 => 2
 def main = grade 10

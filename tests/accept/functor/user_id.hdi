@@ -1,4 +1,5 @@
 module UserId
 type T
-def make(value: Int): T
-def value(id: T): Int
+def make (value: Int): T
+def value (id: T): Int
+/module

@@ -12,14 +12,14 @@ code    = "E100"
 name    = "syntax-error"
 section = "付録C"
 stage   = "構文"
-anchor  = "文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `|`"
+anchor  = "文法に合わない最初のトークン。付録Cの腕 0 本の列は先頭の `|`。閉じの不足・余分（続きの無い `if(...)` を含む）・形の食い違いは閉じの印（第12.1節）"
 
 [[error]]
 code    = "E101"
 name    = "nested-branch"
 section = "§30"
 stage   = "構文"
-anchor  = "内側の `if` か `fn`"
+anchor  = "内側の `if` か `fn`。`as` の束縛や `e ->` の継続、`fn` の本体に置いた分岐も内側の `if`"
 
 [[error]]
 code    = "E102"
@@ -194,7 +194,7 @@ code    = "E303"
 name    = "rail-type"
 section = "§34"
 stage   = "型"
-anchor  = "`let p? =` の右辺は Option、`do` の右辺は効果を持つ式か Option。どちらでもない式"
+anchor  = "`e as p? ->` の値 `e` は Option、`e ->` の値 `e` は効果を持つ式か Option。どちらでもない式"
 
 [[error]]
 code    = "E304"
@@ -243,7 +243,7 @@ code    = "E402"
 name    = "non-exhaustive"
 section = "§28"
 stage   = "網羅性"
-anchor  = "`if`。`let` ではそのパターン"
+anchor  = "`if`。`as` の束縛ではそのパターン"
 
 [[error]]
 code    = "E403"
@@ -278,7 +278,7 @@ code    = "E501"
 name    = "identity-binding"
 section = "§41"
 stage   = "冗長"
-anchor  = "`let`"
+anchor  = "`as`"
 
 [[error]]
 code    = "E502"
@@ -296,24 +296,24 @@ anchor  = "`_`"
 
 [[error]]
 code    = "E504"
-name    = "let-question-underscore"
+name    = "question-underscore-binding"
 section = "§35"
 stage   = "冗長"
-anchor  = "`_`"
+anchor  = "`_?` の `_`"
 
 [[error]]
 code    = "E505"
 name    = "unused-binding"
 section = "§39"
 stage   = "冗長"
-anchor  = "束縛名"
+anchor  = "`as` の束縛名"
 
 [[error]]
 code    = "E506"
 name    = "implicit-discard"
 section = "§40"
 stage   = "冗長"
-anchor  = "`_`"
+anchor  = "`as` の `_`"
 
 [[error]]
 code    = "E507"

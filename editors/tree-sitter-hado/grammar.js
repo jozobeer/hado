@@ -26,6 +26,10 @@ const PREC = {
 // キーワード。付録C のキーワード表（`docs/spec.md`）と同じ集合。
 const keyword = (word) => token(prec(1, word));
 
+// 閉じの印（§12.1）。`/` は除算にも一致するので、`/if` を 1 トークンとして
+// 先に読む（`crates/hado/src/lexer.rs` の `slash_starts_close` と同じ）。
+const closer = (word) => token(prec(2, '/' + word));
+
 const commaSep1 = (rule) => seq(rule, repeat(seq(',', rule)));
 const semicolonSep1 = (rule) => seq(rule, repeat(seq(';', rule)));
 
@@ -182,8 +186,11 @@ module.exports = grammar({
 
     path: ($) => repeat1(seq($.name, '::')),
 
-    // 付録C「module」
-    module_section: ($) => prec.right(seq(keyword('module'), $.upper_name, repeat($.module_item))),
+    // 付録C「module」。`module` と `implement` は閉じの印で終わる（§12.1）。
+    module_section: ($) =>
+      prec.right(
+        seq(keyword('module'), $.upper_name, repeat($.module_item), closer('module')),
+      ),
 
     module_item: ($) =>
       choice(
@@ -211,6 +218,7 @@ module.exports = grammar({
           keyword('as'),
           $.upper_name,
           repeat($._implement_item),
+          closer('implement'),
         ),
       ),
 
@@ -225,6 +233,7 @@ module.exports = grammar({
           commaSep1($.functor_param),
           ')',
           repeat($._implement_item),
+          closer('implement'),
         ),
       ),
 
@@ -336,6 +345,7 @@ module.exports = grammar({
         $.list_expr,
         $.lambda,
         $.resume,
+        $.parenthesized_branch,
         seq('(', $.expression, ')'),
       ),
 
@@ -356,7 +366,7 @@ module.exports = grammar({
         seq('[', commaSep1($.expression), optional(seq(',', '...', $.expression)), ']'),
       ),
 
-    // 付録C「継続と匿名関数」
+    // 付録C「継続と匿名関数」。束縛は後置（§11）。
     _prefix_form: ($) =>
       choice($.binding, $.rail_binding, $.rail_discard, $.with_form, $.branch),
 
@@ -366,23 +376,34 @@ module.exports = grammar({
     with_args: ($) => seq('(', commaSep1($.expression), ')'),
 
     binding: ($) =>
-      seq(keyword('let'), $.pattern, '=', $.expression, '->', $.expression),
+      seq($.pipe, keyword('as'), $.pattern, '->', $.expression),
 
     rail_binding: ($) =>
-      seq(keyword('let'), $.pattern, '?', '=', $.expression, '->', $.expression),
+      seq($.pipe, keyword('as'), $.pattern, '?', '->', $.expression),
 
-    rail_discard: ($) => seq(keyword('do'), $.expression, '->', $.expression),
+    rail_discard: ($) => seq($.pipe, '->', $.expression),
 
     lambda: ($) =>
-      seq(
-        keyword('fn'),
-        '(',
-        choice(
-          seq($.lambda_params, optional($.return_type), '=>', $.expression),
-          seq($.lambda_params, optional($.return_type), $.condition_arms),
-          $.pattern_arms,
+      choice(
+        seq(
+          keyword('fn'),
+          '(',
+          choice(
+            seq($.lambda_params, optional($.return_type), '=>', $.expression),
+            seq($.lambda_params, optional($.return_type), $.condition_arms),
+            $.pattern_arms,
+          ),
+          ')',
         ),
-        ')',
+        // 本体に `->` があるときの `fn … /fn`（§12）。
+        seq(
+          keyword('fn'),
+          $.lambda_params,
+          optional($.return_type),
+          '=>',
+          $.expression,
+          closer('fn'),
+        ),
       ),
 
     lambda_params: ($) =>
@@ -394,17 +415,31 @@ module.exports = grammar({
     // 付録C「分岐」
     branch: ($) => choice($.condition_branch, $.boolean_branch, $.pattern_branch),
 
+    // 本体に `->` があれば `/if` で閉じる（§12.1）。続きがある `if(...)` は
+    // `primary` の `parenthesized_branch` が読む。`/if` は最も内側の `if` が取る
+    // ので右結合にする。
     boolean_branch: ($) =>
-      seq(keyword('if'), $.expression, '=>', $.arm_body, '|', $.arm_body),
+      prec.right(
+        seq(keyword('if'), $.expression, '=>', $.arm_body, '|', $.arm_body, optional(closer('if'))),
+      ),
 
-    condition_branch: ($) => seq(keyword('if'), $.condition_arms),
+    condition_branch: ($) =>
+      prec.right(seq(keyword('if'), $.condition_arms, optional(closer('if')))),
 
     condition_arms: ($) => repeat1(choice($.condition_arm, $.pattern_fallback)),
 
     condition_arm: ($) => seq('|', $.expression, '=>', $.arm_body),
 
     pattern_branch: ($) =>
-      seq(keyword('if'), $.expression, repeat(seq(',', $.expression)), $.pattern_arms),
+      prec.right(
+        seq(
+          keyword('if'),
+          $.expression,
+          repeat(seq(',', $.expression)),
+          $.pattern_arms,
+          optional(closer('if')),
+        ),
+      ),
 
     pattern_arms: ($) => repeat1(choice($.pattern_arm, $.pattern_fallback)),
 
@@ -417,11 +452,28 @@ module.exports = grammar({
         choice($.arm_body, $.arm_conditions),
       ),
 
-    arm_conditions: ($) => seq(keyword('if'), $.condition_arms),
+    arm_conditions: ($) =>
+      prec.right(seq(keyword('if'), $.condition_arms, optional(closer('if')))),
 
     pattern_fallback: ($) => seq('|', $.arm_body),
 
     arm_body: ($) => choice($.pipe, $.binding, $.rail_binding, $.rail_discard),
+
+    // §12.1: `if(...)` は続きを持つ `if` の閉じ。`(` で始まる条件の `if` とも
+    // 読めるので、`primary` に置いて GLR に `=>` の有無で選ばせる。
+    parenthesized_branch: ($) =>
+      choice(
+        seq(keyword('if'), '(', $.expression, '=>', $.arm_body, '|', $.arm_body, ')'),
+        seq(keyword('if'), '(', $.condition_arms, ')'),
+        seq(
+          keyword('if'),
+          '(',
+          $.expression,
+          repeat(seq(',', $.expression)),
+          $.pattern_arms,
+          ')',
+        ),
+      ),
 
     // 付録C「パターン」
     pattern: ($) =>

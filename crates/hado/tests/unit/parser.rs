@@ -81,18 +81,54 @@ fn record_and_list_literals() {
 #[test]
 fn bindings_and_fn() {
     assert_eq!(
-        parse_expr_ok("def main = let x = 1 -> x + 1"),
-        "(let x = 1 -> (x + 1))"
+        parse_expr_ok("def main = 1 as x -> x + 1"),
+        "(1 as x -> (x + 1))"
     );
     assert_eq!(
-        parse_expr_ok("def main = let x? = f y -> x"),
-        "(let x? = f y -> x)"
+        parse_expr_ok("def main = f y as x? -> x"),
+        "(f y as x? -> x)"
     );
-    assert_eq!(parse_expr_ok("def main = do g x -> x"), "(do g x -> x)");
+    assert_eq!(parse_expr_ok("def main = g x -> x"), "(g x -> x)");
     assert_eq!(
         parse_expr_ok("def main = fn(x => x + 1)"),
         "fn(x => (x + 1))"
     );
+}
+
+/// §11・§34: `let` と `do` は廃止され、E100 になる。
+#[test]
+fn removed_binding_keywords_are_e100() {
+    for source in [
+        "def main = let x = 1 -> x",
+        "def main = let x? = f y -> x",
+        "def main = do g x -> x",
+    ] {
+        let d = parse_source(source, "t").unwrap_err();
+        assert_eq!(d.code.as_deref(), Some("E100"), "{source}: {d}");
+    }
+}
+
+/// §12.1: `if` の閉じは本体の `->` の有無と続きの有無で決まる。
+#[test]
+fn if_close_follows_the_rule() {
+    for source in [
+        "def main = if true => 1 | 0",
+        "def main = if (a + b) * 2 > c => 1 | 0",
+        "def main = if(c => 1 | 2) + 1",
+        "def main = if((a + b) * 2 > c => 1 | 0) as n -> n",
+    ] {
+        let parsed = parse_source(source, "t");
+        assert!(parsed.is_ok(), "{source}: {:?}", parsed.err());
+    }
+    for (source, want) in [
+        ("def main = if true => 1 | log \"a\" -> 2", "E100"),
+        ("def main = if true => 1 | 2 /if", "E100"),
+        ("def main = if true => 1 | 0 /if", "E100"),
+        ("def main = if true => if x | A => f(x) | 0", "E101"),
+    ] {
+        let d = parse_source(source, "t").unwrap_err();
+        assert_eq!(d.code.as_deref(), Some(want), "{source}: {d}");
+    }
 }
 
 #[test]
@@ -161,9 +197,15 @@ fn e101_nested_branch() {
 }
 
 fn round_trip(source: &str) {
-    let ast = parse_source(source, "t").unwrap();
+    let ast = match parse_source(source, "t") {
+        Ok(ast) => ast,
+        Err(error) => panic!("{source}: {error}"),
+    };
     let printed = canonical_program(&ast);
-    let restored = parse_source(&printed, "t").unwrap();
+    let restored = match parse_source(&printed, "t") {
+        Ok(ast) => ast,
+        Err(error) => panic!("{source} -> {printed:?}: {error}"),
+    };
     assert_eq!(ast.main(), restored.main(), "{source}\n{printed}");
     assert_eq!(printed, canonical_program(&restored), "{printed}");
 }
@@ -241,14 +283,16 @@ fn pattern_shaped_fallback_before_an_arm_still_records_e404() {
 
 #[test]
 fn pattern_fallback_does_not_steal_an_enclosing_comma() {
+    // §12.1: `,` と `)` は中の `if` の閉じも兼ねるので、印は要らない。
     round_trip("def main = Cons(if x | None => 1 | 0, xs)");
     round_trip("def main = with H(if x | None => 1 | 0, 2) -> 3");
+    round_trip("def main = [if x | None => 1 | 0, 2]");
 }
 
 #[test]
 fn e105_tuple_pattern() {
     // §20: tuple syntax in a pattern is also E105, not a plain error.
-    let d = parse_source("def main = let (a, b) = x -> a", "t").unwrap_err();
+    let d = parse_source("def main = (a, b) as p -> a", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E105"));
     let d = parse_source("def main = if x | (a, b) => a | 0", "t").unwrap_err();
     assert_eq!(d.code.as_deref(), Some("E105"));

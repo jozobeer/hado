@@ -51,14 +51,14 @@ for arity in (0, 1):
         add(f'37-a(3) arity={arity} labels={len(labels)}', declarations + f'def use (n: Int): Int{suffix(labels + ["Foo"])} => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
         add(f'37-a(3) inferred arity={arity} labels={len(labels)}', declarations + f'def use (n: Int) => {call} + n\ndef main = Int.to_string (use 3)\n', 'String' + suffix(labels + ['Foo']))
 add('37-a(5) abort', 'effect Stop\nabort stop\nhandler Stop as H\nabort stop => 9\ndef main = Int.to_string (with H -> stop)\n', 9, 'print')
-add('37-a(5) again', 'effect Ask\nagain ask(value: Int): Void\nhandler Ask as H\nagain ask _ => resume ()\ndef main = Int.to_string (with H -> do ask 7 -> 8)\n', 8, 'print')
+add('37-a(5) again', 'effect Ask\nagain ask(value: Int): Void\nhandler Ask as H\nagain ask _ => resume ()\ndef main = Int.to_string (with H -> ask 7 -> 8)\n', 8, 'print')
 values = [-1, 0, 3, 5, 2147483647, rng.randrange(10, 10000)]
 for value in values:
     add('37-b2(1) parameter', f'def f (raise: Int): Int => raise\ndef main = Int.to_string (f ({value}))\n', value, 'print')
     add('37-b2(2) function', f'def inc (n: Int): Int => n + 1\ndef f (raise: Fn(Int => Int)): Int => raise ({value})\ndef main = Int.to_string (f inc)\n', value + 1, 'print')
-    add('37-b2(3) let', f'def main = Int.to_string (let raise = {value} -> raise + 1)\n', value + 1, 'print')
+    add('37-b2(3) let', f'def main = Int.to_string ({value} as raise -> raise + 1)\n', value + 1, 'print')
     add('37-b2(5) user operation', f'effect Foo\nonce tick: Int\ndef f (tick: Int): Int => tick\ndef main = Int.to_string (f ({value}))\n', value, 'print')
-add('37-b2(5) again let', 'effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => let x = tick -> x + 1\ndef main = Int.to_string (f 8)\n', 9, 'print')
+add('37-b2(5) again let', 'effect Foo\nagain tick(value: Int): Void\ndef f (tick: Int): Int => tick as x -> x + 1\ndef main = Int.to_string (f 8)\n', 9, 'print')
 add('37-b2(4) unshadowed', 'def main = Int.to_string (raise { message = "x" })\n', 'x', 'error')
 
 def quote(value):
@@ -89,7 +89,7 @@ for name in ('args', 'env', 'cwd'):
     for value in values:
         add('37-b2(6) parameter', f'def f ({name}: Int): Int => {name}\ndef main = f ({value})\n', value, 'print')
         add('37-b2(6) function', f'def inc (n: Int): Int => n + 1\ndef f ({name}: Fn(Int => Int)): Int => {name} ({value})\ndef main = f inc\n', value+1, 'print')
-        add('37-b2(6) let', f'def main = let {name} = {value} -> {name} + 1\n', value+1, 'print')
+        add('37-b2(6) let', f'def main = {value} as {name} -> {name} + 1\n', value+1, 'print')
 def reject(label, source, code, anchor, sub=False, multiple=False):
     blank, indent = rng.randrange(1, 8), rng.randrange(1, 8)
     if sub and source.startswith('def '): source = 'library\n' + source.replace('def main = 0\n', '')
@@ -107,14 +107,14 @@ def reject(label, source, code, anchor, sub=False, multiple=False):
 reject('37-b user', 'effect Foo\nonce pick: Int\ndef main = pick\n', 'E706', 'def main')
 reject('37-d(4) missing-arm', 'handler Env as H\nonce args => ["x"]\nonce env _ => None\ndef main = 0\n', 'E605', 'handler Env')
 reject('37-e(1) effect', 'effect Env\nonce custom: Int\ndef main = 0\n', 'E205', 'Env')
-reject('37-e module', 'module Env\ndef value: Int Pure\n', 'E205', 'Env')
+reject('37-e module', 'module Env\ndef value: Int Pure\n/module\n', 'E205', 'Env')
 for name in ('EnvDefault', 'IoDefault'):
-    reject('37-e module '+name, f'module {name}\ndef value: Int Pure\n', 'E205', name)
+    reject('37-e module '+name, f'module {name}\ndef value: Int Pure\n/module\n', 'E205', name)
 for sub in (False, True):
     for multiple in (False, True):
         for shape, source, anchor in [
             ('def', 'def args = 1\n', 'args'),
-            ('implementation', 'module M\ndef args: Int Pure\nimplement M as M\ndef args = 1\n', 'args ='),
+            ('implementation', 'module M\ndef args: Int Pure\n/module\nimplement M as M\ndef args = 1\n/implement\n', 'args ='),
             ('operation', 'effect Foo\nonce args: Int\n', 'args'),
         ]:
             reject('37-e(2) '+shape, source + 'def main = 0\n', 'E205', anchor, sub, multiple)
@@ -126,10 +126,10 @@ for effect, arms, body, expected in [
 ]:
     directory = add('37-e(3) handler', f'def main = sub::M.value\n', expected, 'print')
     (directory / 'sub').mkdir()
-    (directory / 'sub' / 'sub.hd').write_text(f'handler {effect} as H\n{arms}module M\ndef value: '+('String List {Error}' if effect == 'Env' else 'String Pure')+f'\nimplement M as M\ndef value = with H -> {body}\n')
+    (directory / 'sub' / 'sub.hd').write_text(f'handler {effect} as H\n{arms}module M\ndef value: '+('String List {Error}' if effect == 'Env' else 'String Pure')+f'\n/module\nimplement M as M\ndef value = with H -> {body}\n/implement\n')
 directory = add('37-e(4) visible', 'def main = sub::M.value\n', '[]', 'print')
 (directory / 'sub').mkdir()
-(directory / 'sub' / 'sub.hd').write_text('module M\ndef value: String List {Env, Error}\nimplement M as M\ndef value = args\n')
+(directory / 'sub' / 'sub.hd').write_text('module M\ndef value: String List {Env, Error}\n/module\nimplement M as M\ndef value = args\n/implement\n')
 for contract in ('List', 'Option', 'String'):
     reject('37-e(5) contract', f'handler {contract} as H\nonce invented => 0\n', 'E605', 'handler', True)
 
@@ -139,7 +139,7 @@ def summary(body, data):
     indices = sorted(set([0, len(data)//2, len(data)-1])) if data else []
     if not indices: return 'def main = [Bytes.length (' + body + ')]\n'
     return ('def first | [] => -1 | [head, ..._] => head\ndef rest | [] => [] | [_, ...tail] => tail\ndef rec at values index => if index == 0 => first values | at (rest values) (index - 1)\n'
-            + 'def main = let bytes = ' + body + ' -> let values = Bytes.to_list bytes -> [Bytes.length bytes'
+            + 'def main = ' + body + ' as bytes -> Bytes.to_list bytes as values -> [Bytes.length bytes'
             + ''.join(f', at values {i}' for i in indices) + ']\n')
 def file_case(shape, data, name='input'):
     directory = runtime('37-f(1) '+shape, summary('read_file '+quote(name), data), '', oracle=['file', name])
@@ -159,7 +159,7 @@ for shape, data, name in [
     ('large', rng.randbytes(1024*1024+73), 'input'), ('unicode', '日本語\n'.encode(), '資料'),
 ]: file_case(shape, data, name)
 for shape, data in [('empty', b''), ('ascii', b'write '+str(rng.randrange(10000)).encode()), ('binary', bytes([0,255,128,10])), ('overwrite', b'short')]:
-    source = f'def main = do write_file "output" (Bytes.of_list {list(data)}) -> Bytes.to_list (read_file "output")\n'
+    source = f'def main = write_file "output" (Bytes.of_list {list(data)}) -> Bytes.to_list (read_file "output")\n'
     directory = runtime('37-f(2) '+shape, source, str(list(data)))
     (directory / 'written.json').write_text(json.dumps(list(data)))
     if shape == 'overwrite': (directory / 'output').write_bytes(b'old contents that must be truncated')
@@ -176,7 +176,7 @@ for shape, data in [('closed', b''), ('empty', b''), ('content', b'stdin '+rng.r
     if len(data) >= 1024: (directory / 'large-list').touch()
     if shape == 'closed': (directory / 'closed-stdin').touch()
 data = b'twice '+rng.randbytes(39)
-directory = runtime('37-f(5) second', 'def main = let first = read_stdin -> let second = read_stdin -> [Bytes.length first, Bytes.length second]\n', str([len(data), 0]))
+directory = runtime('37-f(5) second', 'def main = read_stdin as first -> read_stdin as second -> [Bytes.length first, Bytes.length second]\n', str([len(data), 0]))
 (directory / 'stdin').write_bytes(data)
 failures = [
     ('read_file', 'missing', 'NotFound'), ('read_file', 'file/child', 'NotADirectory'),
@@ -215,7 +215,7 @@ for sub in (False, True):
     for name in ('read_file','write_file','log','read_dir','read_stdin'):
         for shape, source, anchor in [
             ('def', f'def {name} = 1\n', name),
-            ('implementation', f'module M\ndef {name}: Int Pure\nimplement M as M\ndef {name} = 1\n', name+' ='),
+            ('implementation', f'module M\ndef {name}: Int Pure\n/module\nimplement M as M\ndef {name} = 1\n/implement\n', name+' ='),
             ('operation', f'effect Foo\nonce {name}: Int\n', name),
         ]:
             reject('37-e Io '+shape, source+'def main = 0\n', 'E205', anchor, sub, True)

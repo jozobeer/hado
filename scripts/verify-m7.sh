@@ -64,15 +64,15 @@ for module, names in r43_members.items():
 # §55 の署名と stdlib の署名が一致する（旧 verify-r43 の 43-a をここへ移した）。
 section_text = "\n".join(section)
 signatures = {
-    "stdlib/list.hd": ["def A head(values: A List): A Option Pure",
-                       "def A nth(values: A List, index: Int): A Option Pure",
-                       "def A take(values: A List, count: Int): A List Pure",
-                       "def A drop(values: A List, count: Int): A List Pure"],
-    "stdlib/string.hd": ["def join(values: String List, separator: String): String Pure",
-                         "def trim(s: String): String Pure"],
-    "stdlib/int.hd": ["def abs(value: Int): Int Pure",
-                      "def min(left: Int, right: Int): Int Pure",
-                      "def max(left: Int, right: Int): Int Pure"],
+    "stdlib/list.hd": ["def A head (values: A List): A Option Pure",
+                       "def A nth (values: A List, index: Int): A Option Pure",
+                       "def A take (values: A List, count: Int): A List Pure",
+                       "def A drop (values: A List, count: Int): A List Pure"],
+    "stdlib/string.hd": ["def join (values: String List, separator: String): String Pure",
+                         "def trim (s: String): String Pure"],
+    "stdlib/int.hd": ["def abs (value: Int): Int Pure",
+                      "def min (left: Int, right: Int): Int Pure",
+                      "def max (left: Int, right: Int): Int Pure"],
     "stdlib/io.hd": ["once log(contents: String): Void {Error}"],
 }
 for path, lines in signatures.items():

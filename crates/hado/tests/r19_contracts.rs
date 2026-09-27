@@ -102,7 +102,7 @@ fn generated_store(arity: usize, seed: i64, offset: i64) -> (String, i64) {
     let mut source = store_header(arity, seed);
     let (filled, reads, expected) = generated_fields(arity.max(1), seed, offset);
     source.push_str(&format!(
-        "\ndef empty = {{ {} }}\ndef fill seed => {{ {filled} }}\ndef read value => {reads}",
+        "\ndef empty = {{ {} }}\ndef fill seed => {{ {filled} }}\ndef read value => {reads}\n/implement",
         (0..arity.max(1))
             .map(|i| format!("slot{i} = None"))
             .collect::<Vec<_>>()
@@ -123,7 +123,7 @@ fn store_header(arity: usize, seed: i64) -> String {
             )
         })
         .collect();
-    format!("type {} = {{ {} }}\ndef main = (M.read M.empty) + (M.read (M.fill {seed}))\nmodule Store\ntype {}\ndef {}: {}\ndef fill(seed: Int): {}\ndef read(value: {}): Int\nimplement Store as M\ntype {} = {}", applied(&vars, "Payload"), fields.join("; "), applied(&vars, "T"), applied(&vars, "empty"), applied(&vars, "T"), applied(&types, "T"), applied(&types, "T"), applied(&vars, "T"), applied(&vars, "Payload"))
+    format!("type {} = {{ {} }}\ndef main = M.read M.empty + M.read (M.fill ({seed}))\nmodule Store\ntype {}\ndef {}: {}\ndef fill (seed: Int): {}\ndef read (value: {}): Int\n/module\nimplement Store as M\ntype {} = {}", applied(&vars, "Payload"), fields.join("; "), applied(&vars, "T"), applied(&vars, "empty"), applied(&vars, "T"), applied(&types, "T"), applied(&types, "T"), applied(&vars, "T"), applied(&vars, "Payload"))
 }
 fn generated_fields(count: usize, seed: i64, offset: i64) -> (String, String, i64) {
     let mut filled = Vec::new();
@@ -167,7 +167,7 @@ fn generated_abstract_arities_and_value_members_execute() {
         let (source, expected) = generated_store(arity, seed, offset);
         Case::new(&source).run(&expected.to_string());
     }
-    let source = "def main = (M.count_int M.empty) + (M.count_bool M.empty)\nmodule S\ntype A T\ndef A empty: A T\ndef count_int(value: Int T): Int\ndef count_bool(value: Bool T): Int\nimplement S as M\ntype A T = A List\ndef empty = []\ndef count_int value => List.length value\ndef count_bool value => List.length value";
+    let source = "def main = M.count_int M.empty + M.count_bool M.empty\nmodule S\ntype A T\ndef A empty: A T\ndef count_int (value: Int T): Int\ndef count_bool (value: Bool T): Int\n/module\nimplement S as M\ntype A T = A List\ndef empty = []\ndef count_int value => List.length value\ndef count_bool value => List.length value\n/implement";
     Case::new(source).run("0");
 }
 
@@ -186,7 +186,7 @@ fn contract_arity_mismatches_are_e602() {
                 .collect::<Vec<_>>()
                 .join("; ")
         };
-        let source = format!("type {} = {{ {fields} }}\ndef main = M.run 1\nmodule S\ntype {}\ndef run(x: Int): Int\nimplement S as M\ntype {} = {}\ndef run x => x", applied(&realized, "Payload"), applied(&declared, "T"), applied(&realized, "T"), applied(&realized, "Payload"));
+        let source = format!("type {} = {{ {fields} }}\ndef main = M.run 1\nmodule S\ntype {}\ndef run (x: Int): Int\n/module\nimplement S as M\ntype {} = {}\ndef run x => x\n/implement", applied(&realized, "Payload"), applied(&declared, "T"), applied(&realized, "T"), applied(&realized, "Payload"));
         if actual == 0 {
             perturbed(&source, "E602", "implement");
         } else {
@@ -202,18 +202,18 @@ fn value_member_implementation_form_is_distinct_from_function_definition() {
         ("def operation: Fn(Int => Int)", "def operation x => x + 1"),
     ] {
         let source =
-            format!("def main = 1\nmodule S\n{signature}\nimplement S as M\n{implementation}");
+            format!("def main = 1\nmodule S\n{signature}\n/module\nimplement S as M\n{implementation}\n/implement");
         rejected(&source, "E602", "implement");
     }
-    Case::new("def main = M.operation 41\nmodule S\ndef operation: Fn(Int => Int)\nimplement S as M\ndef operation = fn(x => x + 1)").run("42");
+    Case::new("def main = M.operation 41\nmodule S\ndef operation: Fn(Int => Int)\n/module\nimplement S as M\ndef operation = fn(x => x + 1)\n/implement").run("42");
 }
 
 fn argument_program(place: usize, arguments: &str, invocation: &str) -> String {
     match place {
-        0 => format!("def main = M.run {invocation}\nmodule S\ndef run(first: Int, second: Int, third: Int): Int\nimplement S as M\ndef run {arguments} => used + 7"),
+        0 => format!("def main = M.run {invocation}\nmodule S\ndef run (first: Int, second: Int, third: Int): Int\n/module\nimplement S as M\ndef run {arguments} => used + 7\n/implement"),
         1 => format!("def main = fn({arguments} => used + 7) {invocation}"),
         2 => format!("def run {arguments} => used + 7\ndef main = run {invocation}"),
-        _ => format!("def main = M.run {invocation}\nmodule S\ndef run(first: Int, second: Int, third: Int): Int\nimplement S as M\ndef helper {arguments} => used + 7\ndef run x y z => helper x y z"),
+        _ => format!("def main = M.run {invocation}\nmodule S\ndef run (first: Int, second: Int, third: Int): Int\n/module\nimplement S as M\ndef helper {arguments} => used + 7\ndef run x y z => helper x y z\n/implement"),
     }
 }
 #[test]
@@ -265,13 +265,13 @@ fn contract_count_program(count: usize) -> String {
     let calls = (0..count)
         .map(|i| format!("(Id{i}.get (Id{i}.make {}))", i + 2))
         .collect::<Vec<_>>();
-    let mut source = format!("def main = C.answer{}\nmodule X\ntype T\ndef make(x: Int): T\ndef get(x: T): Int\nmodule Consumer\ndef answer: Int\ndef use(x: X.T): Int\n", calls.iter().map(|call| format!(" + {call}")).collect::<String>());
+    let mut source = format!("def main = C.answer{}\nmodule X\ntype T\ndef make (x: Int): T\ndef get (x: T): Int\n/module\nmodule Consumer\ndef answer: Int\ndef use (x: X.T): Int\n/module\n", calls.iter().map(|call| format!(" + {call}")).collect::<String>());
     for i in 0..count {
         source.push_str(&format!(
-            "implement X as Id{i}\ntype T = Int\ndef make x => x\ndef get x => x\n"
+            "implement X as Id{i}\ntype T = Int\ndef make x => x\ndef get x => x\n/implement\n"
         ));
     }
-    source.push_str("implement Consumer as C\ndef answer = 9\ndef use _ => 1");
+    source.push_str("implement Consumer as C\ndef answer = 9\ndef use _ => 1\n/implement");
     source
 }
 #[test]
@@ -284,24 +284,24 @@ fn contract_qualified_types_require_exactly_one_implementation() {
             _ => rejected(&source, "E603", "X.T"),
         }
     }
-    let source = "def main = C.use (Id.make 42)\nmodule X\ntype T\ndef make(x: Int): T\ndef get(x: T): Int\nmodule Consumer\ndef use(x: X.T): Int\nimplement X as Id\ntype T = Int\ndef make x => x\ndef get x => x\nimplement Consumer as C\ndef use x => Id.get x";
+    let source = "def main = C.use (Id.make 42)\nmodule X\ntype T\ndef make (x: Int): T\ndef get (x: T): Int\n/module\nmodule Consumer\ndef use (x: X.T): Int\n/module\nimplement X as Id\ntype T = Int\ndef make x => x\ndef get x => x\n/implement\nimplement Consumer as C\ndef use x => Id.get x\n/implement";
     Case::new(source).run("42");
     rejected(&source.replace("x: X.T", "x: Id.T"), "E204", "Id.T");
     rejected(&source.replace("x: X.T", "x: X.Missing"), "E204", "Missing");
     Case::new(&source.replace("as Id", "as X").replace("Id.", "X.")).run("42");
-    Case::new("def main = M.read (M.make 7)\nmodule S\ntype T\ndef make(n: Int): S.T\ndef read(v: S.T): Int\nimplement S as M\ntype T = Int\ndef make n => n\ndef read v => v").run("7");
+    Case::new("def main = M.read (M.make 7)\nmodule S\ntype T\ndef make (n: Int): S.T\ndef read (v: S.T): Int\n/module\nimplement S as M\ntype T = Int\ndef make n => n\ndef read v => v\n/implement").run("7");
 }
 
 #[test]
 fn unused_type_variables_use_type_references_not_constructor_names() {
     for (index, source) in [
-        "type A Box = | Wrap(Int)\ndef read(value: Int Box): Int => let Wrap(n) = value -> n\ndef main = read (Wrap(7))",
+        "type A Box = | Wrap(Int)\ndef read (value: Int Box): Int => value as Wrap(n) ->\n  n\ndef main = read Wrap(7)",
         "type A Box = { value: Int }\ndef read(value: Int Box): Int => value.value\ndef main = read { value = 7 }",
-        "type A Box = | A(Int)\ndef read(value: Int Box): Int => let A(n) = value -> n\ndef main = read (A(7))",
-        "def main = M.run 7\nmodule S\ndef A run(x: Int): Int\nimplement S as M\ndef run x => x",
-        "def main = M.run 7\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype A Box = | Wrap(Int)\ndef run x => let Wrap(n) = Wrap(x) -> n",
-        "def main = M.run 7\nmodule S\ndef run(x: Int): Int\nimplement S as M\ntype A Box = { value: Int }\ndef run x => let box = { value = x } -> box.value",
-        "def main = M.read (M.make 7)\nmodule S\ntype A T\ndef make(x: Int): Int T\ndef read(x: Int T): Int\nimplement S as M\ntype A T = Int\ndef make x => x\ndef read x => x",
+        "type A Box = | A(Int)\ndef read (value: Int Box): Int => value as A(n) ->\n  n\ndef main = read A(7)",
+        "def main = M.run 7\nmodule S\ndef A run (x: Int): Int\n/module\nimplement S as M\ndef run x => x\n/implement",
+        "def main = M.run 7\nmodule S\ndef run (x: Int): Int\n/module\nimplement S as M\ntype A Box = | Wrap(Int)\ndef run x => Wrap(x) as Wrap(n) ->\n  n\n/implement",
+        "def main = M.run 7\nmodule S\ndef run (x: Int): Int\n/module\nimplement S as M\ntype A Box = { value: Int }\ndef run x => { value = x } as box ->\n  box.value\n/implement",
+        "def main = M.read (M.make 7)\nmodule S\ntype A T\ndef make (x: Int): Int T\ndef read (x: Int T): Int\n/module\nimplement S as M\ntype A T = Int\ndef make x => x\ndef read x => x\n/implement",
     ]
     .into_iter()
     .enumerate()
@@ -325,7 +325,7 @@ fn unused_type_variables_use_type_references_not_constructor_names() {
 
 #[test]
 fn main_abstract_types_are_rejected_inside_fixed_and_generic_payloads() {
-    let suffix = "\nmodule S\ntype T\ndef make(x: Int): T\ndef get(x: T): Int\nimplement S as M\ntype T = Int\ndef make x => x\ndef get x => x";
+    let suffix = "module S\ntype T\ndef make (x: Int): T\ndef get (x: T): Int\n/module\nimplement S as M\ntype T = Int\ndef make x => x\ndef get x => x\n/implement";
     for (index, (prefix, main)) in [
         ("", "M.make 7"),
         ("", "Some(M.make 7)"),
@@ -367,7 +367,7 @@ fn new_diagnostics_keep_stage_and_source_order() {
         ),
         (
             "def run _ => 1",
-            "module S def x: Int\nimplement S as M def x = true",
+            "module S\ndef x: Int\n/module\nimplement S as M\ndef x = true\n/implement",
             "E602",
             "implement",
         ),
@@ -387,18 +387,18 @@ fn new_diagnostics_keep_stage_and_source_order() {
         ("def left _ => 1", "type A Box = | Wrap(Int)", "E519", "_"),
     ] {
         let main = if first.contains("Box") || second.contains("Box") {
-            "def read(value: Int Box): Int => let Wrap(n) = value -> n\ndef main = (left 1) + (read (Wrap(2)))"
+            "def read (value: Int Box): Int => value as Wrap(n) ->\n  n\ndef main = left 1 + read Wrap(2)"
         } else {
             "def main = (left 1) + (right 2)"
         };
         let source = format!("{first}\n{second}\n{main}");
         rejected(&source, code, anchor);
     }
-    let source = "def main = M.make (bad 1)\ndef bad _ => 7\nmodule S type T def make(x: Int): T\nimplement S as M type T = Int def make x => x";
+    let source = "def main = M.make (bad 1)\ndef bad _ => 7\nmodule S\ntype T\ndef make (x: Int): T\n/module\nimplement S as M\ntype T = Int\ndef make x => x\n/implement";
     rejected(source, "E519", "_");
     let mismatch =
-        "module Broken\ndef run(x: Int): Int\nimplement Broken as Bad\ndef run x => true";
-    let unresolved = "module X\ntype T\nmodule Consumer\ndef answer: Int\ndef use(x: X.T): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1";
+        "module Broken\ndef run (x: Int): Int\n/module\nimplement Broken as Bad\ndef run x => true\n/implement";
+    let unresolved = "module X\ntype T\n/module\nmodule Consumer\ndef answer: Int\ndef use (x: X.T): Int\n/module\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1\n/implement";
     rejected(
         &format!("def main = (Bad.run 1) + C.answer\n{unresolved}\n{mismatch}"),
         "E603",
@@ -412,7 +412,7 @@ fn parameterized_contract_references_keep_qualified_name_anchors() {
         .into_iter()
         .enumerate()
     {
-        let source = format!("type (A, B) Pair = | Hold(A, B)\ndef main = C.answer\nmodule X\ntype A T\nmodule Consumer\ndef answer: Int\ndef use(value: {annotation}): Int\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1");
+        let source = format!("type (A, B) Pair = | Hold(A, B)\ndef main = C.answer\nmodule X\ntype A T\n/module\nmodule Consumer\ndef answer: Int\ndef use (value: {annotation}): Int\n/module\nimplement Consumer as C\ndef answer = 1\ndef use _ => 1\n/implement");
         if index == 1 {
             perturbed(&source, "E603", "X.T");
         } else {
@@ -420,16 +420,16 @@ fn parameterized_contract_references_keep_qualified_name_anchors() {
         }
         rejected(&source.replace("X.T", "X.Missing"), "E204", "Missing");
     }
-    let source = "def main = C.use (Id.make 7)\nmodule X\ntype A T\ndef make(n: Int): Int T\ndef get(value: Int T): Int\nmodule Consumer\ndef use(value: Int X.T): Int\nimplement X as Id\ntype A T = A List\ndef make n => [n]\ndef get value => List.length value\nimplement Consumer as C\ndef use value => Id.get value";
+    let source = "def main = C.use (Id.make 7)\nmodule X\ntype A T\ndef make (n: Int): Int T\ndef get (value: Int T): Int\n/module\nmodule Consumer\ndef use (value: Int X.T): Int\n/module\nimplement X as Id\ntype A T = A List\ndef make n => [n]\ndef get value => List.length value\n/implement\nimplement Consumer as C\ndef use value => Id.get value\n/implement";
     Case::new(source).run("1");
 }
 
 #[test]
 fn qualified_realization_cycles_report_e602_without_overflowing() {
     for (variables, applied, representation) in [("", "", "M.T"), ("A ", "Int ", "A M.T")] {
-        let source = format!("def main = M.get (M.make 1)\nmodule S\ntype {variables}T\ndef make(n: Int): {applied}T\ndef get(v: {applied}T): Int\nimplement S as M\ntype {variables}T = {representation}\ndef make n => n\ndef get v => v");
+        let source = format!("def main = M.get (M.make 1)\nmodule S\ntype {variables}T\ndef make (n: Int): {applied}T\ndef get (v: {applied}T): Int\n/module\nimplement S as M\ntype {variables}T = {representation}\ndef make n => n\ndef get v => v\n/implement");
         rejected(&source, "E602", "implement");
     }
-    let source = "def main = A.read None\nmodule S\ntype T\ndef read(value: T Option): Int\nimplement S as A\ntype T = B.T\ndef read _ => 1\nimplement S as B\ntype T = A.T\ndef read _ => 2";
+    let source = "def main = A.read (None)\nmodule S\ntype T\ndef read (value: T Option): Int\n/module\nimplement S as A\ntype T = B.T\ndef read _ => 1\n/implement\nimplement S as B\ntype T = A.T\ndef read _ => 2\n/implement";
     rejected(source, "E602", "implement");
 }

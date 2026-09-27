@@ -63,13 +63,13 @@ type_ref        := path? upper_name ["." upper_name]                       型�
 path            := (name "::")+                                            名前空間（第51節）
 
 ### module:
-module_section  := "module" upper_name module_item*
+module_section  := "module" upper_name module_item* "/module"
 module_item     := "type" type_vars? upper_name                                          抽象型
                  | "def" type_vars? name ":" result                                      値 member
                  | "def" type_vars? name "(" contract_param ("," contract_param)* ")" ":" result
 contract_param  := name ":" type_expr
-implement_section := "implement" contract_ref "as" upper_name implement_item*
-functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item*
+implement_section := "implement" contract_ref "as" upper_name implement_item* "/implement"
+functor_section := "implement" contract_ref "as" upper_name "(" functor_param ("," functor_param)* ")" implement_item* "/implement"
 functor_param   := upper_name ":" contract_ref
 apply_section   := "implement" contract_ref "as" upper_name "=" impl_ref "(" impl_ref ("," impl_ref)* ")"
 contract_ref    := path? upper_name
@@ -106,7 +106,7 @@ primary         := int | float | char | string | bool | void
                  | constructor_expr
                  | record_expr
                  | list_expr
-                 | lambda                                                 `fn(` で始まり `)` で閉じる
+                 | lambda                                                 `fn(...)` か `fn … /fn`
                  | "resume"                                               again の腕の中に限る（第38節）
                  | "(" expression ")"
 constructor_expr := path? upper_name ["(" expression ("," expression)* ")" | record_expr]
@@ -117,27 +117,31 @@ list_expr       := "[" "]"
 ### 継続と匿名関数:
 with_form       := "with" impl_ref with_args? "->" expression                    第38節
 with_args       := "(" expression ("," expression)* ")"
-binding         := "let" pattern "=" expression "->" expression
-rail_binding    := "let" pattern "?" "=" expression "->" expression
-rail_discard    := "do" expression "->" expression
+binding         := pipe "as" pattern "->" expression                             `as` は名付けに限る（第11節）
+rail_binding    := pipe "as" pattern "?" "->" expression                         Option の束縛（第34節）
+rail_discard    := pipe "->" expression                                          値の破棄（第35節）
 lambda          := "fn" "(" lambda_params "=>" expression ")"
                  | "fn" "(" lambda_params condition_arms ")"                     第32節
                  | "fn" "(" pattern_arms ")"                                     第31節
+                 | "fn" lambda_params "=>" expression "/fn"                      本体に `->` があるとき
 lambda_params   := param ("," param)*
                  | typed_param ("," typed_param)*
 
 ### 分岐:
 branch          := boolean_branch | condition_branch | pattern_branch
-boolean_branch  := "if" expression "=>" arm_body "|" arm_body
-condition_branch := "if" condition_arms
+boolean_branch  := "if" expression "=>" arm_body "|" arm_body ["/if"]      本体に `->` があれば `/if`
+condition_branch := "if" condition_arms ["/if"]
 condition_arms  := (condition_arm | pattern_fallback)+
 condition_arm   := "|" expression "=>" arm_body
-pattern_branch  := "if" expression ("," expression)* pattern_arms       scrutinee の列（第26節）
+pattern_branch  := "if" expression ("," expression)* pattern_arms ["/if"]       scrutinee の列（第26節）
 pattern_arms    := (pattern_arm | pattern_fallback)+
 pattern_arm     := "|" pattern ("," pattern)* "=>" (arm_body | arm_conditions)  pattern の列は scrutinee と同数（E125）
 arm_conditions  := "if" condition_arms                                    腕の条件列（第26.1節）。最初の fallback で終わる
 pattern_fallback := "|" arm_body
 arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
+# `if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。
+# 本体に `->` が無いときだけ使い、`if` の全体に続きがあるときに書く（第12.1節）。
+# `,` `;` `)` `]` `}` は中の構文も閉じる。
 
 ### パターン:
 pattern         := "_"

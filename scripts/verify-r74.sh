@@ -53,18 +53,19 @@ def check(name, fn):
 # The sample is the corpus fixture itself, so there is one source of truth.
 E511 = Path('tests/reject/E511/main.hd').read_text()
 # The expectation is derived from the source: the shared variable moves into the
-# arms, so the parameter goes away and every `x == ` prefix is dropped.
-definition = None
-arms = []
-trailer = []
-for line in E511.splitlines():
-    stripped = line.strip()
-    if stripped.startswith('def f '):
-        definition = 'def ' + stripped.split()[1]
-    elif stripped.startswith('|'):
-        arms.append('  | ' + stripped[1:].strip())
-    elif stripped.startswith('def '):
-        trailer.append(stripped)
+# arms, so the parameter goes away and every `x == ` prefix is dropped. 正準形は
+# 見出しと腕が 1 行に載るので、腕は行頭ではなく `|` で切り出す。
+code = [line for line in E511.splitlines() if not line.strip().startswith('//')]
+header = next(line for line in code if line.strip().startswith('def f '))
+definition = 'def ' + header.split()[1]
+trailer = [line.strip() for line in code
+           if line.strip().startswith('def ') and not line.strip().startswith('def f ')]
+tail = header.split('|', 1)[1] if '|' in header else ''
+for line in code:
+    if line is not header and line.strip().startswith('|'):
+        tail += ' | ' + line.strip()[1:].strip()
+segments = [segment.strip() for segment in tail.split('|') if segment.strip()]
+arms = ['  | ' + segment for segment in segments]
 variable = arms[0].split('==', 1)[0].split('|', 1)[1].strip()
 arms = ['  | ' + arm.split('|', 1)[1].strip().replace(variable + ' == ', '', 1) for arm in arms]
 PLAIN = definition + '\n' + '\n'.join(arms) + '\n' + '\n'.join(trailer) + '\n'

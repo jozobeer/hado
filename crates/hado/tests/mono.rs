@@ -157,7 +157,7 @@ fn condition_columns_preserve_source_order_and_fallback() {
 fn let_lowering_distinguishes_shadowed_variables() {
     use hado::mono::Expression;
     let ast =
-        hado::parser::parse_source("def main = let x = 1 -> let x = x + 2 -> x + 3", "t").unwrap();
+        hado::parser::parse_source("def main = 1 as x ->\n  x + 2 as x ->\n  x + 3", "t").unwrap();
     let expression = hado::mono::lower_expression(ast.main().unwrap()).unwrap();
     let Expression::Let {
         id: outer, body, ..
@@ -251,7 +251,7 @@ fn direct_calls_require_the_fixed_function_signature() {
 #[test]
 fn functions_are_specialized_by_argument_types() {
     let ast = hado::parser::parse_source(
-        "def id x => x\ndef main = let a = id 1 -> (a > 0) && id true",
+        "def id x => x\ndef main = id 1 as a ->\n  a > 0 && id true",
         "t",
     )
     .unwrap();
@@ -300,7 +300,7 @@ fn pipe_lowering_supplies_the_first_argument() {
 fn tail_calls_are_marked_only_in_result_positions() {
     use hado::mono::Expression;
     let ast = hado::parser::parse_source(
-        "def id x => x\ndef f x => let a = id x -> if true => id a | id (a + 1)\ndef main = f 2",
+        "def id x => x\ndef f x => id x as a ->\n  if true => id a | id (a + 1)\ndef main = f 2",
         "t",
     )
     .unwrap();
@@ -370,7 +370,7 @@ fn recursive_functions_use_fixed_targets() {
 
 #[test]
 fn concrete_named_function_values_create_closures() {
-    let output = hado::dump_mono("def inc x => x + 1\ndef main = let f = inc -> f 4", "t").unwrap();
+    let output = hado::dump_mono("def inc x => x + 1\ndef main = inc as f ->\n  f 4", "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0)"));
     assert!(output.contains("TailCallClosure"));
     assert_eq!(output.matches("Function {").count(), 2);
@@ -388,7 +388,7 @@ fn checked_lambdas_retain_types_resolved_by_their_calls() {
 
 #[test]
 fn anonymous_closures_capture_outer_bindings() {
-    let source = "def main = let offset = 7 -> let f = fn(x => x + offset) -> f 3";
+    let source = "def main = 7 as offset ->\n  fn(x => x + offset) as f ->\n  f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -403,7 +403,7 @@ fn anonymous_closures_capture_outer_bindings() {
 #[test]
 fn nested_closures_forward_captures_and_keep_parameter_bindings() {
     use hado::mono::Expression;
-    let source = "def main = let seed = 7 -> let make = fn(x => fn(y => seed + x + y)) -> let f = make 2 -> f 3";
+    let source = "def main = 7 as seed ->\n  fn(x => fn(y => seed + x + y)) as make ->\n  make 2 as f ->\n  f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -446,7 +446,7 @@ fn nested_closures_forward_captures_and_keep_parameter_bindings() {
 
 #[test]
 fn lambda_parameter_does_not_capture_shadowed_outer_value() {
-    let source = "def main = let x = 7 -> let f = fn(x => x + 1) -> x + f 3";
+    let source = "def main = 7 as x ->\n  fn(x => x + 1) as f ->\n  x + f 3";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -456,7 +456,7 @@ fn lambda_parameter_does_not_capture_shadowed_outer_value() {
 
 #[test]
 fn lambdas_inside_polymorphic_functions_are_specialized_per_call() {
-    let source = "def wrap x => let f = fn(y => y) -> f x\ndef main = (wrap 3 > 0) && wrap true";
+    let source = "def wrap x => fn(y => y) as f ->\n  f x\ndef main = wrap 3 > 0 && wrap true";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("name: \"wrap\"").count(), 2);
     assert!(output.contains("signature: Signature { parameters: [Int], result: Int }"));
@@ -466,7 +466,7 @@ fn lambdas_inside_polymorphic_functions_are_specialized_per_call() {
 
 #[test]
 fn polymorphic_named_values_use_the_reference_type() {
-    let source = "def id x => x\ndef main = let f = id -> f 3";
+    let source = "def id x => x\ndef main = id as f ->\n  f 3";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0), signature: Signature { parameters: [Int], result: Int } }"));
     assert!(output.contains("TailCallClosure"));
@@ -541,18 +541,18 @@ fn pipeline_keeps_the_left_composite_type_separate_from_its_result() {
 
 #[test]
 fn record_projections_preserve_each_intermediate_type() {
-    let source = "type Inner = { x: Int }\ntype Outer = { inner: Inner }\ndef main = let obj = { inner = { x = 3 } } -> obj.inner.x";
+    let source = "type Inner = { x: Int }\ntype Outer = { inner: Inner }\ndef main = { inner = { x = 3 } } as obj ->\n  obj.inner.x\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"inner\", result: Data(\"Inner\", [])"));
     assert!(output.contains("field: \"x\", result: Int"));
-    let source = "type T Box = { value: T }\ndef main = let box = { value = true } -> box.value";
+    let source = "type T Box = { value: T }\ndef main = { value = true } as box ->\n  box.value\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("field: \"value\", result: Bool"));
 }
 
 #[test]
 fn record_let_patterns_evaluate_the_initializer_once() {
-    let source = "type Pair = { left: Int; right: Int }\ndef pair n => { left = n; right = n + 1 }\ndef main = let { left; right = r } = pair 3 -> left + r";
+    let source = "type Pair = { left: Int; right: Int }\ndef pair n => { left = n; right = n + 1 }\ndef main = pair 3 as { left; right = r } ->\n  left + r\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert_eq!(output.matches("CallDirect {").count(), 1);
     assert_eq!(output.matches("RecordGet {").count(), 2);
@@ -602,7 +602,7 @@ fn record_pattern_branches_bind_fields_in_the_arm() {
 
 #[test]
 fn constructor_let_patterns_project_typed_payloads() {
-    let source = "type T Box = | Wrap(T)\ndef main = let Wrap(x) = Wrap(3) -> x + 1";
+    let source = "type T Box = | Wrap(T)\ndef main = Wrap(3) as Wrap(x) ->\n  x + 1\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("Project {"));
     assert!(output.contains("constructor: \"Wrap\", index: 0, result: Int"));
@@ -698,7 +698,7 @@ fn record_pattern_columns_match_fields_in_source_order() {
 
 #[test]
 fn option_propagation_branches_before_the_continuation() {
-    let source = "def main = let x? = Some(1) -> Some(x + 2)";
+    let source = "def main = Some(1) as x? ->\n  Some(x + 2)";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("arms: [(\"Some\", Let {"));
     assert!(output.contains("(\"None\", Construct { constructor: \"None\", fields: [], result: Data(\"Option\", [Int]) })"));
@@ -708,7 +708,7 @@ fn option_propagation_branches_before_the_continuation() {
 #[test]
 fn effect_do_evaluates_the_rhs_then_the_continuation() {
     use hado::mono::Expression;
-    let source = "def main = do (1 / 2) -> true";
+    let source = "def main = 1 / 2 ->\n  true";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -755,7 +755,7 @@ fn divergent_mutual_recursion_uses_the_call_site_result_type() {
         2
     );
     assert!(output.contains("otherwise: Constant(Bool(false))"));
-    let source = "def rec loop x => loop x\ndef main = let f = loop -> false && f 0";
+    let source = "def rec loop x => loop x\ndef main = loop as f ->\n  false && f 0";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0), signature: Signature { parameters: [Int], result: Bool } }"));
     assert!(output.contains("TailCallClosure"));
@@ -764,7 +764,7 @@ fn divergent_mutual_recursion_uses_the_call_site_result_type() {
 #[test]
 fn specialization_cache_distinguishes_result_types() {
     let source =
-        "def rec loop x => loop x\ndef main = let flag = false && loop 0 -> if flag => loop 0 | 1";
+        "def rec loop x => loop x\ndef main = false && loop 0 as flag ->\n  if flag => loop 0 | 1";
     let checked = hado::check_source(source, "t").unwrap();
     let ast = hado::parser::parse_source(source, "t").unwrap();
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
@@ -789,7 +789,7 @@ fn specialization_cache_distinguishes_result_types() {
 #[test]
 fn qualified_module_calls_resolve_to_the_exported_function() {
     let source =
-        "def main = M.inc 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
+        "def main = M.inc 2\nmodule S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef inc x => x + 1\n/implement\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.inc\""));
     assert!(output.contains(
@@ -799,7 +799,7 @@ fn qualified_module_calls_resolve_to_the_exported_function() {
 
 #[test]
 fn module_internal_calls_resolve_private_functions_in_their_module() {
-    let source = "def helper x => x + 10\ndef main = M.inc 2 + helper 3\nmodule S def inc(x: Int): Int\nimplement S as M def helper x => x + 1 def inc x => helper x";
+    let source = "def helper x => x + 10\ndef main = M.inc 2 + helper 3\nmodule S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef helper x => x + 1\ndef inc x => helper x\n/implement\n";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("name: \"M.helper\""));
     assert!(output.contains("name: \"helper\""));
@@ -823,7 +823,7 @@ fn module_internal_calls_resolve_private_functions_in_their_module() {
 
 #[test]
 fn module_exports_can_be_used_as_function_values() {
-    let source = "def main = let f = M.inc -> f 2\nmodule S def inc(x: Int): Int\nimplement S as M def inc x => x + 1";
+    let source = "def main = M.inc as f ->\n  f 2\nmodule S\ndef inc (x: Int): Int\n/module\nimplement S as M\ndef inc x => x + 1\n/implement";
     let output = hado::dump_mono(source, "t").unwrap();
     assert!(output.contains("MakeClosure { captures: [], function: FunctionId(0)"));
     assert!(output.contains("TailCallClosure"));
@@ -832,7 +832,7 @@ fn module_exports_can_be_used_as_function_values() {
 
 #[test]
 fn sibling_module_definition_metadata_uses_distinct_paths() {
-    let source = "def main = A.run 1 + B.run 1\nmodule S def run(x: Int): Int\nimplement S as A def run x => x + 1\nimplement S as B def run x => x + 2";
+    let source = "def main = A.run 1 + B.run 1\nmodule S\ndef run (x: Int): Int\n/module\nimplement S as A\ndef run x => x + 1\n/implement\nimplement S as B\ndef run x => x + 2\n/implement\n";
     let checked = hado::check_source(source, "t").unwrap();
     assert!(checked.module_definitions.contains_key("A.run"));
     assert!(checked.module_definitions.contains_key("B.run"));

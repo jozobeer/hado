@@ -3,9 +3,5 @@
 // item: 条件列の判別
 // item: 冗長・到達不能の判定
 type Grade = | Excellent | Good | Pass | Fail
-def classify score
-  | score >= 90 => Excellent
-  | score >= 70 => Good
-  | score >= 50 => Pass
-  | Fail
+def classify score | score >= 90 => Excellent | score >= 70 => Good | score >= 50 => Pass | Fail
 def main = classify 75

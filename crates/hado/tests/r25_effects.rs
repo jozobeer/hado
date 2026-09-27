@@ -117,7 +117,7 @@ fn let_question_requires_option() {
         perturb_rejection(
             &case,
             "main.hd",
-            &format!("def main = let x? = {n} -> Some(x)"),
+            &format!("def main = {n} as x? -> Some(x)"),
             "E303",
             &n.to_string(),
         );
@@ -133,24 +133,24 @@ fn do_effect_row_is_checked_after_number_defaulting() {
     let case = Case::new();
     case.write(
         "main.hd",
-        &format!("def f x => do (x / x) -> {n}\ndef main = f {arg}\n"),
+        &format!("def f x => (x / x) -> {n}\ndef main = f {arg}\n"),
     );
     assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
     case.write(
         "main.hd",
-        &format!("def f (x: Int): Int => do (x / x) -> {n}\ndef main = f {arg}\n"),
+        &format!("def f (x: Int): Int => (x / x) -> {n}\ndef main = f {arg}\n"),
     );
     assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
     perturb_rejection(
         &case,
         "main.hd",
-        &format!("def f x => do {discarded} -> x\ndef main = f {arg}\n"),
+        &format!("def f x => {discarded} -> x\ndef main = f {arg}\n"),
         "E303",
         &discarded.to_string(),
     );
     case.write(
         "main.hd",
-        &format!("effect Ask\nonce ask: Bool\ndef f x => do ask -> x\ndef main = f {arg}\n"),
+        &format!("effect Ask\nonce ask: Bool\ndef f x => ask -> x\ndef main = f {arg}\n"),
     );
     assert_eq!(case.print_type("main.hd"), "Int {Ask}\n");
 }
@@ -174,7 +174,7 @@ fn do_discards_an_error_effect() {
     let case = Case::new();
     case.write(
         "main.hd",
-        &format!("def boom = raise {{ message = \"{n}\" }}\ndef main = do boom -> {n}\n"),
+        &format!("def boom = raise {{ message = \"{n}\" }}\ndef main = boom -> {n}\n"),
     );
     assert_eq!(case.print_type("main.hd"), "Int {Error}\n");
 }

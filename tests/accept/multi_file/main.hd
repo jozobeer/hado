@@ -2,4 +2,5 @@
 // expect: 42
 // item: 節構文
 type Request = { amount: Int }
-def main = let request = { amount = 20 } -> MemoryStore.run { value = request.amount } + FileStore.run { value = request.amount + 1 }
+def main = { amount = 20 } as request ->
+  MemoryStore.run { value = request.amount } + FileStore.run { value = request.amount + 1 }

@@ -160,9 +160,9 @@ harness.HADO = sys.argv[2]
 from harness import check_code, check_fix, fmt
 
 # E501: そのまま返す束縛。R57 の門番と同じ形。
-check_fix(sys.argv[1], 'd/e501', 'def main =\n  let v = 1 ->\n  v\n', 'def main =\n  1\n')
+check_fix(sys.argv[1], 'd/e501', 'def main =\n  1 as v ->\n  v\n', 'def main =\n  1\n')
 # E503 と E501 を同じファイルに置くと、一括の fmt が両方を直す。
-MIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => 0\ndef main =\n  let v = f A ->\n  v\n'
+MIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => 0\ndef main =\n  f A as v ->\n  v\n'
 FIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main =\n  f A\n'
 check_code(sys.argv[1], 'd/mixed', MIXED, 'E503')
 assert fmt(sys.argv[1], 'd/mixed-fmt', MIXED, FIXED) == FIXED

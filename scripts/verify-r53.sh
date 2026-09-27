@@ -178,7 +178,7 @@ assert b'.probe.hd' in checked.stderr, checked.stderr
 # `.` 始まりのディレクトリを根にするときは、その中の普通の名前を読む。
 inner = project(Path(sys.argv[1]) / 'd/inner', {
     '.scratch/main.hd': 'def main = inner::Util.helper 3\n',
-    '.scratch/inner/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n\nimplement Util as Util\ndef helper x => x\n',
+    '.scratch/inner/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n/module\n\nimplement Util as Util\ndef helper x => x\n/implement\n',
 })
 checked = run('check', str(inner / '.scratch/main.hd'))
 assert checked.returncode == 0, (checked.returncode, checked.stderr)
@@ -202,9 +202,9 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
-hidden = 'def helper = let y = 1 -> y\n'
+hidden = 'def helper = 1 as y -> y\n'
 root = project(Path(sys.argv[1]) / 'f', {
-    'main.hd': 'def main = let x = 7 -> x\n',
+    'main.hd': 'def main = 7 as x -> x\n',
     '.scratch/helper.hd': hidden,
 })
 formatted = run('fmt', str(root / 'main.hd'))
@@ -212,7 +212,7 @@ assert formatted.returncode == 0, (formatted.returncode, formatted.stderr)
 assert formatted.stdout == b'fmt: main.hd (1 rewrites)\n', formatted.stdout
 assert (root / '.scratch/helper.hd').read_text() == hidden, 'fmt wrote the isolated file'
 
-source = 'def main = let x = 7 -> x\n'
+source = 'def main = 7 as x -> x\n'
 fixed = project(Path(sys.argv[1]) / 'f/build', {'main.hd': source, '.scratch/helper.hd': hidden})
 built = run('build', '--fix', str(fixed / 'main.hd'))
 assert built.returncode == 0, (built.returncode, built.stderr)

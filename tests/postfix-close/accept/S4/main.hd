@@ -1,0 +1,4 @@
+// spec: §12
+def xs = [if true => 1 | 0 as z ->
+  z
+  /if, 3]

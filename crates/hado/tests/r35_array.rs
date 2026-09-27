@@ -208,7 +208,7 @@ fn array_comparisons_reject_function_elements_recursively() {
             ("a != a", "E703"),
             ("compare a a", "E704"),
         ] {
-            let source = format!("{declaration}def main = let a = {value} -> {expression}");
+            let source = format!("{declaration}def main = {value} as a -> {expression}");
             let error = check_source(&source, "t")
                 .err()
                 .unwrap_or_else(|| panic!("accepted {source}"));
@@ -222,7 +222,7 @@ fn existing_list_record_and_opaque_function_equality_stays_rejected() {
     for source in [
         "def main = [fn(x => x + 1)] == [fn(x => x + 1)]",
         "type Cell = { run: Fn(Int => Int) }\ndef main = { run = fn(x => x + 1) } == { run = fn(x => x + 1) }",
-        "def main = let a = Store.make 1 -> a == a\nmodule Store\ntype T\ndef make(x: Int): T Pure\nimplement Store as Store\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)",
+        "def main = Store.make 1 as a ->\n  a == a\nmodule Store\ntype T\ndef make (x: Int): T Pure\n/module\nimplement Store as Store\ntype T = Fn(Int => Int)\ndef make x => fn(y => x + y)\n/implement",
     ] {
         let error = check_source(source, "t").err().unwrap_or_else(|| panic!("accepted {source}"));
         assert_eq!(error.code.as_deref(), Some("E703"), "{source}: {error}");
