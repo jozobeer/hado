@@ -1596,6 +1596,9 @@ struct ConvertCtx {
     convert_id: FunctionId,
     convert_sig: Signature,
     forwarding: bool,
+    /// §38: handler の値引数のうち `_` 以外。convert 関数の追加の引数で、
+    /// 腕の本体からはこの id で見える。継続が convert を呼び直すときにも渡す。
+    value_params: Vec<(usize, Type)>,
 }
 
 impl ConvertCtx {
@@ -3201,8 +3204,11 @@ impl Lowerer {
             .get(&(node.span.line, node.span.col))
             .cloned()
             .map(|types| self.install_with_types(&types));
+        // §38: 値引数は `with` の位置で 1 回だけ評価する。`with_params` が
+        // 結果に `Let` をかぶせ、腕の lower の間だけ名前を見えるようにする。
+        let mut evaluated = Vec::new();
         for arg in args {
-            let _ = self.expression(arg)?;
+            evaluated.push(self.expression(arg)?);
         }
         let needs_answer = handler.arms.iter().any(|arm| {
             matches!(
@@ -3222,13 +3228,16 @@ impl Lowerer {
         if let Some(answer) = answer.clone() {
             self.again_answers.push(answer);
         }
-        let saved = std::mem::replace(&mut self.rewriting_return, false);
-        self.handler_stack.push(handler.clone());
-        self.handler_answers.push(answer.clone());
-        let value = self.completion(body);
-        self.handler_stack.pop();
-        self.handler_answers.pop();
-        self.rewriting_return = saved;
+        let value = self.with_params(&handler.params, evaluated, |this| {
+            let saved = std::mem::replace(&mut this.rewriting_return, false);
+            this.handler_stack.push(handler.clone());
+            this.handler_answers.push(answer.clone());
+            let value = this.completion(body);
+            this.handler_stack.pop();
+            this.handler_answers.pop();
+            this.rewriting_return = saved;
+            value
+        });
         if answer.is_some() {
             self.again_answers.pop();
         }
@@ -3868,22 +3877,52 @@ impl Lowerer {
         self.next_function += 1;
         let convert_param = self.next;
         self.next += 1;
+        // §38: 値引数は `with` の位置の変数として `scope` に入っている。腕を
+        // lower する間だけ、その名前を convert の追加引数へ向け直す。
+        let with_values: Vec<(String, Expression)> = handler
+            .params
+            .iter()
+            .filter(|param| param.name != "_")
+            .filter_map(|param| {
+                self.scope.get(&param.name).map(|(id, ty)| {
+                    (
+                        param.name.clone(),
+                        Expression::Variable {
+                            id: *id,
+                            ty: ty.clone(),
+                        },
+                    )
+                })
+            })
+            .collect();
+        let mut value_params = Vec::new();
+        for (_, value) in &with_values {
+            let id = self.next;
+            self.next += 1;
+            value_params.push((id, value.ty()));
+        }
+        let mut convert_parameters = vec![incoming.clone()];
+        convert_parameters.extend(value_params.iter().map(|(_, ty)| ty.clone()));
         let convert = ConvertCtx {
             incoming: incoming.clone(),
             outgoing: outgoing.clone(),
             success,
             convert_id,
             convert_sig: Signature {
-                parameters: vec![incoming.clone()],
+                parameters: convert_parameters,
                 result: outgoing.clone(),
             },
             forwarding,
+            value_params: value_params.clone(),
         };
         let variable = Expression::Variable {
             id: convert_param,
             ty: incoming,
         };
-        let arms = self.convert_arms(handler, &variable, &convert)?;
+        let saved_scope = self.install_value_params(&with_values, &value_params);
+        let arms = self.convert_arms(handler, &variable, &convert);
+        self.restore_value_params(saved_scope);
+        let arms = arms?;
         let fallback = forwarding.then(|| {
             Box::new(Expression::Unreachable {
                 result: outgoing.clone(),
@@ -3894,11 +3933,13 @@ impl Lowerer {
         {
             return Err("handler arms disagree on the answer type".into());
         }
+        let mut parameters = vec![convert_param];
+        parameters.extend(value_params.iter().map(|(id, _)| *id));
         self.functions.push(Function {
             id: convert_id,
             name: format!("convert_{}", convert_id.0),
             signature: convert.convert_sig.clone(),
-            parameters: vec![convert_param],
+            parameters,
             captures: Vec::new(),
             body: Expression::Switch {
                 value: Box::new(variable),
@@ -3908,7 +3949,39 @@ impl Lowerer {
             }
             .in_tail_position(),
         });
-        Expression::call_direct(convert_id, &convert.convert_sig, vec![value])
+        let mut arguments = vec![value];
+        arguments.extend(with_values.into_iter().map(|(_, value)| value));
+        Expression::call_direct(convert_id, &convert.convert_sig, arguments)
+    }
+
+    /// 腕を lower する間だけ、handler の値引数の名前を convert の追加引数に
+    /// 向け直す。戻すための元の値を返す。
+    fn install_value_params(
+        &mut self,
+        with_values: &[(String, Expression)],
+        value_params: &[(usize, Type)],
+    ) -> Vec<(String, Option<(usize, Type)>)> {
+        let mut saved = Vec::new();
+        for ((name, _), (id, ty)) in with_values.iter().zip(value_params) {
+            saved.push((
+                name.clone(),
+                self.scope.insert(name.clone(), (*id, ty.clone())),
+            ));
+        }
+        saved
+    }
+
+    fn restore_value_params(&mut self, saved: Vec<(String, Option<(usize, Type)>)>) {
+        for (name, previous) in saved.into_iter().rev() {
+            match previous {
+                Some(value) => {
+                    self.scope.insert(name, value);
+                }
+                None => {
+                    self.scope.remove(&name);
+                }
+            }
+        }
     }
 
     // 宣言では型引数を具体化できないため、本体を先に単相化して登録した操作だけを扱う。
@@ -4098,14 +4171,23 @@ impl Lowerer {
                 ty: input.clone(),
             }],
         )?;
-        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
+        let mut arguments = vec![called];
+        arguments.extend(convert.value_params.iter().map(|(id, ty)| {
+            Expression::Variable {
+                id: *id,
+                ty: ty.clone(),
+            }
+        }));
+        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, arguments)?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         let result = body.ty();
+        let mut captures = vec![(captured, continuation_ty)];
+        captures.extend(convert.value_params.iter().cloned());
         let closure = self.continuation_function(
             id,
             (param, input),
-            vec![(captured, continuation_ty)],
+            captures,
             body.in_tail_position(),
             &result,
         )?;
