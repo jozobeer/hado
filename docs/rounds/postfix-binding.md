@@ -322,3 +322,21 @@ full 層の唯一の赤は `verify-string-split-linear` の検査 i（join）で
 3. 見出しの中の項目が読めないとき、`recover_declaration` が `/module`・
    `/implement` を飛ばして木の外まで走り、「閉じていない」という別の E100 が
    本当の誤りを位置の順で覆っていた。閉じの手前で止める。
+
+着地後（2026-09-27）。PR #55 は `e0a06a7` で入った。着地後の全走は手元で回さず、main の CI（full 層）を読む。**この走行は赤だった。**
+
+```
+$ gh run list --branch main --limit 3
+completed	failure	Merge pull request #55 from jozobeer/postfix-binding	ci	main	push	36303573802	2026-09-27T07:35:30Z
+
+$ gh run view --job=108575720470 --log | grep -a TALLY
+TALLY: 3806/3807 passed; red: verify-treesitter.log
+
+$ tail -8 target/gate-logs-f1/verify-treesitter.log
+OK: declaration forms and section 7 precedence goldens match
+NG: Neovim marks each promised token with its capture group (no @comment mark at 0:0-16 ('// comment 12345'); marks=[])
+PASSED: 4/5
+corpus files: 163
+```
+
+赤はこのラウンドの成果物ではなく、Neovim の extmark を数える検査が `marks=[]`（1 つも置かれなかった）を観測したもの。探針（`scripts/treesitter-hl.lua`）は `redraw!` の完了を待たずに記録を読むので、負荷の高い計算機で描画が遅れると 0 件になる。**同じ木は手元で 4 回続けて `PASSED: 5/5`（`extmarks: 39`）**、前後の main（`a19f6cd`・`e9e2352`）の CI でもこの検査は緑で、赤はこの 1 回だけ。偽赤として `docs/issues/flaky-treesitter-extmark-probe.md` に切り出した。
