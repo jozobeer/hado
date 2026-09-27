@@ -134,7 +134,7 @@ rng = random.Random(seed)
 for index in range(6):
     count = rng.randint(1, 6)
     arguments = [rng.choice(['a', 'b', 'c', 'x y', '-n', '日本語']) for _ in range(count)]
-    path = write(str(root), f'args-{index}', 'def main =\n  let argv = args ->\n  List.length argv\n')
+    path = write(str(root), f'args-{index}', 'def main =\n  args as argv ->\n  List.length argv\n')
     result = hado(['run', str(path), '--', *arguments], env=temp_env(path.parent / 'tmp'))
     assert result.returncode == 0, (index, result.returncode, result.stderr.decode())
     assert result.stdout == f'{count}\n'.encode(), (index, result.stdout, arguments)
@@ -188,7 +188,7 @@ root = Path(sys.argv[1]) / 'd'
 root.mkdir(parents=True, exist_ok=True)
 seed = int(os.environ.get('HADO_SEED', '48'))
 rng = random.Random(seed)
-source = 'def main =\n  let bytes = read_stdin ->\n  Bytes.to_string bytes\n'
+source = 'def main =\n  read_stdin as bytes ->\n  Bytes.to_string bytes\n'
 for index in range(4):
     line = ''.join(rng.choice(string.ascii_lowercase) for _ in range(rng.randint(1, 20)))
     path = write(str(root), f'stdin-{index}', source)

@@ -35,12 +35,12 @@ def again_source(n):
         'again yield(value: A): Void\n'
         'handler A Yield as Collect\n'
         'again yield value =>\n'
-        '  let rest = resume () ->\n'
+        '  resume () as rest ->\n'
         '  [value, ...rest]\n'
         'return _ => []\n'
         'def rec loop (n: Int): Void {Int Yield} =>\n'
         '  if n <= 0 => ()\n'
-        '  | do yield n -> loop (n - 1)\n'
+        '  | yield n -> loop (n - 1) /if\n'
         f'def main = List.length (with Collect -> loop {n})\n')
 
 def build_program(root, name, n):

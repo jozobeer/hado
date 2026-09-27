@@ -219,11 +219,11 @@ for name in reversed(names):
 (directory / 'entries' / 'child').mkdir()
 data = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 2048)))
 directory = add('38-c(4) §55 read_stdin twice',
-                'def main = let first = Bytes.length read_stdin -> let second = Bytes.length read_stdin -> [first, second]\n', str([len(data), 0]))
+                'def main = Bytes.length read_stdin as first -> Bytes.length read_stdin as second -> [first, second]\n', str([len(data), 0]))
 (directory / 'stdin').write_bytes(data)
 add('38-c(5) §55 env non-UTF8 value', 'def main = env "HADO_R38_BAD_VALUE"\n', 'InvalidUtf8', 1)
 for name, blank, indent in [('EnvDefault', int(sys.argv[3]), int(sys.argv[4])), ('IoDefault', int(sys.argv[5]), int(sys.argv[6]))]:
-    source = 'def main = 0\n' + '\n' * blank + ' ' * indent + 'module ' + name + '\n'
+    source = 'def main = 0\n' + '\n' * blank + ' ' * indent + 'module ' + name + '\n/module\n'
     add('38-c(6) §49 module ' + name, source, json.dumps(['E205', blank+2, indent+8]), 1, 'reject')
 assert {label.split()[0] for _, label, _, _ in manifest} == {f'38-c({i})' for i in range(1, 7)}
 (base / 'manifest.tsv').write_text(''.join(f'{i}\t{label}\t{status}\t{mode}\n' for i, label, status, mode in manifest))

@@ -65,7 +65,7 @@ texts = ['', 'a', 'hello world', 'line1\nline2', 'tab\there', 'quote"inside',
          'back\\slash', '日本語', 'snow ☃', 'x' * 1000]
 for index, text in enumerate(texts):
     literal = json.dumps(text, ensure_ascii=False)
-    source = f'def main =\n  do log {literal} ->\n  0\n'
+    source = f'def main =\n  log {literal} ->\n  0\n'
     build_printed(sys.argv[1], f'log-ok-{index}', source, text + '\n0\n')
 print(f'log success: {len(texts)} cases')
 PY
@@ -110,7 +110,7 @@ r43_log_caught() {
     cat >"$dir/main.hd" <<'HD'
 handler Error as ToUnit
 abort raise e =>
-  do write_file "observed" (Bytes.of_string e.message) ->
+  write_file "observed" (Bytes.of_string e.message) ->
   ()
 return value => value
 def main =
@@ -262,8 +262,12 @@ for line in Path('tests/corpus.sha256').read_text().splitlines():
 # コーパスを本文から選び、札と期待出力と lock をその場で見る。
 patterns = ['String.join', 'String.trim', 'Int.abs', 'Int.min', 'Int.max',
             'List.head', 'List.nth', 'List.take', 'List.drop', r'\blog\b']
+# 対象は R43 の prelude の 2 項目。閉じの印を測る受理コーパスも `log` を使うので、
+# member の語だけで選ぶと項目が混ざる。項目の札で絞ってから本文を見る。
+wanted = {'Env と Io', 'String 操作'}
 selected = {path: path.read_text() for path in sorted(Path('tests/accept').glob('*/main.hd'))
-            if any(re.search(pattern, path.read_text()) for pattern in patterns)}
+            if any(re.search(pattern, path.read_text()) for pattern in patterns)
+            and any(f'// item: {item}' in path.read_text().splitlines() for item in wanted)}
 assert selected, 'no accept case uses the new prelude members'
 items = set()
 for path, source in selected.items():
@@ -287,7 +291,7 @@ for path, source in selected.items():
     result = subprocess.run([str(copied.with_suffix(''))], capture_output=True, stdin=subprocess.DEVNULL)
     assert result.returncode == 0 and result.stderr == b'', (path, result.returncode, result.stderr)
     assert result.stdout == (expected + '\n').encode(), (path, result.stdout, expected)
-assert items == {'Env と Io', 'String 操作'}, items
+assert items == wanted, items
 print(f'corpus: {len(selected)} accept cases derived by content, headers, lock and stdout verified')
 PY
 }
@@ -306,7 +310,7 @@ arms = ['once read_file _ => Bytes.of_string "virtual"',
         'once log _ => ()',
         'once read_dir _ => ["virtual"]',
         'once read_stdin => Bytes.of_string "virtual"']
-full = 'handler Io as MyIo\n' + '\n'.join(arms) + '\ndef main = with MyIo -> do log "virtual" -> 0\n'
+full = 'handler Io as MyIo\n' + '\n'.join(arms) + '\ndef main = with MyIo -> log "virtual" -> 0\n'
 missing = 'handler Io as MyIo\n' + '\n'.join(arm for arm in arms if arm != 'once log _ => ()') + '\ndef main = 0\n'
 
 def check(name, source, expected_code):

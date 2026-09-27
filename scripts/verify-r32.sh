@@ -54,7 +54,7 @@ verify_library_rep() {
     local base="$workdir/32i-rep"
     mkdir -p "$base/comment" "$base/indent"
     for c in comment indent; do
-        printf '// no library declaration here\n\nmodule Extra\ndef f(x: Int): Int\n\nimplement Extra as E\ndef f x => x\n' >"$base/$c/a.hd"
+        printf '// no library declaration here\n\nmodule Extra\ndef f(x: Int): Int\n/module\n\nimplement Extra as E\ndef f x => x\n/implement\n' >"$base/$c/a.hd"
     done
     printf 'library // declaration\n' >"$base/comment/z.hd"
     printf '  library\n' >"$base/indent/z.hd"
@@ -131,7 +131,7 @@ report_case() {
         printf 'def main =\n'
         for triple in "$3" "$4" "$5"; do
             IFS=: read -r name passed total <<<"$triple"
-            printf '  let t%d = report::Report.add %s "%s" %s %s ->\n' "$step" "$state" "$name" "$passed" "$total"
+            printf '  report::Report.add %s "%s" %s %s as t%d ->\n' "$state" "$name" "$passed" "$total" "$step"
             state="t$step"
             step=$((step + 1))
         done
@@ -233,9 +233,11 @@ def helper value => value + 1
 
 module Store
 def read(value: Int): Int
+/module
 
 implement Store as Memory
 def read value => helper value
+/implement
 EOF
 
 cat >"$workdir/32b/lib.hd" <<'EOF'
@@ -243,9 +245,11 @@ library
 
 module Store
 def read(value: Int): Int
+/module
 
 implement Store as MemoryStore
 def read value => value
+/implement
 EOF
 printf 'def main = 1\n' >"$workdir/32c3/main.hd"
 printf 'def library = 1\n' >"$workdir/32g1/main.hd"
@@ -262,15 +266,19 @@ abort fail
 
 module S
 def read(value: Int): Int
+/module
 
 module Empty
 def done(x: Int): Int
+/module
 
 implement S as Memory
 def read value => value
+/implement
 
 implement S as Make(P: S)
 def read value => P.read value
+/implement
 
 handler E as H
 abort fail => 0
@@ -282,10 +290,12 @@ library
 
 module S
 def read(value: Int): Int
+/module
 
 implement S as Memory
 def read value => value
 def extra x => x
+/implement
 EOF
 
 cat >"$workdir/32d2/lib.hd" <<'EOF'
@@ -293,10 +303,12 @@ library
 
 module S
 def read(value: Int): Int
+/module
 
 implement S as Memory
 type Local = | Local(Int)
 def read value => value
+/implement
 EOF
 
 cat >"$workdir/32d3/lib.hd" <<'EOF'
@@ -306,18 +318,22 @@ def helper x => x
 
 module S
 def read(value: Int): Int
+/module
 
 implement S as Memory
 def read value => value
+/implement
 EOF
 
 printf 'def main = 1\n' >"$workdir/32e/a.hd"
 cat >"$workdir/32e/lib.hd" <<'EOF'
 module Store
 def read(value: Int): Int
+/module
 
 implement Store as Memory
 def read value => value
+/implement
 EOF
 
 expect_error() {
@@ -424,18 +440,21 @@ make_app() {
     local base=$1
     mkdir -p "$base/lib/store" "$base/lib/id"
     printf 'library\n\ntype Found = { value: Int }\n' >"$base/lib/lib.hd"
-    printf 'module Store\ndef find(x: Int): Int\ndef wrap(f: Found): Int\n' >"$base/lib/store/store.hdi"
+    printf 'module Store\ndef find(x: Int): Int\ndef wrap(f: Found): Int\n/module\n' >"$base/lib/store/store.hdi"
     cat >"$base/lib/id/int_id.hd" <<EOF
 module IntId
 def value(x: Int): Int
+/module
 
 implement IntId as IntId
 def value x => x + $payload_fa
+/implement
 EOF
     cat >"$base/lib/store/memory.hd" <<EOF
 implement Store as Memory
 def find id => id::IntId.value id + $payload_fb
 def wrap f => f.value
+/implement
 EOF
     printf 'def main = lib::store::Memory.find 1\n' >"$base/main.hd"
 }
@@ -465,9 +484,11 @@ blank_b2=$((1 + RANDOM % 4))
     blank_lines "$blank_b2"
     printf 'def main x => x\n\n'
     printf 'module S\n'
-    printf 'def read(value: Int): Int\n\n'
+    printf 'def read(value: Int): Int\n'
+    printf '/module\n\n'
     printf 'implement S as Memory\n'
     printf 'def read value => main value\n'
+    printf '/implement\n'
 } >"$workdir/32b2/main.hd"
 expect_error '32-b (library の引数付き main、別ファイル、先頭の空行)' "$workdir/32b2/lib.hd" main.hd E206 $((blank_b2 + 1)) 1
 
@@ -504,8 +525,8 @@ blank_c3=$((1 + RANDOM % 4))
 { blank_lines "$blank_c3"; printf 'library\n'; } >"$workdir/32c3/sig.hdi"
 expect_error '32-c (3b) .hdi の library、先頭の空行' "$workdir/32c3/main.hd" sig.hdi E100 $((blank_c3 + 1)) 1
 accept '32-d (未参照の公開面でも受理)' "$workdir/32d/lib.hd"
-expect_error '32-d (1) 契約に無い実装の def' "$workdir/32d1/lib.hd" lib.hd E514 8 1
-expect_error '32-d (2) 実装局所の ADT が未使用' "$workdir/32d2/lib.hd" lib.hd E513 7 1
+expect_error '32-d (1) 契約に無い実装の def' "$workdir/32d1/lib.hd" lib.hd E514 9 1
+expect_error '32-d (2) 実装局所の ADT が未使用' "$workdir/32d2/lib.hd" lib.hd E513 8 1
 expect_error '32-d (3) ライブラリ根の外の def が未使用' "$workdir/32d3/lib.hd" lib.hd E513 3 1
 
 # 32-d (4): handler の腕から参照される外の def は、その先も辿って根にする。
@@ -554,21 +575,21 @@ build_prints '32-f (check → build → 実行、生成値)' "$workdir/32f/app/m
 # 32-f (1): ライブラリの中から利用側の根の外の型を無修飾で参照すると E204。
 make_app "$workdir/32f1/app"
 printf 'type Config = { n: Int }\ndef main = lib::store::Memory.find 1\n' >"$workdir/32f1/app/main.hd"
-printf 'implement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap (f: Config) => f.n\n' "$payload_fb" >"$workdir/32f1/app/lib/store/memory.hd"
+printf 'implement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap (f: Config) => f.n\n/implement\n' "$payload_fb" >"$workdir/32f1/app/lib/store/memory.hd"
 expect_error '32-f (1) 利用側の根の外の型を無修飾参照' "$workdir/32f1/app/main.hd" lib/store/memory.hd E204 3 14
 
 # 32-f (2): ライブラリの中から兄弟ディレクトリを参照すると E204。
 make_app "$workdir/32f2/app"
 mkdir -p "$workdir/32f2/app/other"
-printf 'module OtherStore\ndef f(x: Int): Int\n' >"$workdir/32f2/app/other/other_store.hdi"
-printf 'implement OtherStore as Helper\ndef f x => x\n' >"$workdir/32f2/app/other/helper.hd"
-printf 'implement Store as Memory\ndef find id => other::Helper.f id + %s\ndef wrap f => f.value\n' "$payload_fb" >"$workdir/32f2/app/lib/store/memory.hd"
+printf 'module OtherStore\ndef f(x: Int): Int\n/module\n' >"$workdir/32f2/app/other/other_store.hdi"
+printf 'implement OtherStore as Helper\ndef f x => x\n/implement\n' >"$workdir/32f2/app/other/helper.hd"
+printf 'implement Store as Memory\ndef find id => other::Helper.f id + %s\ndef wrap f => f.value\n/implement\n' "$payload_fb" >"$workdir/32f2/app/lib/store/memory.hd"
 expect_error '32-f (2) 兄弟ディレクトリの実装参照' "$workdir/32f2/app/main.hd" lib/store/memory.hd E204 2 16
 
 # 32-f (3): 入口検査でライブラリの中の未参照の実装は E513。
 make_app "$workdir/32f3/app"
 mkdir -p "$workdir/32f3/app/lib/extra"
-printf 'implement store::Store as Spare\ndef find x => x\ndef wrap f => f.value\n' >"$workdir/32f3/app/lib/extra/spare.hd"
+printf 'implement store::Store as Spare\ndef find x => x\ndef wrap f => f.value\n/implement\n' >"$workdir/32f3/app/lib/extra/spare.hd"
 expect_error '32-f (3) ライブラリ内の未参照の実装' "$workdir/32f3/app/main.hd" lib/extra/spare.hd E513 1 1
 
 # 32-f 単体: ライブラリ根のファイルを単体で check すれば受理（パスはライブラリ根から解く）。
@@ -582,17 +603,17 @@ expect_error '32-f 埋め込みの main (library ディレクトリの def main)
 
 # 32-d (4): 根でもライブラリ根でもないサブディレクトリのファイルの外の def は E100。
 make_app "$workdir/32d4b/app"
-printf 'def helper x => x\n\nimplement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap f => f.value\n' "$payload_fb" >"$workdir/32d4b/app/lib/store/memory.hd"
+printf 'def helper x => x\n\nimplement Store as Memory\ndef find id => id::IntId.value id + %s\ndef wrap f => f.value\n/implement\n' "$payload_fb" >"$workdir/32d4b/app/lib/store/memory.hd"
 expect_error '32-d (4) 根でもライブラリ根でもない外の def' "$workdir/32d4b/app/main.hd" lib/store/memory.hd E100 1 1
 
 # 32-d (3) 再確認: 外の def はファイル局所。別ファイルからは E204、同じファイルの
 # 実装からは受理。
 mkdir -p "$workdir/32d3b/lib/store" "$workdir/32d3c"
 printf 'library\n\ndef helper x => x + 1\n' >"$workdir/32d3b/lib/lib.hd"
-printf 'module Store\ndef find(x: Int): Int\n' >"$workdir/32d3b/lib/store/store.hdi"
-printf 'implement store::Store as Memory\ndef find id => helper id\n' >"$workdir/32d3b/lib/store/memory.hd"
+printf 'module Store\ndef find(x: Int): Int\n/module\n' >"$workdir/32d3b/lib/store/store.hdi"
+printf 'implement store::Store as Memory\ndef find id => helper id\n/implement\n' >"$workdir/32d3b/lib/store/memory.hd"
 expect_error '32-d (3) 再確認 (外の def はファイル局所)' "$workdir/32d3b/lib/lib.hd" store/memory.hd E204 2 16
-printf 'library\n\ndef helper x => x + 1\n\nmodule Local\ndef run(x: Int): Int\n\nimplement Local as L\ndef run x => helper x\n' >"$workdir/32d3c/lib.hd"
+printf 'library\n\ndef helper x => x + 1\n\nmodule Local\ndef run(x: Int): Int\n/module\n\nimplement Local as L\ndef run x => helper x\n/implement\n' >"$workdir/32d3c/lib.hd"
 accept '32-d (3) 再確認 (同じファイルの実装から参照)' "$workdir/32d3c/lib.hd"
 
 # 32-i: tests/library を代表ファイルから check して全件受理。
@@ -623,9 +644,9 @@ expect_error '32-f5 ライブラリ根と配下の型の衝突' "$workdir/32f5/a
 # ライブラリ根と配下の契約の衝突（§51）。constructor と同じ名前空間の規則。
 mkdir -p "$workdir/32f6/app/lib/store"
 printf 'def main = 1\n' >"$workdir/32f6/app/main.hd"
-printf 'library\n\nmodule Store\ndef read(x: Int): Int\n' >"$workdir/32f6/app/lib/lib.hd"
+printf 'library\n\nmodule Store\ndef read(x: Int): Int\n/module\n' >"$workdir/32f6/app/lib/lib.hd"
 blank_f6=$((1 + RANDOM % 4))
-{ blank_lines "$blank_f6"; printf 'module Store\ndef read(x: Int): Int\n'; } >"$workdir/32f6/app/lib/store/store.hd"
+{ blank_lines "$blank_f6"; printf 'module Store\ndef read(x: Int): Int\n/module\n'; } >"$workdir/32f6/app/lib/store/store.hd"
 expect_error '32-f6 ライブラリ根と配下の契約の衝突' "$workdir/32f6/app/main.hd" lib/store/store.hd E205 $((blank_f6 + 1)) 8
 
 echo "PASSED: $passed/$total"

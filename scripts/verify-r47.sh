@@ -159,11 +159,11 @@ for index in range(10):
     value = rng.randint(-9, 9)
     name = f'identity-{index}'
     if index % 2 == 0:
-        source = f'def g n => n + ({added})\ndef main =\n  let x = g ({value}) -> x\n'
+        source = f'def g n => n + ({added})\ndef main =\n  g ({value}) as x -> x\n'
         expected = value + added
         expected_text = f'g ({value})'
     else:
-        source = f'def main =\n  let x = {value} -> x\n'
+        source = f'def main =\n  {value} as x -> x\n'
         expected = value
         expected_text = str(value)
     caught = check_code(root, name, source, 'E501')
@@ -198,7 +198,7 @@ Path(root).mkdir(parents=True, exist_ok=True)
 
 for index in range(8):
     value = rng.randint(-9, 9)
-    source = f'def main =\n  let x = let y = {value} -> y -> x\n'
+    source = f'def main =\n  {value} as y -> y as x -> x\n'
     name = f'nested-{index}'
     check_code(root, name, source, 'E501')
     fixed = check_fix(root, name, source)
@@ -225,7 +225,7 @@ root = Path(sys.argv[1]) / 'd'
 root.mkdir(parents=True, exist_ok=True)
 cases = {
     'branch': 'def f x\n  // keep\n  => if x\n  | Some(v) => v\n  | 0\ndef main = f (Some(7))\n',
-    'binding': 'def main =\n  let x = 5 // keep\n    -> x\n',
+    'binding': 'def main =\n  5 // keep\n    as x -> x\n',
 }
 for name, source in cases.items():
     path = root / name / 'main.hd'

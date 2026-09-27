@@ -75,7 +75,7 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
             if ty == 'Int Array': values = [[i * 65539, i + 1] for i in range(length, 0, -1)]
         else:
             xs = show(ty, values)
-        start = prefix + f'def main = let a = make {xs} -> '
+        start = prefix + f'def main = make {xs} as a -> '
         printed = 'Array.of_list [' + ', '.join(
             'Array.of_list ' + show('Int', v) if ty == 'Int Array' else literal(ty, v)
             for v in values) + ']'
@@ -105,7 +105,7 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
             lhs = 'a'
             lhs_values = left_values if relation == 'length versus first element' else values
             result_type = 'type Orders = { equal: Bool; different: Bool; forward: Int; backward: Int; reverse_equal: Bool; reverse_different: Bool }\n'
-            expression = f'let b = {other} -> '
+            expression = f'{other} as b -> '
             result = ('{ equal = ' + lhs + ' == b; different = ' + lhs + ' != b; forward = compare (' + lhs + ') b; '
                       'backward = compare b (' + lhs + '); reverse_equal = b == ' + lhs + '; reverse_different = b != ' + lhs + ' }')
             equal = lhs_values == other_values
@@ -114,7 +114,7 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
                 str(equal).lower(), str(not equal).lower(), order, -order, str(equal).lower(), str(not equal).lower())
             comparison_start = start
             if relation == 'length versus first element':
-                comparison_start = base_prefix + 'def main = let a = make [' + literal(ty, higher) + '] -> '
+                comparison_start = base_prefix + 'def main = make [' + literal(ty, higher) + '] as a -> '
             add(f'35-e {ty} length={length} {relation}', result_type + comparison_start + expression + result, expected)
         label = f'35-a {ty} length={length}'
         add(label + ' length', start + 'Array.length a', str(len(values)))
@@ -134,14 +134,14 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
             new_values[index] = replacement
             changed = f'Array.set a {index} {literal(ty, replacement)}'
             if ty != 'Int Array' and length != 30000:
-                add(label + f' set={index} immutable', start + f'let b = {changed} -> [Array.to_list b, Array.to_list a]',
+                add(label + f' set={index} immutable', start + f'{changed} as b -> [Array.to_list b, Array.to_list a]',
                     '[' + show(ty, new_values) + ', ' + show(ty, values) + ']')
             else:
                 observe = (lambda a: f'Array.get (Array.get {a} {index}) 0') if ty == 'Int Array' else (lambda a: f'Array.get {a} {index}')
                 result_ty = 'Int' if ty == 'Int Array' else ty
                 after = replacement[0] if ty == 'Int Array' else replacement
                 before = values[index][0] if ty == 'Int Array' else values[index]
-                add(label + f' set={index} immutable', start + f'let b = {changed} -> [{observe("b")}, {observe("a")}]', show(result_ty, [after, before]))
+                add(label + f' set={index} immutable', start + f'{changed} as b -> [{observe("b")}, {observe("a")}]', show(result_ty, [after, before]))
         for index in sorted({-1, length, length + 1}):
             for member in ['get', 'set']:
                 call = f'Array.{member} a ({index})'
@@ -150,23 +150,23 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
                 add(f'35-b {ty} length={length} {member}={index}', start + call, 'IndexOutOfRange', 'error')
 for member in ['get', 'set']:
     expr = 'Array.get a 1' if member == 'get' else 'Array.length (Array.set a 1 9)'
-    add(f'35-b handler {member}', 'def main = let a = Array.of_list [5] -> with H -> ' + expr + '\nhandler Error as H\nabort raise e => String.length e.message', str(len('IndexOutOfRange')))
+    add(f'35-b handler {member}', 'def main = Array.of_list [5] as a -> with H -> ' + expr + '\nhandler Error as H\nabort raise e => String.length e.message', str(len('IndexOutOfRange')))
     valid = 'Array.get a 0' if member == 'get' else 'Array.length (Array.set a 0 9)'
-    add(f'35-b handler {member} success', 'def main = let a = Array.of_list [5] -> with H -> ' + valid + '\nhandler Error as H\nabort raise e => String.length e.message', str(5 if member == 'get' else 1))
-large = 'def rec generate n => if n <= 0 => [] | [n, ...generate (n - 1)]\ndef main = let a = Array.of_list (generate 30000) -> '
+    add(f'35-b handler {member} success', 'def main = Array.of_list [5] as a -> with H -> ' + valid + '\nhandler Error as H\nabort raise e => String.length e.message', str(5 if member == 'get' else 1))
+large = 'def rec generate n => if n <= 0 => [] | [n, ...generate (n - 1)]\ndef main = Array.of_list (generate 30000) as a -> '
 values = list(range(30000, 0, -1))
 add('35-c of_list 30000', large + '[Array.length a, Array.get a 29999, Array.get a 0]', show('Int', [len(values), values[-1], values[0]]), 'timeout')
 changed = values.copy()
 changed[-1] = -73
-add('35-c set 30000', large + 'let b = Array.set a 29999 (-73) -> [Array.length b, Array.get b 29999, Array.get b 0, Array.get a 29999]', show('Int', [len(changed), changed[-1], changed[0], values[-1]]), 'timeout')
+add('35-c set 30000', large + 'Array.set a 29999 (-73) as b -> [Array.length b, Array.get b 29999, Array.get b 0, Array.get a 29999]', show('Int', [len(changed), changed[-1], changed[0], values[-1]]), 'timeout')
 blank, indent = pad % 9 + 1, (pad // 9) % 13 + 1
 source = '\n' * blank + ' ' * indent + 'type A Array = { value: A }\ndef main = 0'
 add('35-f reserved Array anchor', source, f':{blank + 1}:{indent + len("type A ") + 1}: error[E205]:', 'code:E205')
 add('35-f Int Array annotation', 'def f (xs: Int Array) => xs\ndef main = Array.length (f (Array.of_list [3, 5]))', '2')
 shared = ('def main = read ({ value = Store.make (Array.of_list [3, 5, 7]) })\n'
           'def read box => Array.length box.value\ntype Box = { value: Store.T }\n'
-          'module Store\ntype T\ndef make(value: Int Array): T Pure\n'
-          'implement Store as Store\nshared type T = Int Array\ndef make value => value')
+          'module Store\ntype T\ndef make(value: Int Array): T Pure\n/module\n'
+          'implement Store as Store\nshared type T = Int Array\ndef make value => value\n/implement')
 add('35-f2 shared Array before record registration', shared, '3')
 add('35-f2 opaque negative control', shared.replace('shared type', 'type'), 'error[E305]:', 'code:E305')
 for shape, declaration, bad, good in [
@@ -175,18 +175,18 @@ for shape, declaration, bad, good in [
     ('record', 'type Cell = { value: Fn(Int => Int) }\n', 'Array.of_list [{ value = fn(x => x + 1) }]', 'Array.of_list [{ value = 1 }]')]:
     for op, code in [('==', 'E703'), ('!=', 'E703'), ('compare', 'E704')]:
         blank, indent = (pad + len(manifest)) % 9 + 1, (pad + len(manifest)) % 13 + 1
-        prefix = '\n' * blank + declaration + ' ' * indent + 'def main = let a = ' + bad + ' -> '
+        prefix = '\n' * blank + declaration + ' ' * indent + 'def main = ' + bad + ' as a -> '
         expression = 'compare a a' if op == 'compare' else f'a {op} a'
         token_prefix = '' if op == 'compare' else 'a '
         line = prefix.count('\n') + 1
         column = len(prefix.rsplit('\n', 1)[-1] + token_prefix) + 1
         add(f'35-e2 {shape} {op} function rejected', prefix + expression, f':{line}:{column}: error[{code}]:', 'code:' + code)
-        source = declaration.replace('Fn(Int => Int)', 'Int') + 'def main = let a = ' + good + ' -> ' + expression
+        source = declaration.replace('Fn(Int => Int)', 'Int') + 'def main = ' + good + ' as a -> ' + expression
         expected = '0' if op == 'compare' else str(op == '==').lower()
         add(f'35-e2 {shape} {op} non-function control', source, expected)
 # IEEE equality must not be replaced by compare == 0 for Array elements.
 add('35-e Float NaN and signed zero',
-    'def main = let a = Array.of_list [0.0 / 0.0] -> let b = Array.of_list [0.0 / 0.0] -> '
+    'def main = Array.of_list [0.0 / 0.0] as a -> Array.of_list [0.0 / 0.0] as b -> '
     '[(if a == b => 1 | 0), (if a != b => 1 | 0), compare a b, '
     'compare a (Array.of_list [1.0]), compare (Array.of_list [1.0]) a, '
     '(if Array.of_list [-0.0] == Array.of_list [0.0] => 1 | 0), compare (Array.of_list [-0.0]) (Array.of_list [0.0])]',

@@ -53,10 +53,10 @@ def check(name, fn):
 # The sample is the corpus fixture itself, so there is one source of truth.
 E501 = Path('tests/reject/E501/main.hd').read_text()
 # The expectation is derived from the source: the value the binding returns.
-value = E501.split('let x = ', 1)[1].split(' ->', 1)[0].strip()
+value = E501.split(' as x ', 1)[0].rsplit('=> ', 1)[1].strip()
 PLAIN = 'def f %s =>\n  %s\ndef main = f 1\n' % (value, value)
 # A body that is not the bound name is not E501, so the fix must leave it alone.
-OTHER = 'def f v =>\n  let x = v ->\n  x + 1\ndef main = f 1\n'
+OTHER = 'def f v =>\n  v as x ->\n  x + 1\ndef main = f 1\n'
 
 
 def r73_fix_accepts():
@@ -66,7 +66,7 @@ def r73_fix_accepts():
     fix = run([hado, 'check', '--fix', path])
     assert fix.returncode == 0, (fix.returncode, fix.stderr[:200])
     assert run([hado, 'check', path]).returncode == 0, 'the fixed file is not accepted'
-    assert 'let x =' not in Path(path).read_text(), 'the binding did not go away'
+    assert 'as x ' not in Path(path).read_text(), 'the binding did not go away'
 
 
 def r73_fmt_accepts_and_is_idempotent():

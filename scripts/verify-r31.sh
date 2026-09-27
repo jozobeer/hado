@@ -29,7 +29,7 @@ write_source() {
 effect Y
 again y(value: Int): Void
 handler Y as $handler
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 $(if [ "$handler" = Keep ]; then echo "return x => x"; else echo "return _ => []"; fi)
 $body
 EOF
@@ -51,21 +51,21 @@ check_prints() {
 
 write_source list "def main = with Collect -> [y $payload_a, y $payload_b]"
 write_source let "def f u => if u == () => [7] | []
-def main = with Keep -> let u = y $payload_a -> f u" Keep
+def main = with Keep -> y $payload_a as u -> f u" Keep
 write_source argument "def f u => if u == () => [9] | []
 def main = with Keep -> f (y $payload_a)" Keep
 write_source record "type P = { a: Void; b: Int }
-def main = with Keep -> let p = { a = y $payload_a; b = 4 } -> [p.b]" Keep
+def main = with Keep -> { a = y $payload_a; b = 4 } as p -> [p.b]" Keep
 write_source pipe "def f u => if u == () => [8] | []
 def main = with Keep -> y $payload_a |> f" Keep
 write_source operand "def n u => if u == () => 5 | 0
 def main = with Keep -> [n (y $payload_a) + n (y $payload_b)]" Keep
 write_source tail "def main = with Collect -> y $payload_a"
-write_source do "def main = with Collect -> do y $payload_a -> y $payload_b"
+write_source do "def main = with Collect -> y $payload_a -> y $payload_b"
 write_source branch "def main = with Collect -> if true => y $payload_a | y $payload_b"
 write_source short_circuit "def g u => if u == () => true | false
-def main = with Collect -> let b = false && g (y $payload_a) -> if b => y $payload_b | y 3"
-write_source nested "def main = with Collect -> let inner = with Collect -> y $payload_a -> do y $payload_b -> inner"
+def main = with Collect -> false && g (y $payload_a) as b -> if b => y $payload_b | y 3"
+write_source nested "def main = with Collect -> (with Collect -> y $payload_a) as inner -> y $payload_b -> inner"
 
 check '31-d (list, generated payload)' check_prints list "[$payload_a, $payload_b]"
 check '31-d (let)' check_prints let "[$payload_a, 7]"
@@ -89,12 +89,12 @@ again z(value: Int): Void
 effect Y
 again y(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return $returns
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y $first -> do z $outer -> $last
+def main = with Outer -> with Collect -> y $first -> z $outer -> $last
 EOF
 }
 
@@ -107,22 +107,22 @@ again z(value: Int): Void
 effect W
 again w(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return x => x
 handler W as Inner
 again w value => [value + 100, ...resume ()]
 return _ => []
-def main = with Outer -> with Inner -> do w $inner -> do z $outer -> ()
+def main = with Outer -> with Inner -> w $inner -> z $outer -> ()
 EOF
 }
 
 write_outer_source a 1 2 "()" "_ => []"
 write_outer_source b 1 2 "()" "x => x"
-write_outer_source c 1 2 "do y 3 -> ()" "x => x"
+write_outer_source c 1 2 "y 3 -> ()" "x => x"
 write_spread_source f 2 3
 write_outer_source generated_a "$payload_a" "$payload_b" "()" "_ => []"
 payload_c=$((payload_b + 1 + RANDOM))
-write_outer_source generated_c "$payload_a" "$payload_b" "do y $payload_c -> ()" "x => x"
+write_outer_source generated_c "$payload_a" "$payload_b" "y $payload_c -> ()" "x => x"
 write_spread_source generated_f "$payload_a" "$payload_b"
 
 mkdir -p "$workdir/e" "$workdir/ok_outer" "$workdir/ok_once"
@@ -134,14 +134,14 @@ again y(value: Int): Void
 effect B
 once b: Int
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
 handler B as Inner
 once b => 2
-def main = with Outer -> with Collect -> with Inner -> do y b -> do z 5 -> ()
+def main = with Outer -> with Collect -> with Inner -> y b -> z 5 -> ()
 EOF
 cat >"$workdir/ok_outer/main.hd" <<'EOF'
 effect Z
@@ -149,12 +149,12 @@ again z(value: Int): Void
 effect Y
 again y(value: Int): Void
 handler Z as Outer
-again z value => let rest = resume () -> [value, ...rest]
+again z value => resume () as rest -> [value, ...rest]
 return _ => []
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do z 4 -> ()
+def main = with Outer -> with Collect -> z 4 -> ()
 EOF
 cat >"$workdir/ok_once/main.hd" <<'EOF'
 effect A
@@ -164,9 +164,9 @@ again y(value: Int): Void
 handler A as Outer
 once a => 1
 handler Y as Collect
-again y value => let rest = resume () -> [value, ...rest]
+again y value => resume () as rest -> [value, ...rest]
 return _ => []
-def main = with Outer -> with Collect -> do y 9 -> do y a -> ()
+def main = with Outer -> with Collect -> y 9 -> y a -> ()
 EOF
 
 check '31-a outer return discards inner answer' check_prints a "[2]"
@@ -189,7 +189,7 @@ again ask(seed: Int): Int
 handler Ask as Twice
 again ask seed => resume (seed * 2)
 return x => x
-def main = with Twice -> let v = ask $seed -> [v]
+def main = with Twice -> ask $seed as v -> [v]
 EOF
 }
 
@@ -202,10 +202,10 @@ again s(value: String): Void
 effect Y
 again y(value: Int): Void
 handler S as Names
-again s value => let rest = resume () -> [value, ...rest]
+again s value => resume () as rest -> [value, ...rest]
 return x => x
 handler Y as Collect
-again y value => let rest = resume () -> [String.concat "$prefix" (Int.to_string value), ...rest]
+again y value => resume () as rest -> [String.concat "$prefix" (Int.to_string value), ...rest]
 return _ => []
 def main = with Names -> with Collect -> $body
 EOF
@@ -213,8 +213,8 @@ EOF
 
 write_ask_source h 21
 write_ask_source generated_h "$payload_a"
-write_mixed_source i 'do s "a" -> do y 1 -> ()' n
-write_mixed_source j 'do y 1 -> do s "b" -> ()' ''
+write_mixed_source i 's "a" -> y 1 -> ()' n
+write_mixed_source j 'y 1 -> s "b" -> ()' ''
 check '31-h non-Void again result' check_prints h '[42]'
 check '31-i mixed payloads' check_prints i '["a", "n1"]'
 check '31-j mixed payloads through resume' check_prints j '["b", "1"]'

@@ -44,7 +44,7 @@ def fix_to_fixpoint(path, limit=4):
     return run([hado, 'check', path]).returncode == 0
 
 
-E515_FLOW = 'def usage = "usage"\ndef message args =>\n  if args\n    | [] => usage\n    | [name, ...rest] => name\ndef main =\n  let args = EnvDefault.args ->\n  IoDefault.log (message args)\n'
+E515_FLOW = 'def usage = "usage"\ndef message args =>\n  if args\n    | [] => usage\n    | [name, ...rest] => name\ndef main =\n  EnvDefault.args as args ->\n  IoDefault.log (message args)\n'
 E505_ALONE = 'def message\n  | [] => "usage"\n  | [name, ...rest] => name\ndef main = IoDefault.log (message [])\n'
 USED_TAIL = 'def first_of\n  | [] => "none"\n  | [y, ..._] => y\ndef message\n  | [] => "usage"\n  | [name, ...rest] => first_of rest\ndef main = IoDefault.log (message ["a"])\n'
 

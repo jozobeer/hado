@@ -55,8 +55,10 @@ E506 = Path('tests/reject/E506/main.hd').read_text()
 # The expectation is derived from the source: the binding goes, the body stays.
 PLAIN = 'def f x =>\n  x\ndef main = f 2\n'
 # E506 fires for an effectful discard too (measured in R72), so the fix must
-# leave this shape alone.
-EFFECTFUL = 'def f x =>\n  let _ = IoDefault.log "x" ->\n  x\ndef main = f 1\n'
+# leave this shape alone. The postfix spelling of the explicit `_` binding is
+# `e as _ ->`; the bare `e ->` is the canonical discard and is accepted, so the
+# rejected shape keeps its `as _`.
+EFFECTFUL = 'def f x =>\n  IoDefault.log "x" as _ ->\n  x\ndef main = f 1\n'
 
 
 def r72_fix_accepts():
@@ -66,7 +68,7 @@ def r72_fix_accepts():
     fix = run([hado, 'check', '--fix', path])
     assert fix.returncode == 0, (fix.returncode, fix.stderr[:200])
     assert run([hado, 'check', path]).returncode == 0, 'the fixed file is not accepted'
-    assert 'let _' not in Path(path).read_text(), 'the binding did not go away'
+    assert 'as _' not in Path(path).read_text(), 'the binding did not go away'
 
 
 def r72_fmt_accepts_and_is_idempotent():

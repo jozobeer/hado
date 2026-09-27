@@ -154,7 +154,7 @@ from harness import BUILD, build, expect
 root = Path(sys.argv[1]) / 'c'
 root.mkdir(parents=True, exist_ok=True)
 source = BUILD + '''def main =
-  let sorted = List.sort (List.reverse (build_go 1000000 [])) fn(a, b => a - b) ->
+  List.sort (List.reverse (build_go 1000000 [])) fn(a, b => a - b) as sorted ->
   [List.fold sorted 0 fn(a, x => a + x), List.fold sorted 0 fn(a, x => (a * 31 + x) % 1000000007)]
 '''
 binary = build(root, 'sort', source)
