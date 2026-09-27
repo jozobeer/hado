@@ -812,7 +812,7 @@ fn literal_pattern_fix(
     if prefix.len() + 1 >= head.len() {
         return None;
     }
-    let replacement = literal_replacement(&cuts, prefix, source, end, first)?;
+    let replacement = literal_replacement(&cuts, prefix, start + head.len(), source, end, first)?;
     Some(Fix {
         code: "E511",
         line: node.span.line,
@@ -873,15 +873,19 @@ fn literal_prefix<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 fn literal_replacement(
     cuts: &[(usize, usize)],
     prefix: &str,
+    head_end: usize,
     source: &str,
     end: usize,
     first: usize,
 ) -> Option<String> {
     let line_start = source[..first].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    // 正準形は `def` の見出しと最初の腕が同じ行に載る。そのとき行頭から腕までを
+    // そのまま前置きにすると見出しが二重になるので、見出しの後ろだけを残す。
+    let lead_start = line_start.max(head_end);
     let mut replacement = String::new();
     replacement.push_str(prefix);
     replacement.push('\n');
-    replacement.push_str(&source[line_start..first]);
+    replacement.push_str(&source[lead_start..first]);
     let mut cursor = first;
     for (cut_start, cut_end) in cuts {
         if *cut_start < cursor || *cut_end > end {
