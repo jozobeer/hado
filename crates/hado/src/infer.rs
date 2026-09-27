@@ -766,6 +766,15 @@ impl Checker<'_> {
                 *ty = self.inference.resolve(ty).qualify_data_types(type_names);
             }
         }
+        self.qualify_module_with_types(type_names, saved_with_spans);
+    }
+
+    // `with` ごとに控えた型も、module の本体で推論した分だけ局所型名を修飾する。
+    fn qualify_module_with_types(
+        &mut self,
+        type_names: &HashMap<String, String>,
+        saved_with_spans: &HashSet<(usize, usize)>,
+    ) {
         for (with_span, types) in &mut self.with_types {
             if saved_with_spans.contains(with_span) {
                 continue;
