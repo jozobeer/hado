@@ -1,0 +1,5 @@
+// spec: §55
+// expect: [a][b][c]
+// needs: prelude
+def main = Map.insert (Map.insert (Map.insert Map.empty "c" 3) "a" 1) "b" 2 as m ->
+  Map.fold m "" fn(acc, k, _ => String.concat acc (String.concat "[" (String.concat k "]")))
