@@ -3344,8 +3344,9 @@ impl Checker<'_> {
         args: &[Node],
         body: &Node,
     ) -> Result<Ty, Diagnostic> {
+        let mut arg_tys = Vec::new();
         for arg in args {
-            self.expression(arg)?;
+            arg_tys.push(self.expression(arg)?);
         }
         let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
         let Some(effect) = self.handlers.get(&handler.name).cloned() else {
@@ -3359,7 +3360,7 @@ impl Checker<'_> {
         let Some(decl) = self.handler_decls.get(&handler.name).cloned() else {
             return Ok(ty);
         };
-        self.handler_answer(&decl, &ty, &row, handler.span)
+        self.handler_answer(&decl, &ty, &row, handler.span, &arg_tys, args)
     }
 
     fn handler_answer(
@@ -3368,13 +3369,43 @@ impl Checker<'_> {
         body: &Ty,
         row: &Row,
         span: Span,
+        arg_tys: &[Ty],
+        args: &[Node],
     ) -> Result<Ty, Diagnostic> {
         let answer = self.inference.fresh();
         let saved = self.values.clone();
-        let result = self.infer_handler_arms(handler, body, row, &answer, span);
+        let result = self
+            .bind_handler_params(handler, arg_tys, args, span)
+            .and_then(|()| self.infer_handler_arms(handler, body, row, &answer, span));
         self.values = saved;
         result?;
         Ok(self.inference.resolve(&answer))
+    }
+
+    /// §38: `with` の実引数を handler の宣言型と照合し、値引数を全ての腕の
+    /// スコープに入れる。個数は E301、型は E305（アンカーは食い違った実引数）。
+    fn bind_handler_params(
+        &mut self,
+        handler: &HandlerDecl,
+        arg_tys: &[Ty],
+        args: &[Node],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if handler.params.len() != arg_tys.len() {
+            return Err(self.error(span, Some("E301"), "handler argument arity mismatch"));
+        }
+        for ((param, arg_ty), arg) in handler.params.iter().zip(arg_tys).zip(args) {
+            let declared = match &param.ty {
+                Some(annotation) => self.annotation(annotation, param.span)?,
+                None => self.inference.fresh(),
+            };
+            self.unify(&declared, arg_ty, arg.span)?;
+            if param.name != "_" {
+                self.values
+                    .insert(param.name.clone(), Scheme::monomorphic(declared));
+            }
+        }
+        Ok(())
     }
 
     fn infer_handler_arms(

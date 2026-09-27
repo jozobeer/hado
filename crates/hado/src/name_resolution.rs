@@ -185,6 +185,8 @@ impl Resolver<'_> {
     fn handler(&mut self, handler: &HandlerDecl, scope: &Scope) {
         for arm in &handler.arms {
             let mut local = scope.clone();
+            // §38: 値引数は handler の全ての腕から見える。
+            bind_params(&mut local.values, &handler.params);
             match arm {
                 HandlerArm::Operation { params, body, .. } => {
                     bind_params(&mut local.values, params);
