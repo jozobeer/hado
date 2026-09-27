@@ -504,7 +504,7 @@ def diagnostics_range_encoding(nvim, work):
 def diagnostics_unsaved_change(nvim, work):
     directory = make(work, 'unsaved')
     old_text = 'def main = missing 1\n'
-    new_text = 'def main =\n  let unused = 1 ->\n  0\n'
+    new_text = 'def main =\n  1 as unused ->\n  0\n'
     fixed_text = 'def main = 1\n'
     path = directory / 'u.hd'
     write_text(path, old_text)
@@ -657,7 +657,8 @@ result.actions = request(client, 'textDocument/codeAction', {
 CONTRACT = ('type T = | A | B\n'
             'module M\n'
             'def good (x: Int): T\n'
-            'def broken (x: Int): Missing\n')
+            'def broken (x: Int): Missing\n'
+            '/module\n')
 
 
 def contract_probe(nvim, work, label, contract_rel, entry_rel, root_rel, open_entry,
