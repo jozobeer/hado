@@ -565,6 +565,13 @@ pub struct Diagnostic {
     pub message: String,
     pub related: Option<Box<Related>>,
     pub suggestion: Option<Suggestion>,
+    /// §56: the positions the message writes out, in the checked coordinates.
+    /// `message` holds `{0}`, `{1}`, ... where each one goes. Every file was
+    /// lexed with the previous files' lines added (§50), so `source_diagnostic`
+    /// rewrites them into the file that holds them and then fills the message;
+    /// a single-file path fills them with the checked coordinates, which are
+    /// the file's own.
+    pub mentions: Vec<(usize, usize)>,
 }
 
 /// 形の提示（§58.4）。書き換え（第57節）ではないので `fmt` も `--fix` も適用しない。
@@ -605,6 +612,17 @@ impl Diagnostic {
         self.col = span.col;
         self.end_line = span.end_line;
         self.end_col = span.end_col;
+    }
+
+    /// §56: write the mentioned positions into `message`, which holds `{0}`,
+    /// `{1}`, ... for them. Call it once, after the positions are in the
+    /// coordinates of the file the message is read with.
+    pub fn fill_mentions(&mut self) {
+        for (index, (line, col)) in self.mentions.iter().enumerate() {
+            self.message = self
+                .message
+                .replace(&format!("{{{index}}}"), &format!("{line}:{col}"));
+        }
     }
 }
 
@@ -675,6 +693,7 @@ pub fn parse(toks: &[Tok]) -> Result<Program, String> {
 
 fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
     Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: path.to_string(),
@@ -871,6 +890,7 @@ impl Parser<'_> {
         message: impl Into<String>,
     ) -> Diagnostic {
         Diagnostic {
+            mentions: Vec::new(),
             suggestion: None,
             related: None,
             path: self.path.to_string(),
@@ -2036,6 +2056,7 @@ impl Parser<'_> {
     /// 閉じの不足を E100 として報告する。`canonical form:` に直した綴りを添える。
     fn report_violation(&mut self, span: Span, message: &str, canonical: String) {
         self.diagnostics.push(Diagnostic {
+            mentions: Vec::new(),
             suggestion: None,
             related: None,
             path: self.path.to_string(),
@@ -2067,6 +2088,7 @@ impl Parser<'_> {
             let suggestion = (arm_body && matches!(node.kind, NodeKind::BoolBranch { .. }))
                 .then_some(Suggestion::ArmConditions);
             return Err(Diagnostic {
+                mentions: Vec::new(),
                 suggestion,
                 ..self.error_at(
                     sp,
@@ -2817,6 +2839,7 @@ impl Parser<'_> {
         // branch として最後まで成るときだけ、綴りを添える。
         if self.kind() == &TokKind::KwIf && self.boolean_branch_ahead() {
             return Err(Diagnostic {
+                mentions: Vec::new(),
                 suggestion: Some(Suggestion::ArmConditions),
                 ..self.error(
                     Some("E101"),

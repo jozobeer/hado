@@ -369,7 +369,12 @@ fn with_prelude(
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
-    check_parsed(&parse_with_prelude(source, path)?, path)
+    check_parsed(&parse_with_prelude(source, path)?, path).map_err(|mut error| {
+        // §56: a single source has no concatenation, so the checked coordinates
+        // are the file's own and the message is ready to write.
+        error.fill_mentions();
+        error
+    })
 }
 
 fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
@@ -504,6 +509,7 @@ fn check_parsed_filtered(
             (Some(error), _) => Err(error),
             (None, Some(checked)) => Ok(checked),
             (None, None) => Err(parser::Diagnostic {
+                mentions: Vec::new(),
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -571,6 +577,7 @@ pub fn dump_mono(source: &str, path: &str) -> Result<String, parser::Diagnostic>
 
 pub(crate) fn entry_required(path: &str) -> parser::Diagnostic {
     parser::Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -607,6 +614,7 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
     let checked = check_parsed(parsed, path)?;
     let ast = &parsed.ast;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -618,6 +626,7 @@ fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diag
         message: "main must be a value definition for lowering".into(),
     })?;
     let program = mono::lower_program(ast, &checked).map_err(|message| parser::Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: path.into(),

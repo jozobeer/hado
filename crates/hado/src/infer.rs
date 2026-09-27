@@ -1738,6 +1738,7 @@ impl Checker<'_> {
             })
         });
         Diagnostic {
+            mentions: Vec::new(),
             suggestion: None,
             related,
             path: self.path.into(),

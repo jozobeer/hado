@@ -48,6 +48,7 @@ impl Project {
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
         let library_error = library_main.map(|span| Diagnostic {
+            mentions: Vec::new(),
             suggestion: None,
             related: None,
             path: files[0].path.clone(),
@@ -465,6 +466,7 @@ fn collect_sources(
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: path.to_string_lossy().into_owned(),
@@ -481,6 +483,7 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
 /// 持たない診断にする。読む前の誤りなので、位置は入口の先頭に置く。
 pub fn input_diagnostic(input: &Path, message: &str) -> Diagnostic {
     Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: input.to_string_lossy().into_owned(),
@@ -627,6 +630,7 @@ fn read_file(
         None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
     };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+        mentions: Vec::new(),
         suggestion: None,
         related: None,
         path: display.clone(),
@@ -700,6 +704,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic {
+                mentions: Vec::new(),
                 suggestion: None,
                 related: None,
                 path: path.to_string_lossy().into_owned(),
@@ -758,6 +763,7 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     })
                 });
                 let error = Diagnostic {
+                    mentions: Vec::new(),
                     suggestion: None,
                     related,
                     path: file.source.path.clone(),
@@ -785,13 +791,18 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
     (roots, duplicate)
 }
 
-/// §56: a position is written with the path of the file that holds it and with
-/// the line counted inside that file. Every file was lexed with the previous
-/// files' line counts added, so the checked line picks the file (§50).
+/// §56: the file a checked line belongs to, with the line rewritten inside it.
+/// Every file was lexed with the previous files' line counts added, so the
+/// checked line picks the file (§50).
+fn localize_line<'a>(files: &'a [SourceFile], line: &mut usize) -> Option<&'a SourceFile> {
+    let file = files.iter().rev().find(|file| file.offset < *line)?;
+    *line -= file.offset;
+    Some(file)
+}
+
 fn localize(files: &[SourceFile], path: &mut String, line: &mut usize) {
-    if let Some(file) = files.iter().rev().find(|file| file.offset < *line) {
+    if let Some(file) = localize_line(files, line) {
         *path = file.path.clone();
-        *line -= file.offset;
     }
 }
 
@@ -800,6 +811,12 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
         localize(files, &mut related.path, &mut related.line);
     }
     localize(files, &mut error.path, &mut error.line);
+    // §56: a mentioned position sits in the same file as the anchor, so only
+    // its line is rewritten; the column is already counted inside the line.
+    for mention in &mut error.mentions {
+        localize_line(files, &mut mention.0);
+    }
+    error.fill_mentions();
     for index in 0..files.len() {
         error.message = error.message.replace(&format!("file{index}$"), "");
     }

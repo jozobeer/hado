@@ -353,6 +353,7 @@ impl Resolver<'_> {
             })
         });
         self.result.diagnostics.push(Diagnostic {
+            mentions: Vec::new(),
             suggestion: None,
             related,
             path: self.path.into(),

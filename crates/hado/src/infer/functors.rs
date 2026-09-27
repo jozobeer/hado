@@ -43,6 +43,7 @@ pub(super) fn duplicate_applications(ast: &Ast, path: &str) -> Vec<Diagnostic> {
                     .collect::<Vec<_>>(),
             );
             (!seen.insert(key)).then(|| Diagnostic {
+                mentions: Vec::new(),
                 suggestion: None,
                 related: None,
                 path: path.into(),

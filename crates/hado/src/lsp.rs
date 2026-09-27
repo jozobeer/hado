@@ -852,6 +852,7 @@ fn diagnostics_of(
                 (
                     path.clone(),
                     Diagnostic {
+                        mentions: Vec::new(),
                         suggestion: None,
                         related: None,
                         path: path
