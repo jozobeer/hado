@@ -292,8 +292,8 @@ def run(name, source):
 
 # 空の写像。find は None、remove は to_list を変えない。
 empty = run('empty', 'def main =\n'
-                     '  let m = Map.empty ->\n'
-                     '  let removed = Map.remove m "k" ->\n'
+                     '  Map.empty as m ->\n'
+                     '  Map.remove m "k" as removed ->\n'
                      '  [ Option.unwrap_or (Map.find m "k") "none",\n'
                      '    Int.to_string (List.length (Map.to_list m)),\n'
                      '    Int.to_string (List.length (Map.to_list removed)) ]')
@@ -301,8 +301,8 @@ assert empty == '["none", "0", "0"]', empty
 
 # 鍵を持つ写像に無い鍵。find は None、remove は同じ写像を返す。
 absent = run('absent', 'def main =\n'
-                       '  let m = Map.insert (Map.insert Map.empty "b" "2") "a" "1" ->\n'
-                       '  let removed = Map.remove m "zzz" ->\n'
+                       '  Map.insert (Map.insert Map.empty "b" "2") "a" "1" as m ->\n'
+                       '  Map.remove m "zzz" as removed ->\n'
                        '  [ Option.unwrap_or (Map.find m "zzz") "none",\n'
                        '    Option.unwrap_or (Map.find removed "a") "gone",\n'
                        '    Int.to_string (List.length (Map.to_list m)),\n'
@@ -360,9 +360,9 @@ expected = sorted(insert_order)
 # なる（docs/rounds/map-by-builtin-compare.md の実測と仕様への疑義を参照）。
 witness = 'def witness m => Map.fold m "" fn(acc, key, _ => String.concat acc (String.concat "<" key))\n'
 source = witness + 'def main =\n'
-source += '  let m = Map.empty ->\n'
+source += '  Map.empty as m ->\n'
 for key in insert_order:
-    source += f'  let m = Map.insert m "{key}" 0 ->\n'
+    source += f'  Map.insert m "{key}" 0 as m ->\n'
 source += '  IoDefault.log (witness m)\n'
 got = run('order', source)
 assert got == ''.join('<' + key for key in expected), (got, expected)
@@ -371,7 +371,7 @@ assert got == ''.join('<' + key for key in expected), (got, expected)
 # 降順に呼んで reverse する実装でも `to_list` は昇順になる。`fold` の
 # 訪問列だけが降順を露わにする。ここでは `fold` の訪問列そのものを測る。
 to_list = run('list', 'def main =\n'
-                      '  let m = Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 ->\n'
+                      '  Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 as m ->\n'
                       '  List.length (Map.to_list m)')
 assert to_list == '3', to_list
 
@@ -435,7 +435,7 @@ def load_prefix(keys):
             '  | [] => m\n'
             '  | [key, ...rest] => load rest (Map.insert m key "v")\n'
             'def main =\n'
-            f'  let m = load [{literal}] Map.empty ->\n')
+            f'  load [{literal}] Map.empty as m ->\n')
 
 
 def base_source(keys):
@@ -446,7 +446,7 @@ def base_source(keys):
 def last_insert_source(keys):
     """n - 1 件を入れた木に最後の 1 件を足す。基準は n - 1 件の木。"""
     return (load_prefix(keys[:-1])
-            + f'  let grown = Map.insert m "{keys[-1]}" "v" ->\n'
+            + f'  Map.insert m "{keys[-1]}" "v" as grown ->\n'
             + '  IoDefault.log (Int.to_string (List.length (Map.to_list grown)))\n')
 
 
@@ -457,7 +457,7 @@ def find_source(keys, probe):
 
 def remove_source(keys, probe):
     return (load_prefix(keys)
-            + f'  let removed = Map.remove m "{probe}" ->\n'
+            + f'  Map.remove m "{probe}" as removed ->\n'
             + '  IoDefault.log (Int.to_string (List.length (Map.to_list removed)))\n')
 
 
@@ -578,13 +578,13 @@ def expected(operations):
     return sorted(model)
 
 
-source = ['def main =', '  let m0 = Map.empty ->']
+source = ['def main =', '  Map.empty as m0 ->']
 name = 'm0'
 for index, (kind, key) in enumerate(operations, start=1):
     nxt = f'm{index}'
     call = 'Map.insert' if kind == 'insert' else 'Map.remove'
     extra = f' "{key}" "v"' if kind == 'insert' else f' "{key}"'
-    source.append(f'  let {nxt} = {call} {name}{extra} ->')
+    source.append(f'  {call} {name}{extra} as {nxt} ->')
     name = nxt
 source.append(f'  Map.to_list {name}')
 path = workdir / 'main.hd'
@@ -722,14 +722,15 @@ assert declared, 'Map is not in the §55 function set'
 assert block.count('module Map') == 1, block.count('module Map')
 typed = block[block.index('module Map'):]
 typed = typed[:typed.index('```', typed.index('module Map'))]
-# `def K insert(...)` の形から member 名を取る（型変数の前置きは member 名の前）。
+# `def K insert (...)` の形から member 名を取る（型変数の前置きは member 名の前）。
+# 後置では `def 名前 (引数)` と空白が入るが、旧い綴りも読めるようにしておく。
 found = re.findall(r'^def\s+(?:\([^)]*\)\s+)?(\w+)\s*[(:]', typed, re.M)
 assert sorted(found) == sorted(declared), (found, declared)
 
 # `find` は `V Option` を返す。
 find_returns = None
 for line in typed.splitlines():
-    if line.strip().startswith('def') and re.search(r'\bfind\(', line):
+    if line.strip().startswith('def') and re.search(r'\bfind\s*\(', line):
         find_returns = line.rsplit('):', 1)[1].strip()
 assert find_returns == 'V Option Pure', find_returns
 # `fold` と `to_list` が昇順であることを §55 の本文が述べている。
@@ -742,16 +743,16 @@ assert 'MakeMap' not in spec[:start] + spec[end:], 'MakeMap is out of scope'
 # 受理コーパスが §55 の member を実走して昇順を測っている。実行して照合する。
 cases = {
     'empty_find': 'def main =\n'
-                  '  let m = Map.empty ->\n'
-                  '  let removed = Map.remove m "k" ->\n'
+                  '  Map.empty as m ->\n'
+                  '  Map.remove m "k" as removed ->\n'
                   '  [Option.unwrap_or (Map.find m "k") "none",\n'
                   '   Int.to_string (List.length (Map.to_list removed))]',
     'ascending': 'def key_of | MapEntry(k, _) => k\n'
                  'def main =\n'
-                 '  let m = Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 ->\n'
+                 '  Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 as m ->\n'
                  '  List.map (Map.to_list m) key_of',
     'fold_ascending': 'def main =\n'
-                      '  let m = Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 ->\n'
+                      '  Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 as m ->\n'
                       '  Map.fold m [] fn(acc, k, _ => List.append acc [k])',
 }
 
@@ -892,7 +893,7 @@ first_of = ('def first_of\n'
             '| [] => MapEntry(0.0, "")\n'
             '| [e, ..._] => e\n')
 zero = run('zero', key_of + first_of + 'def main =\n'
-           '  let m = Map.insert (Map.insert Map.empty (-0.0) "neg") 0.0 "pos" ->\n'
+           '  Map.insert (Map.insert Map.empty (-0.0) "neg") 0.0 "pos" as m ->\n'
            '  [ Int.to_string (List.length (Map.to_list m)),\n'
            '    Option.unwrap_or (Map.find m (-0.0)) "none",\n'
            '    Option.unwrap_or (Map.find m 0.0) "none",\n'
@@ -904,8 +905,8 @@ assert zero == '["1", "pos", "pos", "-0.0", "none", "0"]', zero
 # NaN 同士は `==` が false なので、長さ 1 と find/remove で畳みを測り、
 # 鍵の `==` では照合しない。
 nan = run('nan', 'def main =\n'
-                 '  let nan = 0.0 / 0.0 ->\n'
-                 '  let m = Map.insert (Map.insert Map.empty nan "first") nan "second" ->\n'
+                 '  0.0 / 0.0 as nan ->\n'
+                 '  Map.insert (Map.insert Map.empty nan "first") nan "second" as m ->\n'
                  '  [ Int.to_string (List.length (Map.to_list m)),\n'
                  '    Option.unwrap_or (Map.find m nan) "none",\n'
                  '    Int.to_string (List.length (Map.to_list (Map.remove m nan))) ]')
