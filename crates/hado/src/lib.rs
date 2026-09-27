@@ -281,6 +281,7 @@ fn with_prelude(
             include_str!("../../../stdlib/option.hd"),
         ),
         ("stdlib/error.hd", include_str!("../../../stdlib/error.hd")),
+        ("stdlib/map.hd", include_str!("../../../stdlib/map.hd")),
     ] {
         prelude.extend(
             parser::parse_source(source, name)?
@@ -305,6 +306,7 @@ fn with_prelude(
             include_str!("../../../stdlib/int.hd"),
             include_str!("../../../stdlib/float.hd"),
             include_str!("../../../stdlib/char.hd"),
+            include_str!("../../../stdlib/map.hd"),
         ] {
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;

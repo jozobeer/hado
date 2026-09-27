@@ -1,0 +1,266 @@
+type (K, V) MapEntry = | MapEntry(K, V)
+
+module Map
+type (K, V) T
+def (K, V) empty: (K, V) T
+def (K, V) insert(map: (K, V) T, key: K, value: V): (K, V) T
+def (K, V) find(map: (K, V) T, key: K): V Option
+def (K, V) remove(map: (K, V) T, key: K): (K, V) T
+def (K, V, A) fold(map: (K, V) T, initial: A, f: Fn(A, K, V => A)): A
+def (K, V) to_list(map: (K, V) T): (K, V) MapEntry List
+
+implement Map as Map
+// 実体は左傾赤黒木（LLRB）。色と節と削除の途中結果はこの実装の中だけに置く。
+type Color = | Red | Black
+type (K, V) T = | Leaf | Node(Color, (K, V) T, K, V, (K, V) T)
+// 削除の再帰の戻り値。鍵が無いときは Unchanged を返し、途中で押し下げた赤を捨てて
+// 元の木をそのまま返す（no-op）。これが無いと、存在しない鍵の削除で赤黒木の
+// 不変条件が壊れ、次の削除が別の鍵を落とす。
+type (K, V) Step = | Unchanged | Deleted((K, V) T)
+
+def empty = Leaf
+
+// --- 木の観察 ---
+def red
+| Leaf => false
+| Node(color, _, _, _, _) => color == Red
+
+def left
+| Leaf => Leaf
+| Node(_, l, _, _, _) => l
+
+def right
+| Leaf => Leaf
+| Node(_, _, _, _, r) => r
+
+def empty_at
+| Leaf => true
+| Node(_, _, _, _, _) => false
+
+// --- 色の操作 ---
+def flip
+| Red => Black
+| Black => Red
+
+def repaint
+| Leaf => Leaf
+| Node(c, l, k, v, r) => Node(flip c, l, k, v, r)
+
+def paint t color =>
+  if t
+  | Leaf => Leaf
+  | Node(_, l, k, v, r) => Node(color, l, k, v, r)
+
+def flip_colors
+| Leaf => Leaf
+| Node(c, l, k, v, r) => Node(flip c, repaint l, k, v, repaint r)
+
+// --- 回転 ---
+def rotate_left
+| Leaf => Leaf
+| Node(c, l, k, v, r) => rotate_left_at c l k v r
+
+def rotate_left_at c l k v r =>
+  if r
+  | Leaf => Node(c, l, k, v, r)
+  | Node(_, rl, rk, rv, rr) => Node(c, Node(Red, l, k, v, rl), rk, rv, rr)
+
+def rotate_right
+| Leaf => Leaf
+| Node(c, l, k, v, r) => rotate_right_at c l k v r
+
+def rotate_right_at c l k v r =>
+  if l
+  | Leaf => Node(c, l, k, v, r)
+  | Node(_, ll, lk, lv, lr) => Node(c, ll, lk, lv, Node(Red, lr, k, v, r))
+
+// --- 赤の不変条件を戻す（Sedgewick の fixUp）---
+def fix_right t
+| red (right t) && not (red (left t)) => rotate_left t
+| t
+
+def fix_left t
+| red (left t) && red (left (left t)) => rotate_right t
+| t
+
+def fix_flip t
+| red (left t) && red (right t) => flip_colors t
+| t
+
+def fix_up t => fix_flip (fix_left (fix_right t))
+
+// --- 挿入 ---
+def insert t k v => paint (ins t k v) Black
+
+def rec ins t k v =>
+  if t
+  | Leaf => Node(Red, Leaf, k, v, Leaf)
+  | Node(c, l, y, vy, r) => ins_at c l y vy r (compare k y) k v
+
+def rec ins_at c l y vy r order k v
+| order < 0 => fix_up (Node(c, ins l k v, y, vy, r))
+| order > 0 => fix_up (Node(c, l, y, vy, ins r k v))
+// order == 0 は `compare` が等価と見た鍵。先に入っている鍵 `y` を保ち、値だけを `v` に
+// 差し替える（§55）。Float の `-0.0` の後に `+0.0` を入れても鍵は `-0.0` のまま残る。
+| fix_up (Node(c, l, y, v, r))
+
+// --- 探索 ---
+def rec find t k =>
+  if t
+  | Leaf => None
+  | Node(_, l, y, vy, r) => find_at (compare k y) l vy r k
+
+def rec find_at order l vy r k
+| order < 0 => find l k
+| order > 0 => find r k
+| Some(vy)
+
+// --- 昇順の畳み込みと列挙 ---
+// 木を帰りがけ順（左 → 節 → 右）に辿り、キーの昇順で累算器を呼ぶ。
+def rec fold t initial f =>
+  if t
+  | Leaf => initial
+  | Node(_, l, k, v, r) => fold r (f (fold l initial f) k v) f
+
+def to_list t => List.reverse (fold t [] fn(acc, k, v => [MapEntry(k, v), ...acc]))
+
+// --- 削除（LLRB）---
+def remove t k => paint (del t k) Black
+
+def del t k =>
+  if del_step t k
+  | Unchanged => t
+  | Deleted(next) => next
+
+def rec del_step t k =>
+  if t
+  | Leaf => Unchanged
+  | Node(c, l, y, vy, r) => del_step_at (Node(c, l, y, vy, r)) (compare k y) k
+
+def rec del_step_at node order k
+| order < 0 => del_step_left node k
+| order == 0 => del_step_eq node k
+| del_step_gt node k
+
+// order > 0。Sedgewick の delete は等号・大の枝の頭で「左が赤なら右回転」を必ず行う。
+// 回転後は必ず右へ降りる（新しい根の鍵は元の鍵より小さいので比較は不要）。
+def rec del_step_gt t k => del_step_right (rot_left_if_red t) k
+
+def rot_left_if_red t
+| red (left t) => rotate_right t
+| t
+
+def rec del_step_left t k => del_step_left_at (keep_red_left t) k
+
+def rec del_step_left_at t k => del_step_left_rec (del_step (left t) k) t
+
+def rec del_step_left_rec res t =>
+  if res
+  | Unchanged => Unchanged
+  | Deleted(next) => del_step_left_build t next
+
+def rec del_step_left_build t next =>
+  if t
+  | Leaf => Unchanged
+  | Node(c, _, y, vy, r) => Deleted (fix_up (Node(c, next, y, vy, r)))
+
+def keep_red_left t
+| red (left t) || red (left (left t)) => t
+| move_red_left t
+
+def rec del_step_right t k => del_step_right_at (keep_red_right t) k
+
+def rec del_step_right_at t k => del_step_right_rec (del_step (right t) k) t
+
+def rec del_step_right_rec res t =>
+  if res
+  | Unchanged => Unchanged
+  | Deleted(next) => del_step_right_build t next
+
+def rec del_step_right_build t next =>
+  if t
+  | Leaf => Unchanged
+  | Node(c, l, y, vy, _) => Deleted (fix_up (Node(c, l, y, vy, next)))
+
+def keep_red_right t
+| red (right t) || red (left (right t)) => t
+| move_red_right t
+
+def rec del_step_eq t k =>
+  if t
+  | Leaf => Unchanged
+  | Node(c, l, y, vy, r) => del_step_eq_at (Node(c, l, y, vy, r)) k
+
+def rec del_step_eq_at node k
+| red (left node) => del_step_right (rotate_right node) k
+| del_step_eq_direct node k
+
+def rec del_step_eq_direct t k =>
+  if t
+  | Leaf => Unchanged
+  | Node(c, l, y, vy, r) => del_step_eq_finish (Node(c, l, y, vy, r)) k (empty_at r) (rotates_right (Node(c, l, y, vy, r)))
+
+def rec del_step_eq_finish t k nothing rotates
+| nothing => Deleted(Leaf)
+| rotates => del_step_right t k
+| del_step_replace (keep_red_right t)
+
+def rotates_right t
+| red (right t) => false
+| red (left (right t)) => false
+| red (left (left t)) => true
+| false
+
+def del_step_replace
+| Leaf => Unchanged
+| Node(c, l, _, _, r) => Deleted (fix_up (with_min_from_right c l r))
+
+def move_red_left
+| Leaf => Leaf
+| Node(c, l, k, v, r) => move_red_left_at (flip_colors (Node(c, l, k, v, r)))
+
+def move_red_left_at
+| Leaf => Leaf
+| Node(c, l, k, v, r) => move_red_left_decide c l k v r
+
+def move_red_left_decide c l k v r
+| red (left r) => flip_colors (rotate_left (Node(c, l, k, v, rotate_right r)))
+| Node(c, l, k, v, r)
+
+def move_red_right
+| Leaf => Leaf
+| Node(c, l, k, v, r) => move_red_right_at (flip_colors (Node(c, l, k, v, r)))
+
+def move_red_right_at
+| Leaf => Leaf
+| Node(c, l, k, v, r) => move_red_right_decide c l k v r
+
+def move_red_right_decide c l k v r
+| red (left l) => flip_colors (rotate_right (Node(c, l, k, v, r)))
+| Node(c, l, k, v, r)
+
+// --- 右部分木の最小を根に据えて、その最小を消す ---
+def with_min_from_right c l r => with_min_entry c l r (min_entry r)
+
+def with_min_entry c l r entry =>
+  if entry
+  | Some(MapEntry(mk, mv)) => Node(c, l, mk, mv, delete_min r)
+  | None => Leaf
+
+def rec min_entry
+| Leaf => None
+| Node(_, l, k, v, _) => min_choose (min_entry l) (MapEntry(k, v))
+
+def min_choose found current =>
+  if found
+  | Some(_) => found
+  | None => Some(current)
+
+def rec delete_min
+| Leaf => Leaf
+| Node(_, Leaf, _, _, _) => Leaf
+| Node(c, l, k, v, r) => delete_min_after (keep_red_left (Node(c, l, k, v, r)))
+
+def rec delete_min_after
+| Leaf => Leaf
+| Node(c, l, k, v, r) => fix_up (Node(c, delete_min l, k, v, r))
