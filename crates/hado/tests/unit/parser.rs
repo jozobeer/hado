@@ -82,13 +82,13 @@ fn record_and_list_literals() {
 fn bindings_and_fn() {
     assert_eq!(
         parse_expr_ok("def main = 1 as x -> x + 1"),
-        "(let x = 1 -> (x + 1))"
+        "(1 as x -> (x + 1))"
     );
     assert_eq!(
         parse_expr_ok("def main = f y as x? -> x"),
-        "(let x? = f y -> x)"
+        "(f y as x? -> x)"
     );
-    assert_eq!(parse_expr_ok("def main = g x -> x"), "(do g x -> x)");
+    assert_eq!(parse_expr_ok("def main = g x -> x"), "(g x -> x)");
     assert_eq!(
         parse_expr_ok("def main = fn(x => x + 1)"),
         "fn(x => (x + 1))"
