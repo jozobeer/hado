@@ -118,3 +118,61 @@ fn close_defects_are_e100() {
     }
     assert!(count >= 10, "閉じの負例が足りない: {count}");
 }
+
+/// §57: 局所修正（`--fix`）と一括修正（`fmt`）が書く置換も後置の綴りで、
+/// 書いた結果を読み直して検査できる。旧形の `let`・`do` を書き戻さない。
+#[test]
+fn canonical_rewrites_write_parseable_postfix() {
+    for name in ["E507", "E508", "E520"] {
+        let path = repo_root().join("tests/reject").join(name).join("main.hd");
+        let source = fs::read_to_string(&path).expect("readable");
+
+        // `check --fix`: 診断のアンカーに合う置換を 1 つ当てる。
+        let error = hado::check_source(&source, name)
+            .err()
+            .unwrap_or_else(|| panic!("{name}: 診断が出ない"));
+        let code = error.code.clone().expect("code");
+        assert_eq!(code, name, "{name}: 別の診断が先に出た");
+        let fix = hado::fixes::fix_at(&source, &code, error.line, error.col)
+            .unwrap_or_else(|| panic!("{name}: 書き換えが無い"));
+        let fixed = format!(
+            "{}{}{}",
+            &source[..fix.start],
+            fix.replacement,
+            &source[fix.end..]
+        );
+        parse_source(&fixed, name).unwrap_or_else(|error| {
+            panic!("{name}: --fix の出力を読み直せない: {error}\n{fixed}")
+        });
+        hado::check_source(&fixed, name)
+            .unwrap_or_else(|error| panic!("{name}: --fix の出力が検査を通らない: {error}\n{fixed}"));
+
+        // `fmt`: 当てられる書き換えを一括で当てる。
+        let (formatted, applied) = hado::fixes::format(&source)
+            .unwrap_or_else(|limit| panic!("{name}: {limit} 回で収束しない"))
+            .unwrap_or_else(|| panic!("{name}: 書き換えが 1 つも出ない"));
+        assert!(applied > 0);
+        parse_source(&formatted, name).unwrap_or_else(|error| {
+            panic!("{name}: fmt の出力を読み直せない: {error}\n{formatted}")
+        });
+        hado::check_source(&formatted, name)
+            .unwrap_or_else(|error| panic!("{name}: fmt の出力が検査を通らない: {error}\n{formatted}"));
+        assert!(
+            hado::fixes::format(&formatted).expect("settles").is_none(),
+            "{name}: fmt が冪等でない"
+        );
+    }
+}
+
+/// §11: 正準形の印字も後置で、旧形の `let`・`do` を出さない。
+#[test]
+fn canonical_spelling_uses_postfix_bindings() {
+    let source = "def main =\n  1 as x ->\n  x + 1 as y ->\n  y\n";
+    let ast = parse_source(source, "postfix.hd").unwrap();
+    let printed = hado::parser::canonical(ast.main().expect("main"));
+    assert_eq!(printed, "(1 as x -> ((x + 1) as y -> y))");
+    assert!(!printed.contains("let"), "{printed}");
+    assert!(!printed.contains("do "), "{printed}");
+    parse_source(&format!("def main = {printed}"), "postfix.hd")
+        .unwrap_or_else(|error| panic!("正準形を読み直せない: {error}\n{printed}"));
+}
