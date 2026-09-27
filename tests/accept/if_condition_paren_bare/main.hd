@@ -1,5 +1,4 @@
 // spec: §12
-// item: 条件が ( で始まる if（裸）
 // expect: big
 def big (a: Int, b: Int, c: Int): String => if (a + b) * 2 > c => "big" | "small"
 def main = big 1 2 5

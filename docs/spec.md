@@ -2072,10 +2072,10 @@ prelude は全プログラムに連結され、全ての検査を受ける。pre
 `List.head` は `[]` で `None`、先頭があれば `Some(先頭)` である。`List.nth` は `index` が負か長さ以上なら `None` である。`List.take` は `count` が 0 以下なら `[]`、長さ以上なら全件である。`List.drop` は `count` が 0 以下なら全件、長さ以上なら `[]` である。`List` のこの 4 つの型は次のとおりとする。
 
 ```ocaml
-def A head(values: A List): A Option Pure
-def A nth(values: A List, index: Int): A Option Pure
-def A take(values: A List, count: Int): A List Pure
-def A drop(values: A List, count: Int): A List Pure
+def A head (values: A List): A Option Pure
+def A nth (values: A List, index: Int): A Option Pure
+def A take (values: A List, count: Int): A List Pure
+def A drop (values: A List, count: Int): A List Pure
 ```
 
 # 第XI部 診断
@@ -2325,8 +2325,7 @@ as
 失敗しうる処理：
 
 ```ocaml
-def create_user input =>
-  parse input as parsed ->
+def create_user input => parse input as parsed ->
   validate parsed ->
   authorize parsed ->
   save parsed
@@ -2335,8 +2334,7 @@ def create_user input =>
 値を返さない処理：
 
 ```ocaml
-def delete_user id =>
-  find_user id as user ->
+def delete_user id => find_user id as user ->
   authorize_delete user ->
   delete user
 ```
@@ -2356,51 +2354,37 @@ def try_create input =>
 ADT分岐：
 
 ```ocaml
-def display
-| Guest => "guest"
-| Member(user) => user.name
+def display | Guest => "guest" | Member(user) => user.name
 ```
 
 Option分岐：
 
 ```ocaml
-def display_name user =>
-  if user.name
-  | Some(name) => name
-  | "anonymous"
+def display_name user => if user.name | Some(name) => name | "anonymous"
 ```
 
 Boolean：
 
 ```ocaml
-def size x =>
-  if x > 10 => Large | Small
+def size x => if x > 10 => Large | Small
 ```
 
 複数条件：
 
 ```ocaml
-def classify score
-| score >= 90 => Excellent
-| score >= 70 => Good
-| score >= 50 => Pass
-| Fail
+def classify score | score >= 90 => Excellent | score >= 70 => Good | score >= 50 => Pass | Fail
 ```
 
 pattern fallback：
 
 ```ocaml
-def name
-| Member(user) => user.name
-| "guest"
+def name | Member(user) => user.name | "guest"
 ```
 
 pipeline：
 
 ```ocaml
-def active_names users =>
-  List.filter users fn(user => user.active)
-  |> List.map fn(user => user.name)
+def active_names users => List.filter users fn(user => user.active) |> List.map fn(user => user.name)
 ```
 
 契約と実装：

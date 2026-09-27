@@ -1,5 +1,4 @@
 // spec: §12
-// item: 条件が ( で始まる if（/if）
 // expect: 7
 def big (a: Int, b: Int, c: Int): Int => if (a + b) * 2 > c => 1 | c as d ->
   d + 1
