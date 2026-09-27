@@ -4,6 +4,8 @@
 # §54 の終了コードと §55 の log_error（`docs/rounds/exit-code-from-main.md`）。
 # 完了条件をそのまま測る。値は仕様の境界（0・255・256・-1・i64 の両端）で選ぶ。
 # 生成した実行ファイルと `hado run` の両方で測る（完了条件 2）。
+# log_error の失敗は ENOSPC（/dev/full）と EPIPE（stderr の読み手が先に終わる）の
+# 両方で測る。数値の `// expect:` を持つ入口はファイル名で選ばず全て走らせる。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -144,10 +146,9 @@ log_error_streams() {
 check '3 log_error writes stderr only and log writes stdout' log_error_streams
 
 # --- 4. 失敗した log_error は捕捉できる IoFailure。捕まえなければ 1 ---
-log_error_caught() {
-    local dir="$workdir/logerr-caught"
-    mkdir -p "$dir"
-    cat >"$dir/main.hd" <<'HD'
+# 捕捉の証拠は、handler がプログラムの隣に残す `observed` のファイル。
+write_log_error_handler() {
+    cat >"$1/main.hd" <<'HD'
 handler Error as Catch
 abort raise e =>
   write_file "observed" (Bytes.of_string e.message) ->
@@ -157,10 +158,15 @@ def main =
   with Catch ->
   log_error "x"
 HD
-    "$hado" build "$dir/main.hd" >/dev/null 2>&1 || return 1
-    # 失敗する書き込み先は stderr なので、/dev/full は log_error 自身の出力だけを
-    # 隠す。handler がプログラムの隣に残す記録が、捕まえた値の証拠になる。
-    (cd "$dir" && sh -c './main 2>/dev/full')
+}
+
+# ENOSPC: 書き込み先を /dev/full にする。
+log_error_caught() {
+    local dir="$workdir/logerr-caught"
+    mkdir -p "$dir"
+    write_log_error_handler "$dir"
+    "$hado" build -o "$dir/program" "$dir/main.hd" >/dev/null 2>&1 || return 1
+    (cd "$dir" && sh -c './program 2>/dev/full')
     [ $? -eq 0 ] || return 1
     [ "$(cat "$dir/observed" 2>/dev/null)" = 'IoFailure' ]
 }
@@ -170,11 +176,36 @@ log_error_uncaught() {
     local dir="$workdir/logerr-uncaught"
     mkdir -p "$dir"
     printf 'def main =\n  log_error "x" ->\n  ()\n' >"$dir/main.hd"
-    "$hado" build "$dir/main.hd" >/dev/null 2>&1 || return 1
-    (cd "$dir" && sh -c './main 2>/dev/full')
+    "$hado" build -o "$dir/program" "$dir/main.hd" >/dev/null 2>&1 || return 1
+    (cd "$dir" && sh -c './program 2>/dev/full')
     [ $? -eq 1 ]
 }
 check '4 an uncaught log_error failure exits 1' log_error_uncaught
+
+# EPIPE: stderr の読み手が先に終わったパイプへ書く。シグナル（141）で終わらせず、
+# 他の書き込み失敗と同じにする（§54・§55）。
+log_error_epipe_uncaught() {
+    local dir="$workdir/logerr-epipe-uncaught" helper status=0
+    mkdir -p "$dir"
+    printf 'def main =\n  log_error "x" ->\n  ()\n' >"$dir/main.hd"
+    "$hado" build -o "$dir/program" "$dir/main.hd" >/dev/null 2>&1 || return 1
+    helper=$(readlink -f scripts/exec-stderr-epipe.py)
+    (cd "$dir" && python3 "$helper" ./program) || status=$?
+    [ "$status" -eq 1 ]
+}
+check '4 an uncaught stderr EPIPE exits 1, not 141' log_error_epipe_uncaught
+
+log_error_epipe_caught() {
+    local dir="$workdir/logerr-epipe-caught" helper status=0
+    mkdir -p "$dir"
+    write_log_error_handler "$dir"
+    "$hado" build -o "$dir/program" "$dir/main.hd" >/dev/null 2>&1 || return 1
+    helper=$(readlink -f scripts/exec-stderr-epipe.py)
+    (cd "$dir" && python3 "$helper" ./program) || status=$?
+    [ "$status" -eq 0 ] || return 1
+    [ "$(cat "$dir/observed" 2>/dev/null)" = 'IoFailure' ]
+}
+check '4 a caught stderr EPIPE is an IoFailure' log_error_epipe_caught
 
 # 印字の失敗も 1。
 print_failure() {
@@ -197,6 +228,36 @@ int_ignores_broken_stdout() {
     [ $? -eq 7 ]
 }
 check '4 an Int main never writes so a broken stdout does not matter' int_ignores_broken_stdout
+
+# --- 5. 数値の `// expect:` を宣言した入口は、その値を印字する ---
+# 入口はファイル名で選ばない（§50 の第 2 入口を漏らさない）。tests/ と stdlib/ の
+# うち、数値の `// expect:`・`// run-expect:` を持つファイルを全て build して走らせる。
+# 期待値はファイルのヘッダから読み、判定器には書き写さない。
+expect_number_is_printed() {
+    local out_dir="$workdir/expect" red=0 seen=0
+    mkdir -p "$out_dir"
+    local file want out got rc
+    while IFS= read -r file; do
+        while IFS= read -r want; do
+            seen=$((seen + 1))
+            out="$out_dir/$(echo "$file" | tr '/.' '__')"
+            if ! "$hado" build -o "$out" "$file" >/dev/null 2>"$out_dir/build.err"; then
+                echo "  $file: build failed" >&2
+                red=$((red + 1))
+                continue
+            fi
+            got=$("$out" 2>/dev/null)
+            rc=$?
+            if [ "$got" != "$want" ] || [ "$rc" -ne 0 ]; then
+                echo "  $file: want=$want got='$got' rc=$rc" >&2
+                red=$((red + 1))
+            fi
+        done < <(grep -oE '^// (run-)?expect: [0-9]+' "$file" | awk '{print $NF}')
+    done < <(grep -rlE '^// (run-)?expect: [0-9]+' tests stdlib | sort)
+    [ "$seen" -gt 0 ] || { echo "  no numeric expect entry" >&2; return 1; }
+    [ "$red" -eq 0 ]
+}
+check '5 every numeric // expect: entry prints its number' expect_number_is_printed
 
 # --- 7. `hado test` は guest の終了コードをそのまま報告する ---
 # 期待する値はここで作り、門番に書き写さない。
