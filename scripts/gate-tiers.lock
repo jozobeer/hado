@@ -1,4 +1,5 @@
 canonical-in-syntax-errors	full
+char-and-float-conversions	core
 ci	quick
 clippy	core
 cognitive-complexity	core

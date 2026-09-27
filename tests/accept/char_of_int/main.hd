@@ -1,0 +1,4 @@
+// spec: §55
+// expect: [0, 55295, 57344, 1114111, 12354, 128512]
+// needs: prelude
+def main = List.map [0, 55295, 57344, 1114111, 12354, 128512] fn(n => Char.to_int (Char.of_int n))

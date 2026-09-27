@@ -1,0 +1,4 @@
+// spec: §54
+// expect: ["0.0", "-0.0", "0.1", "inf", "-inf", "nan"]
+// needs: prelude
+def main = List.map [0.0, -0.0, 0.1, 1.0 / 0.0, -1.0 / 0.0, 0.0 / 0.0] Float.to_string

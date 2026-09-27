@@ -304,6 +304,7 @@ fn with_prelude(
             include_str!("../../../stdlib/bytes.hd"),
             include_str!("../../../stdlib/int.hd"),
             include_str!("../../../stdlib/float.hd"),
+            include_str!("../../../stdlib/char.hd"),
         ] {
             let padded = "\n".repeat(line) + module;
             let parsed = parser::parse_source(&padded, path)?;

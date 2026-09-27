@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <gc.h>
+#include <math.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -653,15 +654,72 @@ int64_t hado_int_parse_unchecked(const HadoString *string) {
   return parse_int(string).value;
 }
 
+/* §55: the accepted spelling is exactly `"-"? digit+ "." digit+`: the whole
+   string must match, `+` and exponents are not accepted, and leading zeros
+   and trailing fraction zeros are. */
+static int float_grammar(const HadoString *string) {
+  size_t index = 0;
+  if (string->length == 0) return 0;
+  if (string->bytes[0] == '-') index = 1;
+  size_t integer_start = index;
+  while (index < string->length && string->bytes[index] >= '0' && string->bytes[index] <= '9') {
+    ++index;
+  }
+  if (index == integer_start) return 0;
+  if (index >= string->length || string->bytes[index] != '.') return 0;
+  ++index;
+  size_t fraction_start = index;
+  while (index < string->length && string->bytes[index] >= '0' && string->bytes[index] <= '9') {
+    ++index;
+  }
+  if (index == fraction_start) return 0;
+  return index == string->length;
+}
+
+static int float_has_nonzero_digit(const HadoString *string) {
+  for (size_t index = 0; index < string->length; ++index) {
+    if (string->bytes[index] >= '1' && string->bytes[index] <= '9') return 1;
+  }
+  return 0;
+}
+
+/* strtod rounds to nearest with ties to even on glibc. The copy only exists to
+   NUL-terminate the bytes: the grammar check already fixed the shape. */
+static double float_parse_bytes(const HadoString *string) {
+  if (string->length == SIZE_MAX) abort();
+  char *buffer = hado_alloc(string->length + 1);
+  if (buffer == NULL) abort();
+  memcpy(buffer, string->bytes, string->length);
+  buffer[string->length] = '\0';
+  return strtod(buffer, NULL);
+}
+
+int8_t hado_float_parse_is_valid(const HadoString *string) {
+  if (!float_grammar(string)) return 0;
+  double value = float_parse_bytes(string);
+  /* A spelling that rounds to infinity overflows, and a spelling with a
+     nonzero digit that rounds to zero underflows: neither is a Float. A
+     nonzero subnormal is accepted, so ERANGE alone is not the test. */
+  if (isinf(value)) return 0;
+  if (value == 0.0 && float_has_nonzero_digit(string)) return 0;
+  return 1;
+}
+
+double hado_float_parse_unchecked(const HadoString *string) {
+  return float_parse_bytes(string);
+}
+
+/* §54: the same canonical spelling the printer uses, from the Rust formatter.
+   Keeping one formatter keeps `Float.to_string x` and the print of `x` equal. */
 HadoString *hado_float_to_string(double value) {
-  char buffer[32];
-  int length = snprintf(buffer, sizeof(buffer), "%.17g", value);
-  if (length < 0 || (size_t)length >= sizeof(buffer)) abort();
-  HadoString *result = hado_alloc(sizeof(HadoString) + (size_t)length);
+  unsigned char bytes[400];
+  size_t length = hado_format_float(value, bytes, sizeof(bytes));
+  if (length == 0 || length > sizeof(bytes)) abort();
+  HadoString *result = hado_alloc(sizeof(HadoString) + length);
   if (result == NULL) abort();
-  result->length = (size_t)length;
-  result->scalars = (size_t)length;
-  memcpy(result->bytes, buffer, result->length);
+  result->length = length;
+  result->scalars = length;
+  memcpy(result->bytes, bytes, length);
   return result;
 }
 
@@ -674,6 +732,26 @@ HadoString *hado_char_to_string(uint32_t value) {
   result->scalars = 1;
   memcpy(result->bytes, bytes, length);
   return result;
+}
+
+int64_t hado_char_to_int(uint32_t value) {
+  return (int64_t)value;
+}
+
+/* §55: a Char is a Unicode scalar value, so the surrogates and the values
+   above the last scalar are not valid. Char.of_int is the only way a Char is
+   built from an Int, so this is the one place the invariant is checked. */
+int8_t hado_char_of_int_is_valid(int64_t value) {
+  return (value >= 0 && value <= 0xd7ff) || (value >= 0xe000 && value <= 0x10ffff);
+}
+
+uint32_t hado_char_of_int_unchecked(int64_t value) {
+  if (!hado_char_of_int_is_valid(value)) abort();
+  return (uint32_t)value;
+}
+
+double hado_int_to_float(int64_t value) {
+  return (double)value;
 }
 
 void hado_print_error_string(const HadoString *string) {

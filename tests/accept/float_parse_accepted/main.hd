@@ -1,0 +1,4 @@
+// spec: §55
+// expect: [7.5, -12.0, 1.0]
+// needs: prelude
+def main = List.map ["007.5", "-012.0", "1.00"] Float.parse

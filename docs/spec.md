@@ -1892,7 +1892,8 @@ String: length concat slice get split starts_with contains join trim
 Bytes: length get of_list to_list to_string of_string
 Array: length get set of_list to_list
 Int: to_string parse abs min max
-Float: to_string
+Float: to_string parse of_int
+Char: to_int of_int to_string
 ```
 
 `Option.ok_or` は値の不在を理由のある失敗へ持ち上げる。
@@ -1901,7 +1902,7 @@ Float: to_string
 def A ok_or(value: A Option, error: Exception): A {Error}
 ```
 
-効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append` `sort` `head` `nth` `take` `drop`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains` `join` `trim`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string` `abs` `min` `max`、`Float.to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`）は `{Error}` を持ち、`Pure` を書かない。
+効果を持たない member は戻り型に `Pure` を書く（第20節）。`List.length` `reverse` `append` `sort` `head` `nth` `take` `drop`、`Option.unwrap_or` `is_some`、`String.length` `concat` `starts_with` `contains` `join` `trim`、`Bytes.length` `to_list` `of_string`、`Array.length` `of_list` `to_list`、`Int.to_string` `abs` `min` `max`、`Float.to_string` `of_int`、`Char.to_int` `to_string` が対象である。`Fn` を引数に取る `List.map` `filter` `fold` と `Option.map` は効果多相なので書かない。失敗する member（`String.slice` `get` `split`、`Bytes.get` `of_list` `to_string`、`Array.get` `set`、`Int.parse`、`Float.parse`、`Char.of_int`）は `{Error}` を持ち、`Pure` を書かない。
 
 `sort` は比較関数を引数に取る merge sort とし、比較関数の型は `Pure` とする。比較の結果は分岐の条件に置かれるので（第36節）、効果を持つ比較関数は型が合わない。
 
@@ -1946,6 +1947,16 @@ def parse(value: String): Int {Error}
 def abs(value: Int): Int Pure
 def min(left: Int, right: Int): Int Pure
 def max(left: Int, right: Int): Int Pure
+
+module Float
+def to_string(value: Float): String Pure
+def parse(value: String): Float {Error}
+def of_int(value: Int): Float Pure
+
+module Char
+def to_int(value: Char): Int Pure
+def of_int(value: Int): Char {Error}
+def to_string(value: Char): String Pure
 ```
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
@@ -1978,6 +1989,8 @@ once read_stdin: Bytes {Error}
 | `Bytes.of_list` の 0..255 の範囲外 | `"ByteOutOfRange"` |
 | `Bytes.to_string` の不正 UTF-8 | `"InvalidUtf8"` |
 | `Int.parse` の不正（桁溢れを含む） | `"InvalidInt"` |
+| `Float.parse` の不正（文法外・無限大への丸め・0 への丸め） | `"InvalidFloat"` |
+| `Char.of_int` の Unicode スカラ値の範囲外 | `"InvalidScalar"` |
 | argv・env・cwd・ディレクトリ名の非 UTF-8 | `"InvalidUtf8"` |
 | ファイルが無い | `"NotFound"` |
 | 権限が無い | `"PermissionDenied"` |
@@ -1988,6 +2001,10 @@ once read_stdin: Bytes {Error}
 prelude は全プログラムに連結され、全ての検査を受ける。prelude の項目は公開面として E513 の根にする（第39節）。
 
 `Int.parse` の受理文法は、往復から導いた下限として `Int.to_string` が返す全ての Int の10進表記を含み、本節が決めた上限として ASCII の `-?[0-9]+` に一致して値が -9223372036854775808 以上 9223372036854775807 以下である文字列だけを受理し、先行ゼロの個数は制限せず、`+`・空白・`_`・小数点・全角数字は拒否する。
+
+`Float.parse` の受理文法は ASCII の `"-"? digit+ "." digit+` に文字列全体が一致することとし、`+`・空白・指数・16 進は受理せず、先行ゼロと小数部の末尾の 0 は受理する。受理した表記は IEEE 754 の round-to-nearest, ties-to-even で f64 に丸め、丸めた結果が無限大になる表記と、0 でないのに 0 に丸まる表記は受理しない。`Float.of_int` は i64 を同じ丸めで f64 にする。`Char.of_int` は Unicode スカラ値の範囲（0x0000..=0xD7FF と 0xE000..=0x10FFFF）の Int だけを受理する。
+
+`Float.to_string` の綴りは第54節の Float の印字と同じ正準形とし、往復可能な最短の 10 進桁を指数を使わず位取りで並べ、小数点の両側に最低 1 桁を置き、NaN と無限大は `nan` `inf` `-inf` とする。`Char.to_string` はそのスカラ値の UTF-8 バイト列を内容とする String を返し、引用符もエスケープも付けない（第54節の最上位の Char と同じ生の文字で、入れ子の `'a'` の形ではない）。
 
 `read_dir` は指定したディレクトリの各項目の名前だけを返し、`.` と `..` を除いて UTF-8 のバイト順に整列する。
 

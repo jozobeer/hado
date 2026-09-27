@@ -1,0 +1,11 @@
+module Char
+def to_int(value: Char): Int Pure
+def of_int(value: Int): Char {Error}
+def to_string(value: Char): String Pure
+implement Char as Char
+def to_int value => __char_to_int value
+def of_int value =>
+  if __char_of_int_is_valid value
+    => __char_of_int_unchecked value
+    | raise { message = "InvalidScalar" }
+def to_string value => __char_to_string value
