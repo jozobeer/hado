@@ -1958,6 +1958,7 @@ Array: length get set of_list to_list
 Int: to_string parse abs min max
 Float: to_string parse of_int
 Char: to_int of_int to_string
+Map: empty insert find remove fold to_list
 ```
 
 `Option.ok_or` は値の不在を理由のある失敗へ持ち上げる。
@@ -2027,7 +2028,21 @@ def to_int (value: Char): Int Pure
 def of_int (value: Int): Char {Error}
 def to_string (value: Char): String Pure
 /module
+
+type (K, V) MapEntry
+
+module Map
+type (K, V) T
+def (K, V) empty: (K, V) T Pure
+def (K, V) insert (map: (K, V) T, key: K, value: V): (K, V) T Pure
+def (K, V) find (map: (K, V) T, key: K): V Option Pure
+def (K, V) remove (map: (K, V) T, key: K): (K, V) T Pure
+def (K, V, A) fold (map: (K, V) T, initial: A, f: Fn(A, K, V => A)): A
+def (K, V) to_list (map: (K, V) T): (K, V) MapEntry List Pure
+/module
 ```
+
+`Map` の鍵の同一性は組み込みの `compare` が `0` を返すことで定める（第21節）。`insert` は等価な鍵が既にあれば先に入っている鍵を保ち、値だけを置き換える。`find` は等価な鍵が無ければ `None` を返す。`remove` は等価な鍵を 1 つ消し、等価な鍵が無ければ写像を変えない（no-op）。空の写像でも同じである。`fold` は写像の鍵を昇順に訪れて累算器を呼び、`to_list` は鍵の昇順に並べた `MapEntry` を返す。`MapEntry` は外に置く公開の型で、`to_list` の要素を作る `MapEntry(K, V)` を持つ。木の形は公開せず、`Map.T` の中の constructor は外から使えない（第47節）。
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
 

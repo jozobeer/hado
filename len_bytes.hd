@@ -1,1 +1,0 @@
-def main = String.length (Bytes.to_string (Bytes.of_list [227, 129, 130]))

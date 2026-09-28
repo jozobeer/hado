@@ -1,1 +1,0 @@
-def main = String.length (Int.to_string 12345)
