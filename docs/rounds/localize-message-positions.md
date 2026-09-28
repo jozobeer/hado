@@ -20,9 +20,10 @@
 
 - 決定 1: 本文が指す位置は `Diagnostic.mentions` に持つ（issue の推奨）。`related`（§56 の関連位置）へは移さない。E502 は 2 位置を持つが `related` は 1 つで、§56 のラベルをコードごとに 1 つ定める規則も変えることになるため。
 - 決定 2: 本文は `{0}` `{1}` … の穴を持つ。`source_diagnostic` が `mentions` をファイルの座標へ直してから `fill_mentions()` で穴を埋める。既定 1 行・JSON・LSP の綴りは変えない。
-- 決定 3: 単独ファイルの経路（`check_source`・`check_ast`）は、生の座標（= ファイルの座標）で穴を埋める。`check_parsed` では埋めない（`Project` が `source_diagnostic` を通すため）。
+- 決定 3: 単独ファイルの経路（`check_source`・`dump_mono`・`check_ast`）は、生の座標（= ファイルの座標）で穴を埋める。`Project` は `source_diagnostic` を通すので、`Project` が呼ぶ関数は `*_concatenated` と名付けて穴を残す（決定 6）。
 - 決定 4: `end_line` は今のままにする。CLI の JSON と LSP は `Project::diagnostic_end` がファイルの本文から終端を数え直すので、本文の数字だけが対象である。
 - 決定 5: `mentions` は `Option<Box<Mentions>>`（`Mentions` は位置の並び）にする。並びをそのまま欄にすると `Diagnostic` が 144 バイトになり、clippy の `result_large_err`（128 バイト）が 239 か所で赤になる。あわせて `code` を `Option<Box<str>>` にする（E コードは固定の字句）。`Diagnostic` は 120 バイトに戻る。
+- 決定 6: 穴埋めを呼び出し側の 3 箇所に置く形は、経路が増えると漏れる（審査で `hado::dump_mono` の漏れが出た）。`check_parsed` と `dump_parsed` の plain 名を**単独ファイル用（埋める）**にし、`Project` が使う生の形を `check_parsed_concatenated`・`check_parsed_for_print_concatenated`・`check_parsed_all_concatenated`・`dump_parsed_concatenated` と名付ける。新しい単独ファイルの経路が plain 名を呼べば埋まり、`Project` 側は名前に `_concatenated` が見えて localize の必要に気づく。
 
 ### 期待値の根拠
 
@@ -32,7 +33,7 @@ issue の現象を後置の綴りで再現した実測（下の「Red」）を�
 
 - `crates/hado/src/parser.rs`: `Diagnostic.mentions`・`Mentions`・`fill_mentions`。
 - `crates/hado/src/check.rs`: E501・E502・E507・E508・E406・E403・E405 の本文を穴付きにし、`mentions` を積む。`check_ast` は穴を埋める。
-- `crates/hado/src/lib.rs`: `check_source` は穴を埋める。
+- `crates/hado/src/lib.rs`: `check_parsed`・`dump_parsed`（単独ファイル用。`fill_mentions` で穴を埋める）と、`Project` 用の `check_parsed_concatenated`・`check_parsed_for_print_concatenated`・`check_parsed_all_concatenated`・`dump_parsed_concatenated`（決定 6）。`check_source`・`dump_mono` は前者を通る。
 - `crates/hado/src/project.rs`: `source_diagnostic` が `mentions` を localize してから穴を埋める。
 - `crates/hado/src/*.rs`: 診断の組立に `mentions: None` を足し、`code` を `Box<str>` にする（決定 5）。
 - `crates/hado/tests/localize_message_positions.rs`: 入口の行数を変えて測る判定器。
@@ -47,8 +48,9 @@ issue の現象を後置の綴りで再現した実測（下の「Red」）を�
 2. Green: `Diagnostic` に `mentions` を足し、6 つの本文を穴付きにし、`source_diagnostic` で localize して埋める。
 3. その並びが `Diagnostic` を大きくして clippy の `result_large_err` を赤にするので、`mentions` の箱化と `code` の `Box<str>` で大きさを戻す（決定 5）。
 4. 門番を新設し、LSP の判定器に検査を足す。
-5. ラウンドの最後に 1 回だけ `cargo test --offline`・`run-gates.sh --tier quick`・`--tier core`・`lint-docs.sh`・`verify-spec-contracts.sh` を回す。
-6. `docs/issues/localize-message-positions.md` を消し、push して PR にする（マージしない）。
+5. 審査の指摘（`hado::dump_mono` の経路で穴が残る）を受け、単独ファイル用の plain 名と `Project` 用の `*_concatenated` 名に分け、単独ファイルの公開経路を洗う検査を足す（決定 6）。
+6. ラウンドの最後に 1 回だけ `cargo test --offline`・`run-gates.sh --tier quick`・`--tier core`・`lint-docs.sh`・`verify-spec-contracts.sh` を回す。
+7. `docs/issues/localize-message-positions.md` を消し、push して PR にする（マージしない）。
 
 ### 判定
 
@@ -176,21 +178,57 @@ $ cargo clippy --offline --all-targets -- -D warnings   # 箱化の後
 ```
 $ bash scripts/verify-localize-message-positions.sh
 == J1 ==
-J1:診断位置(ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.01s): PASS
+J1:診断位置(ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.50s): PASS
 == J2 ==
 J2 skip-mention-localize: caught
 J2 skip-mention-fill: caught
-J2:変異(cases=2): PASS
+J2 skip-single-source-fill: caught
+J2:変異(cases=3): PASS
 == J3 ==
 J3:lint-docs(PASSED: 16/16): PASS
 PASSED: 3/3
 ```
+
+### 審査対応: `hado::dump_mono` の経路に穴が残っていた
+
+審査で、公開 API `hado::dump_mono` が `check_parsed` を通るのに `fill_mentions` を呼ばず、本文に `{0}` `{1}` が残ることが出た（このラウンドが入れた退行）。穴埋めを呼び出し側の 3 箇所に置いた形が漏れた。単独ファイル用の plain 名（`check_parsed`・`dump_parsed`）が埋め、`Project` 用は `*_concatenated` と名付けて穴を残す形に直した（決定 6）。
+
+直す前の探針（main `54bf927` から変わらない `hado::dump_mono` の出力）:
+
+```
+$ cargo test --offline --test zz_probe_dump -- --nocapture
+PROBE e501 code=Some("E501") message="binding x is returned unchanged at {0}"
+PROBE e502 code=Some("E502") message="identical branch results at {0} and {1}"
+```
+
+直した後（同じ探針）:
+
+```
+$ cargo test --offline --test zz_probe_dump -- --nocapture
+PROBE e501 code=Some("E501") message="binding x is returned unchanged at 3:3"
+PROBE e502 code=Some("E502") message="identical branch results at 2:14 and 2:18"
+```
+
+足した検査 `single_source_entries_report_filled_messages` は、7 コードを `dump_mono`・`check_source`・`check::check_ast`・`infer::check_ast` の 4 経路に通し、本文に `{` が残らず `L:C` を持つことを見る。直す前は赤、直した後は緑。
+
+```
+$ cargo test --offline --test localize_message_positions -- --exact single_source_entries_report_filled_messages   # 直す前
+E501: dump_mono left a message hole: "binding x is returned unchanged at {0}"
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out
+$ cargo test --offline --test localize_message_positions -- --exact single_source_entries_report_filled_messages   # 直した後
+test single_source_entries_report_filled_messages ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out
+```
+
+学び: 穴を埋める呼び出しを経路ごとに足す形は、経路が 1 本増えるだけで漏れる。**埋める場所は「単独ファイルの出口」に 1 つだけ置き、生の座標を渡す形は名前（`_concatenated`）で区別する**と、新しい経路は plain 名を呼ぶだけで正しくなり、`Project` 側は名前で localize の必要性に気づく。判定器も「代表 1 経路」ではなく、その出口を通る公開経路を数えて全部測る。
 
 ### ラウンドの最後の実測
 
 ```
 $ cargo test --offline
 （`test result: ok` が 71 行、`FAILED` は 0 行。rc=0）
+$ cargo clippy --offline --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.74s
 $ bash scripts/run-gates.sh --tier quick target/gates-quick
 TALLY: 41/41 passed; red: none
 $ bash scripts/run-gates.sh --tier core target/gates-core
