@@ -500,6 +500,48 @@ def diagnostics_range_encoding(nvim, work):
         check_negotiated_range(nvim, work, mode, expected)
 
 
+@check('diagnostics-localized-message')
+def diagnostics_localized_message(nvim, work):
+    # §56: 入口以外のファイルに出た診断も、本文が指す位置はそのファイルの中で
+    # 数える。両方を開くと、それぞれの入口の解析が同じファイルへ診断を出すので、
+    # 位置が直っていなければ本文の違う 2 件が並ぶ。入口の行数を変えても本文の
+    # 位置が動かないことを見る（期待値は入力から数え、行番号は埋め込まない）。
+    entry = 'def main = "hi"\n'
+    bad = 'def main =\n  "hello" as x ->\n  x\n'
+    body = point_range_of(bad, 'x\n', 'utf-8')['start']
+    expected = 'at %d:%d' % (body['line'] + 1, body['character'] + 1)
+    for lines in (1, 8):
+        label = 'localized-%d' % lines
+        directory = make(work, label)
+        write_text(directory / 'hello.hd', entry + '\n' * (lines - 1))
+        write_text(directory / 'bad.hd', bad)
+        result = nvim.run(r'''
+local entry = work .. '/__LABEL__/hello.hd'
+local path = work .. '/__LABEL__/bad.hd'
+local entry_uri = vim.uri_from_fname(entry)
+local uri = vim.uri_from_fname(path)
+open(entry)
+open(path)
+wait_for(function()
+  local ps = publishes_for(entry_uri)
+  local qs = publishes_for(uri)
+  return #ps > 0 and #qs > 0 and #qs[#qs].diagnostics > 0
+end, 30000, 'diagnostics of both entries')
+result.publishes = publishes_for(uri)
+'''.replace('__LABEL__', label))
+        diagnostics = diags_of(result['publishes'])
+        identity = [diagnostic for diagnostic in diagnostics
+                    if diagnostic.get('code') == 'E501']
+        if len(identity) != 1:
+            raise Failure('%s: bad.hd published %d E501 diagnostics, want 1: %r'
+                          % (label, len(identity),
+                             [diagnostic.get('message') for diagnostic in identity]))
+        message = identity[0]['message']
+        if expected not in message:
+            raise Failure('%s: the E501 message %r does not carry %r'
+                          % (label, message, expected))
+
+
 @check('diagnostics-unsaved-change')
 def diagnostics_unsaved_change(nvim, work):
     directory = make(work, 'unsaved')
