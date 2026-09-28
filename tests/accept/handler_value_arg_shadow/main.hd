@@ -1,0 +1,9 @@
+// spec: §38
+// needs: prelude
+// expect: 106
+effect Ask
+once ask: Int
+handler Ask as Fixed(n: Int)
+once ask => n
+def use (n: Int): Int {Ask} => ask + n
+def main = Int.to_string (with Fixed(6) -> use 100)
