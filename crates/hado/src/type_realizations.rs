@@ -51,7 +51,7 @@ fn check_items<'a>(
 /// The prelude is prepended to the user's items, so an implementation in the
 /// prelude must not see the user's root types; an implementation in the user's
 /// program sees both the prelude and the user's types.
-fn outer_types<'a>(items: &'a [Item], index: usize, prelude_items: usize) -> HashSet<&'a str> {
+fn outer_types(items: &[Item], index: usize, prelude_items: usize) -> HashSet<&str> {
     let end = if index < prelude_items {
         prelude_items
     } else {
