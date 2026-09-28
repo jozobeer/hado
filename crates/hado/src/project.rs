@@ -217,12 +217,12 @@ impl Project {
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
-        crate::check_parsed(&self.parsed, &self.files[0].path)
+        crate::check_parsed_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
     pub fn check_for_print(&self) -> Result<crate::Checked, Diagnostic> {
-        crate::check_parsed_for_print(&self.parsed, &self.files[0].path)
+        crate::check_parsed_for_print_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
@@ -232,8 +232,11 @@ impl Project {
         &self,
         reject_user_main_effects: bool,
     ) -> (Vec<Diagnostic>, Option<crate::Checked>) {
-        let (errors, checked) =
-            crate::check_parsed_all(&self.parsed, &self.files[0].path, reject_user_main_effects);
+        let (errors, checked) = crate::check_parsed_all_concatenated(
+            &self.parsed,
+            &self.files[0].path,
+            reject_user_main_effects,
+        );
         (
             errors
                 .into_iter()
@@ -244,7 +247,7 @@ impl Project {
     }
 
     pub fn dump_mono(&self) -> Result<String, Diagnostic> {
-        crate::dump_parsed(&self.parsed, &self.files[0].path)
+        crate::dump_parsed_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 

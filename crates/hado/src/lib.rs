@@ -369,30 +369,53 @@ fn with_prelude(
 }
 
 pub fn check_source(source: &str, path: &str) -> Result<Checked, parser::Diagnostic> {
-    check_parsed(&parse_with_prelude(source, path)?, path).map_err(|mut error| {
-        // §56: a single source has no concatenation, so the checked coordinates
-        // are the file's own and the message is ready to write.
-        error.fill_mentions();
-        error
-    })
+    check_parsed(&parse_with_prelude(source, path)?, path)
 }
 
-fn check_parsed(parsed: &ParsedSource, path: &str) -> Result<Checked, parser::Diagnostic> {
+/// §56: a single source has no concatenation, so the checked coordinates are
+/// the file's own and the message is ready to write. Every single-source entry
+/// fills here. `Project` uses the `*_concatenated` forms and localizes the
+/// positions with `source_diagnostic` instead, so a new path does not have to
+/// remember to fill.
+pub(crate) fn check_parsed(
+    parsed: &ParsedSource,
+    path: &str,
+) -> Result<Checked, parser::Diagnostic> {
+    check_parsed_concatenated(parsed, path).map_err(fill_mentions)
+}
+
+/// §56: the raw form of `check_parsed`. The positions it mentions are the
+/// concatenated ones (§50), so the caller must run `source_diagnostic` on the
+/// diagnostic before the message is written.
+fn check_parsed_concatenated(
+    parsed: &ParsedSource,
+    path: &str,
+) -> Result<Checked, parser::Diagnostic> {
     check_parsed_filtered(parsed, path, true)
 }
 
-pub(crate) fn check_parsed_for_print(
+/// §56: the raw form used by `Project` for `--print-type`; it localizes with
+/// `source_diagnostic`.
+pub(crate) fn check_parsed_for_print_concatenated(
     parsed: &ParsedSource,
     path: &str,
 ) -> Result<Checked, parser::Diagnostic> {
     check_parsed_filtered(parsed, path, false)
 }
 
+/// §56: write the mentioned positions into the message. A path that hands a
+/// diagnostic to a reader outside `Project` goes through here, or through
+/// `source_diagnostic`, which localizes the positions first.
+fn fill_mentions(mut error: parser::Diagnostic) -> parser::Diagnostic {
+    error.fill_mentions();
+    error
+}
+
 /// §56・§58.4（L1）: 最初に当たる段階の診断を**全件**、アンカー順に返す。`checked` は
 /// 「型が得られたか」で、L2 により**型推論が途中で失敗したときだけ** `None` になる
 /// （E3xx の致命。E602 は推論が最後まで走るので型がある）。CLI の `--show-all` と LSP の
 /// diagnostics が同じ列を使う。
-pub(crate) fn check_parsed_all(
+pub(crate) fn check_parsed_all_concatenated(
     parsed: &ParsedSource,
     path: &str,
     reject_user_main_effects: bool,
@@ -608,10 +631,26 @@ pub(crate) fn has_main_definition(ast: &parser::Ast) -> bool {
 }
 
 fn dump_parsed(parsed: &ParsedSource, path: &str) -> Result<String, parser::Diagnostic> {
+    dump_parsed_with(parsed, path, check_parsed)
+}
+
+/// §56: the raw form used by `Project`, which localizes with `source_diagnostic`.
+pub(crate) fn dump_parsed_concatenated(
+    parsed: &ParsedSource,
+    path: &str,
+) -> Result<String, parser::Diagnostic> {
+    dump_parsed_with(parsed, path, check_parsed_concatenated)
+}
+
+fn dump_parsed_with(
+    parsed: &ParsedSource,
+    path: &str,
+    check: fn(&ParsedSource, &str) -> Result<Checked, parser::Diagnostic>,
+) -> Result<String, parser::Diagnostic> {
     if parsed.inspection == Inspection::Library {
         return Err(entry_required(path));
     }
-    let checked = check_parsed(parsed, path)?;
+    let checked = check(parsed, path)?;
     let ast = &parsed.ast;
     let main = ast.main().ok_or_else(|| parser::Diagnostic {
         mentions: None,
