@@ -10,4 +10,4 @@ def read (entry: Entry Option): Int {Error} => Option.ok_or (entry as { value = 
   pass (n + 1) ->
   Some(Box(n + 2)) as Box(m)? ->
   Some(m)) { message = "missing" }
-def main = read Some({ value = Box(40) })
+def main = Int.to_string (read Some({ value = Box(40) }))

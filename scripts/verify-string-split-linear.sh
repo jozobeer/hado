@@ -680,8 +680,8 @@ from harness import build, expect
 
 root = Path(sys.argv[1]) / 'k'
 root.mkdir(parents=True, exist_ok=True)
-expect(build(root, 'float_length', 'def main = String.length (Float.to_string 0.1)'), b'3\n')
-expect(build(root, 'char_length', "def main = String.length (Char.to_string 'あ')"), b'1\n')
+expect(build(root, 'float_length', 'def main = Int.to_string (String.length (Float.to_string 0.1))'), b'3\n')
+expect(build(root, 'char_length', "def main = Int.to_string (String.length (Char.to_string 'あ'))"), b'1\n')
 print('lengths: Float.to_string 0.1 is 3 scalars and Char.to_string あ is 1 scalar')
 PY
 }

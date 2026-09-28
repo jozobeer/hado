@@ -14,6 +14,7 @@ impl Case {
         ));
         std::fs::create_dir(&path).unwrap();
         std::fs::write(path.join("main.hd"), source).unwrap();
+        wrap_entry(&path.join("main.hd"));
         Self(path)
     }
     fn command(&self, args: &[&str]) -> Output {
@@ -41,6 +42,58 @@ impl Drop for Case {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+/// §54 makes an Int main the exit code rather than a printed line. Ask the
+/// compiler for the entry's main type and, when it is Int, wrap the trailing
+/// body in `Int.to_string` so the stdout assertions keep measuring the value.
+fn wrap_entry(path: &std::path::Path) {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
+        .args(["check", "--print-type"])
+        .arg(path)
+        .output()
+        .unwrap();
+    // `check --print-type` renders an effectful Int as `Int {…}`; the effect
+    // row does not change §54's rule, so any Int spelling counts.
+    let ty = String::from_utf8_lossy(&output.stdout);
+    let ty = ty.trim();
+    if !output.status.success() || !(ty == "Int" || ty.starts_with("Int {")) {
+        return;
+    }
+    let source = std::fs::read_to_string(path).unwrap();
+    let marker = "def main =";
+    let Some(at) = source.rfind(marker) else {
+        return;
+    };
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    std::fs::write(
+        path,
+        format!(
+            "{}def main = Int.to_string ({}){}",
+            &source[..at],
+            &after[..cut],
+            &after[cut..]
+        ),
+    )
+    .unwrap();
+}
+
 fn random(state: &mut u64, limit: usize) -> usize {
     *state = state
         .wrapping_mul(6364136223846793005)

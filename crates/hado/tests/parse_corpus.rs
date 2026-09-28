@@ -183,20 +183,23 @@ fn gen_probe() {
     for i in 0..5 {
         let a = (rng.below(1000)) as i64;
         let b = (rng.below(1000)) as i64;
-        let src = format!("def main = {a} + {b}");
-        let obj = work.join(format!("g{i}.o"));
+        // §54 makes an Int main the exit code, whose range is 0..=255. The
+        // probe's sum exceeds that, so it prints through the prelude instead.
+        let src = format!("def main = Int.to_string ({a} + {b})");
         let exe = work.join(format!("g{i}"));
-        if let Err(e) = hado::compile_to_object(&src, &obj) {
-            panic!("gen {i}: compile failed: {e}");
+        if let Err(e) = hado::build::executable(&src, "gen.hd", &exe) {
+            panic!("gen {i}: build failed: {e}");
         }
-        hado::link_executable(&obj, &exe).unwrap_or_else(|e| panic!("gen {i}: link failed: {e}"));
         let out = std::process::Command::new(&exe).output().unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let want = (a + b).to_string();
         if stdout == want {
             println!("parse_gen_ok: {a} {b} {}", a + b);
         } else {
-            panic!("gen {i}: got stdout {stdout:?}, want {want:?}");
+            panic!(
+                "gen {i}: got stdout {stdout:?} status {:?}, want {want:?}",
+                out.status
+            );
         }
     }
 }

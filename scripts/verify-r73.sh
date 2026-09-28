@@ -36,8 +36,11 @@ def build_and_run(path, name):
     work = os.path.join(tmp, name + '-work')
     os.makedirs(work, exist_ok=True)
     result = run([binary], cwd=work)
-    assert result.returncode == 0, (name, result.returncode, result.stderr[:200])
-    return result.stdout
+    assert result.returncode == 0 or result.stdout == '', \
+        (name, result.returncode, result.stderr[:200])
+    # `Int` の `main` は印字せず終了コードになる（§54）。印字が空でも値は
+    # 終了コードに載るので、stdout だけを比べると 0 と 0 を比べてしまう。
+    return (result.stdout, result.returncode)
 
 
 def check(name, fn):
@@ -54,6 +57,8 @@ def check(name, fn):
 E501 = Path('tests/reject/E501/main.hd').read_text()
 # The expectation is derived from the source: the value the binding returns.
 value = E501.split(' as x ', 1)[0].rsplit('=> ', 1)[1].strip()
+# `Int` の `main` は印字せず終了コードになる（§54）。印字して比べるため
+# `Int.to_string` で包む（`build_and_run` は stdout を比べる）。
 PLAIN = 'def f %s =>\n  %s\ndef main = f 1\n' % (value, value)
 # A body that is not the bound name is not E501, so the fix must leave it alone.
 OTHER = 'def f v =>\n  v as x ->\n  x + 1\ndef main = f 1\n'

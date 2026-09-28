@@ -414,7 +414,7 @@ printf 'shared type T = Int\n\ndef main = 1\n' >"$workdir/33c4/main.hd"
 
 # 33-d: 契約 Store の抽象型 T を shared type T = Int で実体化し、main が整数を返す。
 {
-    printf 'def main = Store.find 1\n\n'
+    printf 'def main = Int.to_string (Store.find 1)\n\n'
     printf 'module Store\ntype T\ndef find(id: Int): T Pure\n/module\n\n'
     printf 'implement Store as Store\nshared type T = Int\ndef find _ => %s\n/implement\n' "$rand_int"
 } >"$workdir/33d/main.hd"
@@ -595,7 +595,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 # 33-g: 契約修飾型 X.T。契約 Store の member の型 Id.T は唯一の実装 IntId の
 # shared type T = Int で解け、Int を直接渡せる。
 {
-    printf 'def main = Store.find %s\n' "$rand_int"
+    printf 'def main = Int.to_string (Store.find %s)\n' "$rand_int"
     printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
     printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
     printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n/implement\n\n'
@@ -604,7 +604,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 
 # 33-g (2): 実装が 2 つなら E603（変わらない）。
 {
-    printf 'def main = Store.find %s\n' "$rand_int"
+    printf 'def main = Int.to_string (Store.find %s)\n' "$rand_int"
     printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
     printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
     printf 'implement Id as IntId\nshared type T = Int\ndef make n => n\n/implement\n\n'
@@ -614,7 +614,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 
 # 33-g (3): 唯一の実装が印なしなら Id.T は不透明で、Int を渡すと E305。
 {
-    printf 'def main = Store.find %s\n' "$rand_int"
+    printf 'def main = Int.to_string (Store.find %s)\n' "$rand_int"
     printf 'module Id\ntype T\ndef make(n: Int): T Pure\n/module\n\n'
     printf 'module Store\ndef find(id: Id.T): Int Pure\n/module\n\n'
     printf 'implement Id as IntId\ntype T = Int\ndef make n => n\n/implement\n\n'
@@ -650,7 +650,7 @@ mkdir -p "$workdir/33a1" "$workdir/33a1c" "$workdir/33a3" "$workdir/33a1b" "$wor
 
 # 正の対照: 同じ実装の中では局所型は一致するので受理して実行できる。
 {
-    printf 'def main = A.read (A.make %s)\n' "$rand_int"
+    printf 'def main = Int.to_string (A.read (A.make %s))\n' "$rand_int"
     printf 'module Store\ntype T\ndef make(id: Int): T Pure\ndef read(value: T): Int Pure\n/module\n\n'
     printf 'implement Store as A\ntype Hidden = | Wrap(Int)\nshared type T = Hidden\ndef make id => Wrap(id)\ndef read | Wrap(id) => id\n/implement\n'
 } >"$workdir/33distpos/main.hd"
@@ -879,7 +879,7 @@ done
 
 # 正の対照 (nested-two-types): 二段適用・複数抽象型・二型引数。実行時に生成した文字列を
 # 二段適用した functor の抽象型に通し、List.length がそのリストの長さを印字する。
-printf 'def main = read ({ value = Second.make "%s" })\ndef read box => List.length box.value\ntype Box = { value: String Second.T }\nmodule Pair\ntype A T\ntype (A, B) U\ndef A make(x: A): A T Pure\n/module\nimplement Pair as Base\nshared type A T = A List\nshared type (A, B) U = Fn(A => B)\ndef make x => [x]\n/implement\nimplement Pair as Make(M: Pair)\nshared type A T = A M.T\nshared type (A, B) U = (A, B) M.U\ndef make x => M.make x\n/implement\nimplement Pair as First = Make(Base)\nimplement Pair as Second = Make(First)\n' "$rand_ne" >"$workdir/33nested/main.hd"
+printf 'def main = Int.to_string (read ({ value = Second.make "%s" }))\ndef read box => List.length box.value\ntype Box = { value: String Second.T }\nmodule Pair\ntype A T\ntype (A, B) U\ndef A make(x: A): A T Pure\n/module\nimplement Pair as Base\nshared type A T = A List\nshared type (A, B) U = Fn(A => B)\ndef make x => [x]\n/implement\nimplement Pair as Make(M: Pair)\nshared type A T = A M.T\nshared type (A, B) U = (A, B) M.U\ndef make x => M.make x\n/implement\nimplement Pair as First = Make(Base)\nimplement Pair as Second = Make(First)\n' "$rand_ne" >"$workdir/33nested/main.hd"
 
 for probe in "$workdir/33c1/main.hd" "$workdir/33c2/main.hd" "$workdir/33c3/main.hd" "$workdir/33c3neg/main.hd" \
     "$workdir/33c4/main.hd" "$workdir/33c5/main.hd" "$workdir/33c6/main.hd" \

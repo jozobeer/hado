@@ -1,9 +1,10 @@
 // spec: §38
 // expect: 3
+// needs: prelude
 effect A
 abort a
 handler A as Outer
 abort a => 3
 return x => x * 10
 def f (n: Int): Int {A} => if n > 0 => n | a
-def main = with Outer -> f 0
+def main = Int.to_string (with Outer -> f 0)

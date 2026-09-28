@@ -1,6 +1,7 @@
 // spec: §38
 // item: handler と with
 // expect: 7
+// needs: prelude
 effect Ask
 once ask: Int
 def double (n: Int): Int => n * 2
@@ -8,4 +9,4 @@ handler Ask as Fixed
 once ask => double 3
 return value => value
 def use (x: Int): Int {Ask} => ask + x
-def main = with Fixed -> use 1
+def main = Int.to_string (with Fixed -> use 1)

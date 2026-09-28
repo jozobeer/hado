@@ -61,7 +61,7 @@ def check_code(path, code):
 
 def run_value(root, name, value):
     """`run` a literal main and require the value on stdout with exit code 0."""
-    path = write(root, name, f'def main = {value}\n')
+    path = write(root, name, f'def main = Int.to_string ({value})\n')
     temporary = Path(root) / name / 'tmp'
     result = hado(['run', str(path)], env=temp_env(temporary))
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
@@ -74,7 +74,7 @@ def run_value(root, name, value):
 
 def control(root):
     """The comparisons must reject a wrong value and a wrong exit code."""
-    path = write(root, 'control-value', 'def main = 1\n')
+    path = write(root, 'control-value', 'def main = Int.to_string 1\n')
     result = hado(['run', str(path)], env=temp_env(Path(root) / 'control-value' / 'tmp'))
     try:
         assert result.stdout == b'2\n'
@@ -134,7 +134,7 @@ rng = random.Random(seed)
 for index in range(6):
     count = rng.randint(1, 6)
     arguments = [rng.choice(['a', 'b', 'c', 'x y', '-n', '日本語']) for _ in range(count)]
-    path = write(str(root), f'args-{index}', 'def main =\n  args as argv ->\n  List.length argv\n')
+    path = write(str(root), f'args-{index}', 'def main =\n  args as argv ->\n  Int.to_string (List.length argv)\n')
     result = hado(['run', str(path), '--', *arguments], env=temp_env(path.parent / 'tmp'))
     assert result.returncode == 0, (index, result.returncode, result.stderr.decode())
     assert result.stdout == f'{count}\n'.encode(), (index, result.stdout, arguments)
@@ -212,7 +212,7 @@ from harness import execute, hado, write
 
 root = Path(sys.argv[1]) / 'e'
 root.mkdir(parents=True, exist_ok=True)
-path = write(str(root), 'output', 'def main = 42\n')
+path = write(str(root), 'output', 'def main = Int.to_string 42\n')
 target = root / 'out' / 'prog'
 target.parent.mkdir(parents=True, exist_ok=True)
 built = hado(['build', '-o', str(target), str(path)])

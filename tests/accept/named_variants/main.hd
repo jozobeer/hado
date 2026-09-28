@@ -1,6 +1,7 @@
 // spec: §17
 // expect: 42
 // item: record
+// needs: prelude
 type A Message = | Empty | Item { value: A; weight: Int } | Pair(A, Int)
 def score | Empty => 0 | Item { value; weight = w } => value + w | Pair(x, w) => x * w
-def main = score Item { weight = 4; value = 8 } + score Pair(5, 6) + score (Empty)
+def main = Int.to_string (score Item { weight = 4; value = 8 } + score Pair(5, 6) + score (Empty))

@@ -267,7 +267,7 @@ else
     done
     # predicate 7: probe behaviour (enumeration, not a hard-coded count)
     mkdir -p tests/accept/__probe__
-    printf -- '// spec: 付録B\n// expect: 3\ndef main = 1 + 2\n' >tests/accept/__probe__/main.hd
+    printf -- '// spec: 付録B\n// expect: 3\n// needs: prelude\ndef main = Int.to_string (1 + 2)\n' >tests/accept/__probe__/main.hd
     cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
     probe_status=$?
     rm -f tests/accept/__probe__/main.hd

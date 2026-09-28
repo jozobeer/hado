@@ -139,7 +139,7 @@ fn native_execution_uses_the_concrete_representation() {
         let source = program(
             prefix,
             &[SIGNATURE, &module("M", representation, make, get)],
-            &format!("M.get (M.make {index})"),
+            &format!("Int.to_string (M.get (M.make {index}))"),
         );
         std::fs::write(&path, source).unwrap();
         let built = Command::new(env!("CARGO_BIN_EXE_hado"))
@@ -289,9 +289,9 @@ fn native_data_payloads_use_module_abstract_representations() {
                 "type Box = | Wrap(M.T)"
             };
             let body = if record {
-                format!("{{ value = M.make {index} }} as box -> M.get box.value")
+                format!("Int.to_string ({{ value = M.make {index} }} as box -> M.get box.value)")
             } else {
-                format!("Wrap(M.make {index}) as Wrap(value) -> M.get value")
+                format!("Int.to_string (Wrap(M.make {index}) as Wrap(value) -> M.get value)")
             };
             let case_dir = dir.join(format!("case{case}_{record}_{index}"));
             std::fs::create_dir_all(&case_dir).unwrap();

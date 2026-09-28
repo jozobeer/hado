@@ -1,6 +1,7 @@
 // spec: §16
 // expect: 1
 // item: 再帰型
+// needs: prelude
 type T List2 = | Nil2 | Cons2(T, T List2)
 def first | Nil2 => 0 | Cons2(head, _) => head
-def main = first Cons2(1, Nil2)
+def main = Int.to_string (first Cons2(1, Nil2))

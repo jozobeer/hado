@@ -173,20 +173,31 @@ fn array_public_members_match_specification() {
 fn polymorphic_allocation_specializes_and_slots_execute() {
     let dir = std::env::temp_dir().join(format!("hado-array-slots-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (value, expected) in [
-        ("9876543210", "9876543210"),
-        ("-0.25", "-0.25"),
-        ("true", "true"),
-        ("'𐀀'", "𐀀"),
-        ("\"あ😀\"", "あ😀"),
+    // §54: an Int main is the exit code, whose range is 0..=255, so the wide
+    // Int slot is rendered by the intrinsic rather than by the entry. A stdlib
+    // logical path is required for `__` names (E202), and it suppresses the
+    // prelude, so `__int_to_string` is the available formatter.
+    for (value, main, expected) in [
+        (
+            "9876543210",
+            "__int_to_string (__array_get (make 3 ({value})) 1)",
+            "9876543210",
+        ),
+        ("-0.25", "__array_get (make 3 ({value})) 1", "-0.25"),
+        ("true", "__array_get (make 3 ({value})) 1", "true"),
+        ("'𐀀'", "__array_get (make 3 ({value})) 1", "𐀀"),
+        ("\"あ😀\"", "__array_get (make 3 ({value})) 1", "あ😀"),
     ] {
-        let source = format!("def make n x => __array_fill_unchecked (__array_alloc n) 1 x\ndef main = __array_get (make 3 ({value})) 1");
+        let source = format!(
+            "def make n x => __array_fill_unchecked (__array_alloc n) 1 x\ndef main = {}",
+            main.replace("{value}", value)
+        );
         let object = dir.join("test.o");
         hado::compile_source_to_object(&source, "stdlib/probe.hd", &object).unwrap();
         let executable = dir.join("test");
         hado::link_executable(&object, &executable).unwrap();
         let output = std::process::Command::new(&executable).output().unwrap();
-        assert!(output.status.success());
+        assert!(output.status.success(), "{output:?}");
         assert!(output.stderr.is_empty());
         assert_eq!(output.stdout, format!("{expected}\n").as_bytes());
     }
