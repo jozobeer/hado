@@ -241,4 +241,21 @@ $ bash scripts/corpus-lock.sh --check
 （差分なし。rc=0）
 ```
 
+### main 取り込み後（`54bf927` → `bb44419`）
+
+PR の前に main（`bb44419`。`map-by-builtin-compare` と後置の写し直し）を取り込んだ。自動で merge でき、競合は無かった。コーパスはこのラウンドで触っていないので `corpus-lock.sh --check` は差分なし、`gate-tiers-lock.sh --check` も一致（門番の層は main 側の追加と合わせて導出）。層別は main の追加分を含めて数え直した。
+
+```
+$ cargo test --offline
+（`test result: ok` が 71 行、`FAILED` は 0 行。rc=0）
+$ bash scripts/run-gates.sh --tier quick target/gates-quick
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core
+TALLY: 713/713 passed; red: none
+$ bash scripts/corpus-lock.sh --check
+（差分なし。rc=0）
+```
+
+門番 `verify-localize-message-positions` は core 走の中で `PASSED: 3/3`、LSP は `PASSED: 12/12`、`lint-docs` は `PASSED: 16/16`。
+
 
