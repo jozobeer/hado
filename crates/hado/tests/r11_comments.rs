@@ -34,8 +34,10 @@ fn slash_division_and_comment_have_distinct_runtime_results() {
     let dir = std::env::temp_dir().join(format!("hado-r11-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for (name, source, expected) in [
-        ("division", "def main = 6 / 2", "3\n"),
-        ("comment", "def main = 1 // 2", "1\n"),
+        // §54: an Int main is the exit code, so the two Int runs print through
+        // the prelude while the String run is printed by the entry.
+        ("division", "def main = Int.to_string (6 / 2)", "3\n"),
+        ("comment", "def main = Int.to_string (1) // 2", "1\n"),
         ("quoted", "def main = \"-- # //\"", "-- # //\n"),
     ] {
         let case_dir = dir.join(name);

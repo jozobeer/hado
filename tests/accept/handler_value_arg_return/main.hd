@@ -10,4 +10,4 @@ return _ => [limit]
 def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i ->
   loop (i - 1)
   /if
-def main = List.length (with Take(7) -> loop 1)
+def main = Int.to_string (List.length (with Take(7) -> loop 1))

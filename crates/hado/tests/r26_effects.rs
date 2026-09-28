@@ -67,7 +67,15 @@ impl Case {
         );
         assert_eq!(diagnostic.lines().count(), 1);
     }
+    /// §54 makes an Int main the exit code rather than a printed line. When the
+    /// entry's `main` is exactly Int, wrap the trailing body in `Int.to_string`
+    /// so the stdout assertions that follow keep measuring the computed value.
     fn build(&self, entry: &str) -> Output {
+        let path = self.0.join(entry);
+        let source = std::fs::read_to_string(&path).unwrap();
+        if let Some(wrapped) = wrap_int_main(&source, &path) {
+            std::fs::write(&path, wrapped).unwrap();
+        }
         self.command("build", entry)
     }
     fn run(&self, entry: &str) -> Output {
@@ -80,6 +88,43 @@ impl Drop for Case {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// Wrap the trailing `def main = <body>` in `Int.to_string (...)` when the
+/// program's main type is Int, and return `None` otherwise. The body stops at
+/// the first following top-level declaration.
+fn wrap_int_main(source: &str, path: &std::path::Path) -> Option<String> {
+    let checked = hado::check_source(source, &path.display().to_string()).ok()?;
+    if checked.main != hado::types::Ty::Int {
+        return None;
+    }
+    let marker = "def main =";
+    let at = source.rfind(marker)?;
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    Some(format!(
+        "{}def main = Int.to_string ({}){}",
+        &source[..at],
+        &after[..cut],
+        &after[cut..]
+    ))
 }
 
 fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {

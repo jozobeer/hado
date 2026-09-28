@@ -73,6 +73,8 @@ def anchor(found):
 
 def build_run(root, name, files, expect):
     """Build the program and check the value `main` prints."""
+    # `Int` の `main` は印字せず終了コードになる（§54）。探針は
+    # `Int.to_string` で包んだ入口を渡し、印字された値を見る。
     directory = write(root, name, files)
     build = subprocess.run([HADO, 'build', str(directory / 'main.hd')], capture_output=True)
     assert build.returncode == 0 and build.stderr == b'', (name, build.returncode, build.stderr.decode())
@@ -135,7 +137,7 @@ source = 'def main = 1\n' + decls
 found = diagnostic(project(root, 'unused', {'main.hd': source}, 'check'), 'E513')
 assert anchor(found) == ('main.hd', *position(source, f'handler {effect} as {handler}')), found
 
-used = decls + f'def main = with {handler} -> {op}\n'
+used = decls + f'def main = Int.to_string (with {handler} -> {op})\n'
 build_run(root, 'with', {'main.hd': used}, str(n))
 print('handler: unused is E513, used by with runs')
 PY
@@ -166,7 +168,8 @@ decls = (f'effect {effect}\n'
          f'once {op}: Int\n'
          f'handler {effect} as {handler}\n'
          f'once {op} => {n}\n')
-reached = decls + f'def f (x: Int): Int {{{effect}}} => x + {op}\ndef main = with {handler} -> f 0\n'
+reached = decls + (f'def f (x: Int): Int {{{effect}}} => x + {op}\n'
+                   f'def main = Int.to_string (with {handler} -> f 0)\n')
 build_run(root, 'reached', {'main.hd': reached}, str(n))
 
 # (2) 効果の操作の型にだけ現れる型は使われる（bug.md の 2 つ目の穴）

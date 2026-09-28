@@ -39,6 +39,11 @@ impl Case {
         );
         assert_eq!(output.stdout, b"Int\n");
         assert!(output.stderr.is_empty());
+        let path = self.0.join(entry);
+        let source = std::fs::read_to_string(&path).unwrap();
+        if let Some(wrapped) = wrap_main_body(&source) {
+            std::fs::write(&path, wrapped).unwrap();
+        }
         let output = self.command("build", entry);
         assert_eq!(
             output.status.code(),
@@ -87,6 +92,39 @@ impl Drop for Case {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+/// Wrap the trailing `def main = ...` body in `Int.to_string (...)` so the value
+/// prints instead of becoming the exit code (§54). The body stops at the first
+/// following top-level declaration.
+fn wrap_main_body(source: &str) -> Option<String> {
+    let marker = "def main =";
+    let at = source.rfind(marker)?;
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    Some(format!(
+        "{}def main = Int.to_string ({}){}",
+        &source[..at],
+        &after[..cut],
+        &after[cut..]
+    ))
+}
+
 fn random(state: &mut u64, limit: usize) -> usize {
     *state = state
         .wrapping_mul(6364136223846793005)

@@ -1,5 +1,6 @@
 // spec: §38
 // expect: 12
+// needs: prelude
 effect A
 abort a
 handler A as Outer
@@ -9,4 +10,4 @@ handler A as Inner
 abort a => 2
 return x => x + 100
 def f (n: Int): Int {A} => if n > 0 => n | a
-def main = with Outer -> with Inner -> f 0
+def main = Int.to_string (with Outer -> with Inner -> f 0)

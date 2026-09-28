@@ -1,9 +1,10 @@
 // spec: §38
 // expect: 1
 // item: handler と with
+// needs: prelude
 effect Ask
 once ask: String
 handler Ask as Fixed
 once ask => with Fixed -> "there"
 return value => value
-def main = 1
+def main = Int.to_string 1

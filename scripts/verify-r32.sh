@@ -456,7 +456,7 @@ def find id => id::IntId.value id + $payload_fb
 def wrap f => f.value
 /implement
 EOF
-    printf 'def main = lib::store::Memory.find 1\n' >"$base/main.hd"
+    printf 'def main = Int.to_string (lib::store::Memory.find 1)\n' >"$base/main.hd"
 }
 
 # 32-a: main の無い .hd は check ではライブラリとして受理、build / dump-mono は E206 1:1。

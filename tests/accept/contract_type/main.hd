@@ -1,7 +1,8 @@
 // spec: §46
 // expect: 41
 // item: 契約の拡張
-def main = Store.find (IntId.make 41)
+// needs: prelude
+def main = Int.to_string (Store.find (IntId.make 41))
 module UserId
 type T
 def make (value: Int): T

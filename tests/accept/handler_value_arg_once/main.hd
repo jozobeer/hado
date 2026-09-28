@@ -1,4 +1,5 @@
 // spec: §38
+// needs: prelude
 // expect: 49
 effect Ask
 once ask: Int
@@ -7,4 +8,4 @@ once ask => n
 return value => value + n
 def inner (x: Int): Int {Ask} => ask + x
 def outer (y: Int): Int {Ask} => inner (y + 1)
-def main = with Fixed(6) -> outer 36
+def main = Int.to_string (with Fixed(6) -> outer 36)

@@ -10,8 +10,8 @@ type Flag = | Yes | No
 def fetch (b: Bool): Flag {Ask} => if b => Yes | No
 def get (n: Int): Int {Ask} => n
 type Pair = { a: Int; b: Int }
-def main = with HAsk -> if(fetch true | Yes => 1 | 0) as scrutinee ->
+def main = Int.to_string (with HAsk -> if(fetch true | Yes => 1 | 0) as scrutinee ->
   List.length (List.map [true] fetch) as argument ->
   get 1 + 1 as operand ->
   { a = get 2; b = 0 } as recd ->
-  scrutinee + argument + operand + recd.a
+  scrutinee + argument + operand + recd.a)

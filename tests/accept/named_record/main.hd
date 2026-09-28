@@ -1,7 +1,8 @@
 // spec: §18
 // expect: 42
 // item: record
+// needs: prelude
 type User = | Payload { id: Int; name: String }
 def number user => user as Payload { id = n } ->
   n
-def main = number Payload { name = "a"; id = 37 } + Payload { id = 5; name = "b" }.id
+def main = Int.to_string (number Payload { name = "a"; id = 37 } + Payload { id = 5; name = "b" }.id)

@@ -900,7 +900,7 @@ pub fn compile_mono_to_object(
         define_mono_function(&mut module, printer, checked, &ids)?;
     }
     let print_id = ids[&printers[0].id.0];
-    define_int_entry(&mut module, main_id, print_id)?;
+    define_entry(&mut module, main_id, print_id, &program.entry.ty())?;
     let bytes = module.finish().emit().map_err(|e| e.to_string())?;
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
@@ -981,10 +981,16 @@ fn define_mono_function(
         .map_err(|e| e.to_string())
 }
 
-fn define_int_entry(
+/// `hado_entry` is the OS's `main` (§54). When `main`'s type is Int its value
+/// *is* the exit code, so nothing is printed: 0..=255 is returned as it is and
+/// anything else is diagnosed before it is narrowed to the ABI's i32, so the OS
+/// never normalizes a negative value or 256. Every other type keeps the older
+/// rule -- print the value and return the printer's status.
+fn define_entry(
     module: &mut ObjectModule,
     main: cranelift_module::FuncId,
     print: cranelift_module::FuncId,
+    main_type: &crate::mono::Type,
 ) -> Result<(), String> {
     let mut context = module.make_context();
     context.func.signature = Signature::new(CallConv::SystemV);
@@ -1001,21 +1007,56 @@ fn define_int_entry(
     let block = builder.create_block();
     builder.switch_to_block(block);
     let main = module.declare_func_in_func(main, builder.func);
-    let print = module.declare_func_in_func(print, builder.func);
     let environment = builder
         .ins()
         .iconst(module.target_config().pointer_type(), 0);
     let call = builder.ins().call(main, &[environment]);
     let result = builder.inst_results(call)[0];
-    let printed = builder.ins().call(print, &[environment, result]);
-    let status = builder.inst_results(printed)[0];
-    let code = builder.ins().ireduce(clif_types::I32, status);
-    builder.ins().return_(&[code]);
+    if matches!(main_type, crate::mono::Type::Int) {
+        emit_int_exit_code(module, &mut builder, result)?;
+    } else {
+        let print = module.declare_func_in_func(print, builder.func);
+        let printed = builder.ins().call(print, &[environment, result]);
+        let status = builder.inst_results(printed)[0];
+        let code = builder.ins().ireduce(clif_types::I32, status);
+        builder.ins().return_(&[code]);
+    }
     builder.seal_all_blocks();
     builder.finalize(module.target_config());
     module
         .define_function(entry, &mut context)
         .map_err(|e| e.to_string())
+}
+
+/// Return an Int main's value as the exit code, or diagnose and return 1.
+fn emit_int_exit_code(
+    module: &mut ObjectModule,
+    builder: &mut FunctionBuilder<'_>,
+    result: cranelift_codegen::ir::Value,
+) -> Result<(), String> {
+    let out_of_range = crate::runtime_abi::RuntimeFunction::ExitCodeOutOfRange;
+    let declaration = out_of_range.declaration();
+    let signature = runtime_signature(out_of_range, module.target_config().pointer_type());
+    let id = module
+        .declare_function(declaration.symbol, Linkage::Import, &signature)
+        .map_err(|e| e.to_string())?;
+    let report = module.declare_func_in_func(id, builder.func);
+    let fits = builder.ins().icmp_imm_u(
+        cranelift_codegen::ir::condcodes::IntCC::UnsignedLessThanOrEqual,
+        result,
+        255,
+    );
+    let code = builder.create_block();
+    let diagnose = builder.create_block();
+    builder.ins().brif(fits, code, &[], diagnose, &[]);
+    builder.switch_to_block(code);
+    let narrowed = builder.ins().ireduce(clif_types::I32, result);
+    builder.ins().return_(&[narrowed]);
+    builder.switch_to_block(diagnose);
+    builder.ins().call(report, &[]);
+    let one = builder.ins().iconst(clif_types::I32, 1);
+    builder.ins().return_(&[one]);
+    Ok(())
 }
 
 fn import_function(

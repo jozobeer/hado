@@ -105,7 +105,9 @@ exercise() {
     check "29-e $kind /dev/null is 0" redirected_is 0 "$bin" /dev/null
 }
 
-if ! build_kind int "def main = $int_value" \
+# §54: an Int main is the exit code, whose range is 0..=255. Render it so the
+# gate keeps measuring the print path rather than the exit-code path.
+if ! build_kind int "def main = Int.to_string ($int_value)" \
     || ! build_kind string "def main = \"$string_value\"" \
     || ! build_kind char "def main = '$char_value'"; then
     echo 'NG: build fixture'

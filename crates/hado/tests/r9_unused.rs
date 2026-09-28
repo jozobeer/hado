@@ -89,7 +89,7 @@ fn module_calls_to_outer_definitions_execute() {
     let dir = std::env::temp_dir().join(format!("hado-outer-def-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
-    let source = "def main = M.run 20\n\ndef add x => x + 1\nimplement S as M def run x => add (add x) /implement\nmodule S def run(x: Int): Int /module";
+    let source = "def main = Int.to_string (M.run 20)\n\ndef add x => x + 1\nimplement S as M def run x => add (add x) /implement\nmodule S def run(x: Int): Int /module";
     std::fs::write(&path, source).unwrap();
     let built = Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("build")
