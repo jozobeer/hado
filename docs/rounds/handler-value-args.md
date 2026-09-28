@@ -49,6 +49,8 @@ issue の完了条件のとおり。
 - `handler_value_arg_nested` は入れ子の `with`。内側の値引数と外側の値引数が入れ替わらないことを測る。`abort ask => limit * 10` と `return value => value + limit` を `with Take(2) -> (with Take(5) -> ask)` に当て、正しい対応なら `50 + 2 = 52`、入れ替わっていれば `20 + 5 = 25` になる。
 - `handler_value_arg_return` は `return` の腕から値引数を参照する。
 - `handler_value_arg_effect` は実引数が効果を持つ形。実引数に `Io.log` を置き、`again` の腕が `resume` を繰り返して `convert` が複数回呼ばれる形で、`log` の出力が 1 回であることを `// expect: arg` で見る。
+- `handler_value_arg_once` は `once` の腕。値引数を参照する `once` の腕を関数の中から呼び、その関数をさらに関数から呼ぶ（capture が 2 段伝わること）。`return` の腕も値引数を使う（`6 + 37 + 6 = 49`）。
+- `handler_value_arg_shadow` は `with` の値引数と呼んだ関数の引数が同じ名前の形。`use 100` の引数が腕の `n` と同名でも、腕の `n` は値引数（6）、本体の `n` は利用者の束縛（100）で、`6 + 100 = 106` になる。
 - `with` の実引数の 1 回評価は `r26_effects.rs` のテストでも測る。同じ形の stdout を完全一致で照合し、`List.length` の値まで見る。
 
 ### 成果物
@@ -56,9 +58,9 @@ issue の完了条件のとおり。
 - `crates/hado/src/name_resolution.rs`: `handler` が `HandlerDecl::params` を腕のスコープに入れる。
 - `crates/hado/src/file_scopes.rs`: `handler` が `HandlerDecl::params` を束縛として数え、腕の中の参照を file-local の名前へ付け替えない。
 - `crates/hado/src/infer.rs`: `with` の実引数と宣言型の照合、腕の推論での値引数の束縛。
-- `crates/hado/src/mono.rs`: `with` の位置での 1 回評価と `Let`、`convert` の追加引数、継続の capture、腕の lower 中の `scope` の差し替え。
+- `crates/hado/src/mono.rs`: `with` の位置での 1 回評価と `Let`、値引数の表 `frame_value_args`、腕を lower する間の名前の差し替え、単相化した `def`・lambda・継続への capture の引き継ぎ、`convert` の追加引数。
 - `crates/hado/tests/r26_effects.rs`: 1 回評価の判定器。
-- `tests/accept/handler_value_arg*`: 完了条件 (1)(2) の判定器（5 本）。
+- `tests/accept/handler_value_arg*`: 完了条件 (1)(2) の判定器（7 本）。
 - 本ファイル。
 
 ### 工程
@@ -104,6 +106,8 @@ main で再現（後置の綴り）→ 赤のテスト（受理コーパス 5 �
 | §38 | handler は値の引数を取れ、`with` は呼び出しの形で渡す | 名前解決 | — | `tests/accept/handler_value_arg*` |
 | §38 | 値引数は handler の全ての腕から見える | 名前解決 | — | `crates/hado/src/file_scopes.rs` の束縛 |
 | §38 | 値引数は handler の全ての腕から見える | 型 | E301・E305 | `tests/accept/handler_value_arg*` |
+| §38 | 値引数は handler の全ての腕から見える（`once` の腕も、呼んだ関数の中でも） | 単相化 | — | `tests/accept/handler_value_arg_once` |
+| §38 | 値引数の名前は腕からだけ見え、本体の利用者の束縛を覆わない | 単相化 | — | `tests/accept/handler_value_arg_shadow` |
 | §38 | `with` は `rest` を `H` の下で評価する | 単相化 | — | `crates/hado/tests/r26_effects.rs` の 1 回評価 |
 
 ## 実測
@@ -134,12 +138,14 @@ test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 67 filtered out;
 ### 緑（このラウンドの成果物）
 
 ```
-$ for c in handler_value_arg handler_value_arg_take handler_value_arg_nested handler_value_arg_return handler_value_arg_effect; do printf '%s: ' $c; out=$(cargo run --offline -q -- run tests/accept/$c/main.hd 2>&1); printf 'exit=%s out=%s\n' "$?" "$(echo "$out" | tr '\n' '|')"; done
+$ for c in handler_value_arg handler_value_arg_take handler_value_arg_nested handler_value_arg_return handler_value_arg_effect handler_value_arg_once handler_value_arg_shadow; do printf '%s: ' $c; out=$(cargo run --offline -q -- run tests/accept/$c/main.hd 2>&1); printf 'exit=%s out=%s\n' "$?" "$(echo "$out" | tr '\n' '|')"; done
 handler_value_arg: exit=0 out=0|
 handler_value_arg_take: exit=0 out=30|
 handler_value_arg_nested: exit=0 out=52|
 handler_value_arg_return: exit=0 out=3|
 handler_value_arg_effect: exit=0 out=arg|
+handler_value_arg_once: exit=0 out=49|
+handler_value_arg_shadow: exit=0 out=106|
 $ cargo test --offline --test r26_effects -- handler_value_argument_is_evaluated_once_at_the_with
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 67 filtered out; finished in 1.09s
 ```
@@ -174,4 +180,94 @@ TALLY: 29/29 passed; red: none
 ```
 
 corpus lock の `--check` 差分は、追加した 5 本の `+` 行だけで、main 側の変更は無かった（`origin/main` は基点の `bb44419` のまま）。
+
+### 審査の指摘への対応
+
+審査が 2 件の fatal を出した。1 件目（値引数の名前が `with` の本体へ漏れる）は親が再現して確定した。2 件目（`once` の腕に値引数が届かない）は自分で再現して直した。
+
+#### 指摘 1: 値引数の名前が本体の利用者の束縛とすり替わる
+
+審査の形は `abort` の腕だった。`abort` は継続を捨てる（`ask + k` の `+ k` は走らない）ので、値そのものは食い違わない。`once` に置き換えた最小形で再現した。
+
+```
+$ cat target/v6-samename/main.hd
+effect Ask
+once ask: Int
+handler Ask as Fixed(n: Int)
+once ask => n
+def use (n: Int): Int {Ask} => ask + n
+def main = with Fixed(6) -> use 100
+$ cargo run --offline -q -- run target/v6-samename/main.hd   # 直す前
+200
+```
+
+正しい値は `6 + 100 = 106`。腕の `n` が、呼んだ関数の引数 `n`（100）を拾っていた。main では E204 で止まっていた形なので、黙って違う値を返す退行である。
+
+原因は `with_params` に値引数の名前を `self.scope` へ入れさせ、`with` の本体の lower の間ずっと見せていたこと。腕の本体は呼ばれた関数のフレームで lower されるので、そのフレームの引数と衝突する。
+
+直し方は、名前解決と infer の扱いに揃えること。値は `frame_value_args`（`handler_stack` と同じ並びの表）に持ち、`self.scope` には入れない。腕を lower する間だけ、その handler の値を `scope` に被せる（`install_handler_frame_values`）。本体の式は利用者の束縛をそのまま引く。
+
+```
+$ cargo run --offline -q -- run target/v6-samename/main.hd   # 直した後
+106
+$ cat target/v8-paramshadow/main.hd
+effect Ask
+once ask(value: Int): Int
+handler Ask as Fixed(value: Int)
+once ask value => value * 10
+def main = with Fixed(6) -> ask 2
+$ cargo run --offline -q -- run target/v8-paramshadow/main.hd   # 操作の引数が勝つ
+20
+```
+
+#### 指摘 2: `once` の腕に値引数が届かない
+
+```
+$ cat target/v6-val/main.hd
+effect Ask
+once ask: Int
+handler Ask as Fixed(n: Int)
+once ask => n
+def use (x: Int): Int {Ask} => ask + x
+def main = with Fixed(6) -> use 1
+$ cargo run --offline -q -- run target/v6-val/main.hd   # 直す前
+function definition requires a function type   (exit=1)
+```
+
+`once` の腕は操作の位置で inline に lower される。単相化は `std::mem::take(&mut self.scope)` でフレームを作り直すので、呼ばれた `use` の中に値引数が無い。トップレベルの `def n` があれば黙ってそちらを使う。
+
+対処は、`with` の本体から単相化した `def`・lambda・継続へ値引数を **capture** として引き継ぐこと。capture の id は呼び出し側のフレームのまま使う（閉包は環境の値を同じ id へ読み戻すので、lambda が `self.scope` の束縛を capture にするのと同型である）。値引数があるときの直接呼び出しは閉包にして呼ぶ。載せる組は handler の並びだけで決まるので、同じ単相化を共有する呼び出し位置で capture の数が食い違わない。
+
+```
+$ cargo run --offline -q -- run target/v6-val/main.hd   # 直した後
+7
+$ cat target/v7-nested/main.hd
+effect Ask
+once ask: Int
+handler Ask as Inner(n: Int)
+once ask => n
+handler Ask as Outer(m: Int)
+once ask => m
+def use (x: Int): Int {Ask} => ask + x
+def main = with Outer(10) -> (with Inner(3) -> use 100)
+$ cargo run --offline -q -- run target/v7-nested/main.hd   # 内側が勝つ
+103
+```
+
+#### 足した検査（赤 → 緑）
+
+`handler_value_arg_once`（`once` の腕を 2 段先の関数から呼ぶ。`return` の腕も値引数を使う）と `handler_value_arg_shadow`（値引数と呼んだ関数の引数が同名）を受理コーパスに足した。赤は直す前の等価な入力で測った。
+
+```
+$ cargo run --offline -q -- run target/v6-val/main.hd            # = once の形。直す前
+function definition requires a function type   (exit=1)
+$ cargo run --offline -q -- run target/v6-samename/main.hd       # = shadow の形。直す前
+200
+$ cargo run --offline -q -- run tests/accept/handler_value_arg_once/main.hd     # 直した後
+49
+$ cargo run --offline -q -- run tests/accept/handler_value_arg_shadow/main.hd   # 直した後
+106
+```
+
+`with` の実引数の 1 回評価（`handler_value_arg_effect` の `arg` 1 行と `r26_effects` のテスト）は直した後も変わらない。
 
