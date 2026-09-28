@@ -233,7 +233,7 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     } else {
         crate::Inspection::Library
     };
-    resolve_with_prelude(ast, path, None, inspection)
+    resolve_with_prelude(ast, path, None, inspection, 0)
 }
 
 pub(crate) fn resolve_with_prelude(
@@ -241,9 +241,10 @@ pub(crate) fn resolve_with_prelude(
     path: &str,
     trusted_start: Option<usize>,
     inspection: crate::Inspection,
+    prelude_items: usize,
 ) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
-    if let Err(error) = crate::type_realizations::check(ast, path) {
+    if let Err(error) = crate::type_realizations::check(ast, path, prelude_items) {
         diagnostics.push(error);
     }
     if let Err(error) = declarations(&ast.items, path) {
