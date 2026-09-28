@@ -40,6 +40,7 @@ pub(crate) fn violations(ast: &Ast, path: &str) -> Vec<Violation> {
                         definition: (*name).into(),
                         reference: *reference,
                         diagnostic: Diagnostic {
+                            mentions: None,
                             suggestion: None,
                             related: None,
                             path: path.into(),
