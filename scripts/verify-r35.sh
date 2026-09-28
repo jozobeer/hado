@@ -117,7 +117,7 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
                 comparison_start = base_prefix + 'def main = make [' + literal(ty, higher) + '] as a -> '
             add(f'35-e {ty} length={length} {relation}', result_type + comparison_start + expression + result, expected)
         label = f'35-a {ty} length={length}'
-        add(label + ' length', start + 'Array.length a', str(len(values)))
+        add(label + ' length', start + 'Int.to_string (Array.length a)', str(len(values)))
         if ty != 'Int Array' and length != 30000:
             add(label + ' roundtrip', start + 'Array.to_list a', show(ty, values))
         indices = sorted({0, length - 1, rng.randint(1, length - 2) if length > 2 else 0}) if length else []
@@ -150,9 +150,9 @@ for ty in ['Int', 'Float', 'Bool', 'String', 'Char', 'Cell', 'Int Array']:
                 add(f'35-b {ty} length={length} {member}={index}', start + call, 'IndexOutOfRange', 'error')
 for member in ['get', 'set']:
     expr = 'Array.get a 1' if member == 'get' else 'Array.length (Array.set a 1 9)'
-    add(f'35-b handler {member}', 'def main = Array.of_list [5] as a -> with H -> ' + expr + '\nhandler Error as H\nabort raise e => String.length e.message', str(len('IndexOutOfRange')))
+    add(f'35-b handler {member}', 'def main = Array.of_list [5] as a -> Int.to_string (with H -> ' + expr + ')\nhandler Error as H\nabort raise e => String.length e.message', str(len('IndexOutOfRange')))
     valid = 'Array.get a 0' if member == 'get' else 'Array.length (Array.set a 0 9)'
-    add(f'35-b handler {member} success', 'def main = Array.of_list [5] as a -> with H -> ' + valid + '\nhandler Error as H\nabort raise e => String.length e.message', str(5 if member == 'get' else 1))
+    add(f'35-b handler {member} success', 'def main = Array.of_list [5] as a -> Int.to_string (with H -> ' + valid + ')\nhandler Error as H\nabort raise e => String.length e.message', str(5 if member == 'get' else 1))
 large = 'def rec generate n => if n <= 0 => [] | [n, ...generate (n - 1)]\ndef main = Array.of_list (generate 30000) as a -> '
 values = list(range(30000, 0, -1))
 add('35-c of_list 30000', large + '[Array.length a, Array.get a 29999, Array.get a 0]', show('Int', [len(values), values[-1], values[0]]), 'timeout')
@@ -162,8 +162,8 @@ add('35-c set 30000', large + 'Array.set a 29999 (-73) as b -> [Array.length b, 
 blank, indent = pad % 9 + 1, (pad // 9) % 13 + 1
 source = '\n' * blank + ' ' * indent + 'type A Array = { value: A }\ndef main = 0'
 add('35-f reserved Array anchor', source, f':{blank + 1}:{indent + len("type A ") + 1}: error[E205]:', 'code:E205')
-add('35-f Int Array annotation', 'def f (xs: Int Array) => xs\ndef main = Array.length (f (Array.of_list [3, 5]))', '2')
-shared = ('def main = read ({ value = Store.make (Array.of_list [3, 5, 7]) })\n'
+add('35-f Int Array annotation', 'def f (xs: Int Array) => xs\ndef main = Int.to_string (Array.length (f (Array.of_list [3, 5])))', '2')
+shared = ('def main = Int.to_string (read ({ value = Store.make (Array.of_list [3, 5, 7]) }))\n'
           'def read box => Array.length box.value\ntype Box = { value: Store.T }\n'
           'module Store\ntype T\ndef make(value: Int Array): T Pure\n/module\n'
           'implement Store as Store\nshared type T = Int Array\ndef make value => value\n/implement')
@@ -181,7 +181,8 @@ for shape, declaration, bad, good in [
         line = prefix.count('\n') + 1
         column = len(prefix.rsplit('\n', 1)[-1] + token_prefix) + 1
         add(f'35-e2 {shape} {op} function rejected', prefix + expression, f':{line}:{column}: error[{code}]:', 'code:' + code)
-        source = declaration.replace('Fn(Int => Int)', 'Int') + 'def main = ' + good + ' as a -> ' + expression
+        control = 'Int.to_string (compare a a)' if op == 'compare' else f'a {op} a'
+        source = declaration.replace('Fn(Int => Int)', 'Int') + 'def main = ' + good + ' as a -> ' + control
         expected = '0' if op == 'compare' else str(op == '==').lower()
         add(f'35-e2 {shape} {op} non-function control', source, expected)
 # IEEE equality must not be replaced by compare == 0 for Array elements.

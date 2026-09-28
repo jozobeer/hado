@@ -217,7 +217,9 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
-source = 'def main = 42 as value -> value\n'
+# `Int` の `main` は印字せず終了コードになる（§54）。`run` の stdout を
+# 比べるので、`Int.to_string` で包んだ入口にする。
+source = 'def main = Int.to_string (42 as value -> value)\n'
 root = Path(sys.argv[1]) / 'e'
 plain = project(root / 'plain', {'main.hd': source})
 refused = run('build', str(plain / 'main.hd'))

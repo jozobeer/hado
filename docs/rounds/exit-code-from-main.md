@@ -132,7 +132,7 @@ OK: 4 an uncaught stderr EPIPE exits 1, not 141
 OK: 4 a caught stderr EPIPE is an IoFailure
 OK: 4 a failed print exits 1
 OK: 4 an Int main never writes so a broken stdout does not matter
-OK: 5 every numeric // expect: entry prints its number
+OK: 5 every // expect: entry prints its line
 OK: 7 hado test reports each guest exit code in path order
 PASSED: 22/22
 ```
@@ -279,8 +279,8 @@ PASSED: 2/2
   `Int.to_string` で包み、印字の期待をそのまま保った。拒否フィクスチャの `def main`
   は `// expect:` を持たないので対象外。
 - 棚卸しを門番にした: `scripts/verify-exit-code-from-main.sh` の検査 5 が、`tests/` と
-  `stdlib/` の数値の `// expect:`・`// run-expect:` を持つファイルをファイル名で
-  選ばずに全て build して走らせ、印字と終了コード 0 を測る。期待値はヘッダから読む。
+  `stdlib/` の `// expect:`・`// run-expect:` を持つ入口をファイル名で選ばずに
+  全て build して走らせ、期待値の行と stdout を丸ごと比べる。期待値はヘッダから読む。
 
 ```
 $ for f in $(grep -rlE '^// (run-)?expect: [0-9]+' tests stdlib); do
@@ -307,7 +307,7 @@ OK: 4 a failed log_error is a catchable IoFailure
 OK: 4 an uncaught log_error failure exits 1
 OK: 4 an uncaught stderr EPIPE exits 1, not 141
 OK: 4 a caught stderr EPIPE is an IoFailure
-OK: 5 every numeric // expect: entry prints its number
+OK: 5 every // expect: entry prints its line
 PASSED: 22/22
 ```
 
@@ -326,3 +326,123 @@ PASSED: 22/22
 変えると: 挙動は変えない。本文を「`raise` が届いたら型に関係なく 1（stderr に message）」と改めれば、`def main = 1` との区別は stderr が空かどうかだけだと読める
 推奨:     本文にその 1 文を足す。実装（`hado_abort_error` の `exit(1)`）は既にそうで、文の穴を閉じるだけ。仕様を触るかは人が決める
 ```
+
+### 審査対応 2（M4 着地後、2026-09-27）
+
+`main`（`bb44419`・M4 `map-by-builtin-compare`）を取り込むと、検査 5 が 21/22 に
+なった。`Map` の受理コーパスは `// expect: 0001,0002,0003` のように複数の値を `,` で
+並べる 1 行で書くため、`[0-9]+` の切り出しが行の先頭の `0001` だけを期待値として
+読んでいた。タグの値を**行全体**として読み、入口の選別も「`main` を持ち
+`// expect:`（または `// run-expect:`）を持つ」へ広げた（狭めてはいない）。値が
+数値でも文字列でも構造でも同じ照合をする。`// expect-error:` だけの入口と出力
+ヘッダの無い入口は対象外。
+
+```
+$ bash scripts/verify-exit-code-from-main.sh
+  tests/accept/map_duplicate_float/main.hd: want=1 got='1,pos,pos,-0.0,none,0' rc=0
+  tests/accept/map_duplicate_nan/main.hd:   want=1 got='1,second,0' rc=0
+  tests/accept/map_to_list_order/main.hd:   want=0001 got='0001,0002,0003' rc=0
+NG: 5 every numeric // expect: entry prints its number
+PASSED: 21/22
+```
+
+走らせ方は `crates/hado/tests/corpus.rs` の `launch` に合わせ、入口ごとに作業
+ディレクトリを分けて stdin を空にした（`env_io_roundtrip` は `read_stdin` の長さを
+印字するので、stdin を継承させると 0 にならない）。直した後:
+
+```
+$ bash scripts/verify-exit-code-from-main.sh
+OK: 5 every // expect: entry prints its line
+PASSED: 22/22
+```
+
+赤の探針は `tests/accept/map_to_list_order/main.hd` の期待値を `0001,0002,0004` に
+偽ると `NG: 5 ...`（`want='0001,0002,0004' got='0001,0002,0003'`）で落ちることを見て、
+木には残していない（`corpus-lock.sh --check` は一致に戻した）。
+
+### 審査対応 3（波及する門番の移行、2026-09-27）
+
+`Int` の `main` は印字しなくなったので、**印字を期待する探針は `Int.to_string` で
+包む必要がある**。これは `cargo test` の単体テストだけでなく、`Int` を返す入口を
+走らせて stdout を比べる非コーパスの門番にも同じ形で出る。`scripts/verify-*.sh` を
+機械的に洗い、full 層の 8 本・27 箇所を `Int.to_string` で包んで移行した（検査 5 は
+逆に「`Int` の入口は印字しない」ことを測るので、この移行の対象外）。
+
+- `verify-map-by-builtin-compare.sh` 1（fold の訪問順を測る `to_list` の探針）
+- `verify-r33.sh` 4 / `verify-r34.sh` 6 / `verify-r35.sh` 6 / `verify-r36.sh` 4（`add` の
+  生成側。探針は 377 本あり、`Int` を返す 36-a/36-b/36-c だけを包む）
+- `verify-r46.sh` 2 / `verify-r47.sh` 3 / `verify-r48.sh` 3 / `verify-r50.sh` 1
+- `verify-r52.sh` 1 / `verify-r53.sh` 2 / `verify-r59.sh` 2 / `verify-r61.sh` 4
+- `verify-r69.sh` 1 / `verify-r72.sh` 1 / `verify-r73.sh` 1
+- `verify-string-split-linear.sh` 2
+
+移行後: `9/9`、`72/72`、`1360/1360`、`714/714`、`5/5`、`4/4`、`5/5`、`5/5`、
+`5/5`、`5/5`、`8/8`、`4/4`、`4/4`、`4/4`。
+
+包む位置と範囲は結果の型で決める。`String` を返す探針（`report::Report.render`）を
+包むと型が合わず E305 になり、`with H -> f x` の形は `with` の内側で包まないと
+handler の `abort` の腕（`String`）と本体（`Int`）が食い違う。どちらも実測で
+確かめてから直した。
+
+`verify-r69.sh`・`verify-r72.sh`・`verify-r73.sh` の検査 c は「書き換えても値が
+変わらない」ことを測る。`build_and_run` が stdout だけを返すと、`Int` の入口では
+両側とも空文字になって比較が空転する。stdout と終了コードの対を返す形に直した。
+
+`verify-r46.sh`・`verify-r47.sh` には、期待値の改行の書き漏らしがあった
+（`build_run` は stdout 全体を行として比べる）。改行を足して直し、照合そのものは
+緩めていない。
+
+`verify-string-split-linear.sh` の検査 i だけは床（small median 0.200s 以上）を
+割って赤になる（`0.182s`。環境依存の実時間で、`Int` の印字とは無関係。既知の
+`flaky-string-split-timing-gate`）。
+
+### 切り出した赤（2026-09-27）
+
+**`r60`・`r62`・`r63`・`r68` はこのラウンドの赤ではない。** M4
+`map-by-builtin-compare` が `stdlib/map.hd` の内部型（`T`・`MapColor`・`MapStep`）を
+根の名前空間へ漏らし、利用者が同じ名前を宣言すると E205 になる。`T` はよくある名前
+なので、`type T = | A | B` を持つ探針がまとめて落ちる。
+
+```
+$ printf 'type T = | A | B\ndef main = 0\n' > main.hd && cargo run --offline -q -- check main.hd
+main.hd:239:13: error[E205]: local data type conflicts with an existing type
+```
+
+切り分けは M4 側の worktree（`30bea00`、このラウンドの merge 前）で測った。
+
+```
+（M4 の worktree、未改変）
+r62 rc=1 PASSED: 1/4   r63 rc=1 PASSED: 3/4   r68 rc=1 PASSED: 1/4
+```
+
+落ちる探針は `def main = 0` を含み、`Int` の印字とは無関係である。issue に切り出して
+M4 の担当へ返す（`docs/issues/map-internal-types-leak-into-root.md`）。
+
+`verify-r36.sh` の `timeout 1800` 到達（rc=124）も同じ形で切り分けた。この門番は
+探針 1 本ごとに `cargo run -- build` を呼ぶ（`build_case`）ため、377 本で 50 分前後
+かかる。実測は `elapsed=3044.56s`（約 50.7 分、`timeout 4200` で完走、`PASSED: 384/384`）。
+移行前からの所要時間で、このラウンドで伸びたものではない。門番の timeout は
+変えていない（`run-gates.sh --tier full` の 1 本として完走することを実測で確認した）。
+
+### 層別の実測（2026-09-27）
+
+```
+$ bash scripts/run-gates.sh --tier quick target/gates-qf
+TALLY: 41/41 passed; red: none
+
+$ bash scripts/run-gates.sh --tier core target/gates-cf
+TALLY: 696/696 passed; red: none
+
+$ bash scripts/run-gates.sh --tier full target/gates-ff
+TALLY: 3807/3817 passed; red: verify-r60.log verify-r62.log verify-r63.log
+      verify-r68.log verify-string-split-linear.log
+
+$ bash scripts/corpus-lock.sh --check      # 差分なし
+$ bash scripts/gate-tiers-lock.sh --check  # 差分なし
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+```
+
+full 層の赤 5 本の内訳は、`r60`・`r62`・`r63`・`r68` が M4 の名前漏れ（上記、issue に
+切り出し済み）、`string-split-linear` の検査 i が既知の実時間の床割れ
+（`flaky-string-split-timing-gate`）。このラウンドに由来する赤は無い。

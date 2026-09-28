@@ -58,9 +58,11 @@ def build_run(root, name, expect_ok):
     directory = Path(root) / name
     build = subprocess.run([HADO, 'build', str(directory / 'main.hd')], capture_output=True)
     assert build.returncode == 0 and build.stderr == b'', (name, build.returncode, build.stderr.decode())
-    result = subprocess.run([str(directory / 'main')], capture_output=True, cwd=directory, stdin=subprocess.DEVNULL)
+    result = subprocess.run([str(directory / 'main')], capture_output=True, stdin=subprocess.DEVNULL)
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
     assert result.stderr == b'', (name, result.stderr.decode())
+    # `Int` の `main` は印字せず終了コードになる（§54）。値の門番は
+    # `Int.to_string` で包んだ入口を走らせ、印字された値を見る。
     assert result.stdout == expect_ok.encode(), (name, result.stdout, expect_ok)
 
 def comments(source):
@@ -116,7 +118,7 @@ for index in range(10):
         f'def classify score => if{separator}'
         f'  | score >= {limit} => {yes}{separator}'
         f'  | {no}\n'
-        f'def main = classify ({value})\n')
+        f'def main = classify ({value}) as answer -> Int.to_string answer\n')
     name = f'long-{index}'
     caught = check_code(root, name, source, 'E517')
     assert b'canonical form:' in caught.stderr, (name, caught.stderr.decode())
@@ -189,6 +191,7 @@ sys.path.insert(0, sys.argv[1])
 import harness
 harness.HADO = sys.argv[2]
 from harness import build_run, check_code, check_fix
+import re
 
 root = sys.argv[1] + '/c'
 seed = int(os.environ.get('HADO_SEED', '46'))
@@ -207,7 +210,9 @@ for index in range(10):
     for arm in range(1, length + 1):
         names = ' + '.join(f'x{offset}' for offset in range(arm))
         source += f'  | {written(arm)} => {names}\n'
-    source += '  | 0\ndef main = f [' + ', '.join(str(rng.randint(0, 9)) for _ in range(length)) + ']\n'
+    source += ('  | 0\ndef main =\n  f ['
+               + ', '.join(str(rng.randint(0, 9)) for _ in range(length))
+               + '] as answer -> Int.to_string answer\n')
     name = f'pattern-{index}'
     caught = check_code(root, name, source, 'E516')
     assert b'canonical form:' in caught.stderr, (name, caught.stderr.decode())
@@ -215,8 +220,12 @@ for index in range(10):
     assert fixed.returncode == 0 and fixed.stderr == b'', (name, fixed.returncode, fixed.stderr.decode())
     text = (Path(root) / name / 'main.hd').read_text()
     assert 'Cons' not in text and 'Nil' not in text, (name, text)
-    values = [int(value) for value in text.split('main = f [')[1].rstrip(']\n').split(', ')]
-    build_run(root, name, str(sum(values)) + '\n')
+    # 書き換えた `main` は `Int.to_string` で包んである。印字される値を
+    # ソースから読む（`f [..]` の並びは書き換えで変わらない）。
+    listed = re.search(r'f \[([0-9, ]*)\]', text)
+    assert listed, (name, text)
+    values = [int(value) for value in listed.group(1).split(', ')]
+    build_run(root, name, f'{sum(values)}\n')
 print(f'pattern lists: seed {seed}, 10 rewritten patterns run')
 PY
 }

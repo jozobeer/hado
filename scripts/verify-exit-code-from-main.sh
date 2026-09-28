@@ -229,35 +229,50 @@ int_ignores_broken_stdout() {
 }
 check '4 an Int main never writes so a broken stdout does not matter' int_ignores_broken_stdout
 
-# --- 5. 数値の `// expect:` を宣言した入口は、その値を印字する ---
-# 入口はファイル名で選ばない（§50 の第 2 入口を漏らさない）。tests/ と stdlib/ の
-# うち、数値の `// expect:`・`// run-expect:` を持つファイルを全て build して走らせる。
-# 期待値はファイルのヘッダから読み、判定器には書き写さない。
-expect_number_is_printed() {
+# --- 5. `// expect:` を持つ入口は、その行の値を印字する ---
+# 入口はファイル名で選ばない（§50 の第 2 入口を漏らさない）。`// expect:` は
+# stdout 全体（`docs/corpus.md` の「trim 後」）。`// run-expect:` は 1 行ずつを
+# 順に並べた stdout。タグの値がそのまま期待値で、判定器には書き写さない。
+# 数値でも文字列でも構造でも同じ照合をする（`0001,0002,0003` のように複数値を
+# 1 行で書く形も 1 つの値として丸ごと比べる）。印字の期待を持たない入口
+# （`// expect-error:` だけの入口や、出力ヘッダの無い入口）は対象外。
+expect_is_printed() {
     local out_dir="$workdir/expect" red=0 seen=0
     mkdir -p "$out_dir"
     local file want out got rc
     while IFS= read -r file; do
-        while IFS= read -r want; do
-            seen=$((seen + 1))
-            out="$out_dir/$(echo "$file" | tr '/.' '__')"
-            if ! "$hado" build -o "$out" "$file" >/dev/null 2>"$out_dir/build.err"; then
-                echo "  $file: build failed" >&2
-                red=$((red + 1))
-                continue
-            fi
-            got=$("$out" 2>/dev/null)
-            rc=$?
-            if [ "$got" != "$want" ] || [ "$rc" -ne 0 ]; then
-                echo "  $file: want=$want got='$got' rc=$rc" >&2
-                red=$((red + 1))
-            fi
-        done < <(grep -oE '^// (run-)?expect: [0-9]+' "$file" | awk '{print $NF}')
-    done < <(grep -rlE '^// (run-)?expect: [0-9]+' tests stdlib | sort)
-    [ "$seen" -gt 0 ] || { echo "  no numeric expect entry" >&2; return 1; }
+        grep -q '^def main' "$file" || continue
+        if grep -qE '^// expect:' "$file"; then
+            want=$(sed -nE 's|^// expect: ?(.*)$|\1|p' "$file" | head -1 | sed 's/[[:space:]]*$//')
+        elif grep -qE '^// run-expect:' "$file"; then
+            want=$(sed -nE 's|^// run-expect: ?(.*)$|\1|p' "$file" \
+                | sed 's/[[:space:]]*$//' \
+                | awk 'NR > 1 { printf "\n" } { printf "%s", $0 }')
+        else
+            continue
+        fi
+        seen=$((seen + 1))
+        out="$out_dir/$(echo "$file" | tr '/.' '__')"
+        run_dir="$out_dir/run-$(echo "$file" | tr '/.' '__')"
+        mkdir -p "$run_dir"
+        if ! "$hado" build -o "$out" "$file" >/dev/null 2>"$out_dir/build.err"; then
+            echo "  $file: build failed" >&2
+            red=$((red + 1))
+            continue
+        fi
+        # `corpus.rs` と同じ条件で走らせる。作業ディレクトリを分けて、stdin は空
+        # （`env_io_roundtrip` は `read_stdin` の長さを印字する）。
+        got=$(cd "$run_dir" && "$out" </dev/null 2>/dev/null)
+        rc=$?
+        if [ "$got" != "$want" ] || [ "$rc" -ne 0 ]; then
+            echo "  $file: want='$want' got='$got' rc=$rc" >&2
+            red=$((red + 1))
+        fi
+    done < <(grep -rlE '^// (run-)?expect:' tests stdlib | sort)
+    [ "$seen" -gt 0 ] || { echo "  no // expect: entry" >&2; return 1; }
     [ "$red" -eq 0 ]
 }
-check '5 every numeric // expect: entry prints its number' expect_number_is_printed
+check '5 every // expect: entry prints its line' expect_is_printed
 
 # --- 7. `hado test` は guest の終了コードをそのまま報告する ---
 # 期待する値はここで作り、門番に書き写さない。
