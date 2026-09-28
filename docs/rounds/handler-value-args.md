@@ -181,6 +181,33 @@ TALLY: 29/29 passed; red: none
 
 corpus lock の `--check` 差分は、追加した 5 本の `+` 行だけで、main 側の変更は無かった（`origin/main` は基点の `bb44419` のまま）。
 
+### 着地前（main 取り込み後）の全走
+
+審査の指摘への対応の途中で `origin/main` が `59907ec`（exit-code-from-main、§54 の終了コード）へ進んだ。main を取り込み、受理コーパスの `main` が `Int` を返す棚卸し（`Int.to_string` で包む）に本ラウンドの 7 本を追随させた。lock の `--check` 差分は、main 側の 44 本の `M` と本ラウンドの 7 本の `+` だけで説明できた。
+
+```
+$ cargo test --offline
+test result: ok. ... 0 failed （71 本の test result 行、783 passed、FAILED 0）
+$ bash scripts/run-gates.sh --tier quick target/gates-quick-r2
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core-r2
+TALLY: 710/710 passed; red: none
+$ bash scripts/verify-m4.sh
+PASSED: 172/172
+$ bash scripts/verify-r37.sh
+PASSED: 262/262
+$ bash scripts/verify-r43.sh
+PASSED: 10/10
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/corpus-lock.sh --check
+lock ok
+```
+
+赤は `--tier quick`・`--tier core` のいずれにも無い。
+
 ### 審査の指摘への対応
 
 審査が 2 件の fatal を出した。1 件目（値引数の名前が `with` の本体へ漏れる）は親が再現して確定した。2 件目（`once` の腕に値引数が届かない）は自分で再現して直した。
@@ -271,3 +298,13 @@ $ cargo run --offline -q -- run tests/accept/handler_value_arg_shadow/main.hd   
 
 `with` の実引数の 1 回評価（`handler_value_arg_effect` の `arg` 1 行と `r26_effects` のテスト）は直した後も変わらない。
 
+
+### 仕様への疑義（人が決める）
+
+```
+主張:     §38 の「引数の個数と型」の誤りが §56 のどの行か。§56 は handler の値引数に行を持たず、§38 は個数・型の照合を明文化していない
+再現:     handler H as Fixed(n: Int) / with H(1, 2) -> … と with H("s") -> …
+現行:     E301（個数、アンカーは handler 名）と E305（型、アンカーは食い違った実引数）を適用の類推で選んだ。§56 は変更していない
+変えると: §56 に行を足せば拒否コーパスが 1 本増え、門番の件数が追随する。§38 に 1 文足せば適用と同じ規則であることが読める
+推奨:     §38 に「値引数は適用と同じく個数と型が合わなければならない」を 1 文足し、コードは E301・E305 のままにする（新しい行を足すと §56 の表と既存の 2 コードの意味が重なる）
+```
