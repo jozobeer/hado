@@ -225,3 +225,68 @@ fn positions_are_equal_across_roots_with_different_prefixes() {
     assert_eq!(short_out, long_out);
     assert!(short_out.contains("at 3:3"), "{short_out:?}");
 }
+
+/// §56: a single-source entry hands the diagnostic to the caller without
+/// `source_diagnostic`, so the message must be filled there too. A remaining
+/// `{` is the internal hole spelling leaking out of the API. Every public entry
+/// that can return one of the mention-carrying codes is measured, so a new one
+/// that forgets to fill is caught here rather than by hand.
+#[test]
+fn single_source_entries_report_filled_messages() {
+    for (code, source) in SOURCES {
+        let ast = hado::parser::parse_source(source, "probe.hd")
+            .unwrap_or_else(|error| panic!("{code}: not parseable: {error:?}"));
+        // The first three run the whole check stage, so each must report this
+        // defect with a readable position. `infer` alone need not report it,
+        // but anything it does report must not carry a hole either.
+        let entries = [
+            ("dump_mono", hado::dump_mono(source, "probe.hd").err(), true),
+            (
+                "check_source",
+                hado::check_source(source, "probe.hd").err(),
+                true,
+            ),
+            (
+                "check::check_ast",
+                hado::check::check_ast(&ast, "probe.hd").err(),
+                true,
+            ),
+            (
+                "infer::check_ast",
+                hado::infer::check_ast(&ast, "probe.hd").err(),
+                false,
+            ),
+        ];
+        let mut caught = 0;
+        for (entry, error, wants_position) in entries {
+            let Some(error) = error else {
+                continue;
+            };
+            caught += 1;
+            assert!(
+                !error.message.contains('{'),
+                "{code}: {entry} left a message hole: {:?}",
+                error.message
+            );
+            if wants_position {
+                assert!(
+                    has_position(&error.message),
+                    "{code}: {entry} lost the position: {:?}",
+                    error.message
+                );
+            }
+        }
+        assert!(
+            caught > 0,
+            "{code}: no single-source entry reported the defect"
+        );
+    }
+}
+
+/// Whether `text` carries a `L:C` position, without assuming where or how many.
+fn has_position(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes
+        .windows(3)
+        .any(|window| window[0].is_ascii_digit() && window[1] == b':' && window[2].is_ascii_digit())
+}
