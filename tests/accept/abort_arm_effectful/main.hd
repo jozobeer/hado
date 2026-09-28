@@ -1,5 +1,6 @@
 // spec: §38
 // expect: 101
+// needs: prelude
 effect A
 abort a
 handler A as G
@@ -9,4 +10,4 @@ handler A as H
 abort a => f 1
 return x => x + 10
 def f (n: Int): Int {A} => if n > 0 => n | a
-def main = with G -> with H -> f 0
+def main = Int.to_string (with G -> with H -> f 0)

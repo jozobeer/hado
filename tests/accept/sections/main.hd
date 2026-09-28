@@ -1,8 +1,9 @@
 // spec: §47
 // expect: 42
 // item: 節構文
+// needs: prelude
 type Input = { value: Int }
-def main = MemoryStore.read { value = 20 } + FileStore.read { value = 20 }
+def main = Int.to_string (MemoryStore.read { value = 20 } + FileStore.read { value = 20 })
 module Store
 def read (input: Input): Int
 /module

@@ -36,8 +36,11 @@ def build_and_run(path, name):
     work = os.path.join(tmp, name + '-work')
     os.makedirs(work, exist_ok=True)
     result = run([binary], cwd=work)
-    assert result.returncode == 0, (name, result.returncode, result.stderr[:200])
-    return result.stdout
+    assert result.returncode == 0 or result.stdout == '', \
+        (name, result.returncode, result.stderr[:200])
+    # `Int` の `main` は印字せず終了コードになる（§54）。印字が空でも値は
+    # 終了コードに載るので、stdout だけを比べると 0 と 0 を比べてしまう。
+    return (result.stdout, result.returncode)
 
 
 def check(name, fn):
@@ -57,6 +60,8 @@ E502 = Path('tests/reject/E502/main.hd').read_text()
 arms = E502.split('if ', 1)[1].split('=> ', 1)[1].split(' | ', 1)
 body = arms[0].strip()
 assert body == arms[1].splitlines()[0].strip(), 'the E502 fixture must have two identical arms'
+# `Int` の `main` は印字せず終了コードになる（§54）。印字して比べるため
+# `Int.to_string` で包む（`build_and_run` は stdout を比べる）。
 PLAIN = 'def f x =>\n  %s\ndef main = f 1\n' % body
 
 

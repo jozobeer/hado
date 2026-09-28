@@ -1890,7 +1890,7 @@ def find(id: Int): T Option
 
 ## 53.1. スタックの枯渇
 
-実行中のプロセスのスタックが尽きたときは、`hado: stack overflow` の 1 行を stderr に出力し、終了コード 1 で終了する。シグナルで死んではならない。終了コードは第54節の二値のうち 1 で、区別は stderr の内容がつける。
+実行中のプロセスのスタックが尽きたときは、`hado: stack overflow` の 1 行を stderr に出力し、終了コード 1 で終了する。シグナルで死んではならない。終了コードは第54節の 1 で、区別は stderr の内容がつける。
 
 尽きるまでの反復回数は実行環境と実装に依存するので、仕様では決めない。この診断は言語の `Error` ではない。`handler` で捕まえることはできず、`raise` の `message` としても現れない。stdout に書いたがまだ flush していない分は失われ得る。
 
@@ -1898,19 +1898,21 @@ def find(id: Int): T Option
 
 `main` の値は次の規則で印字する。
 
-`main` が値を返したら stdout に印字して終了コード 0 とする。`main` まで処理されずに届いた `raise` は、その `Exception` の `message` を stderr に印字して終了コード 1 とする。Option は剥がさない。
+`main` の型が `Int` なら、その値がそのまま終了コードである。0 以上 255 以下なら何も印字せずその値で終わり、範囲外なら `hado: exit code out of range` の 1 行を stderr に書いて 1 で終わる。判定は i64 から ABI の i32 へ縮める前に行い、負数や 256 を OS 任せに正規化しない。i64 の範囲外はリテラルに書けない（E112）ので、この判定が受けるのは i64 の全範囲である。
+
+`main` の型が `Int` 以外なら、値を stdout に印字して終了コード 0 とする。`main` まで処理されずに届いた `raise` は、その `Exception` の `message` を stderr に印字して終了コード 1 とする。Option は剥がさない。
 
 印字が失敗したら終了コード 1 とする。失敗とは stdout への書き込みか flush が失敗することで、fd が閉じている・書き込み先が満杯である・パイプの受け手が先に終わっている場合を含む。パイプの受け手が先に終わった場合もシグナルで終了させず、他の書き込み失敗と同じに扱う。
 
 失敗の理由は stderr に印字するが、これは best-effort とし、stderr 自体の失敗は無視する。それ以上報告する先が無いためである。`raise` の `message` の印字が失敗した場合も、終了コードは 1 のままとする。
 
-終了コードは 0 と 1 の二値を保つ。1 は `raise` が `main` まで届いた場合と印字が失敗した場合の両方に当たり、区別は stderr の内容がつける。
+終了コードが取る値は、`main` の型が `Int` ならその値の 0 以上 255 以下の範囲、`Int` 以外なら 0 と 1 である。1 は `Int` 以外の `main` で `raise` が届いた場合と印字が失敗した場合の両方に当たり、区別は stderr の内容がつける。`Int` の範囲外も 1 に落ちるので、`main` が 2 以上を返したのか範囲外だったのかは stderr の内容がつける。
 
 中身は canonical なソース表記で印字する。ソースとして再び読める形が一つに定まることを目的とする。
 
 | 型 | 印字 |
 |---|---|
-| Int | 10 進 |
+| Int | 10 進。ただし `main` の型が `Int` のときは印字せず、その値を終了コードにする（上記） |
 | Float | 往復可能な最短の 10 進桁を指数を使わず位取りで並べ、小数点の両側に最低 1 桁を置く。`3.0` は `3.0`、`0.1` は `0.1`、10 の 300 乗は `1` の後に `0` が 300 個と `.0`。`-0.0` は `-0.0`。NaN と無限大はソースで書けないので `nan` `inf` `-inf` と出す |
 | Bool | `true` `false` |
 | Char | 入れ子では `'a'` の形。エスケープは第5節の 4 つ |
@@ -1923,7 +1925,7 @@ def find(id: Int): T Option
 | record | `{ name = "a"; age = 3 }` |
 | 名前付きfieldのconstructor | `Payload { id = 3; name = "a" }`。fieldは宣言順 |
 
-最上位（`main` が返した値そのものと、stderr へ出す `message`）だけ 2 つの例外を置く。String と Char は引用符もエスケープも付けずに生の文字列を出す。Void は何も出さない（改行も出さない）。
+最上位（`main` が返した値そのものと、stderr へ出す `message`）だけ 3 つの例外を置く。`main` の型が `Int` のときは何も印字しない（上記の終了コードの規則に従う）。String と Char は引用符もエスケープも付けずに生の文字列を出す。Void は何も出さない（改行も出さない）。
 
 # 第X部 prelude
 
@@ -2058,6 +2060,7 @@ effect Io
 once read_file(path: String): Bytes {Error}
 once write_file(path: String, contents: Bytes): Void {Error}
 once log(contents: String): Void {Error}
+once log_error(contents: String): Void {Error}
 once read_dir(path: String): String List {Error}
 once read_stdin: Bytes {Error}
 ```
@@ -2081,6 +2084,7 @@ once read_stdin: Bytes {Error}
 | 権限が無い | `"PermissionDenied"` |
 | ディレクトリでない | `"NotADirectory"` |
 | stdout への書き込みの失敗（`log`） | `"IoFailure"` |
+| stderr への書き込みの失敗（`log_error`） | `"IoFailure"` |
 | その他の I/O の失敗 | `"IoFailure"` |
 
 prelude は全プログラムに連結され、全ての検査を受ける。prelude の項目は公開面として E513 の根にする（第39節）。
@@ -2098,6 +2102,8 @@ prelude は全プログラムに連結され、全ての検査を受ける。pre
 `env` の値が非 UTF-8 のときも、`message` が `"InvalidUtf8"` の `Error` を raise する。
 
 `log` は `contents` の後に改行 1 つを stdout へ書く。書き込みか flush が失敗したら、`message` が `"IoFailure"` の `Error` を raise する。これは第54節の `main` の値の印字とは別の経路で、失敗は捕捉できる値として観測できる。パイプの受け手が先に終わっていても、シグナルで終了させず同じ `Error` とする。
+
+`log_error` は同じ規則で stderr へ書く。改行を 1 つ足し、書き込みか flush が失敗したら `message` が `"IoFailure"` の `Error` を raise する。パイプの受け手が先に終わっていてもシグナルで終了させない。これは第54節の `main` の値を印字する経路とも、範囲外の診断を書く経路とも別で、失敗は捕捉できる値として観測できる。
 
 `String.join` は区切りを要素の間にだけ置く。`[]` は `""`、要素が 1 つならその要素である。`String.trim` は ASCII の空白（SPACE、TAB、LF、VT、FF、CR）を両端から除く。全角空白は除かない。
 

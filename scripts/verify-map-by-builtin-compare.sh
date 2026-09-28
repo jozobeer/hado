@@ -372,7 +372,7 @@ assert got == ''.join('<' + key for key in expected), (got, expected)
 # 訪問列だけが降順を露わにする。ここでは `fold` の訪問列そのものを測る。
 to_list = run('list', 'def main =\n'
                       '  Map.insert (Map.insert (Map.insert Map.empty "3" 0) "1" 0) "2" 0 as m ->\n'
-                      '  List.length (Map.to_list m)')
+                      '  Int.to_string (List.length (Map.to_list m))')
 assert to_list == '3', to_list
 
 # 空や 1 件では測らない（issue の完了条件）。3 件以上を測っていることを

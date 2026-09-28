@@ -2,4 +2,4 @@
 // expect: 3
 // needs: prelude
 // item: List リテラル
-def main = List.length [1, 2, 3]
+def main = Int.to_string (List.length [1, 2, 3])

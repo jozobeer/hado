@@ -4,4 +4,4 @@
 // item: パイプ
 type User = { name: String; active: Bool }
 def active_names users => List.filter users fn(user => user.active) |> List.map fn(user => user.name)
-def main = active_names [{ name = "a"; active = true }] |> List.length
+def main = Int.to_string (active_names [{ name = "a"; active = true }] |> List.length)

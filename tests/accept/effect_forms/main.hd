@@ -1,6 +1,7 @@
 // spec: §37
 // expect: 1
 // item: 効果の宣言
+// needs: prelude
 effect Ask
 once ask: String
 effect Stop
@@ -14,4 +15,4 @@ abort stop => 0
 handler A Yield as HYield
 again yield _ => resume ()
 def id (x: Int): Int {Ask, Stop, Int Yield} => x
-def main = with HAsk -> with HStop -> with HYield -> id 1
+def main = Int.to_string (with HAsk -> with HStop -> with HYield -> id 1)

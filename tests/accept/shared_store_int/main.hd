@@ -1,7 +1,8 @@
 // spec: §10
 // expect: 7
 // item: 型の共有
-def main = Store.find 1
+// needs: prelude
+def main = Int.to_string (Store.find 1)
 module Store
 type T
 def find (id: Int): T Pure

@@ -1,5 +1,6 @@
 // spec: §53
 // expect: 42
 // item: 末尾呼び出し
+// needs: prelude
 def rec down n => if n == 0 => 42 | down (n - 1)
-def main = down 100000000
+def main = Int.to_string (down 100000000)

@@ -22,7 +22,7 @@ fn hado() -> Command {
 #[test]
 fn run_prints_the_main_value_and_leaves_no_binary() {
     let dir = scratch("value");
-    let source = write(&dir, "def main = 3\n");
+    let source = write(&dir, "def main = Int.to_string 3\n");
     let output = hado().arg("run").arg(&source).output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b"3\n");
@@ -39,7 +39,10 @@ fn run_prints_the_main_value_and_leaves_no_binary() {
 #[test]
 fn run_forwards_the_arguments_after_the_separator() {
     let dir = scratch("args");
-    let source = write(&dir, "def main = args as argv ->\n  List.length argv");
+    let source = write(
+        &dir,
+        "def main = Int.to_string (args as argv ->\n  List.length argv)",
+    );
     let output = hado()
         .arg("run")
         .arg(&source)
@@ -90,7 +93,7 @@ fn run_returns_the_program_exit_code() {
 #[test]
 fn build_writes_to_the_requested_output() {
     let dir = scratch("output");
-    let source = write(&dir, "def main = 42\n");
+    let source = write(&dir, "def main = Int.to_string 42\n");
     let target = dir.join("out").join("prog");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     let built = hado()
@@ -132,7 +135,7 @@ fn run_discovers_namespaces_beside_embedded_compiler_sources() {
         "module S\ndef run (x: Int): Int\n/module\nimplement S as M\ndef run x => x + 3\n/implement",
     )
     .unwrap();
-    let source = write(&dir, "def main = store::M.run 7\n");
+    let source = write(&dir, "def main = Int.to_string (store::M.run 7)\n");
     let dotted = dir.join("./main.hd");
     for path in [&source, &dotted] {
         let output = hado().arg("run").arg(path).output().unwrap();

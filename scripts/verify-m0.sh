@@ -40,7 +40,7 @@ fi
 
 # --- check 3: walk ---
 walk_reasons=""
-grep -Fq '"3"' crates/hado/tests/walk.rs || walk_reasons="$walk_reasons missing-expected-stdout-3"
+grep -Fq '"def main = 1 + 2", 3' crates/hado/tests/walk.rs || walk_reasons="$walk_reasons missing-expected-exit-code-3"
 [ "$walk_ok" = "1" ] || walk_reasons="$walk_reasons walk-test-not-passing"
 if [ -z "$walk_reasons" ]; then
     pass 3 "walk"

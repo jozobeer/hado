@@ -216,7 +216,7 @@ for index, values in enumerate(([0], [0, 65])):
 
 # 34-c(2b): get が生成した要素を返す。
 index = random.randrange(len(payload))
-write("c2b", f"def main = Bytes.get (Bytes.of_list [{lit(payload)}]) {index}\n", expect=f"{payload[index]}\n")
+write("c2b", f"def main = Int.to_string (Bytes.get (Bytes.of_list [{lit(payload)}]) {index})\n", expect=f"{payload[index]}\n")
 add("c2b", "34-c(2b) get が生成した要素を返す", "print")
 
 # 34-c(2c): of_string → to_string の往復。
@@ -370,7 +370,7 @@ add("c4c_neg", "34-c(4c) get (-1) は IndexOutOfRange", "error")
 # 34-c(4d): 負の対照（境界の内側は受理）。
 write(
     "c4d_last",
-    f"def main = Bytes.of_list [{lit(payload)}] as b -> Bytes.get b (Bytes.length b - 1)\n",
+    f"def main = Bytes.of_list [{lit(payload)}] as b -> Int.to_string (Bytes.get b (Bytes.length b - 1))\n",
     expect=f"{payload[-1]}\n",
 )
 add("c4d_last", "34-c(4d) 負の対照 get は境界内で受理", "print")
@@ -474,7 +474,7 @@ for index, (left, right) in enumerate((
 # 34-f: Bytes 注釈の関数は受理される。
 write(
     "f_annot",
-    f'def main = Bytes.length (f (Bytes.of_string "{text}"))\ndef f (b: Bytes) => b\n',
+    f'def main = Int.to_string (Bytes.length (f (Bytes.of_string "{text}")))\ndef f (b: Bytes) => b\n',
     expect=f"{text_bytes}\n",
 )
 add("f_annot", "34-f Bytes 注釈の関数が受理され実行できる", "print")
@@ -488,7 +488,7 @@ store = (
 )
 write(
     "f2_shared",
-    f'def main = read ({{ value = Store.make (Bytes.of_string "{text}") }})\n'
+    f'def main = Int.to_string (read ({{ value = Store.make (Bytes.of_string "{text}") }}))\n'
     "def read box => Bytes.length box.value\n"
     "type Box = { value: Store.T }\n"
     + store
@@ -500,7 +500,7 @@ add("f2_shared", "34-f2 shared type T = Bytes が record field に届く", "prin
 # 34-f2 負の対照: shared を消すと等式が無く、record field が不透明なまま落ちる。
 write(
     "f2_opaque",
-    f'def main = read ({{ value = Store.make (Bytes.of_string "{text}") }})\n'
+    f'def main = Int.to_string (read ({{ value = Store.make (Bytes.of_string "{text}") }}))\n'
     "def read box => Bytes.length box.value\n"
     "type Box = { value: Store.T }\n"
     + store
@@ -674,7 +674,7 @@ for category, s in strings.items():
     check_indices(category, s)
     check_split(category, s)
     check_predicates(category, s)
-    string_probe(f'34-a length unchanged {category}', f'String.length {quoted(s)}', value=str(len(s)))
+    string_probe(f'34-a length unchanged {category}', f'Int.to_string (String.length {quoted(s)})', value=str(len(s)))
     string_probe(f'34-b(5) {category} handler slice',
                  f'String.slice {quoted(s)} 0 {len(s) + 1}',
                  value='IndexOutOfRange', handler='e.message')

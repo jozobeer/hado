@@ -57,9 +57,11 @@ def build_run(root, name, expected):
     directory = Path(root) / name
     build = subprocess.run([HADO, 'build', str(directory / 'main.hd')], capture_output=True)
     assert build.returncode == 0 and build.stderr == b'', (name, build.returncode, build.stderr.decode())
-    result = subprocess.run([str(directory / 'main')], capture_output=True, cwd=directory, stdin=subprocess.DEVNULL)
+    result = subprocess.run([str(directory / 'main')], capture_output=True, stdin=subprocess.DEVNULL)
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode())
     assert result.stderr == b'', (name, result.stderr.decode())
+    # `Int` の `main` は印字せず終了コードになる（§54）。値の門番は
+    # `Int.to_string` で包んだ入口を走らせ、印字された値を見る。
     assert result.stdout == expected.encode(), (name, result.stdout, expected)
 
 def comments(source):
@@ -80,7 +82,7 @@ def control(root):
     else:
         raise AssertionError('check_ok accepted a rejected program')
     try:
-        build_run(root, 'control-run', 'def main = 1\n', '2\n')
+        build_run(root, 'control-run', 'def main = Int.to_string 1\n', '2\n')
     except AssertionError:
         pass
     else:
@@ -116,7 +118,7 @@ for index in range(10):
         f'  if x\n'
         f'  | Some(v) => v + ({added})\n'
         f'  | {fallback}\n'
-        f'def main = f (Some({value}))\n')
+        f'def main = f (Some({value})) as answer -> Int.to_string answer\n')
     name = f'sole-{index}'
     caught = check_code(root, name, source, 'E515')
     assert b'canonical form:' in caught.stderr, (name, caught.stderr.decode())
@@ -159,11 +161,11 @@ for index in range(10):
     value = rng.randint(-9, 9)
     name = f'identity-{index}'
     if index % 2 == 0:
-        source = f'def g n => n + ({added})\ndef main =\n  g ({value}) as x -> x\n'
+        source = f'def g n => n + ({added})\ndef main = Int.to_string (\n  g ({value}) as x -> x)\n'
         expected = value + added
         expected_text = f'g ({value})'
     else:
-        source = f'def main =\n  {value} as x -> x\n'
+        source = f'def main = Int.to_string (\n  {value} as x -> x)\n'
         expected = value
         expected_text = str(value)
     caught = check_code(root, name, source, 'E501')
@@ -198,7 +200,7 @@ Path(root).mkdir(parents=True, exist_ok=True)
 
 for index in range(8):
     value = rng.randint(-9, 9)
-    source = f'def main =\n  {value} as y -> y as x -> x\n'
+    source = f'def main = Int.to_string (\n  {value} as y -> y as x -> x)\n'
     name = f'nested-{index}'
     check_code(root, name, source, 'E501')
     fixed = check_fix(root, name, source)

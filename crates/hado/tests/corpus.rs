@@ -366,7 +366,11 @@ fn library_corpus() {
 fn generated_output_headers_enforce_stream_status_and_empty_output() {
     for index in 0..8 {
         let number = index * 17 + 3;
-        let success = format!("def main = {number}");
+        // §54: an Int main is the exit code and prints nothing, so the
+        // generated success case prints a String to keep measuring the same
+        // thing -- a value on stdout with status 0. `compile_source_to_object`
+        // does not link the prelude, so `Int.to_string` is not available here.
+        let success = format!("def main = \"{number}\"");
         let failure = format!("def main = raise {{ message = \"{number}\" }}");
         let empty_failure = "def main = raise { message = \"\" }";
         for (case, source, header, accepted) in [

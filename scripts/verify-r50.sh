@@ -41,7 +41,7 @@ def again_source(n):
         'def rec loop (n: Int): Void {Int Yield} =>\n'
         '  if n <= 0 => ()\n'
         '  | yield n -> loop (n - 1) /if\n'
-        f'def main = List.length (with Collect -> loop {n})\n')
+        f'def main = Int.to_string (List.length (with Collect -> loop {n}))\n')
 
 def build_program(root, name, n):
     """Generate an `again` loop, build it to a private path, and return the binary."""
