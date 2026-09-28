@@ -1,0 +1,10 @@
+// spec: §49
+// expect: 6
+// needs: prelude
+type T = { t: Int }
+type MapColor = { color: Int }
+type MapStep = { step: Int }
+def useT (value: T) => value.t
+def useColor (value: MapColor) => value.color
+def useState (value: MapStep) => value.step
+def main = Int.to_string (useT { t = 1 } + useColor { color = 2 } + useState { step = 3 })
