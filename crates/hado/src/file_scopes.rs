@@ -87,13 +87,15 @@ impl FileScope {
     }
 
     fn handler(&self, handler: &mut HandlerDecl, inherited: &BTreeSet<String>) {
+        // §38: 値引数は handler の全ての腕から見える。束縛として数えないと、
+        // 腕の中の参照が file-local の名前へ付け替えられる。
+        let mut bound = inherited.clone();
+        bound.extend(handler.params.iter().map(|param| param.name.clone()));
         for arm in &mut handler.arms {
             match arm {
-                HandlerArm::Operation { params, body, .. } => {
-                    self.function(params, body, inherited)
-                }
+                HandlerArm::Operation { params, body, .. } => self.function(params, body, &bound),
                 HandlerArm::Return { param, body, .. } => {
-                    self.function(std::slice::from_ref(param), body, inherited)
+                    self.function(std::slice::from_ref(param), body, &bound)
                 }
             }
         }
