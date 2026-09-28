@@ -26,7 +26,7 @@ pub fn compile_source_to_object(
     let ParsedSource { ast, .. } =
         parse_with_prelude(source, source_path).map_err(|e| e.to_string())?;
     let program = mono::lower_program(&ast, &checked)?;
-    emit::compile_mono_to_object(&program, &checked, obj_path)
+    emit::compile_mono_to_object(&program, &checked, obj_path, emit::BUILD_OPT_LEVEL)
 }
 
 /// The static libraries every guest links against, in link order: the C

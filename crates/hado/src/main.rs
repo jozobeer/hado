@@ -304,7 +304,8 @@ fn build_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
         Some(output) => PathBuf::from(output),
         None => input.with_extension(""),
     };
-    match project.build(&target) {
+    let opt_level = hado::emit::selected_opt_level(hado::emit::BUILD_OPT_LEVEL);
+    match project.build_with_opt_level(&target, &opt_level) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
@@ -496,7 +497,8 @@ fn execute(input: &Path, args: &[String]) -> Outcome {
         Err(message) => return Outcome::Failed(format!("run: {message}")),
     };
     let binary = directory.path().join("program");
-    if let Err(message) = project.build(&binary) {
+    let opt_level = hado::emit::selected_opt_level(hado::emit::RUN_OPT_LEVEL);
+    if let Err(message) = project.build_with_opt_level(&binary, &opt_level) {
         return Outcome::Failed(message);
     }
     match Command::new(&binary).args(args).status() {
