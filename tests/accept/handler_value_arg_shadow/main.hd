@@ -1,0 +1,8 @@
+// spec: §38
+// expect: 106
+effect Ask
+once ask: Int
+handler Ask as Fixed(n: Int)
+once ask => n
+def use (n: Int): Int {Ask} => ask + n
+def main = with Fixed(6) -> use 100
