@@ -228,3 +228,19 @@ $ bash scripts/gate-tiers-lock.sh         # cranelift-opt-level full を足し�
 75
 ```
 
+層別（2026-09-29）。
+
+```
+$ bash scripts/run-gates.sh --jobs 4 --tier quick target/gates-quick
+TALLY: 41/41 passed; red: none
+
+$ bash scripts/run-gates.sh --jobs 4 --tier core target/gates-core
+TALLY: 714/714 passed; red: none
+```
+
+`cargo test --offline` は `verify-m0.sh` の検査 2 が `--no-fail-fast` で実走し、
+`OK: 2 cargo-test passed=789`。
+
+着地の直前の main は `d8062d5`（`origin/main` も同じ）で、取り込む差分は無い。
+
+
