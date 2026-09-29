@@ -3635,9 +3635,20 @@ impl Lowerer {
     }
 
     fn handler_index(&self, handler: &crate::parser::HandlerDecl) -> Option<usize> {
-        self.handler_stack.iter().rposition(|candidate| {
-            candidate.name == handler.name && candidate.effect == handler.effect
-        })
+        // 腕を実行中の枠は、その腕から見て外にあるので数えない（`handler_for`
+        // と同じ）。同じ handler を入れ子にしたとき、名前と効果だけでは最も内側
+        // の枠に当たる。内側の腕が呼ぶ操作は外側の枠が捕まえるので、値引数も
+        // その枠のものを使う。
+        self.handler_stack
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, candidate)| {
+                !self.arm_handlers.contains(index)
+                    && candidate.name == handler.name
+                    && candidate.effect == handler.effect
+            })
+            .map(|(index, _)| index)
     }
 
     // 腕の本体を lower している間、その腕の handler を除外する。腕の中でさらに
