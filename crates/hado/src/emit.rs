@@ -11,7 +11,23 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::parser::{Expr, Program};
 
-fn make_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
+/// `build` の Cranelift `opt_level` の既定。`docs/rounds/cranelift-opt-level.md`
+/// の計測で決めた（3 入力すべて 1.1 倍以上かつ比の中央値 2 倍以上のときだけ `speed`）。
+pub const BUILD_OPT_LEVEL: &str = "none";
+/// `hado run` の `opt_level` の既定。`build` と同じ条件に加えて、起動・コンパイル・
+/// リンク込みの end-to-end の比でも 3 入力すべて 1.1 倍以上であることを要求する。
+pub const RUN_OPT_LEVEL: &str = "none";
+
+/// 門番が 2 水準を測るための切り替え。`none` と `speed` だけを受ける。
+/// 既定を選ぶのはこのラウンドの成果物で、切り替えは計測の道具である。
+pub fn selected_opt_level(default: &str) -> String {
+    match std::env::var("HADO_OPT_LEVEL") {
+        Ok(level) if level == "none" || level == "speed" => level,
+        _ => default.to_string(),
+    }
+}
+
+fn make_isa(opt_level: &str) -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
     let mut flag_builder = settings::builder();
     flag_builder
         .set("is_pic", "true")
@@ -20,7 +36,7 @@ fn make_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
         .set("preserve_frame_pointers", "true")
         .map_err(|e| format!("{e:?}"))?;
     flag_builder
-        .set("opt_level", "none")
+        .set("opt_level", opt_level)
         .map_err(|e| format!("{e:?}"))?;
     let flags = settings::Flags::new(flag_builder);
     let isa = cranelift_native::builder()
@@ -45,7 +61,7 @@ fn build_expr(bcx: &mut FunctionBuilder<'_>, expr: &Expr) -> cranelift_codegen::
 /// object file exposing `hado_entry` (SystemV, Export). `hado_entry` calls
 /// the `tail` convention `hado_main`, prints the `i64` result, and returns 0.
 pub fn compile_to_object(prog: &Program, obj_path: &Path) -> Result<(), String> {
-    let isa = make_isa()?;
+    let isa = make_isa(BUILD_OPT_LEVEL)?;
     let builder = ObjectBuilder::new(isa, "hado_walk".to_string(), default_libcall_names())
         .map_err(|e| format!("{e:?}"))?;
     let mut module = ObjectModule::new(builder);
@@ -148,7 +164,8 @@ pub fn lower_mono_function(
     checked: &crate::Checked,
 ) -> Result<Function, String> {
     let checked = &checked.for_codegen();
-    let isa = make_isa()?;
+    // この ISA は `pointer_type` とレイアウトにだけ使い、最適化は module の ISA が持つ。
+    let isa = make_isa(BUILD_OPT_LEVEL)?;
     let signature = mono_signature(&source.signature, checked, isa.pointer_type())?;
     let mut function =
         Function::with_name_signature(UserFuncName::user(0, source.id.0 as u32), signature);
@@ -823,11 +840,12 @@ pub fn compile_mono_to_object(
     program: &crate::mono::Program,
     checked: &crate::Checked,
     path: &Path,
+    opt_level: &str,
 ) -> Result<(), String> {
     let checked = &checked.for_codegen();
     use crate::mono::{FunctionId, Signature as MonoSignature};
     let mut module = ObjectModule::new(
-        ObjectBuilder::new(make_isa()?, "hado", default_libcall_names())
+        ObjectBuilder::new(make_isa(opt_level)?, "hado", default_libcall_names())
             .map_err(|e| e.to_string())?,
     );
     let mut ids = std::collections::HashMap::new();

@@ -350,10 +350,19 @@ impl Project {
         }
         let checked = self.check().map_err(|error| error.to_string())?;
         let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
-        crate::emit::compile_mono_to_object(&program, &checked, output)
+        crate::emit::compile_mono_to_object(
+            &program,
+            &checked,
+            output,
+            crate::emit::BUILD_OPT_LEVEL,
+        )
     }
 
     pub fn build(&self, output: &Path) -> Result<(), String> {
+        self.build_with_opt_level(output, crate::emit::BUILD_OPT_LEVEL)
+    }
+
+    pub fn build_with_opt_level(&self, output: &Path, opt_level: &str) -> Result<(), String> {
         if self.is_library() {
             return Err(self.report(&crate::entry_required(&self.files[0].path)));
         }
@@ -362,7 +371,7 @@ impl Project {
         let checked = self.check().map_err(|error| self.report(&error))?;
         crate::build::executable_with(output, |object| {
             let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
-            crate::emit::compile_mono_to_object(&program, &checked, object)
+            crate::emit::compile_mono_to_object(&program, &checked, object, opt_level)
         })
     }
 }

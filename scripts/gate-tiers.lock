@@ -3,6 +3,7 @@ char-and-float-conversions	core
 ci	quick
 clippy	core
 cognitive-complexity	core
+cranelift-opt-level	full
 embed-runtime	full
 exit-code-from-main	core
 frozen-docs	core

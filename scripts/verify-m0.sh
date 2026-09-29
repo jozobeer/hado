@@ -81,9 +81,18 @@ check_set() {
     grep -Eq "set\([[:space:]]*\"$2\"[[:space:]]*,[[:space:]]*\"$3\"[[:space:]]*\)" "$1" \
         || flag_reasons="$flag_reasons $1:$2!=$3"
 }
+# opt_level は make_isa の引数になり、既定の値は emit.rs の定数が持つ
+# （cranelift-opt-level）。値の錠はその定数に当てる。
+check_const() {
+    grep -Eq "pub const $2: &str = \"$3\";" "$1" \
+        || flag_reasons="$flag_reasons $1:$2!=$3"
+}
 check_set crates/hado/src/emit.rs is_pic true
 check_set crates/hado/src/emit.rs preserve_frame_pointers true
-check_set crates/hado/src/emit.rs opt_level none
+check_const crates/hado/src/emit.rs BUILD_OPT_LEVEL none
+check_const crates/hado/src/emit.rs RUN_OPT_LEVEL none
+grep -Eq 'set\([[:space:]]*"opt_level"[[:space:]]*,[[:space:]]*opt_level[[:space:]]*\)' \
+    crates/hado/src/emit.rs || flag_reasons="$flag_reasons emit.rs:opt_level-not-applied"
 check_set crates/hado/tests/tail.rs is_pic true
 check_set crates/hado/tests/tail.rs preserve_frame_pointers true
 check_set crates/hado/tests/tail.rs opt_level none
