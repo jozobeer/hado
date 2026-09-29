@@ -299,3 +299,24 @@ $ bash scripts/gate-tiers-lock.sh --check
 ```
 
 core 層の `verify-build-json-diagnostics` は `PASSED: 2/2`、LSP は変わらず緑。
+
+### main 取り込み後（`703d120`）
+
+`git fetch origin main` の後 `git merge main` は `Already up to date.` だった
+（分岐元の `main` は `703d120` のままで、このラウンドの後に着地したものは無い）。
+木が変わらないのでコーパスの作り直しは無く、`corpus-lock.sh --check` と
+`gate-tiers-lock.sh --check` はどちらも差分なしである。木を変えない merge でも、
+着地前の門番と quick 層を同じ木で取り直した。
+
+```
+$ git merge main
+Already up to date.
+$ bash scripts/corpus-lock.sh --check        # 差分なし。rc=0
+$ bash scripts/gate-tiers-lock.sh --check    # 差分なし。rc=0
+$ bash scripts/verify-build-json-diagnostics.sh
+K1:4命令の診断(PASSED: 10/10): PASS
+K2:lint-docs(PASSED: 16/16): PASS
+PASSED: 2/2
+$ bash scripts/run-gates.sh --tier quick target/gates-quick2
+TALLY: 41/41 passed; red: none
+```
