@@ -1,0 +1,8 @@
+// spec: §21
+def bump flag hits => if flag => hits + 1 | hits
+
+def rec compare n total =>
+  if n == 0 => total
+  | compare (n - 1) (bump ("hado" == "hado") total)
+
+def main = Int.to_string (compare 10000000 0)

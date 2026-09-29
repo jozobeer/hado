@@ -210,7 +210,8 @@ fn string_literals_are_linked_as_static_data() {
     let program = hado::mono::lower_program(&ast, &checked).unwrap();
     let path = std::env::temp_dir().join(format!("hado-static-string-{}", std::process::id()));
     let object = path.with_extension("o");
-    hado::emit::compile_mono_to_object(&program, &checked, &object).unwrap();
+    hado::emit::compile_mono_to_object(&program, &checked, &object, hado::emit::BUILD_OPT_LEVEL)
+        .unwrap();
     let bytes = std::fs::read(&object).unwrap();
     assert!(bytes
         .windows("あ😀".len())
@@ -362,6 +363,7 @@ fn runtime_calls_keep_types_and_remain_non_tail() {
         },
         &checked,
         &object,
+        hado::emit::BUILD_OPT_LEVEL,
     )
     .unwrap();
     hado::link_executable(&object, &path).unwrap();
