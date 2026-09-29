@@ -358,22 +358,36 @@ impl Project {
         )
     }
 
-    pub fn build(&self, output: &Path) -> Result<(), String> {
+    pub fn build(&self, output: &Path) -> Result<(), BuildError> {
         self.build_with_opt_level(output, crate::emit::BUILD_OPT_LEVEL)
     }
 
-    pub fn build_with_opt_level(&self, output: &Path, opt_level: &str) -> Result<(), String> {
+    pub fn build_with_opt_level(&self, output: &Path, opt_level: &str) -> Result<(), BuildError> {
         if self.is_library() {
-            return Err(self.report(&crate::entry_required(&self.files[0].path)));
+            return Err(BuildError::Diagnostic(crate::entry_required(
+                &self.files[0].path,
+            )));
         }
-        // Diagnostics go through `report` so `build` and `run` show the same
-        // `canonical form:` hint as `check` (§57, §58).
-        let checked = self.check().map_err(|error| self.report(&error))?;
+        // §58.4: the diagnostic keeps its structure so the CLI draws it through
+        // the selected format, exactly like `check` does. Collapsing it to the
+        // default line here is what used to hide `--format json`.
+        let checked = self.check().map_err(BuildError::Diagnostic)?;
         crate::build::executable_with(output, |object| {
             let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
             crate::emit::compile_mono_to_object(&program, &checked, object, opt_level)
         })
+        .map_err(BuildError::Message)
     }
+}
+
+/// `Project::build` の失敗。§56 の検査の診断（CLI は §58.4 の形式で描く）と、
+/// 単相化・書き出しの失敗の文字列を分ける。分ける前は診断を既定の 1 行の
+/// 文字列に潰していたので、`build` / `run` / `test` は `--format json` を
+/// 選べなかった。
+#[derive(Debug)]
+pub enum BuildError {
+    Diagnostic(Diagnostic),
+    Message(String),
 }
 
 #[derive(Debug)]
