@@ -3,9 +3,15 @@ use std::collections::{HashMap, HashSet};
 
 type Signatures<'a> = HashMap<&'a str, Option<&'a ModuleSig>>;
 
-pub(crate) fn check(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
+pub(crate) fn check(ast: &Ast, path: &str, prelude_items: usize) -> Result<(), Diagnostic> {
     let mut errors = Vec::new();
-    check_items(&ast.items, &Signatures::new(), path, &mut errors);
+    check_items(
+        &ast.items,
+        &Signatures::new(),
+        path,
+        &mut errors,
+        prelude_items,
+    );
     match errors.into_iter().min_by_key(crate::diagnostic_order) {
         Some(error) => Err(error),
         None => Ok(()),
@@ -17,6 +23,7 @@ fn check_items<'a>(
     inherited: &Signatures<'a>,
     path: &str,
     errors: &mut Vec<Diagnostic>,
+    prelude_items: usize,
 ) {
     let mut local = Signatures::new();
     for item in items {
@@ -29,21 +36,34 @@ fn check_items<'a>(
     }
     let mut signatures = inherited.clone();
     signatures.extend(local);
-    let outer_types: HashSet<_> = items
+    for (index, item) in items.iter().enumerate() {
+        if let Item::ModuleImpl(module) = item {
+            if let Some(Some(signature)) = signatures.get(module.sig.as_str()) {
+                let outer = outer_types(items, index, prelude_items);
+                check_module(module, signature, &outer, path, errors);
+            }
+            check_items(&module.items, &signatures, path, errors, 0);
+        }
+    }
+}
+
+/// §49・§55: an `implement` treats the top-level types of its own unit as outer.
+/// The prelude is prepended to the user's items, so an implementation in the
+/// prelude must not see the user's root types; an implementation in the user's
+/// program sees both the prelude and the user's types.
+fn outer_types(items: &[Item], index: usize, prelude_items: usize) -> HashSet<&str> {
+    let end = if index < prelude_items {
+        prelude_items
+    } else {
+        items.len()
+    };
+    items[..end]
         .iter()
         .filter_map(|item| match item {
             Item::TypeDef(def) => Some(def.name.as_str()),
             _ => None,
         })
-        .collect();
-    for item in items {
-        if let Item::ModuleImpl(module) = item {
-            if let Some(Some(signature)) = signatures.get(module.sig.as_str()) {
-                check_module(module, signature, &outer_types, path, errors);
-            }
-            check_items(&module.items, &signatures, path, errors);
-        }
-    }
+        .collect()
 }
 
 fn check_module(

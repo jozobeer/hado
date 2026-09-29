@@ -37,6 +37,10 @@ struct Resolver<'a> {
     prelude_operations: BTreeSet<String>,
     // §51, §52: the root that the current item resolves paths from.
     root: Directory,
+    // §47, §55: whether the item being resolved came from the prelude. The
+    // prelude is prepended to the user's items, so a prelude item's outer scope
+    // is the prelude itself; the user's declarations must not reach into it.
+    in_prelude: bool,
     sites: BTreeMap<(usize, usize), Vec<DeclaredName>>,
     renamed: BTreeMap<(usize, usize), String>,
     operations: BTreeMap<Directory, BTreeSet<String>>,
@@ -157,6 +161,7 @@ pub(crate) fn resolve(
         prelude: BTreeMap::new(),
         prelude_operations: BTreeSet::new(),
         root: Vec::new(),
+        in_prelude: false,
         sites: ast
             .name_sites
             .iter()
@@ -246,6 +251,7 @@ impl Resolver<'_> {
             items.iter_mut().zip(locations).zip(roots).enumerate()
         {
             self.root = root.clone();
+            self.in_prelude = index < prelude_items;
             if index >= prelude_items {
                 self.check_declaration_conflicts(item, directory);
             }
@@ -318,6 +324,13 @@ impl Resolver<'_> {
     }
 
     fn has(&self, directory: &[String], space: Space, name: &str) -> bool {
+        // §47, §55: the prelude is prepended to the user's items, so a prelude
+        // item's outer scope is the prelude itself. Reading the merged root
+        // table here would let the user's declarations reach into the prelude
+        // and make an implementation's local type an E205 against the root.
+        if self.in_prelude {
+            return directory.is_empty() && self.has_prelude(space, name);
+        }
         self.symbols
             .get(&(directory.to_vec(), space))
             .is_some_and(|names| names.contains_key(name))
