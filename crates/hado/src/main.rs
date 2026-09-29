@@ -6,12 +6,29 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 /// §58.4: `--format json` は診断を出すすべての経路に効くので、ここに置く。
 static FORMAT_JSON: AtomicBool = AtomicBool::new(false);
 
+/// §58.4: the one place the CLI picks a diagnostic's rendering — the human line,
+/// or JSON. Every path that shows a diagnostic goes through here, so a new path
+/// cannot forget the selected format.
+fn diagnostic_report(project: &Project, error: &hado::parser::Diagnostic) -> String {
+    if FORMAT_JSON.load(Ordering::Relaxed) {
+        project.report_json(error)
+    } else {
+        project.report(error)
+    }
+}
+
 /// The one place the CLI writes a diagnostic: the human line, or §58.4 JSON.
 fn print_diagnostic(project: &Project, error: &hado::parser::Diagnostic) {
-    if FORMAT_JSON.load(Ordering::Relaxed) {
-        eprintln!("{}", project.report_json(error));
-    } else {
-        eprintln!("{}", project.report(error));
+    eprintln!("{}", diagnostic_report(project, error));
+}
+
+/// `Project::build` の失敗を描く。診断は `diagnostic_report` の経路（§58.4 の
+/// 形式）、それ以外の組立・書き出しの失敗はそのまま標準エラーに出す。`run` と
+/// `test` は失敗を `Outcome` に畳んでから書くので、同じ文字列を作る。
+fn build_error_report(project: &Project, error: &hado::project::BuildError) -> String {
+    match error {
+        hado::project::BuildError::Diagnostic(error) => diagnostic_report(project, error),
+        hado::project::BuildError::Message(message) => message.clone(),
     }
 }
 
@@ -307,8 +324,8 @@ fn build_command(cli: &Cli<'_>, input: &Path, project: &Project) -> ExitCode {
     let opt_level = hado::emit::selected_opt_level(hado::emit::BUILD_OPT_LEVEL);
     match project.build_with_opt_level(&target, &opt_level) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("{message}");
+        Err(error) => {
+            eprintln!("{}", build_error_report(project, &error));
             ExitCode::from(1)
         }
     }
@@ -498,8 +515,8 @@ fn execute(input: &Path, args: &[String]) -> Outcome {
     };
     let binary = directory.path().join("program");
     let opt_level = hado::emit::selected_opt_level(hado::emit::RUN_OPT_LEVEL);
-    if let Err(message) = project.build_with_opt_level(&binary, &opt_level) {
-        return Outcome::Failed(message);
+    if let Err(error) = project.build_with_opt_level(&binary, &opt_level) {
+        return Outcome::Failed(build_error_report(&project, &error));
     }
     match Command::new(&binary).args(args).status() {
         Ok(status) => match status.code() {
