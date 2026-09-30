@@ -1,0 +1,6 @@
+// spec: §34
+// expect: { none = None; some = Some(42) }
+def find (id: Int): Int Option Pure => if id == 7 => Some(21) | None
+def double (id: Int): Int Option Pure =>
+  find id as x? -> Some(x + x)
+def main = { none = double 0; some = double 7 }

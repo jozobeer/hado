@@ -1,3 +1,0 @@
-// spec: 付録C
-// error: E100
-def main = Some(1) as x? -> x
