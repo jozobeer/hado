@@ -1997,8 +1997,8 @@ impl Parser<'_> {
 
     // --- expressions ---
 
-    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` は E100。
-    /// `e as p ->`・`e as p? ->`・`e ->` は `Let`・`LetQ`・`DoQ` へ写す。
+    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` と `?` は E100。
+    /// `e as p ->`・`e ->` は `Let`・`DoQ` へ写す（`LetQ` は移行入力だけが読む）。
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.converting {
             return match self.kind() {
@@ -2027,29 +2027,22 @@ impl Parser<'_> {
         if self.kind() == &TokKind::KwAs {
             self.bump();
             let pat = self.parse_pattern()?;
-            let question = self.kind() == &TokKind::Question;
-            if question {
-                self.bump();
+            if self.kind() == &TokKind::Question {
+                return Err(self.error(
+                    Some("E100"),
+                    "`as p? ->` is removed; absence is an effect (bind with `as p ->`)",
+                ));
             }
             self.expect(&TokKind::DashArrow)?;
             let body = self.parse_expr()?;
             let span = value.span;
             let end = self.last_end();
-            let kind = if question {
-                NodeKind::LetQ {
-                    pat,
-                    value: Box::new(value),
-                    body: Box::new(body),
-                }
-            } else {
-                NodeKind::Let {
-                    pat,
-                    value: Box::new(value),
-                    body: Box::new(body),
-                }
-            };
             return Ok(Node {
-                kind,
+                kind: NodeKind::Let {
+                    pat,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                },
                 span: span.until(end),
             });
         }

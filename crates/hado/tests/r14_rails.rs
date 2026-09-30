@@ -20,27 +20,6 @@ fn rejected(source: &str, code: &str, anchor: &str) {
 }
 
 #[test]
-fn generated_patterns_round_trip_with_an_independent_question_token() {
-    let name = "value1".to_string();
-    for pattern in [
-        name.clone(),
-        format!("{{ field = {name} }}"),
-        format!("Box({name})"),
-        format!("{{ field = Box({name}) }}"),
-    ] {
-        let source = format!("def f input => input as {pattern}? -> Some({name})");
-        let ast = parser::parse_source(&source, "rails.hd").unwrap();
-        let printed = parser::canonical_program(&ast);
-        assert!(!printed.contains("let?"), "{printed}");
-        assert!(printed.contains(&format!("as {pattern}? ->")), "{printed}");
-        let restored = parser::parse_source(&printed, "rails.hd").unwrap();
-        assert_eq!(parser::canonical_program(&restored), printed);
-        let spaced = parser::parse_source(&source.replace("? ->", " ? ->"), "rails.hd").unwrap();
-        assert_eq!(parser::canonical_program(&spaced), printed);
-    }
-}
-
-#[test]
 fn old_rail_keywords_are_rejected_at_the_question_mark() {
     for prefix in ["", "\n\n  "] {
         for (body, keyword) in [
@@ -68,18 +47,11 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
     for _ in 0..2 {
         let n = random(&mut state, 1000);
         for (body, code, anchor) in [
-            (format!("{n} as x? -> Some(x + 1)"), "E303", n.to_string()),
-            (format!("{n} as _? -> Some(1)"), "E303", n.to_string()),
             (format!("{n} -> Some(1)"), "E303", n.to_string()),
             (
-                format!("Some({n}) as _? -> Some(1)"),
-                "E504",
-                "_".to_string(),
-            ),
-            (
-                format!("Some(Some({n})) as Some(x)? -> Some(x + 1)"),
+                format!("Some(Some({n})) as Some(Some(x)) -> x + 1"),
                 "E402",
-                "Some(x)".to_string(),
+                "Some(Some(x))".to_string(),
             ),
         ] {
             let padding = format!(
@@ -211,16 +183,16 @@ fn generated_chains_execute_success_and_each_failure_path() {
 }
 
 #[test]
-fn generated_option_chains_propagate_none_at_each_step() {
+fn generated_absent_chains_answer_none_at_each_step() {
     let mut state = 0x1407;
     let n = random(&mut state, 1000) + 1;
     for fail in 0..4 {
         let source = format!(
-            "def first flag => if flag == 1 => None | Some({n})\n\
-             def step flag stage => if flag == stage => None | Some(())\n\
-             def run flag => first flag as x? -> step flag 2 -> step flag 3 -> Some(x + 5)\n\
+            "def first (flag: Int): Int {{Absent}} => if flag == 1 => absent | {n}\n\
+             def step (flag: Int, stage: Int): Void {{Absent}} => if flag == stage => absent | ()\n\
+             def run flag => first flag as x -> step flag 2 -> step flag 3 -> x + 5\n\
              def unwrap | Some(x) => x | None => 0\n\
-             def main = unwrap (run {fail})"
+             def main = unwrap (with Maybe -> run {fail})"
         );
         let expected = if fail == 0 { n + 5 } else { 0 };
         execute(&source, &expected.to_string(), 100 + fail);

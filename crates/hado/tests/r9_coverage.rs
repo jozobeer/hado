@@ -155,14 +155,3 @@ fn record_patterns_resolve_the_whole_field_set() {
     let source = "type A = { x: Int; y: Int }\ntype B = { x: Int; z: Int }\ntype C = { y: Int; z: Int }\ndef f value => value as { x; y } ->\n  x + y\ndef main = f { x = 1; y = 2 } + { x = 1; z = 2 }.z + { y = 1; z = 2 }.z";
     check_source(source, "coverage.hd").unwrap();
 }
-
-#[test]
-fn discarded_rail_binding_points_to_the_underscore() {
-    for padding in [1, 5] {
-        let prefix = format!("def main = Some(1) as{}", " ".repeat(padding + 1));
-        let source = format!("{prefix}_? -> Some(2)");
-        let error = check_source(&source, "coverage.hd").err().unwrap();
-        assert_eq!(error.code.as_deref(), Some("E504"));
-        assert_eq!((error.line, error.col), (1, prefix.len() + 1));
-    }
-}

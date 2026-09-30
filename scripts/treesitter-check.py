@@ -46,7 +46,6 @@ GOLDEN_NAMES = (
     'if-paren',
     'if-close',
     'as-continuation',
-    'rail-binding',
     'discard-continuation',
     'fn-close',
     'with-continuation',

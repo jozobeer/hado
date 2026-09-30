@@ -7,7 +7,7 @@
 //! the expectation is the tool's own single-file output — no case name and no
 //! line number is memorized here.
 //!
-//! `localize-message-positions`: E501・E502・E507・E508・E406・E403・E405.
+//! `localize-message-positions`: E501・E502・E507・E406・E403・E405.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -62,12 +62,6 @@ const SOURCES: &[(&str, &str)] = &[
     (
         "E507",
         "def f | Some(v) => Some(v) | None => None\ndef main = f Some(1)\n",
-    ),
-    (
-        "E508",
-        "def find_user (id: Int): Int Option => Some(id)\n\
-         def f id => if find_user id | Some(user) => Some(user + 1) | None => None\n\
-         def main = f 1\n",
     ),
     (
         "E406",
