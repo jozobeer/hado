@@ -1911,3 +1911,54 @@ fn handler_value_argument_is_evaluated_once_at_the_with() {
         "arg\n6",
     );
 }
+
+// §38: `with` の値引数は外側の handler の下で評価する。`lift_again_arguments` が
+// `With` の実引数を継続に載せないと、`again` の結果が `$Outcome` のまま値引数に
+// 束なり、`run` が `invalid arithmetic operand types` で落ちる。
+#[test]
+fn handler_value_argument_again_resumes_into_the_with() {
+    runs_effectful_closure_source(
+        "effect Ask\n\
+         again ask: Int\n\
+         handler Ask as Answer\n\
+         again ask => resume 7\n\
+         return value => value\n\
+         effect Dummy\n\
+         handler Dummy as Inner(n: Int)\n\
+         return value => value + n\n\
+         def main = Int.to_string (with Answer -> with Inner(ask) -> 10)\n",
+        "17",
+    );
+}
+
+// 同じ穴で、値引数の除算が `Error` を起こしても本体が走ってしまう。呼び出しの
+// 引数 `add (8 / 0)` は 0 になるのに、`with Inner(8 / 0) -> 99` は 99 を印字する。
+#[test]
+fn handler_value_argument_abort_does_not_run_the_with_body() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\n\
+         abort raise _ => 0\n\
+         return value => value\n\
+         effect Dummy\n\
+         handler Dummy as Inner(n: Int)\n\
+         return value => value\n\
+         def main = Int.to_string (with Catch -> with Inner(8 / 0) -> 99)\n",
+        "0",
+    );
+}
+
+// 引数を取らない `again`（§38 の `once ask: String` と同じ形）も resume できる。
+// `yield_arm` がペイロードを常に 1 個渡すと、腕の params が空のとき
+// `handler arm arity mismatch` で `check` を通ったプログラムが `run` できない。
+#[test]
+fn zero_argument_again_resumes() {
+    runs_effectful_closure_source(
+        "effect Ask\n\
+         again ask: Int\n\
+         handler Ask as Answer\n\
+         again ask => resume 7\n\
+         return value => value\n\
+         def main = Int.to_string (with Answer -> ask)\n",
+        "7",
+    );
+}
