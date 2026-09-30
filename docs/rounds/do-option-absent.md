@@ -205,6 +205,43 @@ prelude に `Absent` 効果と `None` へ戻す handler `Maybe` を置き、`as 
           別の欠陥）。審査で優先度を見てほしい
 ```
 
+```
+主張:     §35 の「`e ->` の値は効果を持つ式でなければならない」と「`Option` を `e ->`
+          の値にはできない（E303）」が食い違い、**効果を持つ `Option` の式**が E303 に
+          なる。さらに E506（`as _ ->`）は「`->` を書け」と E303 側へ案内し、2 つの
+          診断が互いを指す
+再現:     `def f = env "X"`（型は `String Option {Error}`）として
+          `f as _ -> ()` は E506 `` a plain binding cannot discard its value; write `->` ``、
+          `f -> ()` は E303 `` `e ->` requires an effect ``（下の「実測」の疑義の再現）
+現行:     `infer::propagation` は効果の行より先に `Option` を弾く。§35 の 2 文目と
+          E303 のアンカー「効果を持つ式でない式」は、効果を持つ `Option` の場合を
+          含まない。E506 の案内は `->` だけを指す
+変えると: 効果を持つ `Option` を `->` で捨てられるようにするなら、§35 の 2 文目と
+          E303 のアンカーを「効果を持たない式」に絞り直し、E506 の案内も
+          「`as p ->` で束縛するか、効果の値を `->` で捨てる」へ分ける必要がある。
+          仕様本文とエラー表の書き換えになる
+推奨:     §35 の 2 文目を「`Option` の値は `->` で捨てられない。`Absent` へ持ち上げるか
+          `as p ->` で束縛する」と明示し、E506 の案内を分ける。仕様の解釈なので人が
+          決めてほしい
+```
+
+```
+主張:     凍結項目 `let p? =` の `// item:` タグをどの受理コーパスに残すか
+再現:     `grep -rn 'item:' tests/accept` は
+          `tests/accept/rail_forms/main.hd:3:// item: let p? =` を返す。このファイルの
+          本体は `if` と `raise` で `Absent` を使っておらず、`// spec: §34` も
+          内容と合わない（`?` の伝播は `tests/reject/E303` と
+          `tests/postfix-close/reject/N12` が拒否側で固定している）
+現行:     凍結した `docs/spec-coverage.md` の対応行が受理コーパス 1 本を要求するため、
+          `rail_forms` にタグだけを残している。`docs/plan.md` と `docs/spec-coverage.md`
+          は凍結なので動かしていない
+変えると: タグと `// spec:` を `tests/accept/absent_effect`（効果版の本体）へ移せば、
+          項目名が指す形と中身が揃う。`docs/spec-coverage.md` の対応行（`§34, §35`）と
+          凍結した §11.2 の関係を人が確かめる必要がある
+推奨:     タグと `// spec:` を `tests/accept/absent_effect` へ移し、`rail_forms` は
+          §40 の受け皿として残す。凍結文書に触れずに済むかの判断を審査で見てほしい
+```
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
@@ -214,7 +251,7 @@ prelude に `Absent` 効果と `None` へ戻す handler `Maybe` を置き、`as 
 | §35 | `e ->` は効果を持つ式だけを受ける | 型 | E303 | `tests/reject/E303` |
 | §40 | 破棄に意味があるのは効果を持つ式だけ | 冗長 | E506 | `tests/reject/E506` |
 | §55 | prelude の効果は `Absent` `Error` `Env` `Io` | 名前解決 | — | `scripts/verify-do-option-absent.sh` |
-| §54 | `Absent` が `main` に届いたら操作名を印字して exit 1 | 実行 | — | `scripts/verify-do-option-absent.sh` |
+| §54 | `Absent` が `main` に届いたら操作名を印字して exit 1 | 実行 | — | `crates/hado/tests/mono.rs`・`scripts/verify-do-option-absent.sh` |
 
 ## 実測
 
@@ -249,7 +286,8 @@ $ bash scripts/verify-do-option-absent.sh
 OK: a no accept corpus or stdlib file spells `as p? ->`
 OK: b an Option discard is E303 and `?` is E100
 OK: c the prelude-only absent program runs as its expect tag says
-PASSED: 3/3
+OK: d an unhandled absent exits 1 and prints the operation name
+PASSED: 4/4
 ```
 
 ```
@@ -278,14 +316,48 @@ $ bash scripts/verify-do-option-absent.sh
 NG: b an Option discard is E303 and `?` is E100 (discard=E100 question=E100)
 NG: c the prelude-only absent program runs as its expect tag says (seen=1 output:tests/accept/absent_effect/main.hd)
 PASSED: 1/3
-$ printf '\ndef extra = Some(1) as x? -> x\n' >> tests/accept/rail_forms/main.hd   # 変異 a
+$ printf '\ndef extra = Some(1) as { value = Box(n) }? -> n\n' >> tests/accept/rail_forms/main.hd   # 変異 a: 空白入りの pattern
 $ bash scripts/verify-do-option-absent.sh
-NG: a no accept corpus or stdlib file spells `as p? ->` (tests/accept/rail_forms/main.hd:14:def extra = Some(1) as x? -> x)
-PASSED: 2/3
+NG: a no accept corpus or stdlib file spells `as p? ->` (tests/accept/rail_forms/main.hd:13:def extra = Some(1) as { value = Box(n) }? -> n)
+PASSED: 3/4
 $ sed -i "s/def main = Some(1) as x? -> x/def main = Some(1) as x -> x/" scripts/verify-do-option-absent.sh   # 変異 b: 検査の入力を旧綴りに
 $ bash scripts/verify-do-option-absent.sh
 NG: b an Option discard is E303 and `?` is E100 (discard=E303 question=E501)
-PASSED: 2/3
+PASSED: 3/4
+$ sed -i 's/0 => Expression::Constant(Constant::String(fallback.into())),/0 => Expression::Constant(Constant::String(String::new())),/' crates/hado/src/mono.rs   # 変異 d
+$ bash scripts/verify-do-option-absent.sh
+NG: d an unhandled absent exits 1 and prints the operation name (status=1 stderr=warning: unused variable: `fallback`)
+PASSED: 3/4
+```
+
+検査 a の探し方は、行コメントと文字列を外してから `?` + `->` を見るので、`// item: let p? =`
+の記録用の `?` と文字列の中の `?` は綴りと数えない。誤検出しないことを、受理コーパスへ
+一時的に足して確かめる。
+
+```
+$ printf '// note: as x? -> y\ndef extra = String.concat "?" "as x? -> y"\n' >> tests/accept/rail_forms/main.hd
+$ bash scripts/verify-do-option-absent.sh
+OK: a no accept corpus or stdlib file spells `as p? ->`
+PASSED: 4/4
+```
+
+§35 の疑義の再現。
+
+```
+$ cat target/p3/main.hd
+def f = env "X"
+def main =
+  f as _ ->
+  ()
+$ cargo run --offline -q -- check target/p3/main.hd
+main.hd:3:8: error[E506]: a plain binding cannot discard its value; write `->`; canonical form: （束縛を削除）
+$ cat target/p2/main.hd
+def f = env "X"
+def main =
+  f ->
+  ()
+$ cargo run --offline -q -- check target/p2/main.hd
+main.hd:3:3: error[E303]: `e ->` requires an effect
 ```
 
 層別の全走（`cargo test --offline` の後、木を止めて 1 回ずつ）。
