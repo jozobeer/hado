@@ -1,7 +1,7 @@
 //! Recursive-descent parser for the hado grammar of 付録C, §5 and §7.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
-//! local bindings (`let` / `let p? =` / `do`), anonymous functions (`fn`),
+//! local bindings (`let` / `do`), anonymous functions (`fn`),
 //! the three branch forms (Boolean branch, condition column, pattern
 //! branch), patterns, records, list literals, modules (`sig` / `struct`)
 //! and type definitions. Every node carries a `Span`.
@@ -97,11 +97,6 @@ pub enum NodeKind {
     NamedConstructor(DeclaredName, Vec<(DeclaredName, Node)>),
     List(Vec<Node>, Option<Box<Node>>),
     Let {
-        pat: Pattern,
-        value: Box<Node>,
-        body: Box<Node>,
-    },
-    LetQ {
         pat: Pattern,
         value: Box<Node>,
         body: Box<Node>,
@@ -1998,7 +1993,7 @@ impl Parser<'_> {
     // --- expressions ---
 
     /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` と `?` は E100。
-    /// `e as p ->`・`e ->` は `Let`・`DoQ` へ写す（`LetQ` は移行入力だけが読む）。
+    /// `e as p ->`・`e ->` は `Let`・`DoQ` へ写す。
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.converting {
             return match self.kind() {
@@ -3124,26 +3119,20 @@ impl Parser<'_> {
         let span = self.span();
         self.bump();
         let pat = self.parse_pattern()?;
-        let question = self.kind() == &TokKind::Question;
-        if question {
-            self.bump();
+        if self.kind() == &TokKind::Question {
+            return Err(self.error(
+                Some("E100"),
+                "`let p? =` is removed; absence is an effect (bind with `e as p ->`)",
+            ));
         }
         self.expect(&TokKind::Eq)?;
         let value = self.parse_pipe()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
-        let kind = if question {
-            NodeKind::LetQ {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
-        } else {
-            NodeKind::Let {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
+        let kind = NodeKind::Let {
+            pat,
+            value: Box::new(value),
+            body: Box::new(body),
         };
         Ok(Node {
             kind,
@@ -3447,7 +3436,7 @@ fn contains_branch_in(node: &Node, allow_arm_conditions: bool) -> Option<Span> {
             .iter()
             .chain(tail.iter().map(Box::as_ref))
             .find_map(|item| contains_branch_in(item, false)),
-        NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
+        NodeKind::Let { value, body, .. } => {
             contains_branch_in(value, false).or_else(|| contains_branch_in(body, false))
         }
         NodeKind::DoQ { value, body } => {
@@ -3558,9 +3547,6 @@ pub fn canonical(node: &Node) -> String {
         // §11: 束縛は後置の `e as p ->` で書く。正準形もその綴りを出す。
         NodeKind::Let { pat, value, body } => {
             format!("({} as {pat} -> {})", canonical(value), canonical(body))
-        }
-        NodeKind::LetQ { pat, value, body } => {
-            format!("({} as {pat}? -> {})", canonical(value), canonical(body))
         }
         NodeKind::DoQ { value, body } => {
             format!("({} -> {})", canonical(value), canonical(body))

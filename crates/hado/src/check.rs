@@ -727,7 +727,7 @@ fn check_fn_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
 /// 束縛を導入するノードで、その束縛が本文で使われているかを見る。
 fn check_bindings(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
     match &node.kind {
-        NodeKind::Let { pat, body, .. } | NodeKind::LetQ { pat, body, .. } => {
+        NodeKind::Let { pat, body, .. } => {
             check_unused(crate::names::bindings(pat), body, path, diagnostics);
         }
         NodeKind::PatternBranch { arms, .. } => {
@@ -1150,9 +1150,7 @@ pub(crate) fn children(node: &Node) -> Vec<&Node> {
         NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
             fields.iter().map(|(_, value)| value).collect()
         }
-        NodeKind::Let { value, body, .. }
-        | NodeKind::LetQ { value, body, .. }
-        | NodeKind::DoQ { value, body } => vec![value, body],
+        NodeKind::Let { value, body, .. } | NodeKind::DoQ { value, body } => vec![value, body],
         NodeKind::BoolBranch { cond, then, els } => vec![cond, then, els],
         NodeKind::CondBranch { arms, fallback } => arms
             .iter()

@@ -1173,9 +1173,9 @@ fn body_dash_arrow(tokens: &[Tok], body_at: usize) -> Option<usize> {
 
 // --- E507: Option の再包装 ---
 
-/// The shape of the function whose body is the branch (§57). `let p? =`
-/// propagates absence out of the enclosing function, so a rewrite is only
-/// offered where the branch is that function's body.
+/// The shape of the function whose body is the branch (§57). A rewrite is only
+/// offered where the branch is that function's body, so the surrounding
+/// continuation does not change meaning.
 #[derive(Clone, Copy, PartialEq)]
 enum Tail {
     /// A branch in tail position: the branch itself is replaced.

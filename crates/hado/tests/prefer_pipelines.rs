@@ -111,7 +111,7 @@ fn collect_node(
                 collect_node(tail, path, false, pipelines);
             }
         }
-        NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
+        NodeKind::Let { value, body, .. } => {
             collect_node(value, path, false, pipelines);
             collect_node(body, path, false, pipelines);
         }

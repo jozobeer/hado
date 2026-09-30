@@ -89,8 +89,6 @@ PY
 
 # `/if` を落とす。
 mutate "drop-rail-if" crates/hado/src/postfix_print.rs 'format!("if {inner}\n{pad}/if")' 'format!("if {inner}")'
-# Option 束縛の `?` を落とす。
-mutate "drop-option-question" crates/hado/src/postfix_print.rs 'binding(format!(" as {pat}?"), value, body, indent, tail)' 'binding(format!(" as {pat}"), value, body, indent, tail)'
 # 続きのある `if` を括弧で閉じない（`if(a => 1 | 2) + 1` を `if a => 1 | 2 + 1` と書く）。
 mutate "drop-if-parens" crates/hado/src/postfix_print.rs 'format!("if({inner})")' 'format!("if {inner}")'
 # 続きの無い `if` にも括弧を付ける（末尾の `if a => 1 | 2` を `if(...)` と書く）。

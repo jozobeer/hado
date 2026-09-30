@@ -843,7 +843,6 @@ impl Lowerer {
             NodeKind::List(items, tail) => self.list_expression(node, items, tail),
             NodeKind::Fn { params, body } => self.lambda(node, params, body),
             NodeKind::Name(name) => self.name_expression(node, name),
-            NodeKind::LetQ { pat, value, body } => self.propagation(Some(pat), value, body),
             NodeKind::DoQ { value, body } => self.do_expression(node, value, body),
             NodeKind::Let { pat, value, body } => self.let_expression(pat, value, body),
             NodeKind::PatternBranch {
@@ -1160,7 +1159,7 @@ impl Lowerer {
             return self.propagate_do_outcome(node, value, body, source, captures);
         }
         if Self::is_option_expression(&source) {
-            return self.option_propagation(None, source, body);
+            return self.option_propagation(source, body);
         }
         let id = self.next;
         self.next += 1;
@@ -1797,46 +1796,22 @@ impl Lowerer {
         )
     }
 
-    fn propagation(
-        &mut self,
-        pattern: Option<&crate::parser::Pattern>,
-        source: &crate::parser::Node,
-        body: &crate::parser::Node,
-    ) -> Result<Expression, String> {
-        let value = self.expression(source)?;
-        self.option_propagation(pattern, value, body)
-    }
-
     fn option_propagation(
         &mut self,
-        pattern: Option<&crate::parser::Pattern>,
         value: Expression,
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
         let ty = value.ty();
-        let Type::Data(container, args) = &ty else {
+        let Type::Data(container, _) = &ty else {
             return Err("propagation requires Option".into());
         };
         if container != "Option" {
             return Err("propagation requires Option".into());
         }
-        let payload = args
-            .first()
-            .ok_or("missing propagation payload type")?
-            .clone();
         let id = self.next;
         self.next += 1;
         let variable = Expression::Variable { id, ty };
-        let projected = Expression::Project {
-            value: Box::new(variable.clone()),
-            constructor: "Some".into(),
-            index: 0,
-            result: payload,
-        };
-        let then = match pattern {
-            Some(pattern) => self.bound_body(pattern, projected, body)?,
-            None => self.expression(body)?,
-        };
+        let then = self.expression(body)?;
         let result = then.ty();
         // 効果多相の callee の中では腕の型が `$Outcome` になりうる。`None` は
         // 成功型の値なので、構築してから done で包む。

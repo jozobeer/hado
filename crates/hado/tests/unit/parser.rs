@@ -105,6 +105,15 @@ fn removed_binding_keywords_are_e100() {
     }
 }
 
+/// §11・§34: 移行の入口（旧形の `let`）でも `let p? =` は E100。
+#[test]
+fn conversion_rejects_the_removed_question_binding() {
+    let (ast, diagnostics) = parse_partial_for_conversion("def main = let x? = f y -> x", "t");
+    assert!(ast.items.is_empty(), "{ast:?}");
+    let code = diagnostics.iter().find_map(|d| d.code.as_deref());
+    assert_eq!(code, Some("E100"), "{diagnostics:?}");
+}
+
 /// §12.1: `if` の閉じは本体の `->` の有無と続きの有無で決まる。
 #[test]
 fn if_close_follows_the_rule() {

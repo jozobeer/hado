@@ -253,7 +253,7 @@ impl Resolver<'_> {
                 self.expression(value, scope, current, false);
                 self.expression(target, scope, current, true);
             }
-            NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
+            NodeKind::Let { pat, value, body } => {
                 self.expression(value, scope, current, false);
                 self.pattern(pat, scope);
                 let mut local = scope.clone();

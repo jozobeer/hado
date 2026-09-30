@@ -1892,8 +1892,7 @@ impl Checker<'_> {
                 self.apply(callee, args, node.span)
             }
             NodeKind::Let { pat, value, body } => self.binding(pat, value, body),
-            NodeKind::LetQ { pat, value, body } => self.propagation(Some(pat), value, body),
-            NodeKind::DoQ { value, body } => self.propagation(None, value, body),
+            NodeKind::DoQ { value, body } => self.propagation(value, body),
             NodeKind::BoolBranch { cond, then, els } => {
                 self.condition(cond)?;
                 let result = self.expression(then)?;
@@ -2559,12 +2558,7 @@ impl Checker<'_> {
         Ok(result)
     }
 
-    fn propagation(
-        &mut self,
-        pattern: Option<&Pattern>,
-        value: &Node,
-        body: &Node,
-    ) -> Result<Ty, Diagnostic> {
+    fn propagation(&mut self, value: &Node, body: &Node) -> Result<Ty, Diagnostic> {
         let saved_effects = self.eval_effects.clone();
         self.eval_effects = self.inference.fresh_row();
         let container = self.expression(value);
@@ -2574,17 +2568,10 @@ impl Checker<'_> {
         self.add_effects(&rhs_row);
         if self.inference.resolve(&container) == Ty::Error {
             let saved = self.values.clone();
-            let checked = self.propagation_body(pattern, &Ty::Error, body);
+            let checked = self.expression(body);
             self.values = saved;
             checked?;
             return Ok(Ty::Error);
-        }
-        if pattern.is_some() {
-            return Err(self.error(
-                value.span,
-                Some("E303"),
-                "`let p? =` is removed; absence is an effect (bind with `e as p ->`)",
-            ));
         }
         if self.option_container(&container) {
             return Err(self.error(value.span, Some("E303"), "`e ->` requires an effect"));
@@ -2636,19 +2623,6 @@ impl Checker<'_> {
                 "binding pattern does not cover its type",
             ));
         }
-    }
-
-    fn propagation_body(
-        &mut self,
-        pattern: Option<&Pattern>,
-        payload: &Ty,
-        body: &Node,
-    ) -> Result<Ty, Diagnostic> {
-        if let Some(pattern) = pattern {
-            self.pattern(pattern, payload)?;
-            self.check_irrefutable(pattern);
-        }
-        self.expression(body)
     }
 
     fn binding(&mut self, pat: &Pattern, value: &Node, body: &Node) -> Result<Ty, Diagnostic> {

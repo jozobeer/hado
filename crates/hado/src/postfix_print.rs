@@ -30,10 +30,10 @@ pub fn node_text(node: &Node) -> String {
     expr(node, 2, true).replace('\n', " ")
 }
 
-/// 構文木の中に `->` の束縛（`Let`・`LetQ`・`DoQ`）があるか。
+/// 構文木の中に `->` の束縛（`Let`・`DoQ`）があるか。
 pub(crate) fn contains_continuation(node: &Node) -> bool {
     match &node.kind {
-        NodeKind::Let { .. } | NodeKind::LetQ { .. } | NodeKind::DoQ { .. } => true,
+        NodeKind::Let { .. } | NodeKind::DoQ { .. } => true,
         NodeKind::Neg(c) | NodeKind::Not(c) => contains_continuation(c),
         NodeKind::Bin(_, l, r) | NodeKind::Pipe(l, r) => {
             contains_continuation(l) || contains_continuation(r)
@@ -409,9 +409,6 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         NodeKind::List(items, rest) => list_text(items, rest.as_deref(), indent),
         NodeKind::Let { pat, value, body } => {
             binding(format!(" as {pat}"), value, body, indent, tail)
-        }
-        NodeKind::LetQ { pat, value, body } => {
-            binding(format!(" as {pat}?"), value, body, indent, tail)
         }
         NodeKind::DoQ { value, body } => binding(String::new(), value, body, indent, tail),
         NodeKind::Fn { params, body } => fn_text(params, body, indent),
