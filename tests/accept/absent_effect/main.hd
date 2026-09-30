@@ -1,0 +1,12 @@
+// spec: §34
+// expect: { found = Some("hi alice"); missing = None }
+// needs: prelude
+type User = { id: Int; name: String }
+type Outcome = { found: String Option; missing: String Option }
+def find_user (id: Int): User {Absent} => if id == 1 => { id = 1; name = "alice" } | absent
+def check_member (id: Int): Void {Absent} => if id == 1 => () | absent
+def greet id => find_user id as user ->
+  check_member user.id ->
+  String.concat "hi " user.name
+def lookup id => with Maybe -> greet id
+def main = { found = lookup 1; missing = lookup 2 }

@@ -316,6 +316,7 @@ fn with_prelude(
         trusted_start = Some(line + 1);
         for module in [
             include_str!("../../../stdlib/error.hd"),
+            include_str!("../../../stdlib/absent.hd"),
             include_str!("../../../stdlib/env.hd"),
             include_str!("../../../stdlib/io.hd"),
             include_str!("../../../stdlib/list.hd"),
