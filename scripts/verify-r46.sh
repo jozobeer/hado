@@ -275,7 +275,7 @@ from harness import check_fix, digest
 
 root = Path(sys.argv[1]) / 'e'
 root.mkdir(parents=True, exist_ok=True)
-# R47 で E501、R57 で E507 / E508 が直せるようになったので、直さないと
+# R47 で E501、R57 で E507 が直せるようになったので、直さないと
 # 決めている未使用（wants.md の診断と正準形）の E505 を使う。
 path = root / 'unfixable' / 'main.hd'
 path.parent.mkdir(parents=True, exist_ok=True)

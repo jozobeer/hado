@@ -51,7 +51,7 @@
   - [32. 引数の条件列](#32-引数の条件列)
 - **[第VI部 失敗と効果](#第vi部-失敗と効果)**
   - [33. Option と失敗](#33-option-と失敗)
-  - [34. `as p? ->`](#34-as-p--)
+  - [34. 不在の効果 `Absent` と `Maybe`](#34-不在の効果-absent-と-maybe)
   - [35. `e ->`](#35-e--)
   - [36. 伝播と分岐](#36-伝播と分岐)
   - [37. 効果](#37-効果)
@@ -155,6 +155,8 @@ x
 もコンパイルエラーになり得る。
 
 引数をそのまま別の関数に渡すだけの `def`（eta 展開）は冗長としない。
+
+値の不在の表し方も 1 つに定める。計算が値を作れないことは効果で表し、その伝播は関数の型に現れる（第34節）。`Option` は値としての不在をデータで表す（record の field、List の要素、探索の結果）。`e ->` は効果だけを実行し、`Option` の不在は `e ->` の先へ進まない（第35節）。
 
 ## 3. 言語全体の原則
 
@@ -275,9 +277,9 @@ if user
 > userがGuestなら `"guest"`、Memberなら名前
 
 ```ocaml
-find_user id as user? ->
-find_account user.account_id as account? ->
-Some(account)
+find_user id as user ->
+find_account user.account_id as account ->
+account
 ```
 
 は、
@@ -388,11 +390,11 @@ def = named definition
 as = local binding
 ```
 
-`as` の本体は `->` の右側に続く継続である。`as` は値を束縛するために使い、成功・失敗の伝播は行わない。`?` を付けた `as p? ->` は Option の伝播を行う（第34節）。
+`as` の本体は `->` の右側に続く継続である。`as` は値を束縛するために使い、成功・失敗の伝播は行わない。不在は効果として型に現れる（第34節）。
 
 プログラムの入口は、根のファイル（第50節）の外に置く `def main` である。`main` は `as` によるローカルbindingではなく、名前付き定義である。`main` を持つ根のファイルが入口ファイルで、1 つのディレクトリに複数あってよい。`hado build` と `hado check` に渡したファイルの `main` が起点になる。渡したファイルに `main` が無いとき、`hado check` はそのディレクトリをライブラリとして検査し（第52節）、`hado build` は E206 とする。
 
-`main` に残ってよい効果は prelude の効果（`Error` `Env` `Io`。第55節、第37節）に限る。ユーザーが宣言した効果が `main` の型に残れば E706 とする。`main` の効果行は一般化せず、本体が持つ効果で閉じる。
+`main` に残ってよい効果は prelude の効果（`Absent` `Error` `Env` `Io`。第55節、第37節）に限る。ユーザーが宣言した効果が `main` の型に残れば E706 とする。`main` の効果行は一般化せず、本体が持つ効果で閉じる。
 
 `main` の型は単相で、Fn と、`shared` で解けない抽象型を含んではならない。`def main = []` は型変数が残るため E701、`def main = inc` は印字できず Fn を含むため E702、`def main = UserStore.find 1` は `shared` で解けない `UserStore.T` を含むため E705 とする。`shared` で具体型に解ける抽象型は E705 の対象外で、解けた型として印字してよい（第47節）。
 
@@ -418,10 +420,10 @@ postfix binding -> continuation
 
 となる。
 
-失敗を伝播する `as p? ->` と、値を破棄する `e ->` も同じ継続構文を使う。
+値を束縛する `as p ->` と、値を破棄する `e ->` は同じ継続構文を使う。どちらも効果を実行する。
 
 ```ocaml
-find_user id as user? ->
+find_user id as user ->
 use user
 ```
 
@@ -430,9 +432,9 @@ validate input ->
 next
 ```
 
-束縛と破棄の左辺は `->` の直前までに置く。`as` は区切りの記号（`->`、腕の `=>`、本体の `=` か `=>`、`(`、`,`）から直後の区切りまでの全体を束縛し、最も弱く結合する。`e as p ->` の `p` には名前だけを書ける。型の強制も pattern の別名も `as` では行わない。別名が要るときは 2 回束縛する（`e as whole -> whole as Some(x)? ->`）。
+束縛と破棄の左辺は `->` の直前までに置く。`as` は区切りの記号（`->`、腕の `=>`、本体の `=` か `=>`、`(`、`,`）から直後の区切りまでの全体を束縛し、最も弱く結合する。`e as p ->` の `p` には名前だけを書ける。型の強制も pattern の別名も `as` では行わない。
 
-`let` と `do` はキーワードごと廃止した。`let` を書くと E100 とし、`` `let` is removed; bind with `e as p ->` `` を出す。`do` を書くと E100 とし、`` `do` is removed; discard with `e ->` `` を出す。
+`let` と `do` と `as p? ->` と `let p? =` はキーワードと印ごと廃止した。`let` を書くと E100 とし、`` `let` is removed; bind with `e as p ->` `` を出す。`do` を書くと E100 とし、`` `do` is removed; discard with `e ->` `` を出す。`as p? ->` と書くと E100 とし、`` `as p? ->` is removed; absence is an effect (bind with `as p ->`) `` を出す。旧形の移行の入口でも `let p? =` は E100 とし、`` `let p? =` is removed; absence is an effect (bind with `e as p ->`) `` を出す。
 
 `->` は、関数型の表記には使わない。関数型は第20節で定める `Fn(...)` を使う。
 
@@ -820,7 +822,7 @@ def parse(input: String): User {Error}
 関数が持つ効果は、戻り型の後ろに波括弧で並べる。
 
 ```ocaml
-def read_config(path: String): Config {Io, Error}
+def read_config(path: String): Config {Absent, Error, Io}
 def parse(input: String): User {Error}
 ```
 
@@ -1085,7 +1087,7 @@ if value
 
 非網羅branchはwarningではなくerror。
 
-`as` の束縛のパターンにも同じ規則を当てる。`?` の有無を問わない（第34節）。
+`as` の束縛のパターンにも同じ規則を当てる（第34節）。
 
 ## 29. `_` の用途
 
@@ -1235,7 +1237,14 @@ effect Error
 abort raise(error: Exception)
 ```
 
-境界は理由の有無である。値が無いだけで理由を持たないものは `Option`、理由を運ぶものは効果とする。`List` の探索は `Option` を返し、パースと I/O と索引の範囲外は効果を持つ。
+理由を持たない不在も効果で表現する。prelude は理由を持たない不在の効果 `Absent` を持つ（第34節）。
+
+```ocaml
+effect Absent
+abort absent
+```
+
+境界は `Absent` と `Error` である。理由を持たない不在は `Absent`、理由を運ぶ失敗は `Error` とする。`Option` は値としての不在をデータで表し、伝播しない。`List` の探索と `Map` の探索と `Env.env` は探索の結果として `Option` を返し、パースと I/O と索引の範囲外は効果を持つ。
 
 理由に構造が要るなら、利用者が効果を宣言する（第37節）。
 
@@ -1249,29 +1258,43 @@ abort parse_failure(failure: ParseFailure)
 
 unchecked exception も持たない。失敗は効果として型に現れ、処理しなければ呼び出し側へ伝わる。
 
-## 34. `as p? ->`
+## 34. 不在の効果 `Absent` と `Maybe`
 
-Optionの成功値を使いたい場合は、名前かパターンの直後に `?` を付けた `as` を使う。
+`Absent` は理由を持たない不在の効果である。操作 `absent` は引数を取らない abort である（第37節）。
 
 ```ocaml
-def display_name user =>
-  user.name as name? ->
-  name
+effect Absent
+abort absent
 ```
 
-`e as { name }? ->` や `e as Id(n)? ->` のように、右辺の値の Option をパターンで分解できる。
+prelude は `Absent` をデータの `Option` へ戻す handler `Maybe` を持つ（第55節）。
 
-`e as p? ->` は、`e` のOptionを評価し、成功値をpattern `p` に束縛する。`?` はpattern全体の末尾に 1 つ置く（`e as { name }? ->`、`e as Id(n)? ->`）。空白は意味を持たないので `e as x ? ->` も同じ形である。
-
-```text
-Some(value)
-  => valueをbindして継続
-
-None
-  => Noneをそのまま伝播
+```ocaml
+handler Absent as Maybe
+abort absent => None
+return value => Some(value)
 ```
 
-`as p? ->` の値 `e` は Option 型でなければならない。そうでなければコンパイルエラーとする（E303）。
+`Absent` は prelude の効果なので、この handler はどのディレクトリにも置ける（第38節、第37節）。
+
+```ocaml
+def find_user (id: Int): User {Absent} =>
+  if id == 1 => alice | absent
+```
+
+不在は効果として関数の型に現れ、呼び出し位置には印を付けない。処理しなければ呼び出し側へ伝わる（第36節）。
+
+`with Maybe -> rest` は `rest` の `Absent` を捕まえ、正常値を `Some`、`absent` を `None` にする。
+
+```ocaml
+def lookup (id: Int): User Option =>
+  with Maybe ->
+  find_user id
+```
+
+`?` を付けた `as p? ->` は廃止した。`?` を書くと E100 とする（第11節）。
+
+`as` のパターンは、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`e as Id(n) ->`）とその入れ子は一致する。
 
 効果による失敗には印を付けない。効果は関数の型が語るので、呼び出し位置には何も書かない（第20節）。
 
@@ -1281,10 +1304,6 @@ def create_user input =>
   validate parsed ->
   save parsed
 ```
-
-`?` の有無が Option と効果を見分ける。`?` があれば値の不在の伝播、無ければ効果の伝播である。
-
-`as` のパターンは、`?` の有無によらず、束縛する値の型の全ての値に一致しなければならない。一致しない値があれば E402 とする。名前、record パターン、constructor が 1 つの型の constructor パターン（`e as Id(n) ->`）とその入れ子は一致する。
 
 ## 35. `e ->`
 
@@ -1306,19 +1325,7 @@ expression -> continuation
 
 で、`expression` を評価し、その値を捨てて `continuation` へ進む。
 
-`e ->` の値 `e` は効果を持つ式か Option でなければならない。純粋な値の破棄は意味を持たない（第40節）ので、どちらでもない式は E303 とする。
-
-Optionなら、
-
-```text
-Some(_)
-  => 継続
-
-None
-  => Noneを伝播
-```
-
-であり、これは `e as _? ->` のcanonical formである。そのため `e as _? ->` は禁止（E504）。
+`e ->` の値 `e` は効果を持つ式でなければならない。純粋な値の破棄は意味を持たない（第40節）ので、効果を持たない式は E303 とする。`Option` は効果ではないので、`Option` を `e ->` の値に置くこともできない（E303）。
 
 効果を持つ式なら、値を捨てて継続する。失敗は効果として伝わるので、`e ->` は伝播の印ではない。
 
@@ -1335,22 +1342,22 @@ def create_user input =>
   save parsed
 ```
 
-Optionの不在は `?` と `e ->` で伝わる。
+データの `Option` の不在は伝播しない。値として受け取り、`if` の分岐で調べるか、`Option.unwrap_or` のような関数で畳む（第55節）。
 
 ```ocaml
 if find_user id
 | Some(user) => ...
-| None => None
+| None => ...
 ```
 
-のような単なる伝播は冗長で、canonical formは、
+`Absent` の不在を伝播させたい計算は、効果として書く。`find_user` を `{Absent}` にすれば、呼び出し側は何も書かずに受け取れる。
 
 ```ocaml
-find_user id as user? ->
-...
+def create_user input =>
+  parse input as parsed ->
+  validate parsed ->
+  save parsed
 ```
-
-局所的な書き換えは §57 にある。
 
 成功値が不要なら、
 
@@ -1363,13 +1370,14 @@ validate user ->
 
 ```text
 効果         = 何も書かない。型が語る
-e as p? ->   = Optionのbind + 伝播
-e ->         = 値の破棄 + 伝播
-if           = meaningful domain branching
+e as p ->    = 効果を持つ式の値のbind
+e ->         = 効果を持つ式の値の破棄
+if           = データの分岐（`Option` の検査を含む）
 handler      = 失敗を別の値へ変える
 ```
 
-ただし、`if` によるOption分岐が常に禁止されるわけではない。`if` は、成功と失敗を異なるドメイン値へ変換するなど、意味のある分岐に使用できる。単に同じ `None` を再伝播するだけのbranchは冗長として拒否する（E508）。
+`if` による `Option` の分岐は禁止されない。成功と失敗を異なるドメイン値へ変換する分岐や、`None` を別の値で置き換える分岐に使う。データの `Option` は伝播しないので、`if` で `None` をそのまま返す形も正準形である。
+
 
 効果を持つ式を書けない位置は 1 つある。分岐の条件（第24節、第25節）である。ここに置くと E308 とする。
 
@@ -1511,7 +1519,7 @@ next
 
 `x` が継続内で使われていないならコンパイルエラー（E505）。
 
-E505 は `as` の束縛（`?` の有無によらず）、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第29節）。
+E505 は `as` の束縛、pattern で束縛した変数、関数の引数の全てに適用する。pattern の一部を使わないときは `_` を書く（第29節）。
 
 引数を使わない関数は、引数の数が外から固定される場所でだけ書ける。その引数は `_` で受ける。場所は 3 つで、契約の member を満たす実装の `def`（functor の本文を含む。`def save _ => ()`、`def save(_: T): Void {Error} => ()`）と、匿名関数 `fn`（`List.map xs fn(_ => 0)`）と、handler の腕（第38節。`abort raise _ => None`）である。それ以外の `def`（外の `def`、契約に無い `def`）に `_` 引数を書くと E519 とする。引数は自分で削れるからである。名前を付けた引数を使わないのは、場所によらず E505 である。
 
@@ -1530,7 +1538,7 @@ calculate as _ ->
 next
 ```
 
-効果を持つ式と Option の破棄には意味があるので、
+効果を持つ式の破棄には意味があるので、
 
 ```ocaml
 validate input ->
@@ -1900,13 +1908,13 @@ def find(id: Int): T Option
 
 `main` の型が `Int` なら、その値がそのまま終了コードである。0 以上 255 以下なら何も印字せずその値で終わり、範囲外なら `hado: exit code out of range` の 1 行を stderr に書いて 1 で終わる。判定は i64 から ABI の i32 へ縮める前に行い、負数や 256 を OS 任せに正規化しない。i64 の範囲外はリテラルに書けない（E112）ので、この判定が受けるのは i64 の全範囲である。
 
-`main` の型が `Int` 以外なら、値を stdout に印字して終了コード 0 とする。`main` まで処理されずに届いた `raise` は、その `Exception` の `message` を stderr に印字して終了コード 1 とする。Option は剥がさない。
+`main` の型が `Int` 以外なら、値を stdout に印字して終了コード 0 とする。`main` まで処理されずに届いた `raise` は、その `Exception` の `message` を stderr に印字して終了コード 1 とする。`main` まで届いた `Absent` の `absent` は運ぶ値が無いので、操作名 `absent` を stderr に印字して終了コード 1 とする。Option は剥がさない。
 
 印字が失敗したら終了コード 1 とする。失敗とは stdout への書き込みか flush が失敗することで、fd が閉じている・書き込み先が満杯である・パイプの受け手が先に終わっている場合を含む。パイプの受け手が先に終わった場合もシグナルで終了させず、他の書き込み失敗と同じに扱う。
 
 失敗の理由は stderr に印字するが、これは best-effort とし、stderr 自体の失敗は無視する。それ以上報告する先が無いためである。`raise` の `message` の印字が失敗した場合も、終了コードは 1 のままとする。
 
-終了コードが取る値は、`main` の型が `Int` ならその値の 0 以上 255 以下の範囲、`Int` 以外なら 0 と 1 である。1 は `Int` 以外の `main` で `raise` が届いた場合と印字が失敗した場合の両方に当たり、区別は stderr の内容がつける。`Int` の範囲外も 1 に落ちるので、`main` が 2 以上を返したのか範囲外だったのかは stderr の内容がつける。
+終了コードが取る値は、`main` の型が `Int` ならその値の 0 以上 255 以下の範囲、`Int` 以外なら 0 と 1 である。1 は `Int` 以外の `main` で `raise` か `absent` が届いた場合と印字が失敗した場合の両方に当たり、区別は stderr の内容がつける。`Int` の範囲外も 1 に落ちるので、`main` が 2 以上を返したのか範囲外だったのかは stderr の内容がつける。
 
 中身は canonical なソース表記で印字する。ソースとして再び読める形が一つに定まることを目的とする。
 
@@ -1931,7 +1939,7 @@ def find(id: Int): T Option
 
 ## 55. prelude
 
-言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Error` `Env` `Io` とする。`/` の戻り型、`as p? ->` の対象、List リテラルの展開先、`main` に残せる効果に用いる。
+言語が名前で解決する名前は、型の `Option` `List` `Exception` と効果の `Absent` `Error` `Env` `Io` とする。`/` の戻り型、`Absent` の `Maybe`、List リテラルの展開先、`main` に残せる効果に用いる。
 
 prelude の各 module は、外の型と `module X` と `implement X as X` を 1 ファイルに置く形で書く。第46節と第47節の規則に従う。
 
@@ -2048,7 +2056,7 @@ def (K, V) to_list (map: (K, V) T): (K, V) MapEntry List Pure
 
 `String` の索引はスカラ値の単位である。`slice` は `start`（含む）から `end`（含まない）までを返し、範囲外は `{Error}` とする。`String.length` は Unicode スカラ値の個数、`Bytes.length` はバイト数である。
 
-prelude は効果 `Env` と `Io` を持ち、操作を値の空間に置く。操作は `once` で、handler が無ければ runtime の既定実装が応える。既定実装は失敗を `Error` として raise する。利用者は `raise` と同じく無修飾で呼ぶ。
+prelude は効果 `Absent` `Env` `Io` を持ち、操作を値の空間に置く。`Absent` の `absent` は引数を取らない abort で、handler `Maybe` が `Option` へ戻す（第34節）。`Env` と `Io` の操作は `once` で、handler が無ければ runtime の既定実装が応える。既定実装は失敗を `Error` として raise する。利用者は `raise` と同じく無修飾で呼ぶ。
 
 ```ocaml
 effect Env
@@ -2154,7 +2162,7 @@ def A drop (values: A List, count: Int): A List Pure
 | E208 | missing-rec | §9 | 名前解決 | `rec` の無い `def` |
 | E301 | arity-mismatch | §13 | 型 | 適用の先頭 |
 | E302 | recursive-type-arg | §16 | 型 | 宣言と異なる型引数 |
-| E303 | rail-type | §34 | 型 | `e as p? ->` の値 `e` は Option、`e ->` の値 `e` は効果を持つ式か Option。どちらでもない式 |
+| E303 | discard-type | §35 | 型 | `e ->` の値 `e` が効果を持つ式でない式 |
 | E304 | record-ambiguous | §18 | 型 | record 式か record パターンの `{`。型が未確定の field 参照では参照式の先頭 |
 | E305 | type-mismatch | §15 | 型 | 型が食い違った式の先頭。適用の引数については下記 |
 | E306 | occurs-check | §15 | 型 | 同上 |
@@ -2169,11 +2177,9 @@ def A drop (values: A List, count: Int): A List Pure
 | E501 | identity-binding | §41 | 冗長 | `as` |
 | E502 | identical-branches | §42 | 冗長 | `if`。第32節の形では `def` か `fn` |
 | E503 | catch-all-underscore | §29 | 冗長 | `_` |
-| E504 | question-underscore-binding | §35 | 冗長 | `_?` の `_` |
 | E505 | unused-binding | §39 | 冗長 | `as` の束縛名 |
 | E506 | implicit-discard | §40 | 冗長 | `as` の `_` |
 | E507 | rewrap | §45 | 冗長 | `if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる |
-| E508 | repropagate | §36 | 冗長 | 再伝播する腕の `\|`。Option の再伝播に当てる |
 | E510 | list-literal-form | §22 | 冗長 | 式の `Cons` か `Nil` |
 | E511 | cond-to-literal-pattern | §26 | 冗長 | `if`。第32節の形では `def` か `fn`。腕の条件列（第26.1節）ではその腕の `if` |
 | E512 | top-var-pattern | §26 | 冗長 | 変数パターン |
@@ -2216,7 +2222,6 @@ def A drop (values: A List, count: Int): A List Pure
   置き換えた fallback に書き換える。すべての腕が scrutinee を組み直すときは、枝ごと scrutinee に畳む
   （第26節、第57節）。畳めるのは scrutinee が単純な変数のときだけである。
 - E507（再包装）: 腕がすべて自分の pattern を組み直す分岐を scrutinee にする。第31節と第32節の形（`def f | ...` と `fn(| ...)`）は `def f value => value` と `fn(value => value)` にする。fallback を持つ形は対象外である。fallback は scrutinee の再評価なので、1 回に畳むと効果の回数が変わり得る。
-- E508（再伝播）: 分岐が `def` か `fn` の本体ちょうどのとき、`| Some(p) => body` と `| None => None` の 2 本の腕を `<scrutinee> as p? -> <body>` にする。第31節と第32節の形では、引数を `value` と名付けた定義にする。`p` は `Some` の 1 つの引数で、その束縛名がすべて `body` で使われていなければならない（1 つも無い形と使われない形は `e ->` が正準形である）。本体でない位置の分岐は伝播先が違うので対象外である。`body` が `value` を自由に参照する形も対象外である（引数の名前が参照を捕捉するため）。
 
 閉じの印（§12.1）の不足・余分・食い違いは E100 であり、局所的な書き換えを持たない。`--fix` と `fmt` は閉じを書き換えない。
 
@@ -2247,7 +2252,7 @@ hado test <file.hd>
 
 既定では変更したファイルを書き、変更したファイルごとに `fmt: <入力根からの相対パス> (<n> rewrites)` を標準出力に出す。1 つも変わらなければ何も出さず終了コード 0 を返す。`--check` はファイルを書かず、変わるファイルごとに `fmt: <相対パス> is not canonical (<n> rewrites)` を出し、1 つでもあれば終了コード 1、無ければ 0 を返す。門番に使える。書き換えが尽きたソースには、`fmt` が書ける正準形違反が残っていない。もう一度 `fmt` を走らせても何も変わらない。
 
-`fmt` は検査をしない。型の検査も、局所的な書き換えを持たない正準形違反（未使用の E505 / E513 や E503 / E504 など）の報告もしない。閉じの印（§12.1）の不足・余分・食い違いも書き換えを持たないので、`fmt` は直さない。残った違反と診断は `check` が報告する。読み書きの失敗と、書き換えが尽きないときは、その旨を標準エラーに出して終了コード 1 を返す。
+`fmt` は検査をしない。型の検査も、局所的な書き換えを持たない正準形違反（未使用の E505 / E513 や E503 など）の報告もしない。閉じの印（§12.1）の不足・余分・食い違いも書き換えを持たないので、`fmt` は直さない。残った違反と診断は `check` が報告する。読み書きの失敗と、書き換えが尽きないときは、その旨を標準エラーに出して終了コード 1 を返す。
 
 `hado build [-o <path>] [--fix] <file.hd>` の `--fix` は、作る前に `fmt` と同じ一括整形を入力根のソースへ当ててから読み直して作る。`--fix` が無ければ `build` はソースを書き換えない。
 `fmt` は局所的な書き換えに加えて、行末の空白（スペースとタブ）を消し、ファイルの終わりを改行 1 つにする。空のファイルはそのままである。字下げのタブと改行コード（CRLF）は変えない。数の綴りは書き換えと同じで、当てた変更の合計を数える。
@@ -2321,7 +2326,6 @@ def
 def rec
 
 as p ->
-as p? ->
 ->
 with
 resume
@@ -2335,7 +2339,7 @@ type
 T Option
 ADT
 record
-{Io, Error}
+{Absent, Error, Io}
 Pure
 
 if
@@ -2578,7 +2582,7 @@ handler_item    := op_kind name param* "=>" expression
 
 ```text
 expression      := pipe | prefix_form
-prefix_form     := binding | rail_binding | rail_discard | with_form | branch
+prefix_form     := binding | rail_discard | with_form | branch
 pipe            := or ("|>" or)*
 or              := and ("||" and)*
 and             := compare ("&&" compare)*
@@ -2616,7 +2620,6 @@ constructor名に続く `()` または `{}` は空白によらずconstructorのp
 with_form       := "with" impl_ref with_args? "->" expression                    第38節
 with_args       := "(" expression ("," expression)* ")"
 binding         := pipe "as" pattern "->" expression                             `as` は名付けに限る（第11節）
-rail_binding    := pipe "as" pattern "?" "->" expression                         Option の束縛（第34節）
 rail_discard    := pipe "->" expression                                          値の破棄（第35節）
 lambda          := "fn" "(" lambda_params "=>" expression ")"
                  | "fn" "(" lambda_params condition_arms ")"                     第32節
@@ -2641,7 +2644,7 @@ pattern_arms    := (pattern_arm | pattern_fallback)+
 pattern_arm     := "|" pattern ("," pattern)* "=>" (arm_body | arm_conditions)  pattern の列は scrutinee と同数（E125）
 arm_conditions  := "if" condition_arms                                    腕の条件列（第26.1節）。最初の fallback で終わる
 pattern_fallback := "|" arm_body
-arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
+arm_body        := pipe | binding | rail_discard            branch を直接置けない（E101）
 # `if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。
 # 本体に `->` が無いときだけ使い、`if` の全体に続きがあるときに書く（第12.1節）。
 # `,` `;` `)` `]` `}` は中の構文も閉じる。

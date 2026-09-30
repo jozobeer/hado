@@ -124,7 +124,7 @@ impl FileScope {
         match &mut node.kind {
             NodeKind::Name(name) => self.reference(name, bound),
             NodeKind::Fn { params, body } => self.function(params, body, bound),
-            NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
+            NodeKind::Let { pat, value, body } => {
                 self.expression(value, bound);
                 self.pattern_body(pat, body, bound);
             }

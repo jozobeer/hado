@@ -5,6 +5,7 @@ ci	quick
 clippy	core
 cognitive-complexity	core
 cranelift-opt-level	full
+do-option-absent	core
 embed-runtime	full
 exit-code-from-main	core
 frozen-docs	core

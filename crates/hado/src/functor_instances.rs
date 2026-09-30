@@ -317,7 +317,7 @@ impl Instance<'_> {
                 }
                 self.node(body);
             }
-            NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
+            NodeKind::Let { pat, value, body } => {
                 self.pattern(pat);
                 self.node(value);
                 self.node(body);

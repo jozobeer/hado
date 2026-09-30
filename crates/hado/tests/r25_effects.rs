@@ -109,7 +109,7 @@ fn perturb_rejection(case: &Case, file: &str, source: &str, code: &str, anchor: 
 }
 
 #[test]
-fn let_question_requires_option() {
+fn discard_requires_an_effect() {
     let mut state = 0x25_03;
     for _ in 0..8 {
         let n = random(&mut state, 1000);
@@ -117,7 +117,7 @@ fn let_question_requires_option() {
         perturb_rejection(
             &case,
             "main.hd",
-            &format!("def main = {n} as x? -> Some(x)"),
+            &format!("def main = {n} -> Some(1)"),
             "E303",
             &n.to_string(),
         );

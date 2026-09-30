@@ -264,22 +264,7 @@ fn record_rebuilding_ignores_field_order_but_preserves_values() {
 }
 
 #[test]
-fn unchanged_none_branch_requires_railway_syntax() {
-    let source = "def f | Some(x) => Some(x + 1) | None => None\ndef main = f (Some(1))";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E508")
-    );
-    let source = "def f | Some(x) => Some(x + 1) | None => Some(0)\ndef main = f (None)";
-    hado::check_source(source, "t").unwrap();
-}
-
-#[test]
-fn selective_none_handling_is_not_plain_repropagation() {
+fn selective_payload_handling_is_not_rewrapping() {
     let source = "def f | Some(1) => Some(1) | Some(0)\ndef main = f (Some(2))";
     hado::check_source(source, "t").unwrap();
 }
@@ -300,33 +285,6 @@ fn record_binding_checks_each_bound_name() {
     }
     let source = format!("{prefix}{{ a = 1; b = 2 }} as {{ a = _; b }} -> b + 1");
     hado::check_source(&source, "t").unwrap();
-}
-
-#[test]
-fn unused_railway_binding_requires_do() {
-    let source = "def main = Some(1) as x? ->\n  Some(2)";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E505")
-    );
-    hado::check_source("def main = Some(1) as x? ->\n  Some(x + 2)", "t").unwrap();
-}
-
-#[test]
-fn body_type_error_precedes_discarded_railway_syntax() {
-    let source = "def main = Some(1) as _? ->\n  1";
-    assert_eq!(
-        hado::check_source(source, "t")
-            .err()
-            .unwrap()
-            .code
-            .as_deref(),
-        Some("E305")
-    );
 }
 
 #[test]

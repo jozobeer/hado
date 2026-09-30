@@ -1,2 +1,0 @@
-// spec: §12
-def map value f => value as x? -> Some(f x)

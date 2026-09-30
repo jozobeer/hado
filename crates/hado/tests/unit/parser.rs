@@ -84,10 +84,6 @@ fn bindings_and_fn() {
         parse_expr_ok("def main = 1 as x -> x + 1"),
         "(1 as x -> (x + 1))"
     );
-    assert_eq!(
-        parse_expr_ok("def main = f y as x? -> x"),
-        "(f y as x? -> x)"
-    );
     assert_eq!(parse_expr_ok("def main = g x -> x"), "(g x -> x)");
     assert_eq!(
         parse_expr_ok("def main = fn(x => x + 1)"),
@@ -95,17 +91,27 @@ fn bindings_and_fn() {
     );
 }
 
-/// §11・§34: `let` と `do` は廃止され、E100 になる。
+/// §11・§34: `let` と `do` と `as p? ->` は廃止され、E100 になる。
 #[test]
 fn removed_binding_keywords_are_e100() {
     for source in [
         "def main = let x = 1 -> x",
         "def main = let x? = f y -> x",
         "def main = do g x -> x",
+        "def main = f y as x? -> x",
     ] {
         let d = parse_source(source, "t").unwrap_err();
         assert_eq!(d.code.as_deref(), Some("E100"), "{source}: {d}");
     }
+}
+
+/// §11・§34: 移行の入口（旧形の `let`）でも `let p? =` は E100。
+#[test]
+fn conversion_rejects_the_removed_question_binding() {
+    let (ast, diagnostics) = parse_partial_for_conversion("def main = let x? = f y -> x", "t");
+    assert!(ast.items.is_empty(), "{ast:?}");
+    let code = diagnostics.iter().find_map(|d| d.code.as_deref());
+    assert_eq!(code, Some("E100"), "{diagnostics:?}");
 }
 
 /// §12.1: `if` の閉じは本体の `->` の有無と続きの有無で決まる。

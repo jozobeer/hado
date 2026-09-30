@@ -191,10 +191,10 @@ anchor  = "宣言と異なる型引数"
 
 [[error]]
 code    = "E303"
-name    = "rail-type"
-section = "§34"
+name    = "discard-type"
+section = "§35"
 stage   = "型"
-anchor  = "`e as p? ->` の値 `e` は Option、`e ->` の値 `e` は効果を持つ式か Option。どちらでもない式"
+anchor  = "`e ->` の値 `e` が効果を持つ式でない式"
 
 [[error]]
 code    = "E304"
@@ -295,13 +295,6 @@ stage   = "冗長"
 anchor  = "`_`"
 
 [[error]]
-code    = "E504"
-name    = "question-underscore-binding"
-section = "§35"
-stage   = "冗長"
-anchor  = "`_?` の `_`"
-
-[[error]]
 code    = "E505"
 name    = "unused-binding"
 section = "§39"
@@ -321,13 +314,6 @@ name    = "rewrap"
 section = "§45"
 stage   = "冗長"
 anchor  = "`if`。第31節と第32節の形では `def` か `fn`。Option の再包装に当てる"
-
-[[error]]
-code    = "E508"
-name    = "repropagate"
-section = "§36"
-stage   = "冗長"
-anchor  = "再伝播する腕の `|`。Option の再伝播に当てる"
 
 [[error]]
 code    = "E510"

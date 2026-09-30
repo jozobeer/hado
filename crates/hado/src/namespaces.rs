@@ -886,7 +886,7 @@ impl Resolver<'_> {
                 self.node_arguments(args, directory, local);
             }
             NodeKind::List(values, tail) => self.node_list(values, tail, directory, local),
-            NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
+            NodeKind::Let { pat, value, body } => {
                 self.pattern(pat, directory, local);
                 self.node(value, directory, local);
                 self.node(body, directory, local);
