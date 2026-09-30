@@ -366,9 +366,9 @@ main.hd:3:3: error[E303]: `e ->` requires an effect
 $ bash scripts/run-gates.sh --tier quick target/gates/quick
 TALLY: 41/41 passed; red: none
 $ bash scripts/run-gates.sh --tier core target/gates/core
-TALLY: 719/719 passed; red: none
+TALLY: 720/720 passed; red: none
 $ bash scripts/run-gates.sh --tier full target/gates/full
-TALLY: 3840/3848 passed; red: verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+TALLY: 3841/3849 passed; red: verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
 ```
 
 full の赤 4 本は main でも赤の既知の赤（`verify-r62`・`verify-r63`・`verify-r68` は
