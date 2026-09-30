@@ -434,7 +434,7 @@ next
 
 束縛と破棄の左辺は `->` の直前までに置く。`as` は区切りの記号（`->`、腕の `=>`、本体の `=` か `=>`、`(`、`,`）から直後の区切りまでの全体を束縛し、最も弱く結合する。`e as p ->` の `p` には名前だけを書ける。型の強制も pattern の別名も `as` では行わない。
 
-`let` と `do` と `as p? ->` はキーワードと印ごと廃止した。`let` を書くと E100 とし、`` `let` is removed; bind with `e as p ->` `` を出す。`do` を書くと E100 とし、`` `do` is removed; discard with `e ->` `` を出す。`as p? ->` と書くと E100 とし、`` `as p? ->` is removed; absence is an effect (bind with `as p ->`) `` を出す。
+`let` と `do` と `as p? ->` と `let p? =` はキーワードと印ごと廃止した。`let` を書くと E100 とし、`` `let` is removed; bind with `e as p ->` `` を出す。`do` を書くと E100 とし、`` `do` is removed; discard with `e ->` `` を出す。`as p? ->` と書くと E100 とし、`` `as p? ->` is removed; absence is an effect (bind with `as p ->`) `` を出す。旧形の移行の入口でも `let p? =` は E100 とし、`` `let p? =` is removed; absence is an effect (bind with `e as p ->`) `` を出す。
 
 `->` は、関数型の表記には使わない。関数型は第20節で定める `Fn(...)` を使う。
 

@@ -19,9 +19,10 @@ prelude に `Absent` 効果と `None` へ戻す handler `Maybe` を置き、`as 
    `effect Absent` / `abort absent` と `handler Absent as Maybe`（`abort absent => None`、
    `return value => Some(value)`）を置き、`lib.rs` の prelude 連結に足す。効果名
    `Absent` は予約になり、利用者の同名宣言は E205 とする（§49、§55）。
-2. **`as p? ->` を廃止する。** `?` は文法から外し、`as p ->` の後ろに `?` を書くと
-   E100 とする（`let`・`do` と同じ「廃止した綴り」の扱い）。構文木の `LetQ` は
-   移行入力（`print-postfix`）だけが読む。
+2. **`as p? ->` と `let p? =` を廃止する。** `?` は文法から外し、`as p ->` の後ろと
+   移行の入口（`print-postfix` が読む旧形の `let`）のどちらに `?` を書いても E100 と
+   する（`let`・`do` と同じ「廃止した綴り」の扱い）。構文木には `?` の束縛を表す
+   ノードを残さない。
 3. **`e ->` は効果を持つ式だけを受ける。** `Option` は効果ではないので E303 とする。
    E303 の短い名前を `rail-type` から `discard-type` へ改める（「rail」は
    `Option` の伝播路を指す古い語で、その路が消えるため）。
@@ -188,12 +189,28 @@ prelude に `Absent` 効果と `None` へ戻す handler `Maybe` を置き、`as 
           （§34・§35）もそのまま使える。審査で見てほしい
 ```
 
+```
+主張:     `print-postfix` は、移行の入口で読めなかった項目を黙って落とし、空の
+          ファイルを書く（`let p? =` は今回 E100 になり、この経路に入る）
+再現:     `printf 'def f value => let x? = value -> x
+' > /tmp/l/legacy.hd`
+          `cargo run --offline -q -- print-postfix /tmp/l /tmp/out`
+          → `skipped=0` と表示し、`/tmp/out/legacy.hd` は空になる
+現行:     字句で読めないときだけ `skipped` に数え、構文で読めない項目は AST から
+          落ちて空の出力になる（今回の変更の前から同じ）
+変えると: 空ファイルは移行の結果として危ない。読めなかった項目を `skipped` に数えるか、
+          診断を出して書かないようにすると、`print-postfix` の出力契約が変わる
+推奨:     このラウンドでは直さず、`docs/issues/print-postfix-drops-unconvertible-items.md`
+          へ切り出す（`?` 以外の壊れた入力でも同じことが起きるため、`?` の廃止とは
+          別の欠陥）。審査で優先度を見てほしい
+```
+
 ## 系譜
 
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
 | §34 | 不在は prelude の `Absent` 効果で表し、`Maybe` が `Option` へ戻す | 実行 | — | `tests/accept/absent_effect` |
-| §34 | `as p? ->` は廃止。`?` は E100 | 構文 | E100 | `tests/unit/parser.rs`・門番の変異 |
+| §34 | `as p? ->` と `let p? =` は廃止。`?` は E100 | 構文 | E100 | `tests/unit/parser.rs`・`tests/postfix-close/reject/N12` |
 | §35 | `e ->` は効果を持つ式だけを受ける | 型 | E303 | `tests/reject/E303` |
 | §40 | 破棄に意味があるのは効果を持つ式だけ | 冗長 | E506 | `tests/reject/E506` |
 | §55 | prelude の効果は `Absent` `Error` `Env` `Io` | 名前解決 | — | `scripts/verify-do-option-absent.sh` |
@@ -269,6 +286,28 @@ $ sed -i "s/def main = Some(1) as x? -> x/def main = Some(1) as x -> x/" scripts
 $ bash scripts/verify-do-option-absent.sh
 NG: b an Option discard is E303 and `?` is E100 (discard=E303 question=E501)
 PASSED: 2/3
+```
+
+層別の全走（`cargo test --offline` の後、木を止めて 1 回ずつ）。
+
+```
+$ bash scripts/run-gates.sh --tier quick target/gates/quick
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates/core
+TALLY: 719/719 passed; red: none
+$ bash scripts/run-gates.sh --tier full target/gates/full
+TALLY: 3840/3848 passed; red: verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+```
+
+full の赤 4 本は main でも赤の既知の赤（`verify-r62`・`verify-r63`・`verify-r68` は
+E402 の期待ずれ、`verify-string-split-linear` は検査 i の性能判定）。このラウンドの
+成果物で新しく赤になった門番は無い。`verify-postfix-binding` は、`?` を印字する枝の
+削除で変異 `drop-option-question` の対象が消えたため、その変異を外して実測 4/4。
+
+```
+$ bash scripts/verify-postfix-binding.sh
+J3:印字器の変異(cases=4): PASS
+PASSED: 4/4
 ```
 
 
