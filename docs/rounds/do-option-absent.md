@@ -493,7 +493,28 @@ without-rail_binding: exit=1 ERROR/MISSING=1
 
 ```
 $ cargo test --offline
-73 の "test result: ok"、0 の "test result: FAILED"（ログは target/roundlogs/cargo-test3.log）
+test result 73 本が ok、FAILED は 0（ログは target/roundlogs/cargo-test3.log）
+$ bash scripts/run-gates.sh --tier quick target/gates/quick
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates/core
+TALLY: 725/725 passed; red: none
+$ bash scripts/run-gates.sh --tier full target/gates/full
+TALLY: 3846/3854 passed; red: verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+```
+
+full の赤 4 本は main でも赤の既知の赤（`verify-r62`・`verify-r63`・`verify-r68` は
+E402 の期待ずれ、`verify-string-split-linear` は検査 i の性能判定）。このラウンドの
+成果物で新しく赤になった門番は無い。M7 の実測（quick 41/41、core 720/720、
+full 3841/3849）と比べて、赤の顔ぶれは同じで、通過数は 5 増えた（戻した
+`verify-r57` と `verify-postfix-binding` の検査が増えた分）。減った門番は無い。
+
+```
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/verify-treesitter.sh
+PASSED: 5/5
 ```
 
 
