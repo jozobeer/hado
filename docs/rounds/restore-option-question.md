@@ -141,7 +141,7 @@ restored: exit=0 ERROR/MISSING=0
 without-rail_binding: exit=1 ERROR/MISSING=1
 ```
 
-層別の全走（`cargo test --offline` の後、木を止めて 1 回ずつ）。
+層別の全走（実装の直後、main 取り込み前）。
 
 ```
 $ cargo test --offline
@@ -168,6 +168,43 @@ PASSED: 2/2
 $ bash scripts/verify-treesitter.sh
 PASSED: 5/5
 ```
+
+### 審査の指摘に当てた後（本文・門番・記録）
+
+本文と門番だけの変更なので、審査の指示により full は回していない。core は
+28 本すべてのログが `PASSED: n/N` で終わり、集計は緑である。core の 734 は、
+直前の 725 に main の dogfood-text-tool（core、7 件）と足した門番（core、2 件）を
+足した数である。
+
+```
+$ cargo test --offline
+test result 73 本が ok、FAILED は 0
+$ bash scripts/run-gates.sh --tier quick target/gates/quick-review
+TALLY: 41/41 passed; red: none
+$ target/debug/hado run tools/gates/main.hd -- target/gates/core-review
+734/734 passed; red: none
+$ bash scripts/verify-restore-option-question.sh
+PASSED: 2/2
+$ bash scripts/verify-do-option-absent.sh
+PASSED: 4/4
+$ bash scripts/verify-r57.sh
+PASSED: 6/6
+$ bash scripts/verify-r71.sh
+PASSED: 4/4
+$ bash scripts/verify-postfix-binding.sh
+PASSED: 4/4
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/verify-dogfood-text-tool.sh
+PASSED: 7/7
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/corpus-lock.sh --check && bash scripts/gate-tiers-lock.sh --check && bash scripts/spec-lock.sh --check
+（3 つとも差分なし、終了コード 0）
+```
+
+core 走行の `TALLY` 行は `| tail -1` の出力に出なかった（門番の契約では TALLY の
+欠落は印なので記録する）。同じ出力先を集計の道具へ直接渡すと上のとおり緑である。
 
 ### 着地前の再走（main `621002c` 取り込み後）
 
