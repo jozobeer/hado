@@ -382,4 +382,118 @@ J3:印字器の変異(cases=4): PASS
 PASSED: 4/4
 ```
 
+## rollback（restore-option-question）
+
+M7 は決定 D2（不在を効果 `Absent` で表す）を入れたが、同時に人が認めていない `?` の
+構文を消した。このラウンドはその削除だけを戻す。D2 の成果は残す。両者は同居する。
+`as p? ->` はデータの `Option` の伝播、`Absent` は効果としての不在を表す。
+
+### 戻した（人の差分 `git diff 8472497 eeb1704` の 1〜9）
+
+| # | 戻したもの | 固定するもの |
+|---|---|---|
+| 1 | `as p? ->` の受理（`parser.rs` の `NodeKind::LetQ`、`spec/grammar.ebnf` の `rail_binding`、`check` / `infer` / `mono` / `fixes` の腕） | `tests/accept/option_propagation`・`tests/unit/parser.rs`・`tests/postfix-close/accept/P5` |
+| 2 | E508（`spec/errors.toml` の行、§56 の表、`tests/reject/E508/`） | `tests/reject/E508`・`scripts/verify-r57.sh` |
+| 3 | §34 の題を `` `as p? ->` `` に戻す（`Absent` と `Maybe` の本文は残す） | `docs/spec.md` §34 |
+| 4 | §2・§10・§11・§28・付録A の `?` の文と例（`e as whole -> whole as Some(x)? ->` を含む） | `docs/spec.md`・`scripts/verify-spec-contracts.sh` |
+| 5 | `scripts/verify-r57.sh` の 57-c / 57-d（旧 E508 の形が受理されることを測る） | `scripts/verify-r57.sh` |
+| 6 | `scripts/verify-spec-contracts.sh` の針 `('r57','57','E508')` と `('r57','57','本体ちょうど')` | `scripts/verify-spec-contracts.sh` |
+| 7 | `scripts/verify-postfix-binding.sh` の変異 `drop-option-question` | `scripts/verify-postfix-binding.sh` |
+| 8 | `tests/postfix-close/accept/P5/main.hd` の `?` の行 | `tests/postfix-close/accept/P5` |
+| 9 | `crates/hado/src/parser.rs` の `LetQ` と各段の腕 | `cargo test --offline` の 11 本の判定器 |
+
+### 人が差分に挙げていないが、1〜9 を戻すために必要だったもの
+
+- `stdlib/option.hd` の `Option.map` を `value as x? -> Some(f x)` に戻した。戻さないと
+  prelude 自身が E508（`| None => None` の再伝播）を出す。
+- `tests/accept/option_propagation` を足した。`drop-option-question` の変異は受理
+  コーパスと stdlib を正準形として往復させる検査（`corpus_is_canonical_and_round_trips`）が
+  捕まえるので、`tests/postfix-close/accept` の P5 だけでは足りない。
+- `editors/tree-sitter-hado` の `rail_binding`（`grammar.js`・`tests/golden/rail-binding.hd`・
+  `.tree`）と `scripts/treesitter-check.py` の `GOLDEN_NAMES` を戻した。受理コーパスを
+  parse する core の門番 `verify-treesitter` の検査 2 が、`?` を受理コーパスへ戻した
+  時点で赤になる（下の変異）。
+- E303 のアンカーを `Option` の `e ->` と `as p? ->` の両方に広げた（陰の短い名前は
+  `discard-type`、節は §35 のまま。`tests/reject/E303` の `// spec: §35` に合わせる）。
+- §11・§33・§35・§36 の `Option` の伝播の散文を、戻した `?` と残した D2
+  （`e ->` は効果専用、E303）の両方に合わせて直した。
+
+### 戻さなかった（M7 の成果）
+
+- 効果 `Absent`・handler `Maybe`・`abort absent`（`stdlib/absent.hd`）、`tests/accept/absent_effect`、
+  `main` に残った `Absent` の操作名印字と exit 1。
+- `e ->` の値が `Option` なら E303（`e ->` は効果専用）。
+- `List.head`・`List.nth`・`Env.env` は `Option` を返す。
+- `let p? =` は E100（移行の入口でも）。`?` を認めるのは `as p? ->` だけである。
+- E504 と `tests/reject/E504`。`as _? ->` は受理され、書き換えを持たない（`verify-r71.sh`）。
+- `tests/accept/rail_forms`・`tests/accept/user_store` の `?`（M7 の実験で 0 にした）。
+- `README.md` の拒否例は E507 のまま（正確である）。
+- `docs/plan.md` §17.4 の「E504 / E507 / E508 は Option 限定に縮小して存続する」は
+  凍結文書なので触らない。D2 の決定と食い違う点は「仕様への疑義」に書く。
+
+### 系譜
+
+| 節 | 規範文の要約 | 段階 | コード | 固定するもの |
+|---|---|---|---|---|
+| §34 | `as p? ->` はデータの `Option` を伝播し、`e ->` は効果だけを実行する | 構文 / 型 | E303 | `tests/accept/option_propagation`・`tests/reject/E303` |
+| §36 | `\| Some(p) => body` と `\| None => None` の 2 腕は `as p? ->` へ書き換わる | 冗長 | E508 | `tests/reject/E508`・`scripts/verify-r57.sh` |
+| §34 | `as _? ->` の破棄は受理され、書き換えを持たない（E504 は戻さない） | 冗長 | — | `scripts/verify-r71.sh` |
+| §34 | 不在は効果 `Absent` で表し、`Maybe` が `Option` へ戻す | 実行 | — | `tests/accept/absent_effect`・`scripts/verify-do-option-absent.sh` |
+| §55 | prelude の効果は `Absent` `Error` `Env` `Io` | 名前解決 | — | `scripts/verify-do-option-absent.sh` |
+
+### 実測
+
+Red（M7 の木。`?` は E100、E508 は出ない）。
+
+```
+$ cargo run --offline -q -- check tests/accept/option_propagation/main.hd
+main.hd:4:42: error[E100]: `as p? ->` is removed; absence is an effect (bind with `as p ->`)
+$ cargo run --offline -q -- check tests/reject/E508/main.hd
+（診断を出さない。終了コード 0）
+```
+
+Green（このラウンドの木）。
+
+```
+$ cargo run --offline -q -- check tests/accept/option_propagation/main.hd
+$ cargo run --offline -q -- run tests/accept/option_propagation/main.hd
+{ none = None; some = Some(42) }
+$ cargo run --offline -q -- check tests/reject/E508/main.hd
+main.hd:4:60: error[E508]: absence bound at 4:62 is propagated unchanged; use `as p? ->` or `->`; canonical form: find_user id as user? -> Some(user + 1)
+```
+
+`?` と D2 の同居（`as p? ->` は `Option` の伝播、`e ->` は効果専用、`let p? =` は E100）。
+
+```
+$ bash scripts/verify-do-option-absent.sh
+OK: a the accept corpus or stdlib spells `as p? ->`
+OK: b an Option discard is E303 and `?` on a non-Option value is E303
+OK: c the prelude-only absent program runs as its expect tag says
+OK: d an unhandled absent exits 1 and prints the operation name
+PASSED: 4/4
+$ bash scripts/verify-r71.sh
+OK: 71-a the discarded Option binding is accepted
+OK: 71-b check --fix leaves the canonical spelling alone
+OK: 71-c fmt leaves the canonical spelling alone and is idempotent
+OK: 71-d Some discards its payload and None propagates
+PASSED: 4/4
+```
+
+文法の変異。`verify-treesitter` の検査 2 と同じ手順（`tree-sitter generate` / `build` /
+`parse`）を、文法だけ M7 の `git show eeb1704:editors/tree-sitter-hado/grammar.js` に
+戻して回す。`tests/accept/option_propagation/main.hd` の `?` が ERROR になる。
+
+```
+$ python3 target/roundlogs/probe-treesitter-mutation.py "$ts" target/roundlogs/ts-probe
+restored: exit=0 ERROR/MISSING=0
+without-rail_binding: exit=1 ERROR/MISSING=1
+```
+
+層別の全走（`cargo test --offline` の後、木を止めて 1 回ずつ）。
+
+```
+$ cargo test --offline
+73 の "test result: ok"、0 の "test result: FAILED"（ログは target/roundlogs/cargo-test3.log）
+```
+
 
