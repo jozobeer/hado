@@ -162,3 +162,40 @@ NotADirectory
 - 当たり: `List.fold` に `Map` を累算する閉包を渡しても E706 にならない（`Map.fold` と違い `List.fold` の署名は型変数だけ）。効果を持つ読み取りは `String List` の累算器に分け、`Map` の集計は純粋な fold にした。
 - 外れ: `String.split text ""` は `EmptySeparator` なので文字単位の分解には使えない。`String.get` を字句の検めに使うことになり、E308 を避けるための `as` 束縛が要った。
 - 実装から還元した点: 門番の変異の写しは、同じディレクトリに `.hd` が 1 本だけになるよう専用ディレクトリへ置く。`hado run` はディレクトリの `.hd` を連結するので、まとめて置くと E205 で落ちる。
+
+### 最後の全走
+
+層は 3 つとも回した。門番 `verify-dogfood-text-tool` は core 層に入った。
+
+```
+$ bash scripts/run-gates.sh --tier quick target/gates-quick
+TALLY: 41/41 passed; red: none
+$ bash scripts/run-gates.sh --tier core target/gates-core
+TALLY: 727/727 passed; red: none
+$ bash scripts/run-gates.sh --tier full target/gates-full
+TALLY: 3848/3856 passed; red: verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+```
+
+赤は 4 本で、すべて main でも赤の既知のものである。`verify-r62`・`verify-r63`・`verify-r68` は `docs/issues/implement-local-adt-identity-is-name-only.md`、`verify-string-split-linear` は検査 i の計時の揺れ（`docs/issues/flaky-string-split-timing-gate.md`）で、このラウンドの成果物ではない。
+
+```
+$ target/debug/hado run tools/gates/main.hd -- target/gates-core
+727/727 passed; red: none
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+```
+
+`cargo test --offline` の実走は m0 が持ち（門番は `PASSED: 8/8`）、単体でも赤の行は出なかった。
+
+```
+$ cargo test --offline 2>&1 | grep -E 'test result:|^error' | tail -2
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.67s
+```
+
+### 着地前の main 取り込みと corpus lock
+
+`git merge main` は `Already up to date.` で、main はこのブランチを切った `eeb1704` から動いていなかった。取り込む行が無いので木は変わらず、`bash scripts/corpus-lock.sh --check` は差分なしで 0 を返した。作り直しはしていない。木が変わらないので層別の再走もしていない（`AGENTS.md` の「木が変わらないなら門番を回さない」）。
+
