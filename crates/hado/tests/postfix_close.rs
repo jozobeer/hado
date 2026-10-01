@@ -1,4 +1,4 @@
-//! 後置の束縛と `if`・`fn` の閉じを固定する（§11・§12・§35・§53・§57）。
+//! 後置の束縛と `if`・`fn` の閉じを固定する（§11・§12・§34・§35・§53・§57）。
 //!
 //! 3 つのことを測る。
 //! - 受理コーパス・stdlib・tools が 1 通りの正準形で書かれ、同じ構文木へ往復する。
@@ -101,7 +101,7 @@ fn close_shapes_parse() {
     assert!(count >= 20, "閉じの正例が足りない: {count}");
 }
 
-/// 閉じの不足・余分・食い違いは E100。旧形の `let`・`do` と `?` も E100。
+/// 閉じの不足・余分・食い違いは E100。旧形の `let`・`do` も E100。
 #[test]
 fn close_defects_are_e100() {
     let mut count = 0;
@@ -123,7 +123,7 @@ fn close_defects_are_e100() {
 /// 書いた結果を読み直して検査できる。旧形の `let`・`do` を書き戻さない。
 #[test]
 fn canonical_rewrites_write_parseable_postfix() {
-    for name in ["E506", "E507", "E520"] {
+    for name in ["E506", "E507", "E508", "E520"] {
         let path = repo_root().join("tests/reject").join(name).join("main.hd");
         let source = fs::read_to_string(&path).expect("readable");
 

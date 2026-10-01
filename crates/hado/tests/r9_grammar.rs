@@ -417,32 +417,41 @@ impl Generator {
             // `fn` の本体では `->` を綴れない（§12.1）。ここは pipe に限る。
             return self.pipe(depth, in_arm);
         }
-        let choice = self.random(if in_arm { 2 } else { 4 });
+        let choice = self.random(if in_arm { 3 } else { 5 });
         self.prefix_variant(depth, in_arm, choice)
     }
 
     fn prefix_variant(&mut self, depth: usize, in_arm: bool, choice: usize) -> String {
-        self.mark("prefix_form", 4, choice);
+        self.mark("prefix_form", 5, choice);
         let source = match choice {
-            0 => {
-                self.mark("binding", 1, 0);
+            0 | 1 => {
+                self.mark(
+                    if choice == 0 {
+                        "binding"
+                    } else {
+                        "rail_binding"
+                    },
+                    1,
+                    0,
+                );
                 let pattern = self.pattern(2);
+                let question = if choice == 0 { "" } else { "?" };
                 let (value, _) = self.capture(|g| g.expression(depth, in_arm));
                 let (body, _) = self.capture(|g| g.expression(depth, in_arm));
                 self.continuation = true;
-                format!("( {value} ) as {pattern} -> {body}")
+                format!("( {value} ) as {pattern}{question} -> {body}")
             }
-            1 => {
+            2 => {
                 self.mark("rail_discard", 1, 0);
                 let (value, _) = self.capture(|g| g.expression(depth, in_arm));
                 let (body, _) = self.capture(|g| g.expression(depth, in_arm));
                 self.continuation = true;
                 format!("( {value} ) -> {body}")
             }
-            2 => self.with_form(depth, in_arm),
+            3 => self.with_form(depth, in_arm),
             _ => self.branch(depth),
         };
-        // 束縛・破棄・with・分岐は根が Neg にならず、`fn` で始まらない。
+        // 束縛・rail・with・分岐は根が Neg にならず、`fn` で始まらない。
         self.neg = false;
         self.fn_head = false;
         source
@@ -1035,9 +1044,9 @@ impl Generator {
         let choice = if depth == 0 || self.sealed_depth > 0 {
             0
         } else {
-            self.random(3)
+            self.random(4)
         };
-        self.mark("arm_body", 3, choice);
+        self.mark("arm_body", 4, choice);
         if choice == 0 {
             self.pipe(depth, true)
         } else {

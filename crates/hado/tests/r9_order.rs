@@ -153,6 +153,11 @@ fn arm_diagnostics_point_to_pipe_with_arbitrary_spacing() {
             ("def main = if true | true => 1 | false => 2 ", "0", "E403"),
             ("def main = if 1 | 1 => 10 ", "1 => 20 | 0", "E405"),
             ("def main = if | 1 > 0 => 1 ", "1 > 0 => 2 | 0", "E406"),
+            (
+                "def f | Some(x) => Some(x + 1) ",
+                "None => None\ndef main = f (Some(1))",
+                "E508",
+            ),
         ] {
             let prefix = format!("{prefix}{}", " ".repeat(padding));
             let source = format!("{prefix}| {}{suffix}", " ".repeat(padding + 2));
@@ -279,7 +284,7 @@ fn broken_dependencies_do_not_create_earlier_type_errors() {
         "later + 1",
         "later 1",
         "later.value",
-        "later as x -> Some(x + 1)",
+        "later as x? -> Some(x + 1)",
     ] {
         let source = format!("def first = {use_site}\ndef later = 1 + \"bad\"\ndef main = first");
         let error = check_source(&source, SOURCE_PATH).err().unwrap();

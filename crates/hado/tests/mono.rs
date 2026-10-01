@@ -697,6 +697,15 @@ fn record_pattern_columns_match_fields_in_source_order() {
 }
 
 #[test]
+fn option_propagation_branches_before_the_continuation() {
+    let source = "def main = Some(1) as x? ->\n  Some(x + 2)";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert!(output.contains("arms: [(\"Some\", Let {"));
+    assert!(output.contains("(\"None\", Construct { constructor: \"None\", fields: [], result: Data(\"Option\", [Int]) })"));
+    assert!(output.contains("constructor: \"Some\", index: 0, result: Int"));
+}
+
+#[test]
 fn absent_at_the_entry_aborts_with_the_operation_name() {
     let source = "def main = absent";
     let output = hado::dump_mono(source, "t").unwrap();
