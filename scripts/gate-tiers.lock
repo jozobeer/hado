@@ -71,6 +71,7 @@ r75	full
 r76	full
 r77	full
 r81	full
+restore-option-question	core
 rustfmt	quick
 spec-contracts	core
 spec-model	quick
