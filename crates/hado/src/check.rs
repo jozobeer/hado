@@ -923,7 +923,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: body.span.line,
         end_col: body.span.col,
         code: Some("E508".into()),
-        message: "absence bound at {0} is propagated unchanged; use `as p? ->` or `->`".into(),
+        message: "absence bound at {0} is propagated unchanged; use `as p? ->`, or `as _? ->` when the arm binds nothing".into(),
     })
 }
 
