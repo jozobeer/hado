@@ -517,4 +517,39 @@ $ bash scripts/verify-treesitter.sh
 PASSED: 5/5
 ```
 
+### 着地前の再走（main `621002c` 取り込み後）
+
+`main` はこのラウンドの間に dogfood-text-tool（PR #70）の分だけ進んでいた。取り込んだ
+（衝突なし）。main は locked コーパス（`tests/accept`・`tests/reject`・`stdlib`）を
+変えていないので、`corpus-lock.sh --check` は差分なしで通り、作り直しは要らなかった。
+main の新しい `tools/dogfood-text-tool/main.hd` は効果を持つ prelude を `as p ->` で
+束縛しており、戻した仕様でも `check` は 0 で通る。
+
+```
+$ bash scripts/corpus-lock.sh --check
+（差分なし、終了コード 0）
+$ cargo run --offline -q -- check tools/dogfood-text-tool/main.hd
+（終了コード 0）
+$ cargo test --offline
+test result 73 本が ok、FAILED は 0、終了コード 0
+$ bash scripts/verify-do-option-absent.sh
+PASSED: 4/4
+$ bash scripts/verify-r71.sh
+PASSED: 4/4
+$ bash scripts/verify-r57.sh
+PASSED: 6/6
+$ bash scripts/verify-postfix-binding.sh
+PASSED: 4/4
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/verify-treesitter.sh
+PASSED: 5/5
+$ bash scripts/verify-dogfood-text-tool.sh
+PASSED: 7/7
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/run-gates.sh --tier quick target/gates/quick-postmerge
+TALLY: 41/41 passed; red: none
+```
+
 
