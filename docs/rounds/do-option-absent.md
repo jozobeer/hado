@@ -382,4 +382,4 @@ J3:印字器の変異(cases=4): PASS
 PASSED: 4/4
 ```
 
-
+`restore-option-question` が、人が認めた `?` の綴りと E508 を戻した（`docs/rounds/restore-option-question.md`）。

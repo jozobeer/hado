@@ -368,7 +368,7 @@ module.exports = grammar({
 
     // 付録C「継続と匿名関数」。束縛は後置（§11）。
     _prefix_form: ($) =>
-      choice($.binding, $.rail_discard, $.with_form, $.branch),
+      choice($.binding, $.rail_binding, $.rail_discard, $.with_form, $.branch),
 
     with_form: ($) =>
       seq(keyword('with'), $.impl_ref, optional($.with_args), '->', $.expression),
@@ -377,6 +377,9 @@ module.exports = grammar({
 
     binding: ($) =>
       seq($.pipe, keyword('as'), $.pattern, '->', $.expression),
+
+    rail_binding: ($) =>
+      seq($.pipe, keyword('as'), $.pattern, '?', '->', $.expression),
 
     rail_discard: ($) => seq($.pipe, '->', $.expression),
 
@@ -454,7 +457,7 @@ module.exports = grammar({
 
     pattern_fallback: ($) => seq('|', $.arm_body),
 
-    arm_body: ($) => choice($.pipe, $.binding, $.rail_discard),
+    arm_body: ($) => choice($.pipe, $.binding, $.rail_binding, $.rail_discard),
 
     // §12.1: `if(...)` は続きを持つ `if` の閉じ。`(` で始まる条件の `if` とも
     // 読めるので、`primary` に置いて GLR に `=>` の有無で選ばせる。

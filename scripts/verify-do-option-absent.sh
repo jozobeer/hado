@@ -2,10 +2,12 @@
 # tier: core
 # round: do-option-absent
 #
-# `Option` の不在を効果 `Absent` に一本化する（D2）。測るのは 4 つ。
-#   a. 受理コーパスと stdlib に `?` の伝播の綴り（`as p? ->`。pattern は空白を含みうる）
-#      が無い。
-#   b. `Option` に対する `->` は E303、`as p? ->` は E100。
+# `Option` の不在を効果 `Absent` で表す（D2）。`as p? ->` はデータの `Option` の
+# 伝播として残る。測るのは 4 つ。
+#   a. 受理コーパスと stdlib に `?` の伝播の綴り（`as p? ->`。pattern は空白を
+#      含みうる）がある。
+#   b. `Option` に対する `->` は E303、`Option` でない値に対する `as p? ->` も
+#      E303。`?` は効果の代わりにならない。
 #   c. prelude の `Absent` と `Maybe` だけで書いた効果版が、自分の `// expect:`
 #      と同じ出力を出し、そのファイル自身は効果も handler も宣言しない。
 #   d. `main` に残った `Absent` は操作名を stderr に出して exit 1。
@@ -21,7 +23,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 hado() { cargo run --offline -q -- "$@"; }
 
-# --- a: `as p? ->` の綴りが受理側に残っていない ---
+# --- a: `as p? ->` の綴りが受理側にある ---
 # `as` と `?` の間には pattern（`{ value = Box(n) }` など空白を含む）が入る。
 # 行コメントと文字列を外してから `?` + `->` を探し、記録用の `?`（`// item: let p? =`）や
 # 文字列の中の `?` を綴りと数えない。
@@ -65,13 +67,13 @@ for root in ("tests/accept", "stdlib"):
                 print(f"{path}:{number}:{line.strip()}")
 PYA
 )
-if [ -z "$spelled" ]; then
-    ok "a no accept corpus or stdlib file spells \`as p? ->\`"
+if [ -n "$spelled" ]; then
+    ok "a the accept corpus or stdlib spells \`as p? ->\`"
 else
-    ng "a no accept corpus or stdlib file spells \`as p? ->\`" "$spelled"
+    ng "a the accept corpus or stdlib spells \`as p? ->\`" "none found"
 fi
 
-# --- b: Option に対する `->` は E303、`?` は E100 ---
+# --- b: Option に対する `->` は E303、Option でない値の `as p? ->` も E303 ---
 mkdir -p "$work/b1" "$work/b2"
 cat > "$work/b1/option_discard.hd" <<'HD'
 def find (x: Int): Int Option => Some(x)
@@ -79,15 +81,15 @@ def main =
   find 0 ->
   1
 HD
-cat > "$work/b2/question.hd" <<'HD'
-def main = Some(1) as x? -> x
+cat > "$work/b2/non_option.hd" <<'HD'
+def main = 1 as n? -> n
 HD
 discard_code=$(hado check "$work/b1/option_discard.hd" 2>&1 | sed -n 's/.*error\[\(E[0-9]*\)\].*/\1/p' | head -1)
-question_code=$(hado check "$work/b2/question.hd" 2>&1 | sed -n 's/.*error\[\(E[0-9]*\)\].*/\1/p' | head -1)
-if [ "$discard_code" = E303 ] && [ "$question_code" = E100 ]; then
-    ok "b an Option discard is E303 and \`?\` is E100"
+question_code=$(hado check "$work/b2/non_option.hd" 2>&1 | sed -n 's/.*error\[\(E[0-9]*\)\].*/\1/p' | head -1)
+if [ "$discard_code" = E303 ] && [ "$question_code" = E303 ]; then
+    ok "b an Option discard is E303 and \`?\` on a non-Option value is E303"
 else
-    ng "b an Option discard is E303 and \`?\` is E100" "discard=$discard_code question=$question_code"
+    ng "b an Option discard is E303 and \`?\` on a non-Option value is E303" "discard=$discard_code question=$question_code"
 fi
 
 # --- c: prelude の効果版が expect と同じ出力を出し、自分では宣言しない ---

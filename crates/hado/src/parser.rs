@@ -1,7 +1,8 @@
 //! Recursive-descent parser for the hado grammar of 付録C, §5 and §7.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
-//! local bindings (`let` / `do`), anonymous functions (`fn`),
+//! local bindings (`let` / `do`, and the Option binding `e as p? ->`),
+//! anonymous functions (`fn`),
 //! the three branch forms (Boolean branch, condition column, pattern
 //! branch), patterns, records, list literals, modules (`sig` / `struct`)
 //! and type definitions. Every node carries a `Span`.
@@ -97,6 +98,13 @@ pub enum NodeKind {
     NamedConstructor(DeclaredName, Vec<(DeclaredName, Node)>),
     List(Vec<Node>, Option<Box<Node>>),
     Let {
+        pat: Pattern,
+        value: Box<Node>,
+        body: Box<Node>,
+    },
+    /// §34: `e as p? -> body`。`e` の `Option` の中身を `p` に束縛し、`None` なら
+    /// `None` を伝播する。旧形の `let p? =` は E100 で、このノードにはならない。
+    LetQ {
         pat: Pattern,
         value: Box<Node>,
         body: Box<Node>,
@@ -1992,8 +2000,9 @@ impl Parser<'_> {
 
     // --- expressions ---
 
-    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` と `?` は E100。
-    /// `e as p ->`・`e ->` は `Let`・`DoQ` へ写す。
+    /// §11・§34・§35: 束縛は `e as p ->`、Option の束縛は `e as p? ->`、破棄は `e ->`。
+    /// `let`・`do`・旧形の `let p? =` は E100。`e as p ->`・`e as p? ->`・`e ->` は
+    /// `Let`・`LetQ`・`DoQ` へ写す。
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.converting {
             return match self.kind() {
@@ -2022,22 +2031,29 @@ impl Parser<'_> {
         if self.kind() == &TokKind::KwAs {
             self.bump();
             let pat = self.parse_pattern()?;
-            if self.kind() == &TokKind::Question {
-                return Err(self.error(
-                    Some("E100"),
-                    "`as p? ->` is removed; absence is an effect (bind with `as p ->`)",
-                ));
+            let question = self.kind() == &TokKind::Question;
+            if question {
+                self.bump();
             }
             self.expect(&TokKind::DashArrow)?;
             let body = self.parse_expr()?;
             let span = value.span;
             let end = self.last_end();
-            return Ok(Node {
-                kind: NodeKind::Let {
+            let kind = if question {
+                NodeKind::LetQ {
                     pat,
                     value: Box::new(value),
                     body: Box::new(body),
-                },
+                }
+            } else {
+                NodeKind::Let {
+                    pat,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                }
+            };
+            return Ok(Node {
+                kind,
                 span: span.until(end),
             });
         }
@@ -3436,7 +3452,7 @@ fn contains_branch_in(node: &Node, allow_arm_conditions: bool) -> Option<Span> {
             .iter()
             .chain(tail.iter().map(Box::as_ref))
             .find_map(|item| contains_branch_in(item, false)),
-        NodeKind::Let { value, body, .. } => {
+        NodeKind::Let { value, body, .. } | NodeKind::LetQ { value, body, .. } => {
             contains_branch_in(value, false).or_else(|| contains_branch_in(body, false))
         }
         NodeKind::DoQ { value, body } => {
@@ -3547,6 +3563,10 @@ pub fn canonical(node: &Node) -> String {
         // §11: 束縛は後置の `e as p ->` で書く。正準形もその綴りを出す。
         NodeKind::Let { pat, value, body } => {
             format!("({} as {pat} -> {})", canonical(value), canonical(body))
+        }
+        // §34: Option の束縛は `?` を pattern の直後に置く。
+        NodeKind::LetQ { pat, value, body } => {
+            format!("({} as {pat}? -> {})", canonical(value), canonical(body))
         }
         NodeKind::DoQ { value, body } => {
             format!("({} -> {})", canonical(value), canonical(body))

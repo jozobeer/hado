@@ -109,6 +109,22 @@ fn perturb_rejection(case: &Case, file: &str, source: &str, code: &str, anchor: 
 }
 
 #[test]
+fn let_question_requires_option() {
+    let mut state = 0x25_03;
+    for _ in 0..8 {
+        let n = random(&mut state, 1000);
+        let case = Case::new();
+        perturb_rejection(
+            &case,
+            "main.hd",
+            &format!("def main = {n} as x? -> Some(x)"),
+            "E303",
+            &n.to_string(),
+        );
+    }
+}
+
+#[test]
 fn discard_requires_an_effect() {
     let mut state = 0x25_03;
     for _ in 0..8 {

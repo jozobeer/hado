@@ -189,7 +189,8 @@ fn rename_fn(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize
 /// `let` / `let?`。値は今の scope で、本文は束縛を足した scope で書き換える。
 fn rename_let(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
     use crate::parser::NodeKind;
-    let NodeKind::Let { pat, value, body } = &mut node.kind else {
+    let (NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body }) = &mut node.kind
+    else {
         return;
     };
     rename(value, scope, next);
@@ -330,7 +331,7 @@ fn rename(node: &mut Node, scope: &BTreeMap<String, String>, next: &mut usize) {
             }
         }
         NodeKind::Fn { .. } => rename_fn(node, scope, next),
-        NodeKind::Let { .. } => rename_let(node, scope, next),
+        NodeKind::Let { .. } | NodeKind::LetQ { .. } => rename_let(node, scope, next),
         NodeKind::PatternBranch { .. } => rename_pattern_branch(node, scope, next),
         // record は書き換える前に field を名前順に並べる。並びは綴りの比較に効く。
         NodeKind::Record(fields) => {
