@@ -6,6 +6,7 @@ clippy	core
 cognitive-complexity	core
 cranelift-opt-level	full
 do-option-absent	core
+dogfood-text-tool	core
 embed-runtime	full
 exit-code-from-main	core
 frozen-docs	core
