@@ -125,7 +125,7 @@ pub(crate) fn free_names(node: &Node, bound: &BTreeSet<String>, result: &mut BTr
         NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
             free_names_all(fields.iter().map(|(_, value)| value), bound, result);
         }
-        NodeKind::Let { pat, value, body } => {
+        NodeKind::Let { pat, value, body } | NodeKind::LetQ { pat, value, body } => {
             free_names(value, bound, result);
             let mut bound = bound.clone();
             bind(pat, &mut bound);

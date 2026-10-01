@@ -89,7 +89,7 @@ handler_item    := op_kind name param* "=>" expression
 
 ### 式（優先順位の低い方から）:
 expression      := pipe | prefix_form
-prefix_form     := binding | rail_discard | with_form | branch
+prefix_form     := binding | rail_binding | rail_discard | with_form | branch
 pipe            := or ("|>" or)*
 or              := and ("||" and)*
 and             := compare ("&&" compare)*
@@ -118,6 +118,7 @@ list_expr       := "[" "]"
 with_form       := "with" impl_ref with_args? "->" expression                    第38節
 with_args       := "(" expression ("," expression)* ")"
 binding         := pipe "as" pattern "->" expression                             `as` は名付けに限る（第11節）
+rail_binding    := pipe "as" pattern "?" "->" expression                         Option の束縛（第34節）
 rail_discard    := pipe "->" expression                                          値の破棄（第35節）
 lambda          := "fn" "(" lambda_params "=>" expression ")"
                  | "fn" "(" lambda_params condition_arms ")"                     第32節
@@ -137,7 +138,7 @@ pattern_arms    := (pattern_arm | pattern_fallback)+
 pattern_arm     := "|" pattern ("," pattern)* "=>" (arm_body | arm_conditions)  pattern の列は scrutinee と同数（E125）
 arm_conditions  := "if" condition_arms                                    腕の条件列（第26.1節）。最初の fallback で終わる
 pattern_fallback := "|" arm_body
-arm_body        := pipe | binding | rail_discard            branch を直接置けない（E101）
+arm_body        := pipe | binding | rail_binding | rail_discard            branch を直接置けない（E101）
 # `if` の直後の `(` は、対応する `)` までの最上位に `=>` があるときだけ閉じの開きと読む。
 # 本体に `->` が無いときだけ使い、`if` の全体に続きがあるときに書く（第12.1節）。
 # `,` `;` `)` `]` `}` は中の構文も閉じる。

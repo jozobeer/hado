@@ -673,7 +673,9 @@ impl<'a> Collector<'a> {
             NodeKind::NamedConstructor(name, _) => {
                 self.reference_unless_shadowed(&name.name, scope, &self.constructors, references);
             }
-            NodeKind::Let { pat, .. } => self.pattern(pat, scope, references),
+            NodeKind::Let { pat, .. } | NodeKind::LetQ { pat, .. } => {
+                self.pattern(pat, scope, references)
+            }
             NodeKind::PatternBranch { arms, .. } => {
                 self.expression_pattern_branch(arms, scope, references)
             }

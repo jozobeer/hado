@@ -74,7 +74,10 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
 }
 
 pub(crate) fn arm_diagnostic(ast: &Ast, mut error: Diagnostic) -> Diagnostic {
-    if matches!(error.code.as_deref(), Some("E403" | "E405" | "E406")) {
+    if matches!(
+        error.code.as_deref(),
+        Some("E403" | "E405" | "E406" | "E508")
+    ) {
         if let Some((_, pipe)) = ast
             .branch_anchors
             .iter()
@@ -692,12 +695,13 @@ type NodeCheck = fn(&Node, &str) -> Result<(), Diagnostic>;
 
 /// ノードごとの検査。順序は診断の出る順に効くので、並びを変えない。
 /// `check_rewrap` だけは枝の範囲を要するので `NODE_CHECKS` の外で走る。
-const NODE_CHECKS: [NodeCheck; 5] = [
+const NODE_CHECKS: [NodeCheck; 6] = [
     check_cons_tail,
     check_duplicate_patterns,
     check_conditions,
     check_literal_fallback,
     check_local_redundancy,
+    check_repropagation,
 ];
 
 /// 枝の範囲を見る検査。順序は `NODE_CHECKS` の `check_local_redundancy` の直後。
@@ -727,7 +731,7 @@ fn check_fn_node(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
 /// 束縛を導入するノードで、その束縛が本文で使われているかを見る。
 fn check_bindings(node: &Node, path: &str, diagnostics: &mut Vec<Diagnostic>) {
     match &node.kind {
-        NodeKind::Let { pat, body, .. } => {
+        NodeKind::Let { pat, body, .. } | NodeKind::LetQ { pat, body, .. } => {
             check_unused(crate::names::bindings(pat), body, path, diagnostics);
         }
         NodeKind::PatternBranch { arms, .. } => {
@@ -876,6 +880,50 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
         end_col: pattern.span.col,
         code: Some(code.into()),
         message: message.into(),
+    })
+}
+
+/// §36 / §57: the single `None` arm of a single-scrutinee branch rebuilds the
+/// absence it binds. The checker (E508) and the local rewrite (§57) share this
+/// predicate, so a rewrite cannot drift from the reported code.
+pub(crate) fn repropagated_arm(node: &Node) -> Option<(&Pattern, &Node)> {
+    let NodeKind::PatternBranch {
+        scrutinees, arms, ..
+    } = &node.kind
+    else {
+        return None;
+    };
+    if scrutinees.len() != 1 {
+        return None;
+    }
+    for (patterns, body) in arms {
+        let [pattern] = patterns.as_slice() else {
+            continue;
+        };
+        if matches!(&pattern.kind, PatternKind::Name(name) if name == "None")
+            && crate::normalize::rebuilds_pattern(pattern, body)
+        {
+            return Some((pattern, body));
+        }
+    }
+    None
+}
+
+fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
+    let Some((pattern, body)) = repropagated_arm(node) else {
+        return Ok(());
+    };
+    Err(Diagnostic {
+        mentions: Mentions::boxed([(pattern.span.line, pattern.span.col)]),
+        suggestion: None,
+        related: None,
+        path: path.into(),
+        line: body.span.line,
+        col: body.span.col,
+        end_line: body.span.line,
+        end_col: body.span.col,
+        code: Some("E508".into()),
+        message: "absence bound at {0} is propagated unchanged; use `as p? ->` or `->`".into(),
     })
 }
 
@@ -1150,7 +1198,9 @@ pub(crate) fn children(node: &Node) -> Vec<&Node> {
         NodeKind::Record(fields) | NodeKind::NamedConstructor(_, fields) => {
             fields.iter().map(|(_, value)| value).collect()
         }
-        NodeKind::Let { value, body, .. } | NodeKind::DoQ { value, body } => vec![value, body],
+        NodeKind::Let { value, body, .. }
+        | NodeKind::LetQ { value, body, .. }
+        | NodeKind::DoQ { value, body } => vec![value, body],
         NodeKind::BoolBranch { cond, then, els } => vec![cond, then, els],
         NodeKind::CondBranch { arms, fallback } => arms
             .iter()

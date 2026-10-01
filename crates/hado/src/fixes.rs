@@ -11,7 +11,7 @@
 //! 対象は §41・§44・§46・§53 の正準形のうち、まわりの木を変えずに書ける
 //! ものだけ: E510（式の `Nil` / `Cons`）、E516（パターンの `Nil` / `Cons`）、
 //! E517（`=> if | ...` の条件列を引数の腕へ）、E507（腕がすべて自分の pattern を
-//! 組み直す分岐は scrutinee）。
+//! 組み直す分岐は scrutinee）、E508（`None` の再伝播は `e as p? ->`）。
 
 use crate::lexer::{lex_full, Span, Tok, TokKind};
 use crate::parser::{self, Ast, DefKind, Item, Node, NodeKind, Pattern, PatternKind};
@@ -208,6 +208,7 @@ pub fn is_fixable(code: &str) -> bool {
             | "E512"
             | "E507"
             | "E520"
+            | "E508"
             | "E510"
             | "E515"
             | "E516"
@@ -1008,6 +1009,8 @@ fn walk_item_in(item: &Item, walk: &Walk<'_>, found: &mut Found<'_>) {
             };
             match &def.kind {
                 DefKind::Value(body) => {
+                    // 値の定義の本体は末尾なので、`as p? ->` の伝播先はこの定義。
+                    found.push(repropagate_fix(body, Tail::If, None, walk));
                     walk_node(body, walk, found);
                 }
                 DefKind::Function { body, .. } => {
@@ -1041,6 +1044,8 @@ fn walk_def_function(
         );
         found.push(rewrap_arm_fix(body, &identity, Tail::Def, walk));
     }
+    let tail = if arms { Tail::Def } else { Tail::If };
+    found.push(repropagate_fix(body, tail, Some(def), walk));
 }
 
 /// The §31 / §32 arm forms (`def f | ...`, `fn(| ...)`) lower to one parameter
@@ -1171,7 +1176,7 @@ fn body_dash_arrow(tokens: &[Tok], body_at: usize) -> Option<usize> {
     Some(body_at - 1)
 }
 
-// --- E507: Option の再包装 ---
+// --- E507 / E508: Option の再包装と再伝播 ---
 
 /// The shape of the function whose body is the branch (§57). A rewrite is only
 /// offered where the branch is that function's body, so the surrounding
@@ -1257,6 +1262,165 @@ fn rewrap_arm_fix(node: &Node, replacement: &str, tail: Tail, walk: &Walk<'_>) -
     })
 }
 
+/// E508: `if E | Some(p) => body | None => None` in tail position is
+/// `E as p? -> body` (§57). The rewrite needs a binder that the body uses:
+/// with none, or with one the body ignores, `E ->` is the canonical form.
+fn repropagate_fix(
+    node: &Node,
+    tail: Tail,
+    def: Option<&parser::Def>,
+    walk: &Walk<'_>,
+) -> Option<Fix> {
+    let Walk { source, lines, .. } = *walk;
+    let Repropagate {
+        scrutinee,
+        body,
+        pattern,
+        absence,
+    } = repropagate_parts(node)?;
+    // The rewritten definition names its argument `value`; a free `value` in
+    // the body would be captured by that name.
+    if tail != Tail::If && crate::names::references(body, "value") {
+        return None;
+    }
+    // With every arm rebuilding, E507 is reported and its rewrite is shorter.
+    if crate::check::rewrap_branch(node).is_some() {
+        return None;
+    }
+    let (pipe, start, end, first_pipe) = repropagate_range(node, absence, tail, walk)?;
+    // The scrutinee ends where the first arm's `|` begins; the first arm's body
+    // ends where the `None` arm's `|` begins.
+    let value_end = trim_back(source, lines.offset(source, first_pipe));
+    let body_end = trim_back(source, lines.offset(source, pipe));
+    let value = if tail == Tail::If {
+        source[lines.offset(source, scrutinee.span)..value_end].trim()
+    } else {
+        "value"
+    };
+    let body_text = &source[lines.offset(source, body.span)..body_end];
+    // §57: 正準形は `<scrutinee> as p? -> <body>`（後置の Option の伝播）。
+    let binding = format!("{value} as {}? -> {body_text}", pattern_text(pattern));
+    let replacement = repropagate_replacement(tail, def, binding)?;
+    Some(Fix {
+        code: "E508",
+        line: pipe.line,
+        col: pipe.col,
+        start,
+        end,
+        canonical: flatten(&replacement),
+        replacement,
+    })
+}
+
+/// 再伝播の形（§36）から取り出した部品。
+struct Repropagate<'a> {
+    scrutinee: &'a Node,
+    body: &'a Node,
+    pattern: &'a Pattern,
+    absence: &'a Pattern,
+}
+
+/// §36: `Some(p)` と `None` の 2 腕だけの分岐から、書き換えに要る部品を取り出す。
+fn repropagate_parts(node: &Node) -> Option<Repropagate<'_>> {
+    let NodeKind::PatternBranch {
+        scrutinees,
+        arms,
+        fallback,
+    } = &node.kind
+    else {
+        return None;
+    };
+    if fallback.is_some() {
+        return None;
+    }
+    let [scrutinee] = scrutinees.as_slice() else {
+        return None;
+    };
+    let [(patterns, body), (absence_patterns, absence_body)] = arms.as_slice() else {
+        return None;
+    };
+    let ([pattern], [absence]) = (patterns.as_slice(), absence_patterns.as_slice()) else {
+        return None;
+    };
+    if !matches!(&absence.kind, PatternKind::Name(name) if name == "None")
+        || !crate::normalize::rebuilds_pattern(absence, absence_body)
+    {
+        return None;
+    }
+    // `as p? -> E` matches `p` against the value inside the Option (§36), so the
+    // first arm must be `Some(p)` with one argument.
+    let PatternKind::Constructor(name, arguments) = &pattern.kind else {
+        return None;
+    };
+    if name != "Some" || arguments.len() != 1 {
+        return None;
+    }
+    let inner = &arguments[0];
+    let binders = crate::names::bindings(inner);
+    if binders.is_empty()
+        || !binders
+            .iter()
+            .all(|(binder, _)| crate::names::references(body, binder))
+    {
+        return None;
+    }
+    Some(Repropagate {
+        scrutinee,
+        body,
+        pattern: inner,
+        absence,
+    })
+}
+
+/// 書き換える範囲と `None` 腕の `|`。既定の位置とコメントを確かめる。
+fn repropagate_range(
+    node: &Node,
+    absence: &Pattern,
+    tail: Tail,
+    walk: &Walk<'_>,
+) -> Option<(Span, usize, usize, Span)> {
+    let Walk {
+        source,
+        lines,
+        tokens,
+        index,
+        branches,
+    } = *walk;
+    // The anchor is the `None` arm's `|`, the position the checker reports
+    // (check::arm_diagnostic moves the code there through branch_anchors).
+    let pipe = tokens.get(index.position(absence.span)?.checked_sub(1)?)?;
+    if !matches!(pipe.kind, TokKind::Pipe) {
+        return None;
+    }
+    let (_, first_pipe, _) = *branch_entry(node.span, branches)?;
+    let (start, end) = branch_range(node, tail, source, lines, tokens, index, branches)?;
+    if source[start..end].contains("//") {
+        return None;
+    }
+    Some((pipe.span, start, end, first_pipe))
+}
+
+/// 末尾の形ごとの書き換えテキスト。`as p? ->` の束縛を内側に置く。
+fn repropagate_replacement(
+    tail: Tail,
+    def: Option<&parser::Def>,
+    binding: String,
+) -> Option<String> {
+    Some(match tail {
+        Tail::If => binding,
+        Tail::Def => {
+            let def = def?;
+            format!(
+                "def {}{} value => {binding}",
+                if def.rec { "rec " } else { "" },
+                def.name
+            )
+        }
+        // §12.1: 本体に `->` があるので `fn ... /fn` で閉じる。
+        Tail::Fn => format!("fn value => {binding} /fn"),
+    })
+}
+
 /// The byte range of one branch: its first token through its last arm. `None`
 /// when the parser recorded no branch at that span.
 fn branch_range(
@@ -1323,6 +1487,11 @@ fn trim_back(source: &str, end: usize) -> usize {
 /// A diagnostic prints on one line; the written text keeps the author's breaks.
 fn flatten(text: &str) -> String {
     text.replace('\n', " ")
+}
+
+/// The canonical spelling of a pattern, with the list forms of E516.
+fn pattern_text(pattern: &Pattern) -> String {
+    parser::list_pattern_source(pattern).unwrap_or_else(|| pattern.to_string())
 }
 
 /// 修正の組み立てに要る不変の文脈（ソース・行表・字句・位置表・分岐表）。走査も
@@ -1403,6 +1572,7 @@ fn walk_node(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
         NodeKind::Let {
             pat, value, body, ..
         } => walk_let(node, pat, value, body, walk, found),
+        NodeKind::LetQ { pat, .. } => walk_let_q(pat, walk, found),
         NodeKind::BoolBranch { cond, then, els } => {
             walk_bool_branch(node, cond, then, els, walk, found)
         }
@@ -1509,12 +1679,22 @@ fn walk_pattern_branch(
     }
 }
 
-/// `fn` の腕。腕の形なら恒等の書き換えを試す。
+/// `as p? ->` の腕。`?` の束縛そのものには局所的な書き換えが無いので、
+/// pattern の中の書き換え（E516 など）だけを拾う。値と本体は `walk_children`
+/// が `check::children` を通って見る。
+fn walk_let_q(pat: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
+    walk_pattern(pat, walk, found);
+}
+
+/// `fn` の腕。腕の形なら恒等の書き換えを試し、末尾の伝播先を決める。
 fn walk_fn(params: &[parser::Param], body: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
     let arms = arm_form(params);
     if arms {
         found.push(rewrap_arm_fix(body, "fn(value => value)", Tail::Fn, walk));
     }
+    // `fn` の本体もその `fn` の末尾なので、伝播先はこの `fn`（§36）。
+    let tail = if arms { Tail::Fn } else { Tail::If };
+    found.push(repropagate_fix(body, tail, None, walk));
 }
 
 fn walk_pattern(pattern: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
