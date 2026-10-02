@@ -391,7 +391,7 @@ $ cargo run --offline -q -- check --format json e/main.hd
 形にすると 1 か所（`boolean_branch_ahead`）で変わることも確かめたが、ill-formed
 な入力でだけ差が出る（valid な入力では両案一致）ので、spec の明文に従い現行の
 ままとした。人に確認して切り出しを選んでいる（2026-09-26）。切り出した issue は
-2026-09-27 に決定 A（現行のまま）として片付けた（下の「e101-suggestion-scope」）。
+2026-10-03 に決定 A（現行のまま）として片付けた（下の「e101-suggestion-scope」）。
 
 着地後（main を checkout した側、2026-09-26）。PR #44 は `fca01a1` で入った。
 
@@ -408,9 +408,10 @@ $ bash scripts/corpus-lock.sh --check; echo $?
 0
 ```
 
-e101-suggestion-scope（決定 A、2026-09-27）。決定は現行のままなので `parser.rs` は
+e101-suggestion-scope（決定 A、2026-10-03）。決定は現行のままなので `parser.rs` は
 変えず、門番に「添える側」の検体（`arm-if-else-next-arm`）を足した。issue の再現
-コードは旧構文なので、後置の綴りで測り直した。
+コード（`if x` / `| A => if true => 1` / `| B => 2`）は後置でもそのまま通用したので、
+書き直さずにそのまま測った。
 
 ```
 $ cat no-else/main.hd
@@ -451,7 +452,7 @@ $ cargo run --offline -q -- check --format json underscore/main.hd
 | 先読みの終端が `=>` なら偽にする（退ける案 B） | `PASSED: 5/10`（`arm-if-else-next-arm` が既定の 1 行と check/build/run/test の JSON で NG） |
 | `boolean_branch_ahead` を常に真にする | `PASSED: 9/10`（other E101 shapes が NG。`incomplete-boolean-branch` を先頭に置くとこの検体が `suggestion: "| p => if \| c => a \| b"` を返して NG） |
 
-ラウンドの最後の全走（2026-09-27）。本ラウンドの門番は `# tier: full` なので、
+ラウンドの最後の全走（2026-10-03）。本ラウンドの門番は `# tier: full` なので、
 quick・core には入らない。門番は単独で回した。
 
 ```
