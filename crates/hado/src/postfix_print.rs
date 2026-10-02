@@ -69,7 +69,11 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
     let mut blocks: Vec<Vec<crate::lexer::Comment>> = Vec::new();
     for comment in &ast.comments {
         match blocks.last_mut() {
-            Some(block) if block.last().is_some_and(|c| c.span.line + 1 == comment.span.line) => {
+            Some(block)
+                if block
+                    .last()
+                    .is_some_and(|c| c.span.line + 1 == comment.span.line) =>
+            {
                 block.push(comment.clone());
             }
             _ => blocks.push(vec![comment.clone()]),
@@ -80,12 +84,26 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
         let first = block.first().expect("block is never empty");
         let insert = match items.slot(first.span.line) {
             Some(index) => {
-                let (_, printed) = items.flat[index];
+                let (_, printed, _) = items.flat[index];
                 // 空行は落とすので、コメントの塊は常にその項目の直上に来る。
                 // 元のソースで間に空行があっても、印字では間が無い。
                 printed
             }
-            None => lines.len(),
+            None => {
+                // 後ろに項目が無い。本体の中のコメントなら、その本体を持つ
+                // 項目の**中**の元の相対位置へ置く（§57 の「同じ定義の
+                // 前後に残す」）。どの項目より後ろなら、ファイルの末尾へ置く。
+                match items.enclosing(first.span.line) {
+                    Some(index) => {
+                        let (source, printed, height) = items.flat[index];
+                        // 見出しの行から何行目か。コメントは本体の中にあるので、
+                        // 見出しの次の行から数える。本体の外へは出さない。
+                        let offset = (first.span.line - source).min(height);
+                        printed + offset
+                    }
+                    None => lines.len(),
+                }
+            }
         };
         let insert = insert.min(lines.len());
         let text: Vec<String> = block.iter().map(comment_line).collect();
@@ -104,8 +122,8 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
 /// 一致する。外側の項目は自分の見出しの 1 行を占め、本体は入れ子の項目が
 /// 占め、閉じの 1 行で終わる。
 struct ItemLines {
-    /// `(元のソースの開始行, 印字の開始行)` を印字の順に並べたもの。
-    flat: Vec<(usize, usize)>,
+    /// `(元のソースの開始行, 印字の開始行, 印字の行数)` を印字の順に並べたもの。
+    flat: Vec<(usize, usize, usize)>,
 }
 
 impl ItemLines {
@@ -116,10 +134,11 @@ impl ItemLines {
     }
 
     /// `items` を平坦化し、次に使える印字行を返す。
-    fn walk(items: &[Item], start: usize, flat: &mut Vec<(usize, usize)>) -> usize {
+    fn walk(items: &[Item], start: usize, flat: &mut Vec<(usize, usize, usize)>) -> usize {
         let mut cursor = start;
         for item in items {
-            flat.push((item_start_line(item), cursor));
+            let here = flat.len();
+            flat.push((item_start_line(item), cursor, 0));
             match item {
                 // 見出しの次の行から本体が始まり、閉じの 1 行で終わる。
                 Item::ModuleSig(module) => {
@@ -130,14 +149,27 @@ impl ItemLines {
                 }
                 _ => cursor += item_text(item).lines().count(),
             }
+            // 自分の見出しから、次の項目が始まるまでが自分の占める範囲。
+            flat[here].2 = cursor - flat[here].1;
         }
         cursor
     }
 
+    /// 印字の順で `index` 番目の項目が占める行数。
+    fn height(&self, index: usize) -> usize {
+        self.flat.get(index).map(|(_, _, h)| *h).unwrap_or(1)
+    }
+
+    /// その行を含む項目（コメントより前に始まる最後の項目）。
+    /// 本体の中のコメントを、その本体を持つ項目へ収めるのに使う。
+    fn enclosing(&self, line: usize) -> Option<usize> {
+        self.flat.iter().rposition(|(source, _, _)| *source <= line)
+    }
+
     /// コメントが付く項目の位置。コメントより後ろで最初に始まる項目である。
-    /// 後ろに項目が無ければ `None`（ファイル末尾のコメント）。
+    /// 後ろに項目が無ければ `None`（そのコメントより後ろに項目が無い）。
     fn slot(&self, line: usize) -> Option<usize> {
-        self.flat.iter().position(|(source, _)| *source > line)
+        self.flat.iter().position(|(source, _, _)| *source > line)
     }
 }
 

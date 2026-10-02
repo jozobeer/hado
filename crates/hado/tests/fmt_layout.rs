@@ -47,7 +47,10 @@ def g y =>
   if y > 0 => 1 | 0
 ";
     let text = formatted(source);
-    assert!(text.contains("// --- 前置き ---\n// spec: §41\ndef f x => x + 1\n"), "{text}");
+    assert!(
+        text.contains("// --- 前置き ---\n// spec: §41\ndef f x => x + 1\n"),
+        "{text}"
+    );
     for comment in ["// --- 前置き ---", "// spec: §41", "// 腕の中のコメント"] {
         assert!(text.contains(comment), "{comment} が消えた:\n{text}");
     }

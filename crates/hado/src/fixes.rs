@@ -129,6 +129,9 @@ pub fn hint(source: &str, code: &str, line: usize, col: usize) -> Option<String>
 /// the bulk form `hado fmt` and `build --fix` use (§58.1). `Ok(None)` when the
 /// source is already canonical or does not parse, `Err(limit)` when the
 /// rewrites did not settle within `limit` passes.
+///
+/// §58.1: 一括整形は書き換えの後に**全体を印字し直す**。`check --fix` は
+/// 診断のアンカーに一致する書き換えだけを当てるので、ここを通らない。
 pub fn format(source: &str) -> Result<Option<(String, usize)>, usize> {
     const LIMIT: usize = 64;
     let mut text = source.to_string();
@@ -146,11 +149,20 @@ pub fn format(source: &str) -> Result<Option<(String, usize)>, usize> {
     if !settled {
         return Err(LIMIT);
     }
-    // §58.1: the bulk form lays the text out as well. `check --fix` applies the
-    // diagnostic-anchored rewrites only, so it never comes through here.
-    let (laid_out, layout_applied) = layout(&text);
+    // §58.1: 印字し直して字下げと改行を正準形へ揃える。コメントは構文木が
+    // 位置を持っているので消えない（§57）。
+    let printed = match crate::parser::parse_source(&text, "<fmt>") {
+        Ok(ast) => crate::parser::canonical_program(&ast),
+        // 読めない入力は印字し直さない。呼ぶ側が検査で報告する。
+        Err(_) => text.clone(),
+    };
+    // 行末の空白とファイル末尾の改行も揃える。
+    let (laid_out, layout_applied) = layout(&printed);
+    if laid_out != source {
+        applied += 1;
+    }
     applied += layout_applied;
-    if applied == 0 {
+    if laid_out == source {
         return Ok(None);
     }
     Ok(Some((laid_out, applied)))
