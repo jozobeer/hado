@@ -450,3 +450,33 @@ $ cargo run --offline -q -- check --format json underscore/main.hd
 |---|---|
 | 先読みの終端が `=>` なら偽にする（退ける案 B） | `PASSED: 5/10`（`arm-if-else-next-arm` が既定の 1 行と check/build/run/test の JSON で NG） |
 | `boolean_branch_ahead` を常に真にする | `PASSED: 9/10`（other E101 shapes が NG。`incomplete-boolean-branch` を先頭に置くとこの検体が `suggestion: "| p => if \| c => a \| b"` を返して NG） |
+
+ラウンドの最後の全走（2026-09-27）。本ラウンドの門番は `# tier: full` なので、
+quick・core には入らない。門番は単独で回した。
+
+```
+$ cargo test --offline 2>&1 | grep '^test result' | awk '{p+=$4; f+=$6} END {print "passed",p,"failed",f}'
+passed 796 failed 0
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+$ bash scripts/run-gates.sh --jobs 4 --tier quick gate-out-quick 2>&1 | tail -1
+TALLY: 41/41 passed; red: none
+$ target/debug/hado run tools/gates/main.hd -- gate-out-core
+733/734 passed; red: verify-lsp-minimal.log
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh | tail -1
+PASSED: 2/2
+$ bash scripts/corpus-lock.sh --check; echo $?
+0
+$ bash scripts/frozen-docs-lock.sh --check; echo $?
+0
+$ bash scripts/gate-tiers-lock.sh --check; echo $?
+0
+```
+
+core の赤 1 件は `verify-lsp-minimal`（11/12）。`diagnostics-localized-message` の
+`localized-1` が E501 を 2 件見て 1 件を期待する。`scripts/lsp-check.py` が publish を
+またいで診断を集めるため、並列走行中の再 publish で重複する揺らぎと見られる。単独では
+12/12 で、本ラウンドの成果物（`verify-canonical-in-syntax-errors.sh` と本ファイル）を
+読まない。
