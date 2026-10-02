@@ -25,6 +25,14 @@
    どれでも `--format json` に従わせる。書き換えは引けないので `canonical` は `null`、
    終端はアンカーと同じ位置。
 5. §58.4 のフィールドを 10 にし、`suggestion` の意味を書く。
+6. E101 の suggestion（`| p => if | c => a | b`）の適用範囲は、§24 と §26.1 の貪欲な
+   読み（現行のまま、決定 A）とする。腕の本体の Boolean branch の else が続く腕の綴りを
+   食う形（`if true => 1` の次に `| B => 2`）には添え、else を欠く形
+   （`| 0 => if true => 1 |`）には添えない（`docs/issues/e101-suggestion-scope.md`）。
+   退ける案（先読みの終端が `=>` のときは添えない）は、§58.4 の「Boolean branch を
+   pattern の腕に置いた形（E101）には `| p => if | c => a | b` を添え、他の形には
+   添えない」が定める範囲を実装で狭め、仕様の書き換えを要する。合法な条件列の扱いは
+   両案で変わらない。
 
 ### code-complete の一周目
 
@@ -35,6 +43,44 @@
 - スコープ: `crates/hado/src/parser.rs`・`project.rs`・`main.rs`（と `Diagnostic` を
   組み立てる各所）、§58.4、門番、本ファイル。
 - 未確認: `Diagnostic` を組み立てる箇所の数と、フィールドを足したときの大きさ。
+
+### code-complete の一周目（e101-suggestion-scope）
+
+決定 A の記録が成果物で、実装は変えない。Red は「検体が赤になりうること」を欠陥の
+注入で示す（既存の判定と同じ形）。
+
+- 意図: E101 の suggestion をどの ill-formed な入力に添えるかを決定 A として記録し、
+  門番で固定する。使う人: hado の作者と builder。場面: 適用範囲を変える変更を入れる
+  とき、退ける案 B を門番が赤にする。
+- 仮説: 現行実装は決定 A のとおりに動く。`boolean_branch_ahead` は先読みの
+  `parse_branch` が `BoolBranch` になるときだけ真になるので、`| B` が else の式として
+  読める形には綴りが付き、else を欠く形には付かない。したがって `parser.rs` を変えず、
+  門番に「添える側」の検体を足すだけで決定を固定できる。
+- 判定器: `bash scripts/verify-canonical-in-syntax-errors.sh` が全件緑。両側の検体が
+  `suggestion` の値そのものを見る（else を欠く `incomplete-boolean-branch` は
+  `suggestion is None`、添える側の `arm-if-else-next-arm` は
+  `| p => if | c => a | b`）。変異（`boolean_branch_ahead` を常に真、先読みの終端が
+  `=>` なら偽）で赤。
+- スコープ: `scripts/verify-canonical-in-syntax-errors.sh`・本ファイル・
+  `docs/issues/e101-suggestion-scope.md`（消す）。`crates/hado/src/parser.rs`、
+  `docs/spec.md` の §24・§26.1・§58.4、`docs/plan.md`、`scripts/gate-tiers.lock` は
+  触らない。
+- 未確認: 退ける案 B に変えたとき、既存の `nested`・`paren-in-arm` が suggestion を
+  失うか（失うなら検体の置き場が悪い）。`incomplete-boolean-branch` が suggestion の
+  不在そのものを見ているか。
+
+実装から分かったこと。仮説は当たり、`parser.rs` は変えずに済んだ。
+`incomplete-boolean-branch` は既に `no_suggestion` が `suggestion is None` を見ている。
+`boolean_branch_ahead` を常に真にすると、この検体を先頭に置いたとき
+`incomplete-boolean-branch` 自身が `suggestion: "| p => if | c => a | b"` を返して赤に
+なる。追加した `arm-if-else-next-arm` は、先読みの終端が `=>` なら偽にする変異
+（退ける案 B）で 5 件が赤になる。既存の `nested`・`paren-in-arm` は同じ変異で赤に
+ならない（else が同じ行にあるため）ので、検体の置き場は TARGETS で正しい。
+
+追加で分かったのは、続く `|` の右が `_` の形（`| 0 => if true => 1` の次に `| _ => 2`）
+には suggestion が付かないこと。`_` は式として読めないので `if true => 1 | _` が
+`BoolBranch` にならない。決定 A の「続く `| B` が else として読める形」の「読める」は、
+`_` を除く式・リテラル・変数・constructor を指す。
 
 ### 期待値の根拠
 
@@ -81,6 +127,7 @@
 | 節 | 規範文の要約 | 段階 | コード | 固定するもの |
 |---|---|---|---|---|
 | §58.4 | E100・E101 の 2 つの形に正準の綴りを `suggestion` として添え、`fmt` と `--fix` は適用しない | 構文 | E100, E101 | `scripts/verify-canonical-in-syntax-errors.sh` |
+| §24・§26.1・§58.4 | E101 の `suggestion` の適用範囲は貪欲な読み（else を欠く形には添えず、続く `\|` が else として読める形には添える） | 構文 | E101 | `scripts/verify-canonical-in-syntax-errors.sh` の `arm-if-else-next-arm`・`incomplete-boolean-branch` |
 
 ## 実測
 
@@ -343,7 +390,8 @@ $ cargo run --offline -q -- check --format json e/main.hd
 読むと明記し、この形の曖昧さは貪欲に読む。先読みの終端が `=>` のときは添えない
 形にすると 1 か所（`boolean_branch_ahead`）で変わることも確かめたが、ill-formed
 な入力でだけ差が出る（valid な入力では両案一致）ので、spec の明文に従い現行の
-ままとした。人に確認して切り出しを選んでいる（2026-09-26）。
+ままとした。人に確認して切り出しを選んでいる（2026-09-26）。切り出した issue は
+2026-09-27 に決定 A（現行のまま）として片付けた（下の「e101-suggestion-scope」）。
 
 着地後（main を checkout した側、2026-09-26）。PR #44 は `fca01a1` で入った。
 
@@ -359,3 +407,46 @@ TALLY: 3736/3736 passed; red: none
 $ bash scripts/corpus-lock.sh --check; echo $?
 0
 ```
+
+e101-suggestion-scope（決定 A、2026-09-27）。決定は現行のままなので `parser.rs` は
+変えず、門番に「添える側」の検体（`arm-if-else-next-arm`）を足した。issue の再現
+コードは旧構文なので、後置の綴りで測り直した。
+
+```
+$ cat no-else/main.hd
+def f x =>
+  if x
+    | A => if true => 1 |
+$ cargo run --offline -q -- check --format json no-else/main.hd
+{"path": "main.hd", "line": 3, "col": 12, "end_line": 3, "end_col": 12, "code": "E101", "message": "branches cannot be nested inside another branch", "canonical": null, "suggestion": null, "related": null}
+$ cat else-next-arm/main.hd
+def f x =>
+  if x
+    | A => if true => 1
+    | B => 2
+$ cargo run --offline -q -- check --format json else-next-arm/main.hd
+{"path": "main.hd", "line": 3, "col": 12, "end_line": 3, "end_col": 12, "code": "E101", "message": "branches cannot be nested inside another branch", "canonical": null, "suggestion": "| p => if | c => a | b", "related": null}
+$ bash scripts/verify-canonical-in-syntax-errors.sh | tail -1
+PASSED: 10/10
+```
+
+続く `|` の右が式として読めない形は、決定 A でも綴りを添えない。`_` は式ではない
+ので（`def f = if true => 1 | _` は E100）、`if true => 1 | _` が `BoolBranch` に
+ならない。
+
+```
+$ cat underscore/main.hd
+def f x =>
+  if x
+    | A => if true => 1
+    | _ => 2
+$ cargo run --offline -q -- check --format json underscore/main.hd
+{"path": "main.hd", "line": 3, "col": 12, "end_line": 3, "end_col": 12, "code": "E101", "message": "branches cannot be nested inside another branch", "canonical": null, "suggestion": null, "related": null}
+```
+
+欠陥の注入（`parser.rs` は注入のたびに戻す）。
+
+| 注入 | 門番 |
+|---|---|
+| 先読みの終端が `=>` なら偽にする（退ける案 B） | `PASSED: 5/10`（`arm-if-else-next-arm` が既定の 1 行と check/build/run/test の JSON で NG） |
+| `boolean_branch_ahead` を常に真にする | `PASSED: 9/10`（other E101 shapes が NG。`incomplete-boolean-branch` を先頭に置くとこの検体が `suggestion: "| p => if \| c => a \| b"` を返して NG） |
