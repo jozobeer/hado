@@ -1789,6 +1789,68 @@ fn list_literal_of_closures_with_different_effects_keeps_their_outcome() {
     );
 }
 
+// 効果の違う閉包を Boolean 分岐の両腕に置いても、§36 の型では受理される。
+// リストリテラルは `as_outcome_closure` で揃えるが、分岐は top-level の
+// `$Outcome` しか包まないので、直す前は `invalid branch types` で落ちる。
+#[test]
+fn branch_of_closures_with_different_effects_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if true => fn(x => 8 / x) | fn(x => x + 1)) 0\n",
+        "0",
+    );
+}
+
+#[test]
+fn branch_of_closures_with_different_effects_runs_the_pure_arm() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if false => fn(x => 8 / x) | fn(x => x + 1)) 4\n",
+        "5",
+    );
+}
+
+// 名前付き関数が効果の違う閉包を返すとき、lower した本体は入れ子の
+// `$Outcome` の閉包になる。署名は効果行を落とした論理型のままなので、
+// 直す前は `lowered return type differs from inferred signature` で落ちる。
+#[test]
+fn named_function_returning_mixed_closures_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef pick b => if b => fn(x => 1 / x) | fn(x => x + 1)\ndef main =\n  with Catch ->\n  pick true as f ->\n  pick false as g ->\n  f 1 + g 1\n",
+        "3",
+    );
+}
+
+#[test]
+fn named_function_returning_effectful_closures_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef pick b => if b => fn(x => 1 / x) | fn(x => 8 / x)\ndef main =\n  with Catch ->\n  pick true as f ->\n  f 1\n",
+        "1",
+    );
+}
+
+#[test]
+fn named_function_returning_list_of_mixed_closures_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef choose b => if b => [fn(x => 1 / x)] | [fn(x => x + 1)]\ndef main =\n  with Catch ->\n  choose true as fs ->\n  if fs | [f] => f 1 | 0\n",
+        "1",
+    );
+}
+
+#[test]
+fn branch_of_option_closures_with_different_effects_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if true => Some(fn(x => 8 / x)) | None) as opt ->\n  if opt | Some(f) => f 0 | 99\n",
+        "0",
+    );
+}
+
+#[test]
+fn branch_of_option_closures_none_arm_stays_none() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if false => Some(fn(x => 8 / x)) | None) as opt ->\n  if opt | Some(f) => f 0 | 99\n",
+        "99",
+    );
+}
+
 #[test]
 fn contract_member_returning_a_closure_over_an_effectful_argument() {
     runs_effectful_closure_source(
