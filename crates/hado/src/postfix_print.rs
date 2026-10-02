@@ -13,6 +13,10 @@ use super::source_print::{literal, parameters, return_type, type_parameters, typ
 use super::*;
 
 /// 1 ファイル分の綴り。`library` 見出しのあとに項目を並べる。
+///
+/// §58.1: 字句が読み飛ばした行コメントは、構文木が持つ位置へ置き直す。
+/// コメントは直後の項目に属し、その項目の見出しから行数分だけ上に来る
+/// （§57 の「コメントを消さない」）。
 pub fn program(ast: &Ast) -> String {
     let mut out = String::new();
     if ast.library.is_some() {
@@ -22,7 +26,136 @@ pub fn program(ast: &Ast) -> String {
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
+    place_comments(ast, out)
+}
+
+/// コメントの 1 つを印字する行。行頭のコメントはそのまま、字下げの付いた
+/// 位置のコメントは 2 の字下げを付ける（本体の内側のコメントを保つ）。
+fn comment_line(comment: &crate::lexer::Comment) -> String {
+    let text = comment.text.trim_end();
+    if comment.span.col == 1 {
+        text.to_string()
+    } else {
+        format!("  {text}")
+    }
+}
+
+/// コメントを、属する項目の高さへ戻す。
+///
+/// 印字し直した行と元のソースの行を突き合わせるのではなく、**項目の印字が
+/// 何行目から始まるかを積み上げて**求める。`items_text` は `module` の本体の
+/// 入れ子項目も印字するので、印字の行数は `ast.items` の数より多い。項目の
+/// 印字の行数をそのまま積めば、入れ子の分も自然に数えられる。
+///
+/// コメントが `module` や `implement` の本体の中にあるときは、**入れ子の
+/// 項目**を基準にする。外側の項目で数えると、本体の中のコメントが本体の
+/// 外へ出てしまう（§57 の「同じ定義の前後に残す」）。
+fn place_comments(ast: &Ast, canonical: String) -> String {
+    if ast.comments.is_empty() {
+        return canonical;
+    }
+    let mut lines: Vec<String> = canonical
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_string)
+        .collect();
+    // §58.1: 空行は置かない。落としても項目の並びは変わらない。
+    lines.retain(|line| !line.is_empty());
+    // 入れ子の項目も含めた、各項目の印字が始まる行。
+    // `library` 見出しの分だけ後ろへずれる。
+    let items = ItemLines::new(&ast.items, usize::from(ast.library.is_some()));
+    // 連続するコメントは 1 つの塊として置く。1 行ずつ置くと、同じ項目に
+    // 付く複数行のコメントが互いの間に項目を挟んでしまう。
+    let mut blocks: Vec<Vec<crate::lexer::Comment>> = Vec::new();
+    for comment in &ast.comments {
+        match blocks.last_mut() {
+            Some(block) if block.last().is_some_and(|c| c.span.line + 1 == comment.span.line) => {
+                block.push(comment.clone());
+            }
+            _ => blocks.push(vec![comment.clone()]),
+        }
+    }
+    blocks.reverse();
+    for block in blocks {
+        let first = block.first().expect("block is never empty");
+        let insert = match items.slot(first.span.line) {
+            Some(index) => {
+                let (_, printed) = items.flat[index];
+                // 空行は落とすので、コメントの塊は常にその項目の直上に来る。
+                // 元のソースで間に空行があっても、印字では間が無い。
+                printed
+            }
+            None => lines.len(),
+        };
+        let insert = insert.min(lines.len());
+        let text: Vec<String> = block.iter().map(comment_line).collect();
+        for (offset, line) in text.into_iter().enumerate() {
+            lines.insert((insert + offset).min(lines.len()), line);
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
     out
+}
+
+/// 入れ子の項目も含めた、各項目の印字開始行。
+///
+/// `items_text` は入れ子の項目も印字するので、平坦化した順が印字の順と
+/// 一致する。外側の項目は自分の見出しの 1 行を占め、本体は入れ子の項目が
+/// 占め、閉じの 1 行で終わる。
+struct ItemLines {
+    /// `(元のソースの開始行, 印字の開始行)` を印字の順に並べたもの。
+    flat: Vec<(usize, usize)>,
+}
+
+impl ItemLines {
+    fn new(items: &[Item], start: usize) -> Self {
+        let mut flat = Vec::new();
+        Self::walk(items, start, &mut flat);
+        Self { flat }
+    }
+
+    /// `items` を平坦化し、次に使える印字行を返す。
+    fn walk(items: &[Item], start: usize, flat: &mut Vec<(usize, usize)>) -> usize {
+        let mut cursor = start;
+        for item in items {
+            flat.push((item_start_line(item), cursor));
+            match item {
+                // 見出しの次の行から本体が始まり、閉じの 1 行で終わる。
+                Item::ModuleSig(module) => {
+                    cursor = Self::walk(&module.items, cursor + 1, flat) + 1;
+                }
+                Item::ModuleImpl(module) => {
+                    cursor = Self::walk(&module.items, cursor + 1, flat) + 1;
+                }
+                _ => cursor += item_text(item).lines().count(),
+            }
+        }
+        cursor
+    }
+
+    /// コメントが付く項目の位置。コメントより後ろで最初に始まる項目である。
+    /// 後ろに項目が無ければ `None`（ファイル末尾のコメント）。
+    fn slot(&self, line: usize) -> Option<usize> {
+        self.flat.iter().position(|(source, _)| *source > line)
+    }
+}
+
+/// 項目が始まる元のソースの行。
+fn item_start_line(item: &Item) -> usize {
+    item_span(item).line
+}
+
+fn item_span(item: &Item) -> &Span {
+    match item {
+        Item::Def(def) => &def.span,
+        Item::SigDef(def) => &def.span,
+        Item::TypeDef(def) => &def.span,
+        Item::ModuleSig(module) => &module.span,
+        Item::ModuleImpl(module) => &module.span,
+        Item::Effect(effect) => &effect.span,
+        Item::Handler(handler) => &handler.span,
+    }
 }
 
 /// 式 1 つを、末尾の位置として 1 行で綴る。正準形の案内（`canonical form:`）に使う。

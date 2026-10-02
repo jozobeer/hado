@@ -696,15 +696,9 @@ fn convert_postfix_file(file: &Path, root: &Path, out: &Path) -> Result<Option<u
             return Ok(None);
         }
     };
-    let (prefix, prefix_lines) = leading_comment_block(&text);
-    let mut output = String::new();
-    output.push_str(prefix);
-    output.push_str(&hado::parser::canonical_program(&ast));
-    let dropped = text
-        .lines()
-        .enumerate()
-        .filter(|(index, line)| *index >= prefix_lines && is_comment_line(line))
-        .count();
+    let output = hado::parser::canonical_program(&ast);
+    // 正準形はコメントも置き直すので、落ちるコメントはもう無い。
+    let dropped = 0usize;
     let relative = if root.is_file() {
         PathBuf::from(file.file_name().unwrap_or_default())
     } else {
@@ -749,63 +743,6 @@ fn collect_postfix_files(path: &Path, out: &mut Vec<PathBuf>) {
         out.push(path.to_path_buf());
     }
 }
-
-/// ファイル先頭に続く、空行かコメント行だけの塊。写す綴りと、その行数。
-fn leading_comment_block(text: &str) -> (&str, usize) {
-    let mut end = 0usize;
-    let mut lines = 0usize;
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") {
-            end += line.len();
-            lines += 1;
-        } else {
-            break;
-        }
-    }
-    (&text[..end], lines)
-}
-
-/// `//` のコメントを含む行か。文字列と文字リテラルの中は数えない。
-fn is_comment_line(line: &str) -> bool {
-    let chars: Vec<char> = line.chars().collect();
-    let mut index = 0usize;
-    let (mut string, mut character, mut escape) = (false, false, false);
-    while index < chars.len() {
-        let current = chars[index];
-        if escape {
-            escape = false;
-        } else if string {
-            string = quoted_open(current, '"', &mut escape);
-        } else if character {
-            character = quoted_open(current, '\'', &mut escape);
-        } else if comment_starts(current, chars.get(index + 1).copied()) {
-            return true;
-        } else {
-            match current {
-                '"' => string = true,
-                '\'' => character = true,
-                _ => {}
-            }
-        }
-        index += 1;
-    }
-    false
-}
-
-/// 引用の中の 1 文字。`\` の次の 1 文字は素通しし、閉じの引用符で false を返す。
-fn quoted_open(current: char, quote: char, escape: &mut bool) -> bool {
-    if current == '\\' {
-        *escape = true;
-    }
-    current != quote
-}
-
-/// 引用符の外でコメントの印 `//` が始まるか。
-fn comment_starts(current: char, next: Option<char>) -> bool {
-    current == '/' && next == Some('/')
-}
-
 fn usage() {
     eprintln!(
         "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | lsp"

@@ -343,11 +343,15 @@ pub struct Ast {
     pub qualified_type_anchors: Vec<(DeclaredName, Span)>,
     pub written_list_patterns: Vec<Span>,
     pub long_condition_functions: Vec<Span>,
+    /// §58.1: 字句が読み飛ばした行コメントの位置。`canonical_program` が
+    /// 定義の前後へ置き直す（§57 の「コメントを消さない」）。
+    pub comments: Vec<crate::lexer::Comment>,
 }
 
 impl Ast {
     pub(crate) fn append(&mut self, other: Self) {
         self.items.extend(other.items);
+        self.comments.extend(other.comments);
         self.library = self.library.or(other.library);
         self.branches_after_fallback
             .extend(other.branches_after_fallback);
@@ -708,8 +712,10 @@ impl PartialParse {
 }
 
 pub(crate) fn parse_source_partial(src: &str, path: &str) -> Result<PartialParse, Diagnostic> {
-    let toks = crate::lexer::lex_full(src).map_err(|e| lex_error_to_diag(e, path))?;
-    Ok(parse_tokens_partial(&toks, path))
+    let lexed = crate::lexer::lex_with_comments(src).map_err(|e| lex_error_to_diag(e, path))?;
+    let mut parsed = parse_tokens_partial(&lexed.tokens, path);
+    parsed.ast.comments = lexed.comments;
+    Ok(parsed)
 }
 
 /// M0-compatible entry: full-parse, then lower to the M0 IR
@@ -743,8 +749,10 @@ pub fn parse_tokens(toks: &[Tok], path: &str) -> Result<Ast, Diagnostic> {
 /// `print-postfix` の入力。旧形（`let`・`do`）と閉じの無い `module`・
 /// `implement` も読める、移行専用の入口。既定の経路はこれを使わない。
 pub fn parse_for_conversion(src: &str, path: &str) -> Result<Ast, Diagnostic> {
-    let toks = crate::lexer::lex_full(src).map_err(|e| lex_error_to_diag(e, path))?;
-    Ok(parse_tokens_partial_with(&toks, path, true).ast)
+    let lexed = crate::lexer::lex_with_comments(src).map_err(|e| lex_error_to_diag(e, path))?;
+    let mut ast = parse_tokens_partial_with(&lexed.tokens, path, true).ast;
+    ast.comments = lexed.comments;
+    Ok(ast)
 }
 
 /// 実測用。移行の入力で読んだ木と、集まった診断を返す。
@@ -950,6 +958,7 @@ impl Parser<'_> {
             qualified_type_anchors: self.qualified_type_anchors.clone(),
             written_list_patterns: self.written_list_patterns.clone(),
             long_condition_functions: self.long_condition_functions.clone(),
+            comments: Vec::new(),
         }
     }
 
