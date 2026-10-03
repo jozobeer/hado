@@ -6,6 +6,7 @@
 #   c. 本体の中のコメントが、印字し直しの後もその定義の中にあり、本体の前に出ない。
 #   d. 空行が残る。
 #   e. コメントを落とす変異で (b) が赤になる。
+#   f. 空の本体を持つ `implement` が印字し直しで増えない（冪等）。
 # 期待値は元のファイルから読み、ファイル名や行を書き込まない。
 #
 # tier: core
@@ -14,7 +15,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 pass=0
-total=5
+total=6
 ok() { echo "OK: $1"; pass=$((pass + 1)); }
 ng() { echo "NG: $1 ($2)"; }
 
@@ -126,6 +127,22 @@ EOF
     fi
 }
 
+# --- f. 空の本体を持つ implement が印字し直しで増えないか ---
+# 空行をファイルの末尾へ置くと、印字し直すたびに空行が増える。
+# `print-postfix` で測る。`fmt` は元のソースと比べるので、この増加を隠す。
+check_f() {
+    mkdir -p "$work/empty1" "$work/empty2" "$work/empty3"
+    printf 'implement Foo as Bar\n\n/implement\n' >"$work/empty1/main.hd"
+    "$hado_bin" print-postfix "$work/empty1" "$work/empty2" >/dev/null 2>&1
+    "$hado_bin" print-postfix "$work/empty2" "$work/empty3" >/dev/null 2>&1
+    if cmp -s "$work/empty2/main.hd" "$work/empty3/main.hd"; then
+        ok "f: 空の本体を持つ implement が印字し直しで増えない"
+    else
+        ng "f: 空の本体を持つ implement が印字し直しで増えない" "2 度目で変わった"
+        diff -u "$work/empty2/main.hd" "$work/empty3/main.hd" | sed -n '1,10p'
+    fi
+}
+
 # --- e. コメントを落とす変異で b が赤になるか ---
 check_e() {
     python3 - "$source_file" <<'PY'
@@ -166,6 +183,7 @@ check_b
 check_c
 check_d
 check_e
+check_f
 
 echo "PASSED: $pass/$total"
 [ "$pass" -eq "$total" ]

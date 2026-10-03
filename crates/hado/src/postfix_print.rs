@@ -201,15 +201,20 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
             .find(|c| c.span.line > line)
             .map(|c| c.span.line);
         let next_item = items.flat.iter().find(|(source, _, _)| *source > line);
+        // 後ろに何も無い空行は置かない。空の本体の中の空行などがこれに当たり、
+        // 置くと本体の外（ファイルの末尾）へ出て、走らせるたびに増える。
+        if next_comment.is_none() && next_item.is_none() {
+            continue;
+        }
         let at = match (next_comment, next_item) {
             // 次が項目で、その項目の方がコメントより先なら、項目の位置。
             (Some(comment), Some((source, printed, _))) if comment >= *source => *printed,
             (Some(comment), _) => match items.slot(comment) {
                 Some(index) => items.flat[index].1,
-                None => lines.len(),
+                None => continue,
             },
             (None, Some((_, printed, _))) => *printed,
-            (None, None) => lines.len(),
+            (None, None) => continue,
         };
         inserts.push((at.min(lines.len()), line, vec![String::new()]));
     }
