@@ -118,4 +118,121 @@ def main = Map.insert (Map.insert (Map.insert Map.empty "c" 3) "a" 1) "b" 2 as m
 
 ## 実測
 
-（この節は着地まで書き足す。）
+main は `ed6a180`。作業は `.worktrees/fmt-layout` の `fmt-layout` で行った。
+
+### 現象（main で再現）
+
+flat と ragged のどちらも `fmt --check` が exit 0 で、同じバイト列にならない。`print-postfix` は全体を印字し直すが、**コメントを落とす**。
+
+```
+$ ./target/debug/hado fmt --check target/issue/fmt-layout/ragged/main.hd
+$ echo $?
+0
+```
+
+### 判定条件ごとの実測
+
+判定器（`cargo test --offline --test fmt_layout`）:
+
+```
+$ cargo test --offline --test fmt_layout
+test comments_stay_before_and_inside_their_definition ... ok
+test formatting_is_idempotent_and_settles ... ok
+test flat_and_ragged_become_the_same_bytes ... ok
+test corpus_stdlib_and_tools_are_canonical_and_idempotent ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+門番（`scripts/verify-fmt-layout.sh`、`# tier: core`）:
+
+```
+$ bash scripts/verify-fmt-layout.sh
+OK: a: 配置の違う 2 つの綴りが同じバイト列になる
+OK: b: コーパス 188 ファイルが印字し直しで変わらない
+OK: c: 本体の中のコメントが定義の中に残り、本体の前に来る
+OK: d: 空行が残る
+OK: e: コメントを落とす変異で b が赤になる（6 ファイル）
+PASSED: 5/5
+```
+
+完了条件 1（flat と ragged が同じバイト列）:
+
+```
+$ diff target/a1/main.hd target/a2/main.hd && echo SAME BYTES
+SAME BYTES
+$ cat target/a2/main.hd
+def size x => if x > 10 => "large" | "small"
+def main = size 3
+```
+
+完了条件 2（コメントが同じ定義の前後に残る）: 本体の中のコメントを持つ定義は本体を次の行へ送る。
+
+```
+$ cat target/ct/main.hd
+def g y =>
+  // 腕の中のコメント
+  if y > 0 => 1 | 0
+```
+
+コーパスの往復（`print-postfix` の出力が元のファイルと 1 バイトも変わらない）:
+
+```
+$ for d in s:stdlib a:tests/accept t:tools; do
+>   o=${d%%:*}; i=${d##*:}
+>   ./target/debug/hado print-postfix $i target/f5p/$o >/dev/null
+> done
+checked 181 files; EXACT differing: 0
+```
+
+`build --fix` の経路（`fmt` と同じ関数を通る）:
+
+```
+$ ./target/debug/hado build --fix target/bfix/main.hd
+fmt: main.hd (1 rewrites)
+$ cat target/bfix/main.hd
+def size x => if x > 10 => "large" | "small"
+def main = size 3
+$ ./target/bfix/main
+small
+```
+
+`fmt --check` は正準なファイルで無音・exit 0、非正準で赤・exit 1:
+
+```
+$ ./target/debug/hado fmt --check stdlib/map.hd; echo $?
+0
+$ ./target/debug/hado fmt --check target/b2/main.hd
+fmt: main.hd is not canonical (1 rewrites)
+1
+```
+
+整形と lint:
+
+```
+$ cargo fmt --all --check && echo FMT CLEAN
+FMT CLEAN
+$ cargo clippy --offline --all-targets -- -D warnings; echo $?
+0
+```
+
+corpus lock は変わらない。lock が覆うのは `tests/accept`・`tests/reject`・`tests/library`・`stdlib/*.hd` で、このラウンドはそのどれの内容も変えない（`tools/` は lock の対象外）。
+
+```
+$ bash scripts/corpus-lock.sh --check; echo $?
+0
+```
+
+### 判明したこと
+
+- コメントは字句の段階で落ちていた。`lex_with_comments` が位置を持ち、構文木の `comments` へ渡す。空行も同じく `blank_lines` として渡す。
+- 印字の行と項目を対応させるには、**入れ子の項目も平坦化して数える**必要があった。`items_text` は `module`・`implement` の本体も印字するので、`ast.items` の数では足りない。
+- 連続するコメント行は 1 つの塊として置く。1 行ずつ置くと、同じ項目へ付く複数行のコメントが互いの間に項目を挟む。
+- 空行は「その次に来るもの」（コメントの塊か項目か、ソースで先に来る方）の直前へ置く。項目の前の空行としてだけ扱うと、本体の中の空行が落ちる。
+- `split('\n')` の末尾の空文字を空行として数えると、ファイル末尾に余分な空行が出る。`strip_suffix('\n')` で除く。
+- **`body.span.end_line` は信用できない。** `def rec ins` の複数行の本体が `end_line=1` を返す。本体の中のコメントの判定は、範囲と「次の項目の直上でない」の組み合わせで行っている。範囲そのものの欠陥は未報告。
+
+### 変異で赤を確かめた検査
+
+検査 e は、`place_comments` がコメントを捨てる変異（`let text: Vec<String> = Vec::new();`）で赤になる。変異を当てると stdlib の 6 ファイルが変わり、赤を検出する。
+
