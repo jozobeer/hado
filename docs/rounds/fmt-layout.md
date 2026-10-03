@@ -114,6 +114,8 @@ def main = Map.insert (Map.insert (Map.insert Map.empty "c" 3) "a" 1) "b" 2 as m
 | §57 | 書き換える範囲に `//` を含むときは書き換えを出さない（コメントを消さない） | 冗長 | — | `tests/fmt_layout.rs`・`scripts/verify-fmt-layout.sh` |
 | §58.1 | `fmt` は §57 の書き換えを一括で当てたあと全体を印字し直す | 冗長 | — | `scripts/verify-fmt-layout.sh`・`tests/fmt_layout.rs` |
 | §58.1 | 字下げは 2、改行は式の形で決まる | 冗長 | — | `tests/accept`・`stdlib`・`tools` の往復 |
+| §58.1 | 空行は残す | 冗長 | — | `scripts/verify-fmt-layout.sh` の検査 d |
+| §58.1 | 本体の中にコメントを持つ定義は本体を次の行へ送る | 冗長 | — | `scripts/verify-fmt-layout.sh` の検査 c |
 | §6・§11・§12 | 綴りは後置。配置も後置の綴りに従う | 構文 | E100 | `crates/hado/tests/postfix_close.rs` |
 
 ## 実測
