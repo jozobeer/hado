@@ -250,6 +250,8 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
 pub struct Lexed {
     pub tokens: Vec<Tok>,
     pub comments: Vec<Comment>,
+    /// §58.1: 空白だけの行。印字し直した結果へ区切りの空行として戻す。
+    pub blank_lines: Vec<usize>,
 }
 
 /// `lex_full` と同じ字句だが、行コメントも返す（§58.1 の印字し直しが使う）。
@@ -304,7 +306,19 @@ pub fn lex_with_comments(src: &str) -> Result<Lexed, LexError> {
     Ok(Lexed {
         tokens: toks,
         comments,
+        blank_lines: blank_lines(src),
     })
+}
+
+/// 空白だけの行の番号（1 始まり）。§58.1 の印字し直しが区切りを戻すのに使う。
+fn blank_lines(src: &str) -> Vec<usize> {
+    // 末尾の改行の後ろには行が無いので、最後の空文字は数えない。
+    let body = src.strip_suffix('\n').unwrap_or(src);
+    body.split('\n')
+        .enumerate()
+        .filter(|(_, line)| line.trim().is_empty())
+        .map(|(index, _)| index + 1)
+        .collect()
 }
 
 struct Lexer<'a> {

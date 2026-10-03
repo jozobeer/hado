@@ -22,11 +22,114 @@ pub fn program(ast: &Ast) -> String {
     if ast.library.is_some() {
         out.push_str("library\n");
     }
-    out.push_str(&items_text(&ast.items));
+    out.push_str(&items_text_with_breaks(&ast.items, &ast.comments));
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
     place_comments(ast, out)
+}
+
+/// 項目を並べる。本体の中にコメントを持つ項目は、本体を次の行へ送る。
+///
+/// §57: コメントは同じ定義の中に残す。1 行に収まる本体にコメントがあると
+/// その行の中に置けないので、`=>` の後ろで改行して本体を次の行へ置く。
+fn items_text_with_breaks(items: &[Item], comments: &[crate::lexer::Comment]) -> String {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            // この項目の本体は、次の項目が始まる行で終わる。次の項目が
+            // 無ければファイルの末尾まで。
+            let next = items.get(index + 1).map_or(usize::MAX, item_start_line);
+            item_text_with_breaks(item, comments, next)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn item_text_with_breaks(
+    item: &Item,
+    comments: &[crate::lexer::Comment],
+    next_line: usize,
+) -> String {
+    match item {
+        Item::ModuleSig(module) => format!(
+            "module {}\n{}\n/module",
+            module.name,
+            items_text_with_breaks(&module.items, comments)
+        ),
+        Item::ModuleImpl(module) => match &module.form {
+            ImplementationForm::Ordinary => format!(
+                "implement {} as {}\n{}\n/implement",
+                module.sig,
+                module.name,
+                items_text_with_breaks(&module.items, comments)
+            ),
+            ImplementationForm::Functor(parameters) => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "implement {} as {}({parameters})\n{}\n/implement",
+                    module.sig,
+                    module.name,
+                    items_text_with_breaks(&module.items, comments)
+                )
+            }
+            form => {
+                let _ = form;
+                item_text(item)
+            }
+        },
+        Item::Def(def) => match body_break_line(def, comments, next_line) {
+            // 本体の中にコメントがあるので、`=>` の後ろで改行する。
+            Some(_) => split_body(item_text(item)),
+            None => item_text(item),
+        },
+        _ => item_text(item),
+    }
+}
+
+/// 本体の中にコメントを持つ `def` なら `true`。
+///
+/// 本体は見出しの行から本体の式の最終行まで。コメントがその範囲に入って
+/// いれば本体の中である。範囲の外にあるコメント（次の項目に付くもの、
+/// 次のまとまりの見出し）は本体の中ではない。
+fn body_break_line(
+    def: &Def,
+    comments: &[crate::lexer::Comment],
+    next_line: usize,
+) -> Option<usize> {
+    let DefKind::Function { body, .. } = &def.kind else {
+        return None;
+    };
+    // 本体の最終行。見出しと同じ行を指すことがあるので、見出しの行で下限を取る。
+    let last = body.span.end_line.max(def.span.line);
+    // 本体の中のコメントは、本体の行の範囲に入るもの。ただし次の項目の
+    // 直上（1 行上）にあるものは、その項目に付くので本体の中ではない。
+    comments
+        .iter()
+        .any(|comment| {
+            comment.span.line > def.span.line
+                && comment.span.line <= last
+                && comment.span.line + 1 != next_line
+        })
+        .then_some(def.span.line)
+}
+
+/// `item` の印字を、本体が始まる `=>` で 2 行に割る。
+fn split_body(text: String) -> String {
+    // 印字は `def … => <本体>` の形なので、最初の ` => ` で割る。
+    match text.find(" => ") {
+        Some(at) => format!(
+            "{}\n  {}",
+            text[..at + 3].trim_end(),
+            text[at + 4..].trim_start()
+        ),
+        None => text,
+    }
 }
 
 /// コメントの 1 つを印字する行。行頭のコメントはそのまま、字下げの付いた
@@ -51,19 +154,28 @@ fn comment_line(comment: &crate::lexer::Comment) -> String {
 /// 項目**を基準にする。外側の項目で数えると、本体の中のコメントが本体の
 /// 外へ出てしまう（§57 の「同じ定義の前後に残す」）。
 fn place_comments(ast: &Ast, canonical: String) -> String {
-    if ast.comments.is_empty() {
-        return canonical;
-    }
     let mut lines: Vec<String> = canonical
         .trim_end_matches('\n')
         .split('\n')
         .map(str::to_string)
         .collect();
-    // §58.1: 空行は置かない。落としても項目の並びは変わらない。
-    lines.retain(|line| !line.is_empty());
     // 入れ子の項目も含めた、各項目の印字が始まる行。
     // `library` 見出しの分だけ後ろへずれる。
     let items = ItemLines::new(&ast.items, usize::from(ast.library.is_some()));
+    // 挿入するものを (印字の位置, 元のソースの行, 中身) で集める。
+    let mut inserts: Vec<(usize, usize, Vec<String>)> = Vec::new();
+    // §58.1: 空行は残す。印字し直した結果には空行が無いので、元のソースで
+    // 空行が挟まっていたところへ入れ直す。空行は「その次に来るもの」の
+    // 直前に付く。次に来るものは項目のことも、コメントの塊のこともある。
+    // どちらの位置に置くかは、下のコメントの処理と突き合わせて決める。
+    let mut blank_before: Vec<usize> = Vec::new();
+    for line in &ast.blank_lines {
+        // 空行の次が空行のこともある。連なりは 1 つにまとめる。
+        if blank_before.last().is_some_and(|prev| *prev + 1 == *line) {
+            continue;
+        }
+        blank_before.push(*line);
+    }
     // 連続するコメントは 1 つの塊として置く。1 行ずつ置くと、同じ項目に
     // 付く複数行のコメントが互いの間に項目を挟んでしまう。
     let mut blocks: Vec<Vec<crate::lexer::Comment>> = Vec::new();
@@ -80,13 +192,33 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
         }
     }
     blocks.reverse();
+    // 空行は、その次に来るコメントの塊か項目の位置へ置く。
+    for line in blank_before {
+        // この空行より後ろで最初に始まるものの位置。
+        let next_comment = ast
+            .comments
+            .iter()
+            .find(|c| c.span.line > line)
+            .map(|c| c.span.line);
+        let next_item = items.flat.iter().find(|(source, _, _)| *source > line);
+        let at = match (next_comment, next_item) {
+            // 次が項目で、その項目の方がコメントより先なら、項目の位置。
+            (Some(comment), Some((source, printed, _))) if comment >= *source => *printed,
+            (Some(comment), _) => match items.slot(comment) {
+                Some(index) => items.flat[index].1,
+                None => lines.len(),
+            },
+            (None, Some((_, printed, _))) => *printed,
+            (None, None) => lines.len(),
+        };
+        inserts.push((at.min(lines.len()), line, vec![String::new()]));
+    }
     for block in blocks {
         let first = block.first().expect("block is never empty");
-        let insert = match items.slot(first.span.line) {
+        let at = match items.slot(first.span.line) {
             Some(index) => {
                 let (_, printed, _) = items.flat[index];
-                // 空行は落とすので、コメントの塊は常にその項目の直上に来る。
-                // 元のソースで間に空行があっても、印字では間が無い。
+                // 空行は入れ直すので、コメントの塊はその項目の直上に来る。
                 printed
             }
             None => {
@@ -105,10 +237,16 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
                 }
             }
         };
-        let insert = insert.min(lines.len());
         let text: Vec<String> = block.iter().map(comment_line).collect();
-        for (offset, line) in text.into_iter().enumerate() {
-            lines.insert((insert + offset).min(lines.len()), line);
+        inserts.push((at.min(lines.len()), first.span.line, text));
+    }
+    // 印字の位置、次にソースの行の順に並べ、後ろから差し込む。後ろから
+    // 入れると、前へ入れるときに後ろの位置がずれない。
+    inserts.sort_by_key(|(at, source, _)| (*at, *source));
+    for (at, _, chunk) in inserts.into_iter().rev() {
+        let at = at.min(lines.len());
+        for (offset, line) in chunk.into_iter().enumerate() {
+            lines.insert((at + offset).min(lines.len()), line);
         }
     }
     let mut out = lines.join("\n");
@@ -153,11 +291,6 @@ impl ItemLines {
             flat[here].2 = cursor - flat[here].1;
         }
         cursor
-    }
-
-    /// 印字の順で `index` 番目の項目が占める行数。
-    fn height(&self, index: usize) -> usize {
-        self.flat.get(index).map(|(_, _, h)| *h).unwrap_or(1)
     }
 
     /// その行を含む項目（コメントより前に始まる最後の項目）。

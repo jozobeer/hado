@@ -944,6 +944,7 @@ fn collect_module_cycle_violations(
                     qualified_type_anchors: vec![],
                     name_sites: vec![],
                     comments: vec![],
+                    blank_lines: vec![],
                 },
                 path,
             ) {

@@ -346,6 +346,8 @@ pub struct Ast {
     /// §58.1: 字句が読み飛ばした行コメントの位置。`canonical_program` が
     /// 定義の前後へ置き直す（§57 の「コメントを消さない」）。
     pub comments: Vec<crate::lexer::Comment>,
+    /// §58.1: 空白だけの行の番号。印字し直した結果へ区切りとして戻す。
+    pub blank_lines: Vec<usize>,
 }
 
 impl Ast {
@@ -715,6 +717,7 @@ pub(crate) fn parse_source_partial(src: &str, path: &str) -> Result<PartialParse
     let lexed = crate::lexer::lex_with_comments(src).map_err(|e| lex_error_to_diag(e, path))?;
     let mut parsed = parse_tokens_partial(&lexed.tokens, path);
     parsed.ast.comments = lexed.comments;
+    parsed.ast.blank_lines = lexed.blank_lines;
     Ok(parsed)
 }
 
@@ -752,6 +755,7 @@ pub fn parse_for_conversion(src: &str, path: &str) -> Result<Ast, Diagnostic> {
     let lexed = crate::lexer::lex_with_comments(src).map_err(|e| lex_error_to_diag(e, path))?;
     let mut ast = parse_tokens_partial_with(&lexed.tokens, path, true).ast;
     ast.comments = lexed.comments;
+    ast.blank_lines = lexed.blank_lines;
     Ok(ast)
 }
 
@@ -959,6 +963,7 @@ impl Parser<'_> {
             written_list_patterns: self.written_list_patterns.clone(),
             long_condition_functions: self.long_condition_functions.clone(),
             comments: Vec::new(),
+            blank_lines: Vec::new(),
         }
     }
 

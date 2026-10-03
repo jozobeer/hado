@@ -694,6 +694,7 @@ impl Checker<'_> {
             long_condition_functions: Vec::new(),
             branches_after_fallback: Vec::new(),
             comments: Vec::new(),
+            blank_lines: Vec::new(),
         };
         self.next_instance_line = crate::functor_instances::max_line(&ast) + 1;
         self.instantiated_modules.push(instance);
