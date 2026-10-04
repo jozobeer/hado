@@ -5,6 +5,8 @@ ci	quick
 clippy	core
 cognitive-complexity	core
 cranelift-opt-level	full
+do-option-absent	core
+dogfood-text-tool	core
 embed-runtime	full
 exit-code-from-main	core
 frozen-docs	core
@@ -69,6 +71,7 @@ r75	full
 r76	full
 r77	full
 r81	full
+restore-option-question	core
 rustfmt	quick
 spec-contracts	core
 spec-model	quick

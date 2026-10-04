@@ -203,7 +203,6 @@ pub fn is_fixable(code: &str) -> bool {
             | "E501"
             | "E502"
             | "E503"
-            | "E504"
             | "E506"
             | "E511"
             | "E512"
@@ -601,40 +600,6 @@ fn arm_reconstructs(
         }
         PatternKind::Name(_) | PatternKind::Underscore => body_text.trim() == scrutinee_text.trim(),
         _ => body_text.trim() == pattern_text,
-    })
-}
-
-/// §35: `e as _? -> body` は成功値を捨てるだけなので、束縛を消して `e -> body`
-/// にする。書き換えるのは値と本体の間（` as _? -> `）だけなので、本体は動かない。
-fn discard_let_fix(
-    pat: &Pattern,
-    value: &Node,
-    body: &Node,
-    code: &'static str,
-    source: &str,
-    lines: &LineMap,
-) -> Option<Fix> {
-    if !matches!(pat.kind, PatternKind::Underscore) {
-        return None;
-    }
-    let start = lines.end_offset(source, value.span);
-    let end = lines.offset(source, body.span);
-    if start >= end || source[start..end].contains("//") {
-        return None;
-    }
-    let canonical = flatten(&format!(
-        "{} -> {}",
-        parser::canonical(value),
-        parser::canonical(body)
-    ));
-    Some(Fix {
-        code,
-        line: pat.span.line,
-        col: pat.span.col,
-        start,
-        end,
-        replacement: " -> ".to_string(),
-        canonical,
     })
 }
 
@@ -1044,7 +1009,7 @@ fn walk_item_in(item: &Item, walk: &Walk<'_>, found: &mut Found<'_>) {
             };
             match &def.kind {
                 DefKind::Value(body) => {
-                    // 値の定義の本体は末尾なので、`let p? =` の伝播先はこの定義。
+                    // 値の定義の本体は末尾なので、`as p? ->` の伝播先はこの定義。
                     found.push(repropagate_fix(body, Tail::If, None, walk));
                     walk_node(body, walk, found);
                 }
@@ -1063,7 +1028,7 @@ fn walk_item_in(item: &Item, walk: &Walk<'_>, found: &mut Found<'_>) {
     }
 }
 
-/// `def` の関数の腕。腕の形なら恒等の書き換えを試し、末尾の伝播先を決める。
+/// `def` の関数の腕。腕の形なら恒等の書き換えを試す。
 fn walk_def_function(
     def: &parser::Def,
     body: &Node,
@@ -1213,9 +1178,9 @@ fn body_dash_arrow(tokens: &[Tok], body_at: usize) -> Option<usize> {
 
 // --- E507 / E508: Option の再包装と再伝播 ---
 
-/// The shape of the function whose body is the branch (§57). `let p? =`
-/// propagates absence out of the enclosing function, so a rewrite is only
-/// offered where the branch is that function's body.
+/// The shape of the function whose body is the branch (§57). A rewrite is only
+/// offered where the branch is that function's body, so the surrounding
+/// continuation does not change meaning.
 #[derive(Clone, Copy, PartialEq)]
 enum Tail {
     /// A branch in tail position: the branch itself is replaced.
@@ -1333,7 +1298,7 @@ fn repropagate_fix(
         "value"
     };
     let body_text = &source[lines.offset(source, body.span)..body_end];
-    // §57: 正準形は `<scrutinee> as p? -> <body>`（後置の伝播）。
+    // §57: 正準形は `<scrutinee> as p? -> <body>`（後置の Option の伝播）。
     let binding = format!("{value} as {}? -> {body_text}", pattern_text(pattern));
     let replacement = repropagate_replacement(tail, def, binding)?;
     Some(Fix {
@@ -1382,7 +1347,7 @@ fn repropagate_parts(node: &Node) -> Option<Repropagate<'_>> {
     {
         return None;
     }
-    // `let p? = E` matches `p` against the value inside the Option (§36), so the
+    // `as p? -> E` matches `p` against the value inside the Option (§36), so the
     // first arm must be `Some(p)` with one argument.
     let PatternKind::Constructor(name, arguments) = &pattern.kind else {
         return None;
@@ -1607,9 +1572,7 @@ fn walk_node(node: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
         NodeKind::Let {
             pat, value, body, ..
         } => walk_let(node, pat, value, body, walk, found),
-        NodeKind::LetQ {
-            pat, value, body, ..
-        } => walk_let_q(pat, value, body, walk, found),
+        NodeKind::LetQ { pat, .. } => walk_let_q(pat, walk, found),
         NodeKind::BoolBranch { cond, then, els } => {
             walk_bool_branch(node, cond, then, els, walk, found)
         }
@@ -1640,19 +1603,6 @@ fn walk_written_cons(callee: &Node, node: &Node, walk: &Walk<'_>, found: &mut Fo
     if let Some(text) = list_expression(node) {
         push_cons_edit(found.fixes, "E510", node.span, &text, walk);
     }
-}
-
-/// `let?` の腕。束縛の削除と、pattern の再帰。
-fn walk_let_q(pat: &Pattern, value: &Node, body: &Node, walk: &Walk<'_>, found: &mut Found<'_>) {
-    found.push(discard_let_fix(
-        pat,
-        value,
-        body,
-        "E504",
-        walk.source,
-        walk.lines,
-    ));
-    walk_pattern(pat, walk, found);
 }
 
 /// `if` の腕。同じ値の分岐の検出と、条件・両腕の再帰。
@@ -1727,6 +1677,13 @@ fn walk_pattern_branch(
             walk_pattern(pattern, walk, found);
         }
     }
+}
+
+/// `as p? ->` の腕。`?` の束縛そのものには局所的な書き換えが無いので、
+/// pattern の中の書き換え（E516 など）だけを拾う。値と本体は `walk_children`
+/// が `check::children` を通って見る。
+fn walk_let_q(pat: &Pattern, walk: &Walk<'_>, found: &mut Found<'_>) {
+    walk_pattern(pat, walk, found);
 }
 
 /// `fn` の腕。腕の形なら恒等の書き換えを試し、末尾の伝播先を決める。

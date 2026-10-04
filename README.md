@@ -68,8 +68,8 @@ lsp                                                         LSP サーバ（stdi
 拒否の例:
 
 ```
-$ cargo run --offline -q -- check tests/reject/E508/main.hd
-main.hd:7:3: error[E508]: absence bound at 7:5 is propagated unchanged; use let p? = or do; canonical form: let user? = find_user id -> Some(user + 1)
+$ cargo run --offline -q -- check tests/reject/E507/main.hd
+main.hd:3:1: error[E507]: branches reconstruct the value at 3:5; canonical form: def f value => value
 ```
 
 ## エディタ（Neovim）

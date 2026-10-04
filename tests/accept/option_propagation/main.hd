@@ -1,0 +1,8 @@
+// spec: §34
+// expect: { none = None; some = Some(42) }
+type Summary = { none: Int Option; some: Int Option }
+def find (id: Int): Int Option Pure => if id == 7 => Some(21) | None
+def double (id: Int): Int Option Pure => find id as x? ->
+  Some(x + x)
+def both (id: Int): Summary Pure => { none = double 0; some = double id }
+def main = both 7

@@ -706,6 +706,23 @@ fn option_propagation_branches_before_the_continuation() {
 }
 
 #[test]
+fn absent_at_the_entry_aborts_with_the_operation_name() {
+    let source = "def main = absent";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert!(output.contains("function: AbortError"), "{output}");
+    assert!(output.contains("Constant(String(\"absent\"))"), "{output}");
+}
+
+#[test]
+fn maybe_answers_absent_as_none() {
+    let source =
+        "def f (x: Int): Int {Absent} => if x > 0 => x | absent\ndef main = with Maybe -> f 1";
+    let output = hado::dump_mono(source, "t").unwrap();
+    assert!(output.contains("constructor: \"None\""), "{output}");
+    assert!(output.contains("constructor: \"Some\""), "{output}");
+}
+
+#[test]
 fn effect_do_evaluates_the_rhs_then_the_continuation() {
     use hado::mono::Expression;
     let source = "def main = 1 / 2 ->\n  true";

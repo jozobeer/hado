@@ -1,0 +1,6 @@
+effect Absent
+abort absent
+
+handler Absent as Maybe
+abort absent => None
+return value => Some(value)

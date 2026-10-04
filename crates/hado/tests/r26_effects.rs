@@ -1835,20 +1835,20 @@ fn one_body_uses_a_handler_at_two_answer_types() {
 
 // 入れ子にした 4 つの形を単独で動かした値。判定器はこの表を独立に持ち、
 // 入れ子どうしの一致では通さない。
-const ABSENT_NESTING: &str = "effect Absent\nabort absent\n\ndef risky (n: Int): Int {Absent, Error} =>\n  if n == 0 => absent | raise { message = \"boom\" }\n\nhandler Absent as Maybe\nabort absent => None\nreturn value => Some(value)\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n";
+const MISSING_NESTING: &str = "effect Missing\nabort missing\n\ndef risky (n: Int): Int {Missing, Error} =>\n  if n == 0 => missing | raise { message = \"boom\" }\n\nhandler Missing as MissingOption\nabort missing => None\nreturn value => Some(value)\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n";
 const NESTED_SINGLE_RUNS: [(&str, u32, &str); 4] = [
-    ("with Maybe -> with ToOption -> ", 0, "None"),
-    ("with Maybe -> with ToOption -> ", 1, "Some(None)"),
-    ("with ToOption -> with Maybe -> ", 0, "Some(None)"),
-    ("with ToOption -> with Maybe -> ", 1, "None"),
+    ("with MissingOption -> with ToOption -> ", 0, "None"),
+    ("with MissingOption -> with ToOption -> ", 1, "Some(None)"),
+    ("with ToOption -> with MissingOption -> ", 0, "Some(None)"),
+    ("with ToOption -> with MissingOption -> ", 1, "None"),
 ];
 
-// Absent と Error の handler を入れ子にした 4 つの形の単独実行。
+// Missing と Error の handler を入れ子にした 4 つの形の単独実行。
 #[test]
 fn nested_handler_orders_run_alone() {
     for (nesting, argument, expected) in NESTED_SINGLE_RUNS {
         runs_effectful_closure_source(
-            &format!("{ABSENT_NESTING}def main = {nesting}risky {argument}\n"),
+            &format!("{MISSING_NESTING}def main = {nesting}risky {argument}\n"),
             expected,
         );
     }
@@ -1859,7 +1859,7 @@ fn nested_handler_orders_run_alone() {
 #[test]
 fn nested_handler_orders_in_one_body_match_their_single_runs() {
     let source = format!(
-        "{ABSENT_NESTING}type R = {{ a: Int Option Option; b: Int Option Option }}\ndef main = {{ a = {}risky {}; b = {}risky {} }}\n",
+        "{MISSING_NESTING}type R = {{ a: Int Option Option; b: Int Option Option }}\ndef main = {{ a = {}risky {}; b = {}risky {} }}\n",
         NESTED_SINGLE_RUNS[0].0,
         NESTED_SINGLE_RUNS[0].1,
         NESTED_SINGLE_RUNS[2].0,
@@ -1887,7 +1887,7 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
         .map(|(name, (_, _, value))| format!("{name} = {value}"))
         .collect();
     let source = format!(
-        "{ABSENT_NESTING}type R = {{ mo_abs: Int Option Option; mo_err: Int Option Option; eo_abs: Int Option Option; eo_err: Int Option Option }}\ndef main = {{ {} }}\n",
+        "{MISSING_NESTING}type R = {{ mo_abs: Int Option Option; mo_err: Int Option Option; eo_abs: Int Option Option; eo_err: Int Option Option }}\ndef main = {{ {} }}\n",
         fields.join("; ")
     );
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));

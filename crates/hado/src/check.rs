@@ -758,12 +758,7 @@ fn condition_is_direct(node: &Node, child: &Node) -> bool {
 }
 
 fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    for check in [
-        identical_branches,
-        catch_all_rows,
-        discarded_binding,
-        returned_binding,
-    ] {
+    for check in [identical_branches, catch_all_rows, returned_binding] {
         check(node, path)?;
     }
     Ok(())
@@ -803,28 +798,6 @@ fn catch_all_rows(node: &Node, path: &str) -> Result<(), Diagnostic> {
         catch_all_row(patterns, path)?;
     }
     Ok(())
-}
-
-/// E504: `e as _? ->` は値を捨てるだけなので `e ->` にすべき位置。
-fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    let NodeKind::LetQ { pat, .. } = &node.kind else {
-        return Ok(());
-    };
-    if !matches!(pat.kind, PatternKind::Underscore) {
-        return Ok(());
-    }
-    Err(Diagnostic {
-        mentions: None,
-        suggestion: None,
-        related: None,
-        path: path.into(),
-        line: pat.span.line,
-        col: pat.span.col,
-        end_line: pat.span.line,
-        end_col: pat.span.col,
-        code: Some("E504".into()),
-        message: "use `->` to discard a success value".into(),
-    })
 }
 
 /// E506: `e as _ ->` は値を捨てられない。E501: `e as x -> x` は束縛が素通し。
@@ -950,7 +923,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: body.span.line,
         end_col: body.span.col,
         code: Some("E508".into()),
-        message: "absence bound at {0} is propagated unchanged; use `as p? ->` or `->`".into(),
+        message: "absence bound at {0} is propagated unchanged; use `as p? ->`, or `as _? ->` when the arm binds nothing".into(),
     })
 }
 

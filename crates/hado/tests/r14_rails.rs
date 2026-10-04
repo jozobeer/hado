@@ -72,14 +72,14 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
             (format!("{n} as _? -> Some(1)"), "E303", n.to_string()),
             (format!("{n} -> Some(1)"), "E303", n.to_string()),
             (
-                format!("Some({n}) as _? -> Some(1)"),
-                "E504",
-                "_".to_string(),
-            ),
-            (
                 format!("Some(Some({n})) as Some(x)? -> Some(x + 1)"),
                 "E402",
                 "Some(x)".to_string(),
+            ),
+            (
+                format!("Some(Some({n})) as Some(Some(x)) -> x + 1"),
+                "E402",
+                "Some(Some(x))".to_string(),
             ),
         ] {
             let padding = format!(
@@ -215,12 +215,33 @@ fn generated_option_chains_propagate_none_at_each_step() {
     let mut state = 0x1407;
     let n = random(&mut state, 1000) + 1;
     for fail in 0..4 {
+        // 破棄の段は `?` の束縛を使う。`e ->` は効果専用で、`Option` を伝播しない
+        // （第35節、E303）。
         let source = format!(
             "def first flag => if flag == 1 => None | Some({n})\n\
              def step flag stage => if flag == stage => None | Some(())\n\
-             def run flag => first flag as x? -> step flag 2 -> step flag 3 -> Some(x + 5)\n\
+             def run flag => first flag as x? -> step flag 2 as _? -> step flag 3 as _? -> Some(x + 5)\n\
              def unwrap | Some(x) => x | None => 0\n\
              def main = unwrap (run {fail})"
+        );
+        let expected = if fail == 0 { n + 5 } else { 0 };
+        // 同じ binary の他の連鎖テストと作業ディレクトリを分ける（`run` は
+        // `serial` ごとに一時ディレクトリを作る）。
+        execute(&source, &expected.to_string(), 200 + fail);
+    }
+}
+
+#[test]
+fn generated_absent_chains_answer_none_at_each_step() {
+    let mut state = 0x1407;
+    let n = random(&mut state, 1000) + 1;
+    for fail in 0..4 {
+        let source = format!(
+            "def first (flag: Int): Int {{Absent}} => if flag == 1 => absent | {n}\n\
+             def step (flag: Int, stage: Int): Void {{Absent}} => if flag == stage => absent | ()\n\
+             def run flag => first flag as x -> step flag 2 -> step flag 3 -> x + 5\n\
+             def unwrap | Some(x) => x | None => 0\n\
+             def main = unwrap (with Maybe -> run {fail})"
         );
         let expected = if fail == 0 { n + 5 } else { 0 };
         execute(&source, &expected.to_string(), 100 + fail);
