@@ -790,6 +790,12 @@ impl Lowerer {
             BoolBranch { cond, .. } => vec![cond],
             CondBranch { arms, .. } => arms.iter_mut().map(|(condition, _)| condition).collect(),
             PatternBranch { scrutinees, .. } => scrutinees.iter_mut().collect(),
+            // §38: `with H(e) -> rest` の `e` は `H` の外で評価するが、継続は
+            // 値引数の束縛と本体を含む。`Apply` の引数と同じくここで let に
+            // 載せないと、外側の handler が解釈する outcome が実引数で終わり、
+            // 本体が落ちるか abort が捨てられる。本体は載せない（内側の `with`
+            // を外へ出すと、捕まえる handler が変わる）。
+            With { args, .. } => args.iter_mut().collect(),
             _ => Vec::new(),
         };
         if !children
@@ -4478,7 +4484,14 @@ impl Lowerer {
         self.next += 1;
         let resume_ty = resume.ty();
         let saved_resume = self.resume_binding.replace((id, resume_ty));
-        let result = self.with_params(&params, vec![value], |this| {
+        // `again ask: Int` のようにペイロード引数の無い操作は、Yield の第 0 欄が
+        // Void でも腕の params は空。`abort` と同じく個数を合わせて束ねる。
+        let arguments = match params.len() {
+            0 => Vec::new(),
+            1 => vec![value],
+            _ => return Err("again arm arity mismatch".into()),
+        };
+        let result = self.with_params(&params, arguments, |this| {
             let saved = std::mem::replace(&mut this.rewriting_return, true);
             let entered = this.enter_arm(handler);
             let result = this.expression(&body);
