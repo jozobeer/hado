@@ -1802,14 +1802,82 @@ impl Lowerer {
     }
 
     /// §34: `e as p? ->` は `Some` の腕で `p` を束縛し、`None` の腕で `None` を返す。
+    /// `e` が効果を運ぶときは先に outcome をほどいてから Option を見る。`as p ->`
+    /// （`let_expression`）と同じ順であり、戻した `LetQ` が `$Outcome` を直に
+    /// Option と見なして `propagation requires Option` で落ちる穴を塞ぐ。
     fn propagation(
         &mut self,
         pattern: Option<&crate::parser::Pattern>,
         source: &crate::parser::Node,
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
+        if self.contains_again(source) || self.contains_handled_call(source) {
+            return self.bind_option_source(pattern, source, body);
+        }
         let value = self.expression(source)?;
+        if is_outcome(&value.ty()) {
+            return self.option_after_outcome(pattern, value, body);
+        }
         self.option_propagation(pattern, value, body)
+    }
+
+    /// 効果を持つ `e` を `as $q ->` でほどき、成功値に対して `as p? ->` を続ける。
+    fn bind_option_source(
+        &mut self,
+        pattern: Option<&crate::parser::Pattern>,
+        source: &crate::parser::Node,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let name = format!("$q{}", self.next);
+        self.next += 1;
+        let tmp = crate::parser::Pattern {
+            kind: crate::parser::PatternKind::Name(name.clone()),
+            span: source.span,
+        };
+        self.let_expression(
+            &tmp,
+            source,
+            &self.option_rest(pattern, &name, source.span, body),
+        )
+    }
+
+    fn option_after_outcome(
+        &mut self,
+        pattern: Option<&crate::parser::Pattern>,
+        value: Expression,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let name = format!("$q{}", self.next);
+        self.next += 1;
+        let span = body.span;
+        let tmp = crate::parser::Pattern {
+            kind: crate::parser::PatternKind::Name(name.clone()),
+            span,
+        };
+        self.propagate_outcome(&tmp, value, &self.option_rest(pattern, &name, span, body))
+    }
+
+    fn option_rest(
+        &self,
+        pattern: Option<&crate::parser::Pattern>,
+        name: &str,
+        span: crate::parser::Span,
+        body: &crate::parser::Node,
+    ) -> crate::parser::Node {
+        crate::parser::Node {
+            span,
+            kind: crate::parser::NodeKind::LetQ {
+                pat: pattern.cloned().unwrap_or(crate::parser::Pattern {
+                    kind: crate::parser::PatternKind::Underscore,
+                    span,
+                }),
+                value: Box::new(crate::parser::Node {
+                    kind: crate::parser::NodeKind::Name(name.into()),
+                    span,
+                }),
+                body: Box::new(body.clone()),
+            },
+        }
     }
 
     fn option_propagation(

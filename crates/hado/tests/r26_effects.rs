@@ -1933,3 +1933,23 @@ fn handler_value_argument_is_evaluated_once_at_the_with() {
         "arg\n6",
     );
 }
+
+// §34: `as p? ->` の値 `e` が効果を持つ Option のとき、単相化は先に outcome を
+// ほどいてから Some/None を見る。`LetQ` を戻したとき `option_propagation` が
+// `$Outcome` を Option と見なして `propagation requires Option` で落ちた。
+// `Option.map` や `as opt -> opt as x? ->` は引数の lifting と `Let` がほどく
+// ので通り、直書きの `as p? ->` だけが赤だった。
+#[test]
+fn option_propagation_through_effectful_option() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\n\
+         abort raise _ => None\n\
+         return value => value\n\
+         type R = { ok: Int Option; raised: Int Option; none: Int Option }\n\
+         def lookup (id: Int): Int Option {Error} => if id == 0 => raise { message = \"neg\" } | Some(id)\n\
+         def missing (id: Int): Int Option {Error} => if id == 0 => raise { message = \"neg\" } | None\n\
+         def main =\n\
+           { ok = with Catch -> lookup 2 as x? -> Some(x + 1); raised = with Catch -> lookup 0 as x? -> Some(x + 1); none = with Catch -> missing 3 as x? -> Some(x + 1) }\n",
+        "{ ok = Some(3); raised = None; none = None }",
+    );
+}
