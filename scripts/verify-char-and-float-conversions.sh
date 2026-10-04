@@ -130,9 +130,9 @@ expect('char_bytes',
        f'def main = List.map {values} '
        'fn(n => Bytes.to_list (Bytes.of_string (Char.to_string (Char.of_int n))))',
        (str([list(chr(n).encode()) for n in accepted]) + '\n').encode())
-expect('char_to_int_literal', "def main = Char.to_int 'a'", b'97\n')
+expect('char_to_int_literal', "def main = Int.to_string (Char.to_int 'a')", b'97\n')
 # R1 の残り: Char.to_string の 1 文字は Unicode スカラ値 1 個である。
-expect('char_to_string_length', "def main = String.length (Char.to_string 'あ')", b'1\n')
+expect('char_to_string_length', "def main = Int.to_string (String.length (Char.to_string 'あ'))", b'1\n')
 for n in rejected:
     expect(f'char_invalid_{n}', f'def main = Char.of_int ({n})',
            b'', code=1, stderr=b'InvalidScalar\n')
@@ -172,7 +172,7 @@ for name, expression, value in cases:
     expect(f'float_to_string_{name}_no_exponent',
            f'def main = String.contains (Float.to_string ({expression})) "e"', b'false\n')
 # R1 の残り: 正準形の 0.1 は 3 文字である。
-expect('float_to_string_length', 'def main = String.length (Float.to_string 0.1)', b'3\n')
+expect('float_to_string_length', 'def main = Int.to_string (String.length (Float.to_string 0.1))', b'3\n')
 print(f'float_to_string: {len(cases)} canonical spellings, no exponent, nan/inf')
 PY
 }

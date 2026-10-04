@@ -1,10 +1,16 @@
 use crate::parser::{
-    Ast, DefKind, Diagnostic, Item, Node, NodeKind, Pattern, PatternKind, TypeExpr, TypeKind,
+    Ast, DefKind, Diagnostic, Item, Mentions, Node, NodeKind, Pattern, PatternKind, TypeExpr,
+    TypeKind,
 };
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<(), Diagnostic> {
     match check_ast_all(ast, path).into_iter().next() {
-        Some(error) => Err(error),
+        // §56: without a project the checked coordinates are the file's own, so
+        // the mentioned positions are already the ones the message writes.
+        Some(mut error) => {
+            error.fill_mentions();
+            Err(error)
+        }
         None => Ok(()),
     }
 }
@@ -15,6 +21,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for span in &ast.long_condition_functions {
         diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -28,6 +35,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     }
     for span in &ast.written_list_patterns {
         diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -41,6 +49,7 @@ pub(crate) fn check_ast_all(ast: &Ast, path: &str) -> Vec<Diagnostic> {
     }
     for span in &ast.branches_after_fallback {
         diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -308,6 +317,7 @@ fn check_definition(
             if !contract_member {
                 for param in params.iter().filter(|param| param.name == "_") {
                     diagnostics.push(Diagnostic {
+                        mentions: None,
                         suggestion: None,
                         related: None,
                         path: path.into(),
@@ -366,6 +376,7 @@ fn check_effect_rows(ty: &TypeExpr, path: &str, diagnostics: &mut Vec<Diagnostic
 /// E522: 同じ効果が 1 つの row に 2 度書かれている。
 fn duplicate_effect(effect: &TypeExpr, path: &str) -> Diagnostic {
     Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -431,6 +442,7 @@ fn check_type_parameters(item: &Item, path: &str, diagnostics: &mut Vec<Diagnost
             continue;
         }
         diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -488,6 +500,7 @@ fn check_unused<'a>(
             continue;
         }
         diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -553,6 +566,7 @@ fn check_sole_parameter_branch(
         return Ok(());
     }
     Err(Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -586,6 +600,7 @@ pub(crate) fn matrix_coverage(
         _ => return Ok(()),
     };
     Err(Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -628,6 +643,7 @@ fn check_boolean_form(
     }
     let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -742,12 +758,7 @@ fn condition_is_direct(node: &Node, child: &Node) -> bool {
 }
 
 fn check_local_redundancy(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    for check in [
-        identical_branches,
-        catch_all_rows,
-        discarded_binding,
-        returned_binding,
-    ] {
+    for check in [identical_branches, catch_all_rows, returned_binding] {
         check(node, path)?;
     }
     Ok(())
@@ -762,6 +773,10 @@ fn identical_branches(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     }
     Err(Diagnostic {
+        mentions: Mentions::boxed([
+            (then.span.line, then.span.col),
+            (els.span.line, els.span.col),
+        ]),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -770,10 +785,7 @@ fn identical_branches(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: node.span.line,
         end_col: node.span.col,
         code: Some("E502".into()),
-        message: format!(
-            "identical branch results at {}:{} and {}:{}",
-            then.span.line, then.span.col, els.span.line, els.span.col
-        ),
+        message: "identical branch results at {0} and {1}".into(),
     })
 }
 
@@ -788,27 +800,6 @@ fn catch_all_rows(node: &Node, path: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-/// E504: `e as _? ->` は値を捨てるだけなので `e ->` にすべき位置。
-fn discarded_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
-    let NodeKind::LetQ { pat, .. } = &node.kind else {
-        return Ok(());
-    };
-    if !matches!(pat.kind, PatternKind::Underscore) {
-        return Ok(());
-    }
-    Err(Diagnostic {
-        suggestion: None,
-        related: None,
-        path: path.into(),
-        line: pat.span.line,
-        col: pat.span.col,
-        end_line: pat.span.line,
-        end_col: pat.span.col,
-        code: Some("E504".into()),
-        message: "use `->` to discard a success value".into(),
-    })
-}
-
 /// E506: `e as _ ->` は値を捨てられない。E501: `e as x -> x` は束縛が素通し。
 fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
     let NodeKind::Let { pat, body, .. } = &node.kind else {
@@ -816,6 +807,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     if matches!(pat.kind, PatternKind::Underscore) {
         return Err(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -834,6 +826,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     }
     Err(Diagnostic {
+        mentions: Mentions::boxed([(body.span.line, body.span.col)]),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -842,10 +835,7 @@ fn returned_binding(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: node.span.line,
         end_col: node.span.col,
         code: Some("E501".into()),
-        message: format!(
-            "binding {bound} is returned unchanged at {}:{}",
-            body.span.line, body.span.col
-        ),
+        message: format!("binding {bound} is returned unchanged at {{0}}"),
     })
 }
 
@@ -880,6 +870,7 @@ fn catch_all_row(patterns: &[Pattern], path: &str) -> Result<(), Diagnostic> {
         ("E512", pattern, "top-level variable patterns are forbidden")
     };
     Err(Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -923,6 +914,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         return Ok(());
     };
     Err(Diagnostic {
+        mentions: Mentions::boxed([(pattern.span.line, pattern.span.col)]),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -931,10 +923,7 @@ fn check_repropagation(node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: body.span.line,
         end_col: body.span.col,
         code: Some("E508".into()),
-        message: format!(
-            "absence bound at {}:{} is propagated unchanged; use `as p? ->` or `->`",
-            pattern.span.line, pattern.span.col
-        ),
+        message: "absence bound at {0} is propagated unchanged; use `as p? ->`, or `as _? ->` when the arm binds nothing".into(),
     })
 }
 
@@ -987,6 +976,7 @@ fn check_rewrap(ast: &Ast, node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     let span = branch_extent(ast, node).unwrap_or(node.span);
     Err(Diagnostic {
+        mentions: Mentions::boxed([(scrutinee.span.line, scrutinee.span.col)]),
         suggestion: None,
         related: None,
         path: path.into(),
@@ -995,10 +985,7 @@ fn check_rewrap(ast: &Ast, node: &Node, path: &str) -> Result<(), Diagnostic> {
         end_line: span.end_line,
         end_col: span.end_col,
         code: Some("E507".into()),
-        message: format!(
-            "branches reconstruct the value at {}:{}",
-            scrutinee.span.line, scrutinee.span.col
-        ),
+        message: "branches reconstruct the value at {0}".into(),
     })
 }
 
@@ -1012,6 +999,7 @@ fn check_literal_fallback(node: &Node, path: &str) -> Result<(), Diagnostic> {
             .any(|(patterns, _)| patterns.iter().any(needs_literal_fallback))
     {
         return Err(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -1044,6 +1032,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
     };
     if fallback.is_none() {
         return Err(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),
@@ -1061,6 +1050,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 || matches!(previous.kind, NodeKind::Bool(true))
         }) {
             return Err(Diagnostic {
+                mentions: Mentions::boxed([(previous.span.line, previous.span.col)]),
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -1069,10 +1059,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 end_line: condition.span.line,
                 end_col: condition.span.col,
                 code: Some("E406".into()),
-                message: format!(
-                    "condition is redundant after {}:{}",
-                    previous.span.line, previous.span.col
-                ),
+                message: "condition is redundant after {0}".into(),
             });
         }
     }
@@ -1085,6 +1072,7 @@ fn check_conditions(node: &Node, path: &str) -> Result<(), Diagnostic> {
             .all(|(condition, _)| literal_comparison(condition) == Some(name))
         {
             return Err(Diagnostic {
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -1150,6 +1138,10 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
                 continue;
             };
             return Err(Diagnostic {
+                mentions: Mentions::boxed([(
+                    previous_pattern.span.line,
+                    previous_pattern.span.col,
+                )]),
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -1165,10 +1157,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
                     }
                     .into(),
                 ),
-                message: format!(
-                    "pattern is covered by the arm at {}:{}",
-                    previous_pattern.span.line, previous_pattern.span.col
-                ),
+                message: "pattern is covered by the arm at {0}".into(),
             });
         }
     }
@@ -1178,6 +1167,7 @@ fn check_duplicate_patterns(node: &Node, path: &str) -> Result<(), Diagnostic> {
 fn check_cons_tail(node: &Node, path: &str) -> Result<(), Diagnostic> {
     if matches!(&node.kind, NodeKind::Name(name) if matches!(name.as_str(), "Nil" | "Cons")) {
         return Err(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: path.into(),

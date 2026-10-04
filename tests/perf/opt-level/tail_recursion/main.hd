@@ -1,0 +1,6 @@
+// spec: §53
+def rec count n acc =>
+  if n == 0 => acc
+  | count (n - 1) (acc + 1)
+
+def main = Int.to_string (count 10000000 0)

@@ -1,6 +1,7 @@
 // spec: §20
 // expect: 3
 // item: 関数値
+// needs: prelude
 def inc x => x + 1
 def apply f x => f x
-def main = apply inc 2
+def main = Int.to_string (apply inc 2)

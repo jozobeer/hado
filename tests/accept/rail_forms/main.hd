@@ -5,9 +5,8 @@
 type Box = | Box(Int)
 type Entry = { value: Box }
 def pass (n: Int): Void {Error} => if n > 0 => () | raise { message = "negative" }
-def read (entry: Entry Option): Int {Error} => Option.ok_or (entry as { value = Box(n) }? ->
-  pass n ->
+def read (entry: Entry Option): Int {Error} => if entry | Some({ value = Box(n) }) => pass n ->
   pass (n + 1) ->
-  Some(Box(n + 2)) as Box(m)? ->
-  Some(m)) { message = "missing" }
-def main = read Some({ value = Box(40) })
+  n + 2 | None => raise { message = "missing" }
+  /if
+def main = Int.to_string (read Some({ value = Box(40) }))

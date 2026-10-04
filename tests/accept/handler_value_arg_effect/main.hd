@@ -1,0 +1,15 @@
+// spec: §38
+// needs: prelude
+// expect: arg
+effect A Yield
+again yield(value: A): Void
+handler A Yield as Take(limit: Int)
+again yield value => resume () as rest ->
+  ()
+return _ => ()
+def noisy n => log "arg" ->
+  n
+def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i ->
+  loop (i - 1)
+  /if
+def main = with Take(noisy 3) -> loop 3

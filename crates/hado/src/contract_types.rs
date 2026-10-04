@@ -83,6 +83,7 @@ impl Contracts {
                 if self.types.get(name) == Some(&None) =>
             {
                 diagnostics.push(Diagnostic {
+                    mentions: None,
                     suggestion: None,
                     related: None,
                     path: path.into(),

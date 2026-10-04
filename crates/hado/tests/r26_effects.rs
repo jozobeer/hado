@@ -67,7 +67,15 @@ impl Case {
         );
         assert_eq!(diagnostic.lines().count(), 1);
     }
+    /// §54 makes an Int main the exit code rather than a printed line. When the
+    /// entry's `main` is exactly Int, wrap the trailing body in `Int.to_string`
+    /// so the stdout assertions that follow keep measuring the computed value.
     fn build(&self, entry: &str) -> Output {
+        let path = self.0.join(entry);
+        let source = std::fs::read_to_string(&path).unwrap();
+        if let Some(wrapped) = wrap_int_main(&source, &path) {
+            std::fs::write(&path, wrapped).unwrap();
+        }
         self.command("build", entry)
     }
     fn run(&self, entry: &str) -> Output {
@@ -80,6 +88,43 @@ impl Drop for Case {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// Wrap the trailing `def main = <body>` in `Int.to_string (...)` when the
+/// program's main type is Int, and return `None` otherwise. The body stops at
+/// the first following top-level declaration.
+fn wrap_int_main(source: &str, path: &std::path::Path) -> Option<String> {
+    let checked = hado::check_source(source, &path.display().to_string()).ok()?;
+    if checked.main != hado::types::Ty::Int {
+        return None;
+    }
+    let marker = "def main =";
+    let at = source.rfind(marker)?;
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    Some(format!(
+        "{}def main = Int.to_string ({}){}",
+        &source[..at],
+        &after[..cut],
+        &after[cut..]
+    ))
 }
 
 fn shifted(source: &str, anchor: &str, padding: usize) -> (String, usize) {
@@ -1790,20 +1835,20 @@ fn one_body_uses_a_handler_at_two_answer_types() {
 
 // 入れ子にした 4 つの形を単独で動かした値。判定器はこの表を独立に持ち、
 // 入れ子どうしの一致では通さない。
-const ABSENT_NESTING: &str = "effect Absent\nabort absent\n\ndef risky (n: Int): Int {Absent, Error} =>\n  if n == 0 => absent | raise { message = \"boom\" }\n\nhandler Absent as Maybe\nabort absent => None\nreturn value => Some(value)\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n";
+const MISSING_NESTING: &str = "effect Missing\nabort missing\n\ndef risky (n: Int): Int {Missing, Error} =>\n  if n == 0 => missing | raise { message = \"boom\" }\n\nhandler Missing as MissingOption\nabort missing => None\nreturn value => Some(value)\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n";
 const NESTED_SINGLE_RUNS: [(&str, u32, &str); 4] = [
-    ("with Maybe -> with ToOption -> ", 0, "None"),
-    ("with Maybe -> with ToOption -> ", 1, "Some(None)"),
-    ("with ToOption -> with Maybe -> ", 0, "Some(None)"),
-    ("with ToOption -> with Maybe -> ", 1, "None"),
+    ("with MissingOption -> with ToOption -> ", 0, "None"),
+    ("with MissingOption -> with ToOption -> ", 1, "Some(None)"),
+    ("with ToOption -> with MissingOption -> ", 0, "Some(None)"),
+    ("with ToOption -> with MissingOption -> ", 1, "None"),
 ];
 
-// Absent と Error の handler を入れ子にした 4 つの形の単独実行。
+// Missing と Error の handler を入れ子にした 4 つの形の単独実行。
 #[test]
 fn nested_handler_orders_run_alone() {
     for (nesting, argument, expected) in NESTED_SINGLE_RUNS {
         runs_effectful_closure_source(
-            &format!("{ABSENT_NESTING}def main = {nesting}risky {argument}\n"),
+            &format!("{MISSING_NESTING}def main = {nesting}risky {argument}\n"),
             expected,
         );
     }
@@ -1814,7 +1859,7 @@ fn nested_handler_orders_run_alone() {
 #[test]
 fn nested_handler_orders_in_one_body_match_their_single_runs() {
     let source = format!(
-        "{ABSENT_NESTING}type R = {{ a: Int Option Option; b: Int Option Option }}\ndef main = {{ a = {}risky {}; b = {}risky {} }}\n",
+        "{MISSING_NESTING}type R = {{ a: Int Option Option; b: Int Option Option }}\ndef main = {{ a = {}risky {}; b = {}risky {} }}\n",
         NESTED_SINGLE_RUNS[0].0,
         NESTED_SINGLE_RUNS[0].1,
         NESTED_SINGLE_RUNS[2].0,
@@ -1842,7 +1887,7 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
         .map(|(name, (_, _, value))| format!("{name} = {value}"))
         .collect();
     let source = format!(
-        "{ABSENT_NESTING}type R = {{ mo_abs: Int Option Option; mo_err: Int Option Option; eo_abs: Int Option Option; eo_err: Int Option Option }}\ndef main = {{ {} }}\n",
+        "{MISSING_NESTING}type R = {{ mo_abs: Int Option Option; mo_err: Int Option Option; eo_abs: Int Option Option; eo_err: Int Option Option }}\ndef main = {{ {} }}\n",
         fields.join("; ")
     );
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
@@ -1851,7 +1896,8 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
 // handler の腕の中の `with` は定義側の 1 節点なので、同じ handler を答え型の
 // 違う外側の `with` に使うと、内側の snapshot は最後の答え型で上書きされる。
 // 直す前は `handler arms disagree on the answer type` で赤。
-const NESTED_WITH_IN_HANDLER_ARM: &str = "effect Absent\nabort absent\n\nhandler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n\nhandler Absent as Nested\nabort absent =>\n  with ToOption ->\n  raise { message = \"boom\" }\nreturn value => Some(value)\n";
+// `Absent` は前口（stdlib/absent.hd）にあるので、ここでは宣言しない。
+const NESTED_WITH_IN_HANDLER_ARM: &str = "handler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n\nhandler Absent as Nested\nabort absent =>\n  with ToOption ->\n  raise { message = \"boom\" }\nreturn value => Some(value)\n";
 
 #[test]
 fn nested_with_in_a_shared_handler_arm_at_two_answer_types() {
@@ -1867,4 +1913,23 @@ fn nested_with_in_a_shared_handler_arm_at_two_answer_types() {
     ] {
         runs_effectful_closure_source(&source, expected);
     }
+}
+
+// §38: `with` の値引数は `with` の位置で 1 回だけ評価する。`again` の腕が
+// `resume` を繰り返して `convert` が複数回走る形で、実引数に置いた `log` の
+// 出力が 1 回であることを stdout の完全一致で見る。直す前は値引数を lower して
+// 捨てるので `log` が 1 回も走らない。
+#[test]
+fn handler_value_argument_is_evaluated_once_at_the_with() {
+    runs_effectful_closure_source(
+        "effect A Yield\n\
+         again yield(value: A): Void\n\
+         handler A Yield as Take(limit: Int)\n\
+         again yield value => resume () as rest -> [limit, value, ...rest]\n\
+         return _ => []\n\
+         def noisy n => log \"arg\" -> n\n\
+         def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i -> loop (i - 1) /if\n\
+         def main = List.length (with Take(noisy 3) -> loop 3)\n",
+        "arg\n6",
+    );
 }

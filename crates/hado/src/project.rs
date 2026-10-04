@@ -48,6 +48,7 @@ impl Project {
         let (libraries, duplicate_library) = library_roots(&token_files);
         let (ast, other_entry_roots, library_main) = parse_files(&token_files, &libraries)?;
         let library_error = library_main.map(|span| Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: files[0].path.clone(),
@@ -216,12 +217,12 @@ impl Project {
     }
 
     pub fn check(&self) -> Result<crate::Checked, Diagnostic> {
-        crate::check_parsed(&self.parsed, &self.files[0].path)
+        crate::check_parsed_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
     pub fn check_for_print(&self) -> Result<crate::Checked, Diagnostic> {
-        crate::check_parsed_for_print(&self.parsed, &self.files[0].path)
+        crate::check_parsed_for_print_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
@@ -231,8 +232,11 @@ impl Project {
         &self,
         reject_user_main_effects: bool,
     ) -> (Vec<Diagnostic>, Option<crate::Checked>) {
-        let (errors, checked) =
-            crate::check_parsed_all(&self.parsed, &self.files[0].path, reject_user_main_effects);
+        let (errors, checked) = crate::check_parsed_all_concatenated(
+            &self.parsed,
+            &self.files[0].path,
+            reject_user_main_effects,
+        );
         (
             errors
                 .into_iter()
@@ -243,7 +247,7 @@ impl Project {
     }
 
     pub fn dump_mono(&self) -> Result<String, Diagnostic> {
-        crate::dump_parsed(&self.parsed, &self.files[0].path)
+        crate::dump_parsed_concatenated(&self.parsed, &self.files[0].path)
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
@@ -346,21 +350,44 @@ impl Project {
         }
         let checked = self.check().map_err(|error| error.to_string())?;
         let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
-        crate::emit::compile_mono_to_object(&program, &checked, output)
+        crate::emit::compile_mono_to_object(
+            &program,
+            &checked,
+            output,
+            crate::emit::BUILD_OPT_LEVEL,
+        )
     }
 
-    pub fn build(&self, output: &Path) -> Result<(), String> {
+    pub fn build(&self, output: &Path) -> Result<(), BuildError> {
+        self.build_with_opt_level(output, crate::emit::BUILD_OPT_LEVEL)
+    }
+
+    pub fn build_with_opt_level(&self, output: &Path, opt_level: &str) -> Result<(), BuildError> {
         if self.is_library() {
-            return Err(self.report(&crate::entry_required(&self.files[0].path)));
+            return Err(BuildError::Diagnostic(crate::entry_required(
+                &self.files[0].path,
+            )));
         }
-        // Diagnostics go through `report` so `build` and `run` show the same
-        // `canonical form:` hint as `check` (§57, §58).
-        let checked = self.check().map_err(|error| self.report(&error))?;
+        // §58.4: the diagnostic keeps its structure so the CLI draws it through
+        // the selected format, exactly like `check` does. Collapsing it to the
+        // default line here is what used to hide `--format json`.
+        let checked = self.check().map_err(BuildError::Diagnostic)?;
         crate::build::executable_with(output, |object| {
             let program = crate::mono::lower_program(&self.parsed.ast, &checked)?;
-            crate::emit::compile_mono_to_object(&program, &checked, object)
+            crate::emit::compile_mono_to_object(&program, &checked, object, opt_level)
         })
+        .map_err(BuildError::Message)
     }
+}
+
+/// `Project::build` の失敗。§56 の検査の診断（CLI は §58.4 の形式で描く）と、
+/// 単相化・書き出しの失敗の文字列を分ける。分ける前は診断を既定の 1 行の
+/// 文字列に潰していたので、`build` / `run` / `test` は `--format json` を
+/// 選べなかった。
+#[derive(Debug)]
+pub enum BuildError {
+    Diagnostic(Diagnostic),
+    Message(String),
 }
 
 #[derive(Debug)]
@@ -465,6 +492,7 @@ fn collect_sources(
 
 fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.to_string_lossy().into_owned(),
@@ -481,6 +509,7 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
 /// 持たない診断にする。読む前の誤りなので、位置は入口の先頭に置く。
 pub fn input_diagnostic(input: &Path, message: &str) -> Diagnostic {
     Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: input.to_string_lossy().into_owned(),
@@ -627,6 +656,7 @@ fn read_file(
         None => std::fs::read_to_string(path).map_err(|error| io_error(&relative, error))?,
     };
     let mut tokens = crate::lexer::lex_full(&text).map_err(|error| Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: display.clone(),
@@ -634,7 +664,7 @@ fn read_file(
         col: error.col,
         end_line: error.line,
         end_col: error.col,
-        code: error.code.map(str::to_owned),
+        code: error.code.map(Into::into),
         message: error.message,
     })?;
     for token in &mut tokens {
@@ -700,6 +730,7 @@ fn role_error(tokens: &[Tok], path: &Path, root_file: bool) -> Option<Diagnostic
             || ((interface || !root_file) && outer && token.kind == TokKind::Def);
         if invalid {
             return Some(Diagnostic {
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.to_string_lossy().into_owned(),
@@ -758,6 +789,7 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
                     })
                 });
                 let error = Diagnostic {
+                    mentions: None,
                     suggestion: None,
                     related,
                     path: file.source.path.clone(),
@@ -785,13 +817,18 @@ fn library_roots(files: &[TokenFile]) -> (BTreeSet<Vec<String>>, Option<Diagnost
     (roots, duplicate)
 }
 
-/// §56: a position is written with the path of the file that holds it and with
-/// the line counted inside that file. Every file was lexed with the previous
-/// files' line counts added, so the checked line picks the file (§50).
+/// §56: the file a checked line belongs to, with the line rewritten inside it.
+/// Every file was lexed with the previous files' line counts added, so the
+/// checked line picks the file (§50).
+fn localize_line<'a>(files: &'a [SourceFile], line: &mut usize) -> Option<&'a SourceFile> {
+    let file = files.iter().rev().find(|file| file.offset < *line)?;
+    *line -= file.offset;
+    Some(file)
+}
+
 fn localize(files: &[SourceFile], path: &mut String, line: &mut usize) {
-    if let Some(file) = files.iter().rev().find(|file| file.offset < *line) {
+    if let Some(file) = localize_line(files, line) {
         *path = file.path.clone();
-        *line -= file.offset;
     }
 }
 
@@ -800,6 +837,14 @@ fn source_diagnostic(files: &[SourceFile], mut error: Diagnostic) -> Diagnostic 
         localize(files, &mut related.path, &mut related.line);
     }
     localize(files, &mut error.path, &mut error.line);
+    // §56: a mentioned position sits in the same file as the anchor, so only
+    // its line is rewritten; the column is already counted inside the line.
+    if let Some(mentions) = &mut error.mentions {
+        for mention in mentions.iter_mut() {
+            localize_line(files, &mut mention.0);
+        }
+    }
+    error.fill_mentions();
     for index in 0..files.len() {
         error.message = error.message.replace(&format!("file{index}$"), "");
     }

@@ -1,0 +1,13 @@
+// spec: §38
+// needs: prelude
+// expect: 3
+effect A Yield
+again yield(value: A): Void
+handler A Yield as Take(limit: Int)
+again yield value => resume () as rest ->
+  [limit, value, ...rest]
+return _ => [limit]
+def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i ->
+  loop (i - 1)
+  /if
+def main = Int.to_string (List.length (with Take(7) -> loop 1))

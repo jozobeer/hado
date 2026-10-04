@@ -191,10 +191,10 @@ anchor  = "宣言と異なる型引数"
 
 [[error]]
 code    = "E303"
-name    = "rail-type"
-section = "§34"
+name    = "discard-type"
+section = "§35"
 stage   = "型"
-anchor  = "`e as p? ->` の値 `e` は Option、`e ->` の値 `e` は効果を持つ式か Option。どちらでもない式"
+anchor  = "`e ->` の値 `e` が効果を持つ式でない式（`Option` を含む）。`as p? ->` の値 `e` が `Option` でない式"
 
 [[error]]
 code    = "E304"
@@ -293,13 +293,6 @@ name    = "catch-all-underscore"
 section = "§29"
 stage   = "冗長"
 anchor  = "`_`"
-
-[[error]]
-code    = "E504"
-name    = "question-underscore-binding"
-section = "§35"
-stage   = "冗長"
-anchor  = "`_?` の `_`"
 
 [[error]]
 code    = "E505"

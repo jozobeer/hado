@@ -72,14 +72,14 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
             (format!("{n} as _? -> Some(1)"), "E303", n.to_string()),
             (format!("{n} -> Some(1)"), "E303", n.to_string()),
             (
-                format!("Some({n}) as _? -> Some(1)"),
-                "E504",
-                "_".to_string(),
-            ),
-            (
                 format!("Some(Some({n})) as Some(x)? -> Some(x + 1)"),
                 "E402",
                 "Some(x)".to_string(),
+            ),
+            (
+                format!("Some(Some({n})) as Some(Some(x)) -> x + 1"),
+                "E402",
+                "Some(Some(x))".to_string(),
             ),
         ] {
             let padding = format!(
@@ -90,6 +90,58 @@ fn generated_rail_errors_preserve_stage_and_pattern_anchors() {
             rejected(&format!("{padding}def main = {body}"), code, &anchor);
         }
     }
+}
+
+/// §54 makes an Int main the exit code rather than a printed line. Ask the
+/// compiler for the entry's main type and, when it is Int, wrap the trailing
+/// body in `Int.to_string` so the stdout assertions keep measuring the value.
+fn wrap_entry(path: &std::path::Path) {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
+        .args(["check", "--print-type"])
+        .arg(path)
+        .output()
+        .unwrap();
+    // `check --print-type` renders an effectful Int as `Int {…}`; the effect
+    // row does not change §54's rule, so any Int spelling counts.
+    let ty = String::from_utf8_lossy(&output.stdout);
+    let ty = ty.trim();
+    if !output.status.success() || !(ty == "Int" || ty.starts_with("Int {")) {
+        return;
+    }
+    let source = std::fs::read_to_string(path).unwrap();
+    let marker = "def main =";
+    let Some(at) = source.rfind(marker) else {
+        return;
+    };
+    let after = source[at + marker.len()..].trim_start_matches([' ', '\t']);
+    let mut cut = after.len();
+    let mut start = after.find('\n').map(|i| i + 1);
+    while let Some(begin) = start {
+        let end = after[begin..]
+            .find('\n')
+            .map(|i| begin + i)
+            .unwrap_or(after.len());
+        let line = &after[begin..end];
+        if !(line.is_empty() || line.starts_with([' ', '\t']) || line.starts_with('/')) {
+            cut = begin;
+            break;
+        }
+        start = if end < after.len() {
+            Some(end + 1)
+        } else {
+            None
+        };
+    }
+    std::fs::write(
+        path,
+        format!(
+            "{}def main = Int.to_string ({}){}",
+            &source[..at],
+            &after[..cut],
+            &after[cut..]
+        ),
+    )
+    .unwrap();
 }
 
 fn execute(source: &str, expected: &str, serial: usize) {
@@ -104,6 +156,7 @@ fn run(source: &str, serial: usize) -> (Option<i32>, String, String) {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.hd");
     std::fs::write(&path, source).unwrap();
+    wrap_entry(&path);
     let build = std::process::Command::new(env!("CARGO_BIN_EXE_hado"))
         .arg("build")
         .arg(&path)
@@ -162,12 +215,33 @@ fn generated_option_chains_propagate_none_at_each_step() {
     let mut state = 0x1407;
     let n = random(&mut state, 1000) + 1;
     for fail in 0..4 {
+        // 破棄の段は `?` の束縛を使う。`e ->` は効果専用で、`Option` を伝播しない
+        // （第35節、E303）。
         let source = format!(
             "def first flag => if flag == 1 => None | Some({n})\n\
              def step flag stage => if flag == stage => None | Some(())\n\
-             def run flag => first flag as x? -> step flag 2 -> step flag 3 -> Some(x + 5)\n\
+             def run flag => first flag as x? -> step flag 2 as _? -> step flag 3 as _? -> Some(x + 5)\n\
              def unwrap | Some(x) => x | None => 0\n\
              def main = unwrap (run {fail})"
+        );
+        let expected = if fail == 0 { n + 5 } else { 0 };
+        // 同じ binary の他の連鎖テストと作業ディレクトリを分ける（`run` は
+        // `serial` ごとに一時ディレクトリを作る）。
+        execute(&source, &expected.to_string(), 200 + fail);
+    }
+}
+
+#[test]
+fn generated_absent_chains_answer_none_at_each_step() {
+    let mut state = 0x1407;
+    let n = random(&mut state, 1000) + 1;
+    for fail in 0..4 {
+        let source = format!(
+            "def first (flag: Int): Int {{Absent}} => if flag == 1 => absent | {n}\n\
+             def step (flag: Int, stage: Int): Void {{Absent}} => if flag == stage => absent | ()\n\
+             def run flag => first flag as x -> step flag 2 -> step flag 3 -> x + 5\n\
+             def unwrap | Some(x) => x | None => 0\n\
+             def main = unwrap (with Maybe -> run {fail})"
         );
         let expected = if fail == 0 { n + 5 } else { 0 };
         execute(&source, &expected.to_string(), 100 + fail);

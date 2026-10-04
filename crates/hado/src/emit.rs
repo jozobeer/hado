@@ -11,7 +11,23 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::parser::{Expr, Program};
 
-fn make_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
+/// `build` の Cranelift `opt_level` の既定。`docs/rounds/cranelift-opt-level.md`
+/// の計測で決めた（3 入力すべて 1.1 倍以上かつ比の中央値 2 倍以上のときだけ `speed`）。
+pub const BUILD_OPT_LEVEL: &str = "none";
+/// `hado run` の `opt_level` の既定。`build` と同じ条件に加えて、起動・コンパイル・
+/// リンク込みの end-to-end の比でも 3 入力すべて 1.1 倍以上であることを要求する。
+pub const RUN_OPT_LEVEL: &str = "none";
+
+/// 門番が 2 水準を測るための切り替え。`none` と `speed` だけを受ける。
+/// 既定を選ぶのはこのラウンドの成果物で、切り替えは計測の道具である。
+pub fn selected_opt_level(default: &str) -> String {
+    match std::env::var("HADO_OPT_LEVEL") {
+        Ok(level) if level == "none" || level == "speed" => level,
+        _ => default.to_string(),
+    }
+}
+
+fn make_isa(opt_level: &str) -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
     let mut flag_builder = settings::builder();
     flag_builder
         .set("is_pic", "true")
@@ -20,7 +36,7 @@ fn make_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
         .set("preserve_frame_pointers", "true")
         .map_err(|e| format!("{e:?}"))?;
     flag_builder
-        .set("opt_level", "none")
+        .set("opt_level", opt_level)
         .map_err(|e| format!("{e:?}"))?;
     let flags = settings::Flags::new(flag_builder);
     let isa = cranelift_native::builder()
@@ -45,7 +61,7 @@ fn build_expr(bcx: &mut FunctionBuilder<'_>, expr: &Expr) -> cranelift_codegen::
 /// object file exposing `hado_entry` (SystemV, Export). `hado_entry` calls
 /// the `tail` convention `hado_main`, prints the `i64` result, and returns 0.
 pub fn compile_to_object(prog: &Program, obj_path: &Path) -> Result<(), String> {
-    let isa = make_isa()?;
+    let isa = make_isa(BUILD_OPT_LEVEL)?;
     let builder = ObjectBuilder::new(isa, "hado_walk".to_string(), default_libcall_names())
         .map_err(|e| format!("{e:?}"))?;
     let mut module = ObjectModule::new(builder);
@@ -148,7 +164,8 @@ pub fn lower_mono_function(
     checked: &crate::Checked,
 ) -> Result<Function, String> {
     let checked = &checked.for_codegen();
-    let isa = make_isa()?;
+    // この ISA は `pointer_type` とレイアウトにだけ使い、最適化は module の ISA が持つ。
+    let isa = make_isa(BUILD_OPT_LEVEL)?;
     let signature = mono_signature(&source.signature, checked, isa.pointer_type())?;
     let mut function =
         Function::with_name_signature(UserFuncName::user(0, source.id.0 as u32), signature);
@@ -823,11 +840,12 @@ pub fn compile_mono_to_object(
     program: &crate::mono::Program,
     checked: &crate::Checked,
     path: &Path,
+    opt_level: &str,
 ) -> Result<(), String> {
     let checked = &checked.for_codegen();
     use crate::mono::{FunctionId, Signature as MonoSignature};
     let mut module = ObjectModule::new(
-        ObjectBuilder::new(make_isa()?, "hado", default_libcall_names())
+        ObjectBuilder::new(make_isa(opt_level)?, "hado", default_libcall_names())
             .map_err(|e| e.to_string())?,
     );
     let mut ids = std::collections::HashMap::new();
@@ -900,7 +918,7 @@ pub fn compile_mono_to_object(
         define_mono_function(&mut module, printer, checked, &ids)?;
     }
     let print_id = ids[&printers[0].id.0];
-    define_int_entry(&mut module, main_id, print_id)?;
+    define_entry(&mut module, main_id, print_id, &program.entry.ty())?;
     let bytes = module.finish().emit().map_err(|e| e.to_string())?;
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
@@ -981,10 +999,16 @@ fn define_mono_function(
         .map_err(|e| e.to_string())
 }
 
-fn define_int_entry(
+/// `hado_entry` is the OS's `main` (§54). When `main`'s type is Int its value
+/// *is* the exit code, so nothing is printed: 0..=255 is returned as it is and
+/// anything else is diagnosed before it is narrowed to the ABI's i32, so the OS
+/// never normalizes a negative value or 256. Every other type keeps the older
+/// rule -- print the value and return the printer's status.
+fn define_entry(
     module: &mut ObjectModule,
     main: cranelift_module::FuncId,
     print: cranelift_module::FuncId,
+    main_type: &crate::mono::Type,
 ) -> Result<(), String> {
     let mut context = module.make_context();
     context.func.signature = Signature::new(CallConv::SystemV);
@@ -1001,21 +1025,56 @@ fn define_int_entry(
     let block = builder.create_block();
     builder.switch_to_block(block);
     let main = module.declare_func_in_func(main, builder.func);
-    let print = module.declare_func_in_func(print, builder.func);
     let environment = builder
         .ins()
         .iconst(module.target_config().pointer_type(), 0);
     let call = builder.ins().call(main, &[environment]);
     let result = builder.inst_results(call)[0];
-    let printed = builder.ins().call(print, &[environment, result]);
-    let status = builder.inst_results(printed)[0];
-    let code = builder.ins().ireduce(clif_types::I32, status);
-    builder.ins().return_(&[code]);
+    if matches!(main_type, crate::mono::Type::Int) {
+        emit_int_exit_code(module, &mut builder, result)?;
+    } else {
+        let print = module.declare_func_in_func(print, builder.func);
+        let printed = builder.ins().call(print, &[environment, result]);
+        let status = builder.inst_results(printed)[0];
+        let code = builder.ins().ireduce(clif_types::I32, status);
+        builder.ins().return_(&[code]);
+    }
     builder.seal_all_blocks();
     builder.finalize(module.target_config());
     module
         .define_function(entry, &mut context)
         .map_err(|e| e.to_string())
+}
+
+/// Return an Int main's value as the exit code, or diagnose and return 1.
+fn emit_int_exit_code(
+    module: &mut ObjectModule,
+    builder: &mut FunctionBuilder<'_>,
+    result: cranelift_codegen::ir::Value,
+) -> Result<(), String> {
+    let out_of_range = crate::runtime_abi::RuntimeFunction::ExitCodeOutOfRange;
+    let declaration = out_of_range.declaration();
+    let signature = runtime_signature(out_of_range, module.target_config().pointer_type());
+    let id = module
+        .declare_function(declaration.symbol, Linkage::Import, &signature)
+        .map_err(|e| e.to_string())?;
+    let report = module.declare_func_in_func(id, builder.func);
+    let fits = builder.ins().icmp_imm_u(
+        cranelift_codegen::ir::condcodes::IntCC::UnsignedLessThanOrEqual,
+        result,
+        255,
+    );
+    let code = builder.create_block();
+    let diagnose = builder.create_block();
+    builder.ins().brif(fits, code, &[], diagnose, &[]);
+    builder.switch_to_block(code);
+    let narrowed = builder.ins().ireduce(clif_types::I32, result);
+    builder.ins().return_(&[narrowed]);
+    builder.switch_to_block(diagnose);
+    builder.ins().call(report, &[]);
+    let one = builder.ins().iconst(clif_types::I32, 1);
+    builder.ins().return_(&[one]);
+    Ok(())
 }
 
 fn import_function(

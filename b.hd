@@ -1,3 +1,0 @@
-def g n => n + (3)
-def main =
-  g (5) as x -> x

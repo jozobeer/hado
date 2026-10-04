@@ -94,7 +94,7 @@ from harness import accepted, printed, project, run_program
 GENERATOR = '''def rec generate (n: Int): Int List =>
   if n == 0 => []
   | [n % 7, ...generate (n - 1)]
-def main = List.length (generate 5)
+def main = Int.to_string (List.length (generate 5))
 '''
 accepted(project(sys.argv[1], 'a/check', {'main.hd': GENERATOR}, 'check'))
 result = run_program(sys.argv[1], 'a/build', {'main.hd': GENERATOR})
@@ -117,14 +117,14 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import accepted, project, run_program
 
-PLAIN = 'def f (n: Int): Int List => [n % 7]\ndef main = List.length (f 5)\n'
+PLAIN = 'def f (n: Int): Int List => [n % 7]\ndef main = Int.to_string (List.length (f 5))\n'
 MUTUAL = '''def rec g (n: Int): Int List =>
   if n == 0 => []
   | [n % 7, ...h (n - 1)]
 def rec h (n: Int): Int List =>
   if n == 0 => []
   | g (n - 1)
-def main = List.length (g 5)
+def main = Int.to_string (List.length (g 5))
 '''
 accepted(project(sys.argv[1], 'b/plain', {'main.hd': PLAIN}, 'check'))
 accepted(project(sys.argv[1], 'b/mutual', {'main.hd': MUTUAL}, 'check'))
@@ -178,7 +178,7 @@ BODY = '''def rec f (n: Int): Int =>
 '''
 unhandled = HEAD + BODY + 'def main = f 5\n'
 handler = HEAD + 'handler Ask as H\nonce ask => 3\nreturn x => x\n'
-handled = HEAD + 'handler Ask as H\nonce ask => 3\nreturn x => x\n' + BODY + 'def main = with H -> f 5\n'
+handled = HEAD + 'handler Ask as H\nonce ask => 3\nreturn x => x\n' + BODY + 'def main = Int.to_string (with H -> f 5)\n'
 found = diagnostic(project(sys.argv[1], 'd/plain', {'main.hd': unhandled}, 'check'), 'E706')
 assert found['message'] == 'main cannot have a user-defined effect', found
 accepted(project(sys.argv[1], 'd/handled', {'main.hd': handled}, 'check'))

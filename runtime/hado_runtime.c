@@ -274,6 +274,25 @@ int64_t hado_io_log(const HadoString *contents) {
   return wrote ? 0 : 4;
 }
 
+int64_t hado_io_log_error(const HadoString *contents) {
+  /* Same rule as hado_io_log, on stderr (§55). stderr is unbuffered by
+     default, but the failure still has to be observed here: a descriptor that
+     is closed or redirected to /dev/full reports it in fwrite or fflush. */
+  int wrote = fwrite(contents->bytes, 1, contents->length, stderr) == contents->length;
+  if (fputc('\n', stderr) == EOF) wrote = 0;
+  if (fflush(stderr) == EOF) wrote = 0;
+  return wrote ? 0 : 4;
+}
+
+/* §54: an Int main outside 0..=255 is diagnosed before it is narrowed to the
+   ABI's i32, so the OS never normalizes a negative value or 256. write(2) is
+   used because stderr's stream state is not this function's to trust. */
+void hado_exit_code_out_of_range(void) {
+  static const char message[] = "hado: exit code out of range\n";
+  ssize_t written = write(STDERR_FILENO, message, sizeof(message) - 1);
+  (void)written;
+}
+
 int64_t hado_io_read_stdin(int64_t ignored) {
   /* Intrinsic applications require a dummy argument; stdin is the only input. */
   (void)ignored;

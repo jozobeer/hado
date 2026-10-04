@@ -1,0 +1,6 @@
+// spec: §55
+// expect: 0001,0002,0003
+// needs: prelude
+def key_of | MapEntry(k, _) => k
+def main = Map.insert (Map.insert (Map.insert Map.empty "0003" 3) "0001" 1) "0002" 2 as m ->
+  String.join (List.map (Map.to_list m) key_of) ","

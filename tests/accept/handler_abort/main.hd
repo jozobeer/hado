@@ -1,6 +1,7 @@
 // spec: §38
 // expect: 0
+// needs: prelude
 handler Error as ToZero
 abort raise _ => 0
 return value => value
-def main = with ToZero -> raise { message = "caught" }
+def main = Int.to_string (with ToZero -> raise { message = "caught" })

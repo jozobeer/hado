@@ -53,8 +53,10 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
+# `Int` の `main` は印字せず終了コードになる（§54）。`run` の stdout を
+# 比べるので、`Int.to_string` で包んだ入口にする。
 root = project(Path(sys.argv[1]) / 'a/git', {
-    'main.hd': 'def main = 42\n',
+    'main.hd': 'def main = Int.to_string 42\n',
     '.git/config': '[core]\n\trepositoryformatversion = 0\n',
     '.git/HEAD': 'ref: refs/heads/main\n',
     '.git/objects/info/packs': '\n',
@@ -177,7 +179,9 @@ assert b'.probe.hd' in checked.stderr, checked.stderr
 
 # `.` 始まりのディレクトリを根にするときは、その中の普通の名前を読む。
 inner = project(Path(sys.argv[1]) / 'd/inner', {
-    '.scratch/main.hd': 'def main = inner::Util.helper 3\n',
+    # `Int` の `main` は印字せず終了コードになる（§54）。stdout を比べる
+    # ので、`Int.to_string` で包む。
+    '.scratch/main.hd': 'def main = Int.to_string (inner::Util.helper 3)\n',
     '.scratch/inner/util.hd': 'library\nmodule Util\ndef helper(x: Int): Int Pure\n/module\n\nimplement Util as Util\ndef helper x => x\n/implement\n',
 })
 checked = run('check', str(inner / '.scratch/main.hd'))

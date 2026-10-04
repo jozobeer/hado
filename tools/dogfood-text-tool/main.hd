@@ -1,0 +1,114 @@
+// dogfood-text-tool: 第56節のエラーコード表と tests/reject の // error: タグを突き合わせ、
+// 欠け（表にあってコーパスに無い）と余り（コーパスにあって表に無い）を印字する。
+// 入力は引数で受ける（第1引数 = 仕様の markdown、第2引数 = 拒否コーパスの根）。
+// 出力は IoDefault.log の行で、差分の有無を main の Int として返す（第54節の終了コード）。
+
+// --- 字句: コードの綴りは `E` の後に数字 3 つ ---
+
+// ASCII の数字 1 文字か。Char を Int へ開いて範囲で見る。
+def is_digit_char ch => Char.to_int ch as value ->
+  if 48 <= value => value <= 57 | false
+
+// index 番目の 1 文字。範囲は呼ぶ側が length で保証する。
+def char_at text index => String.get text index
+
+// `E` の後に数字 3 つの 4 文字か。Char の読みは効果を持つので、条件の外で束縛する。
+def is_code_word text => String.length text as size ->
+  if size == 4 => has_code_chars text | false
+def has_code_chars text => char_at text 0 as first ->
+  char_at text 1 as second ->
+  char_at text 2 as third ->
+  char_at text 3 as fourth ->
+  first == 'E' && is_digit_char second && is_digit_char third && is_digit_char fourth
+
+// --- 行とセルの切り出し ---
+
+def lines_of text => String.split text "\n"
+def token_of text => String.trim text
+def cell_at text separator index => Option.unwrap_or (List.nth (String.split text separator) index) ""
+def field_at text index => cell_at text "|" index
+def arg_or argv index fallback => Option.unwrap_or (List.nth argv index) fallback
+def read_lines path => IoDefault.read_file path as bytes ->
+  lines_of (Bytes.to_string bytes)
+def under root name => String.concat root (String.concat "/" name)
+def main_path reject name => under (under reject name) "main.hd"
+
+// `// error: E100` の行から E100 を返す。形が違えば ""。
+def tag_of line => token_of line as text ->
+  if String.starts_with text "// error:" => tag_value text | ""
+def tag_value text => token_of (cell_at text ":" 1)
+
+// --- 表の走査（第56節だけを読む） ---
+
+type SpecScan = { inside: Bool; rows: String List }
+def scan_start = { inside = false; rows = [] }
+def is_table_head text => String.starts_with text "## 56."
+def is_heading text => String.starts_with text "## "
+def is_row text => String.starts_with text "|"
+def rec scan_spec lines acc => if lines | [] => acc.rows | [line, ...rest] => scan_spec rest (scan_one line acc)
+
+// 節の見出しで入り、次の見出しで出る。節の中の表の行だけをコードとして拾う。
+def scan_one line acc => token_of line as text ->
+  if  | is_table_head text => { inside = true; rows = acc.rows } | acc.inside && is_heading text => { inside = false; rows = acc.rows } | acc.inside => { inside = true; rows = row_codes text acc.rows } | acc
+
+// 表の行の第1セルがコードなら積む。見出し行や区切り行は字句で落ちる。
+def row_codes text rows => if is_row text => add_row_code (field_at text 1) rows | rows
+def add_row_code cell rows => token_of cell as code ->
+  is_code_word code as ok ->
+  if ok => [code, ...rows] | rows
+
+// --- 集計（第55節の Map） ---
+
+def bump_code map code => if code == "" => map | Map.insert map code (Option.unwrap_or (Map.find map code) 0 + 1)
+def count_codes codes => List.fold codes Map.empty fn(acc, code => bump_code acc code)
+
+// --- 拒否コーパスの走査 ---
+
+def tags_of_lines lines => List.filter (List.map lines fn(line => tag_of line)) fn(code => is_code_word code)
+def rec read_codes reject names acc => if names | [] => acc | [name, ...rest] => read_code reject name rest acc
+
+// 名前がコードの綴りでない項目（ファイルなど）は読まない。
+def rec read_code reject name rest acc => is_code_word name as ok ->
+  if ok => read_codes reject rest (List.append acc (tags_of_lines (read_lines (main_path reject name)))) | read_codes reject rest acc
+def reject_codes reject => count_codes (read_codes reject (IoDefault.read_dir reject) [])
+
+// --- 差分 ---
+
+def entry_key | MapEntry(key, _) => key
+def entry_count | MapEntry(_, count) => count
+def map_codes map => List.map (Map.to_list map) entry_key
+def map_size map => List.length (Map.to_list map)
+def is_absent map code => if Option.is_some (Map.find map code) => false | true
+def missing_codes table corpus => List.filter (map_codes table) fn(code => is_absent corpus code)
+def extra_codes table corpus => List.filter (map_codes corpus) fn(code => is_absent table code)
+def duplicates map => List.filter (Map.to_list map) fn(entry => entry_count entry > 1)
+
+// --- 印字 ---
+
+def render_missing code => String.concat "missing: " code
+def render_extra code => String.concat "extra: " code
+def render_duplicate | MapEntry(key, count) => String.concat "duplicate: " (String.concat key (String.concat " " (Int.to_string count)))
+def count_word label value => String.concat label (Int.to_string value)
+def count_line table corpus missing extra dups => String.join [String.concat "spec=" (Int.to_string (map_size table)), count_word "reject=" (map_size corpus), count_word "missing=" (List.length missing), count_word "extra=" (List.length extra), count_word "duplicate=" (List.length dups)] " "
+
+// 表もコーパスも空なら、走査そのものが失敗している。差分として数える。
+def empty_line label size => if size == 0 => [String.concat "empty: " label] | []
+def empty_lines table corpus => List.append (empty_line "spec table" (map_size table)) (empty_line "reject corpus" (map_size corpus))
+def diff_lines table corpus missing extra dups => List.append (List.append (empty_lines table corpus) (List.append (List.map missing render_missing) (List.map extra render_extra))) (List.map dups render_duplicate)
+def report table corpus missing extra dups => List.append (diff_lines table corpus missing extra dups) [String.concat "dogfood-text-tool: " (count_line table corpus missing extra dups)]
+def total table corpus missing extra dups => List.length (empty_lines table corpus) + List.length missing + List.length extra + List.length dups
+def exit_code count => if count == 0 => 0 | 1
+
+def main = args as argv ->
+  arg_or argv 0 "docs/spec.md" as spec_path ->
+  arg_or argv 1 "tests/reject" as reject_path ->
+  read_lines spec_path as spec_lines ->
+  reject_codes reject_path as corpus ->
+  count_codes (scan_spec spec_lines scan_start) as table ->
+  missing_codes table corpus as missing ->
+  extra_codes table corpus as extra ->
+  duplicates table as table_dups ->
+  duplicates corpus as corpus_dups ->
+  List.append table_dups corpus_dups as dups ->
+  IoDefault.log (String.join (report table corpus missing extra dups) "\n") ->
+  exit_code (total table corpus missing extra dups)

@@ -1,6 +1,7 @@
 // spec: §20
 // expect: 3
 // item: tuple
+// needs: prelude
 def add x y => x + y
 def apply2 f x y => f x y
-def main = apply2 add 1 2
+def main = Int.to_string (apply2 add 1 2)

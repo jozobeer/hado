@@ -408,7 +408,7 @@ impl Checker<'_> {
             }
             let message = match constraint.code {
                 "E308" => "effects are not allowed in branch conditions",
-                "E303" => "`e ->` requires an effect or Option",
+                "E303" => "`e ->` requires an effect",
                 _ => "effect row mismatch",
             };
             self.deferred.push(self.error(
@@ -1738,6 +1738,7 @@ impl Checker<'_> {
             })
         });
         Diagnostic {
+            mentions: None,
             suggestion: None,
             related,
             path: self.path.into(),
@@ -1745,7 +1746,7 @@ impl Checker<'_> {
             col: span.col,
             end_line: span.line,
             end_col: span.col,
-            code: code.map(str::to_owned),
+            code: code.map(Into::into),
             message: message.into(),
         }
     }
@@ -2558,6 +2559,8 @@ impl Checker<'_> {
         Ok(result)
     }
 
+    /// §34・§35: `e as p? ->`（`pattern` は `Some`）は `Option` の伝播、`e ->`
+    /// （`None`）は効果の継続。`?` の無い `e ->` は `Option` を受けない（E303）。
     fn propagation(
         &mut self,
         pattern: Option<&Pattern>,
@@ -2577,6 +2580,11 @@ impl Checker<'_> {
             self.values = saved;
             checked?;
             return Ok(Ty::Error);
+        }
+        // `?` の無い `e ->` は効果の破棄である。`Option` の中身を取り出すのは
+        // `as p? ->` の仕事なので、`Option` をここに置くと E303 とする。
+        if pattern.is_none() && self.option_container(&container) {
+            return Err(self.error(value.span, Some("E303"), "`e ->` requires an effect"));
         }
         if self.option_container(&container)
             || (pattern.is_some() && matches!(self.inference.resolve(&container), Ty::Var(_)))
@@ -2631,6 +2639,29 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&result))
     }
 
+    fn propagation_body(
+        &mut self,
+        pattern: Option<&Pattern>,
+        payload: &Ty,
+        body: &Node,
+    ) -> Result<Ty, Diagnostic> {
+        if let Some(pattern) = pattern {
+            self.pattern(pattern, payload)?;
+            self.check_irrefutable(pattern);
+        }
+        self.expression(body)
+    }
+
+    fn propagation_types(&mut self, container: &Ty, span: Span) -> Result<(Ty, Ty), Diagnostic> {
+        match self.inference.resolve(container) {
+            Ty::Adt(name, args) if name == "Option" && args.len() == 1 => {
+                let output = self.inference.fresh();
+                Ok((args[0].clone(), Ty::Adt(name, vec![output])))
+            }
+            _ => Err(self.error(span, Some("E303"), "`e as p? ->` requires Option")),
+        }
+    }
+
     fn constructor_groups(&self) -> HashMap<String, Vec<(String, usize)>> {
         let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
         for (name, scheme) in &self.constructors {
@@ -2662,29 +2693,6 @@ impl Checker<'_> {
                 Some("E402"),
                 "binding pattern does not cover its type",
             ));
-        }
-    }
-
-    fn propagation_body(
-        &mut self,
-        pattern: Option<&Pattern>,
-        payload: &Ty,
-        body: &Node,
-    ) -> Result<Ty, Diagnostic> {
-        if let Some(pattern) = pattern {
-            self.pattern(pattern, payload)?;
-            self.check_irrefutable(pattern);
-        }
-        self.expression(body)
-    }
-
-    fn propagation_types(&mut self, container: &Ty, span: Span) -> Result<(Ty, Ty), Diagnostic> {
-        match self.inference.resolve(container) {
-            Ty::Adt(name, args) if name == "Option" && args.len() == 1 => {
-                let output = self.inference.fresh();
-                Ok((args[0].clone(), Ty::Adt(name, vec![output])))
-            }
-            _ => Err(self.error(span, Some("E303"), "`e as p? ->` requires Option")),
         }
     }
 
@@ -3344,8 +3352,9 @@ impl Checker<'_> {
         args: &[Node],
         body: &Node,
     ) -> Result<Ty, Diagnostic> {
+        let mut arg_tys = Vec::new();
         for arg in args {
-            self.expression(arg)?;
+            arg_tys.push(self.expression(arg)?);
         }
         let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
         let Some(effect) = self.handlers.get(&handler.name).cloned() else {
@@ -3359,7 +3368,7 @@ impl Checker<'_> {
         let Some(decl) = self.handler_decls.get(&handler.name).cloned() else {
             return Ok(ty);
         };
-        self.handler_answer(&decl, &ty, &row, handler.span)
+        self.handler_answer(&decl, &ty, &row, handler.span, &arg_tys, args)
     }
 
     fn handler_answer(
@@ -3368,13 +3377,43 @@ impl Checker<'_> {
         body: &Ty,
         row: &Row,
         span: Span,
+        arg_tys: &[Ty],
+        args: &[Node],
     ) -> Result<Ty, Diagnostic> {
         let answer = self.inference.fresh();
         let saved = self.values.clone();
-        let result = self.infer_handler_arms(handler, body, row, &answer, span);
+        let result = self
+            .bind_handler_params(handler, arg_tys, args, span)
+            .and_then(|()| self.infer_handler_arms(handler, body, row, &answer, span));
         self.values = saved;
         result?;
         Ok(self.inference.resolve(&answer))
+    }
+
+    /// §38: `with` の実引数を handler の宣言型と照合し、値引数を全ての腕の
+    /// スコープに入れる。個数は E301、型は E305（アンカーは食い違った実引数）。
+    fn bind_handler_params(
+        &mut self,
+        handler: &HandlerDecl,
+        arg_tys: &[Ty],
+        args: &[Node],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if handler.params.len() != arg_tys.len() {
+            return Err(self.error(span, Some("E301"), "handler argument arity mismatch"));
+        }
+        for ((param, arg_ty), arg) in handler.params.iter().zip(arg_tys).zip(args) {
+            let declared = match &param.ty {
+                Some(annotation) => self.annotation(annotation, param.span)?,
+                None => self.inference.fresh(),
+            };
+            self.unify(&declared, arg_ty, arg.span)?;
+            if param.name != "_" {
+                self.values
+                    .insert(param.name.clone(), Scheme::monomorphic(declared));
+            }
+        }
+        Ok(())
     }
 
     fn infer_handler_arms(

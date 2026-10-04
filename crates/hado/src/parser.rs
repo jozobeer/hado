@@ -1,7 +1,8 @@
 //! Recursive-descent parser for the hado grammar of 付録C, §5 and §7.
 //!
 //! Covers the full v0.1 syntax: named definitions (`def` / `def rec`),
-//! local bindings (`let` / `let p? =` / `do`), anonymous functions (`fn`),
+//! local bindings (`let` / `do`, and the Option binding `e as p? ->`),
+//! anonymous functions (`fn`),
 //! the three branch forms (Boolean branch, condition column, pattern
 //! branch), patterns, records, list literals, modules (`sig` / `struct`)
 //! and type definitions. Every node carries a `Span`.
@@ -101,6 +102,8 @@ pub enum NodeKind {
         value: Box<Node>,
         body: Box<Node>,
     },
+    /// §34: `e as p? -> body`。`e` の `Option` の中身を `p` に束縛し、`None` なら
+    /// `None` を伝播する。旧形の `let p? =` は E100 で、このノードにはならない。
     LetQ {
         pat: Pattern,
         value: Box<Node>,
@@ -549,6 +552,27 @@ pub(crate) fn related_label(code: &str) -> Option<&'static str> {
     }
 }
 
+/// §56: the positions a diagnostic's message writes out, in the checked
+/// coordinates. It is boxed so a diagnostic without one keeps its size; almost
+/// every diagnostic stands on its anchor alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mentions(Vec<(usize, usize)>);
+
+impl Mentions {
+    /// A boxed list, ready for `Diagnostic::mentions`.
+    pub fn boxed(positions: impl IntoIterator<Item = (usize, usize)>) -> Option<Box<Self>> {
+        Some(Box::new(Self(positions.into_iter().collect())))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.0.iter().copied()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut (usize, usize)> {
+        self.0.iter_mut()
+    }
+}
+
 /// One-line diagnostic (`<path>:<line>:<col>: error[CODE]: <message>` for
 /// E1xx, plain `error: <message>` otherwise). A related position stays on the
 /// same line, because one run reports one diagnostic (§56). The end is the
@@ -561,10 +585,19 @@ pub struct Diagnostic {
     pub col: usize,
     pub end_line: usize,
     pub end_col: usize,
-    pub code: Option<String>,
+    /// §56: the code is a fixed token (`E501`), so it is a boxed `str` and not
+    /// a `String`; `Diagnostic` stays inside clippy's `result_large_err` budget
+    /// now that it carries `mentions`.
+    pub code: Option<Box<str>>,
     pub message: String,
     pub related: Option<Box<Related>>,
     pub suggestion: Option<Suggestion>,
+    /// §56: the positions the message writes out. `message` holds `{0}`,
+    /// `{1}`, ... where each one goes. Every file was lexed with the previous
+    /// files' lines added (§50), so `source_diagnostic` rewrites them into the
+    /// file that holds them and then fills the message; a single-file path
+    /// fills them with the checked coordinates, which are the file's own.
+    pub mentions: Option<Box<Mentions>>,
 }
 
 /// 形の提示（§58.4）。書き換え（第57節）ではないので `fmt` も `--fix` も適用しない。
@@ -605,6 +638,21 @@ impl Diagnostic {
         self.col = span.col;
         self.end_line = span.end_line;
         self.end_col = span.end_col;
+    }
+
+    /// §56: write the mentioned positions into `message`, which holds `{0}`,
+    /// `{1}`, ... for them. Call it once, after the positions are in the
+    /// coordinates of the file the message is read with.
+    pub fn fill_mentions(&mut self) {
+        let Some(mentions) = self.mentions.take() else {
+            return;
+        };
+        for (index, (line, col)) in mentions.iter().enumerate() {
+            self.message = self
+                .message
+                .replace(&format!("{{{index}}}"), &format!("{line}:{col}"));
+        }
+        self.mentions = Some(mentions);
     }
 }
 
@@ -675,6 +723,7 @@ pub fn parse(toks: &[Tok]) -> Result<Program, String> {
 
 fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
     Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.to_string(),
@@ -682,7 +731,7 @@ fn lex_error_to_diag(e: LexError, path: &str) -> Diagnostic {
         col: e.col,
         end_line: e.line,
         end_col: e.col,
-        code: e.code.map(|s| s.to_string()),
+        code: e.code.map(Into::into),
         message: e.message,
     }
 }
@@ -871,6 +920,7 @@ impl Parser<'_> {
         message: impl Into<String>,
     ) -> Diagnostic {
         Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: self.path.to_string(),
@@ -878,7 +928,7 @@ impl Parser<'_> {
             col: s.col,
             end_line: s.end_line,
             end_col: s.end_col,
-            code: Some(code.unwrap_or("E100").to_string()),
+            code: Some(code.unwrap_or("E100").into()),
             message: message.into(),
         }
     }
@@ -1950,8 +2000,9 @@ impl Parser<'_> {
 
     // --- expressions ---
 
-    /// §11・§34・§35: 束縛は `e as p ->`、破棄は `e ->`。`let` と `do` は E100。
-    /// `e as p ->`・`e as p? ->`・`e ->` は `Let`・`LetQ`・`DoQ` へ写す。
+    /// §11・§34・§35: 束縛は `e as p ->`、Option の束縛は `e as p? ->`、破棄は `e ->`。
+    /// `let`・`do`・旧形の `let p? =` は E100。`e as p ->`・`e as p? ->`・`e ->` は
+    /// `Let`・`LetQ`・`DoQ` へ写す。
     fn parse_expr(&mut self) -> Result<Node, Diagnostic> {
         if self.converting {
             return match self.kind() {
@@ -2036,6 +2087,7 @@ impl Parser<'_> {
     /// 閉じの不足を E100 として報告する。`canonical form:` に直した綴りを添える。
     fn report_violation(&mut self, span: Span, message: &str, canonical: String) {
         self.diagnostics.push(Diagnostic {
+            mentions: None,
             suggestion: None,
             related: None,
             path: self.path.to_string(),
@@ -2067,6 +2119,7 @@ impl Parser<'_> {
             let suggestion = (arm_body && matches!(node.kind, NodeKind::BoolBranch { .. }))
                 .then_some(Suggestion::ArmConditions);
             return Err(Diagnostic {
+                mentions: None,
                 suggestion,
                 ..self.error_at(
                     sp,
@@ -2817,6 +2870,7 @@ impl Parser<'_> {
         // branch として最後まで成るときだけ、綴りを添える。
         if self.kind() == &TokKind::KwIf && self.boolean_branch_ahead() {
             return Err(Diagnostic {
+                mentions: None,
                 suggestion: Some(Suggestion::ArmConditions),
                 ..self.error(
                     Some("E101"),
@@ -3081,26 +3135,20 @@ impl Parser<'_> {
         let span = self.span();
         self.bump();
         let pat = self.parse_pattern()?;
-        let question = self.kind() == &TokKind::Question;
-        if question {
-            self.bump();
+        if self.kind() == &TokKind::Question {
+            return Err(self.error(
+                Some("E100"),
+                "`let p? =` is removed; absence is an effect (bind with `e as p ->`)",
+            ));
         }
         self.expect(&TokKind::Eq)?;
         let value = self.parse_pipe()?;
         self.expect(&TokKind::DashArrow)?;
         let body = self.parse_expr()?;
-        let kind = if question {
-            NodeKind::LetQ {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
-        } else {
-            NodeKind::Let {
-                pat,
-                value: Box::new(value),
-                body: Box::new(body),
-            }
+        let kind = NodeKind::Let {
+            pat,
+            value: Box::new(value),
+            body: Box::new(body),
         };
         Ok(Node {
             kind,
@@ -3516,6 +3564,7 @@ pub fn canonical(node: &Node) -> String {
         NodeKind::Let { pat, value, body } => {
             format!("({} as {pat} -> {})", canonical(value), canonical(body))
         }
+        // §34: Option の束縛は `?` を pattern の直後に置く。
         NodeKind::LetQ { pat, value, body } => {
             format!("({} as {pat}? -> {})", canonical(value), canonical(body))
         }

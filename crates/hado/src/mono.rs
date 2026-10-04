@@ -514,6 +514,12 @@ struct Lowerer {
     default_operations: std::collections::HashMap<String, String>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
     handler_stack: Vec<crate::parser::HandlerDecl>,
+    /// `handler_stack` と同じ長さ。各 `with` の値引数のうち `_` 以外を、いま
+    /// lower しているフレームで参照できる id と型で持つ。`with` の本体では
+    /// `with` の位置の変数、単相化した関数の中では capture の id である。
+    /// `self.scope` には入れない。値引数の名前は腕からだけ見えるので、
+    /// 本体の利用者の束縛を覆ってはならない（§38）。
+    frame_value_args: Vec<Vec<(String, (usize, Type))>>,
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
     context_answer: Option<Type>,
@@ -532,6 +538,15 @@ struct Lowerer {
     next_function: usize,
     scope: std::collections::BTreeMap<String, (usize, Type)>,
     next: usize,
+}
+
+/// handler の値引数をこのフレームへ束ねた結果。
+#[derive(Default)]
+struct HandlerValueBindings {
+    /// `with` の位置で 1 回だけ評価するための `Let` の並び。
+    lets: Vec<(usize, Expression)>,
+    /// `_` 以外の値引数を腕から見えるようにするための表。
+    named: Vec<(String, (usize, Type))>,
 }
 
 /// `with` ごとの型を差し替えるとき、元の表の値を戻せるよう控える。
@@ -1600,6 +1615,9 @@ struct ConvertCtx {
     convert_id: FunctionId,
     convert_sig: Signature,
     forwarding: bool,
+    /// §38: handler の値引数のうち `_` 以外。convert 関数の追加の引数で、
+    /// 腕の本体からはこの id で見える。継続が convert を呼び直すときにも渡す。
+    value_params: Vec<(usize, Type)>,
 }
 
 impl ConvertCtx {
@@ -1757,9 +1775,33 @@ impl Lowerer {
         }
         let types: Vec<_> = arguments.iter().map(Expression::ty).collect();
         let (id, signature) = self.specialize_function(name, types, expected)?;
-        Expression::call_direct(id, &signature, arguments)
+        self.specialized_call(id, &signature, arguments)
     }
 
+    /// 単相化した関数を呼ぶ。フレームの値引数があるときは、それを capture に
+    /// 載せた閉包にして呼ぶ。呼んだ先の `once` の腕が §38 の値引数を参照する
+    /// ためである。値引数が無ければ今までどおり直接呼ぶ。
+    fn specialized_call(
+        &mut self,
+        id: FunctionId,
+        signature: &Signature,
+        arguments: Vec<Expression>,
+    ) -> Result<Expression, String> {
+        let captures = self.frame_value_captures();
+        if captures.is_empty() {
+            return Expression::call_direct(id, signature, arguments);
+        }
+        Expression::call_closure(
+            Expression::MakeClosure {
+                function: id,
+                signature: signature.clone(),
+                captures,
+            },
+            arguments,
+        )
+    }
+
+    /// §34: `e as p? ->` は `Some` の腕で `p` を束縛し、`None` の腕で `None` を返す。
     fn propagation(
         &mut self,
         pattern: Option<&crate::parser::Pattern>,
@@ -3103,6 +3145,7 @@ impl Lowerer {
     fn abort_raise(
         &mut self,
         node: &crate::parser::Node,
+        name: &str,
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
         let ty = self
@@ -3115,11 +3158,12 @@ impl Lowerer {
             Err(UnresolvedType::Variable(_)) => Type::Void,
             Err(_) => return Err("abort result type is not concrete".into()),
         };
-        self.abort_raise_with(arguments, result)
+        self.abort_raise_with(name, arguments, result)
     }
 
     fn abort_raise_with(
         &mut self,
+        fallback: &str,
         arguments: Vec<Expression>,
         result: Type,
     ) -> Result<Expression, String> {
@@ -3129,7 +3173,7 @@ impl Lowerer {
                 field: "message".into(),
                 result: Type::String,
             },
-            0 => Expression::Constant(Constant::String(String::new())),
+            0 => Expression::Constant(Constant::String(fallback.into())),
             _ => return Err("abort operation has too many arguments".into()),
         };
         let call = Expression::call_runtime(
@@ -3155,7 +3199,7 @@ impl Lowerer {
         };
         match self.handler_for("raise") {
             Some(_) => self.abort_outcome_with(vec![exception], "raise", success),
-            None => self.abort_raise_with(vec![exception], success),
+            None => self.abort_raise_with("raise", vec![exception], success),
         }
     }
 
@@ -3179,7 +3223,7 @@ impl Lowerer {
                 if self.handler_for(name).is_some() {
                     self.abort_outcome(node, arguments, name)
                 } else {
-                    self.abort_raise(node, arguments)
+                    self.abort_raise(node, name, arguments)
                 }
             }
         }
@@ -3203,9 +3247,13 @@ impl Lowerer {
         // 内側の `with` は外側の snapshot に既に入っている。再適用すると
         // handler 腕の共有節点が最後の答え型で上書きされる。
         let installed = self.begin_with_types(node.span);
+        // §38: 値引数は `with` の位置で 1 回だけ評価する。名前は腕からだけ
+        // 見えるので `self.scope` には入れず、`frame_value_args` に持つ。
+        let mut evaluated = Vec::new();
         for arg in args {
-            let _ = self.expression(arg)?;
+            evaluated.push(self.expression(arg)?);
         }
+        let bindings = self.handler_value_bindings(&handler, evaluated)?;
         let needs_answer = handler.arms.iter().any(|arm| {
             matches!(
                 arm,
@@ -3226,16 +3274,27 @@ impl Lowerer {
         }
         let saved = std::mem::replace(&mut self.rewriting_return, false);
         self.handler_stack.push(handler.clone());
+        let named = bindings.named.clone();
+        self.frame_value_args.push(named);
         self.handler_answers.push(answer.clone());
         let value = self.completion(body);
         self.handler_stack.pop();
+        self.frame_value_args.pop();
         self.handler_answers.pop();
         self.rewriting_return = saved;
         if answer.is_some() {
             self.again_answers.pop();
         }
         self.end_with_types(installed);
-        value
+        let mut value = value?;
+        for (id, argument) in bindings.lets.into_iter().rev() {
+            value = Expression::Let {
+                id,
+                value: Box::new(argument),
+                body: Box::new(value),
+            };
+        }
+        Ok(value)
     }
 
     fn begin_with_types(&mut self, span: crate::parser::Span) -> Option<InstalledTypes> {
@@ -3256,6 +3315,61 @@ impl Lowerer {
         if let Some(installed) = installed {
             self.restore_with_types(installed);
         }
+    }
+
+    /// handler の値引数を、このフレームで参照できる id に束ねる。
+    fn handler_value_bindings(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+        arguments: Vec<Expression>,
+    ) -> Result<HandlerValueBindings, String> {
+        if handler.params.len() != arguments.len() {
+            return Err("handler value argument arity mismatch".into());
+        }
+        let mut bindings = HandlerValueBindings::default();
+        for (param, argument) in handler.params.iter().zip(arguments) {
+            let id = self.next;
+            self.next += 1;
+            let ty = argument.ty();
+            if param.name != "_" {
+                bindings.named.push((param.name.clone(), (id, ty)));
+            }
+            bindings.lets.push((id, argument));
+        }
+        Ok(bindings)
+    }
+
+    /// いま lower しているフレームの値引数を、そのまま値として取り出す。
+    /// `carry_frame_value_args` と同じ順に並べる。腕を lower している間は、
+    /// その腕の handler を数えない（`specialized_name` と同じ理由である。
+    /// 腕は自分の handler の外で走るので、呼んだ先もその handler では捕まえない）。
+    fn frame_value_captures(&self) -> Vec<Expression> {
+        self.frame_value_args
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.arm_handlers.contains(index))
+            .flat_map(|(_, values)| values.iter())
+            .map(|(_, (id, ty))| Expression::Variable {
+                id: *id,
+                ty: ty.clone(),
+            })
+            .collect()
+    }
+
+    /// フレームの値引数を、これから lower する関数（単相化した `def`、lambda、
+    /// 継続）へ capture として引き継ぐ。capture の id はこのフレームのまま使う。
+    /// 閉包は環境の値をその id へ読み戻すので、本体の中でも同じ id で参照できる
+    /// （lambda が `self.scope` の束縛を capture にするのと同じ形である）。
+    /// 載せる組は handler の並びだけで決まる（`frame_value_captures` と同じ）。
+    /// 同じ単相化を共有する呼び出し位置で capture の数が食い違わないためである。
+    fn carry_frame_value_args(&self) -> Vec<(usize, Type)> {
+        self.frame_value_args
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.arm_handlers.contains(index))
+            .flat_map(|(_, values)| values.iter())
+            .map(|(_, (id, ty))| (*id, ty.clone()))
+            .collect()
     }
 
     fn install_with_types(&mut self, types: &crate::WithTypes) -> InstalledTypes {
@@ -3317,7 +3431,7 @@ impl Lowerer {
             .map_err(|_| "default operation result type is not concrete")?;
         let parameters = arguments.iter().map(Expression::ty).collect();
         let (id, signature) = self.specialize_function(&definition, parameters, Some(&expected))?;
-        Expression::call_direct(id, &signature, arguments)
+        self.specialized_call(id, &signature, arguments)
     }
 
     fn handled_operation(
@@ -3342,14 +3456,36 @@ impl Lowerer {
                 _ => None,
             })
             .ok_or_else(|| format!("missing handler arm for {name}"))?;
-        self.with_params(&params, arguments, |this| {
+        // §38: `once` の腕は操作の位置で走る。値引数の名前はこのフレームの値
+        // （`with` の位置の変数、または単相化した関数の capture）を指す。呼んだ
+        // 関数の引数が同じ名前でも、腕から見えるのは値引数の方である。操作の
+        // 引数はこの後に束ねるので、名前が重なれば操作の引数が勝つ。
+        let saved_scope = self.install_handler_frame_values(&handler);
+        let result = self.with_params(&params, arguments, |this| {
             let saved = std::mem::replace(&mut this.rewriting_return, true);
             let entered = this.enter_arm(&handler);
             let result = this.expression(&body);
             this.rewriting_return = saved;
             this.leave_arm(entered);
             result
-        })
+        });
+        self.restore_value_params(saved_scope);
+        result
+    }
+
+    /// handler の値引数の名前を、このフレームの値に向け直す。戻すための元の
+    /// 値を返す。腕の本体は handler の宣言の中にあり、`with` の本体の束縛は
+    /// 見えないので、腕から見える値引数はこの表だけで決まる。
+    fn install_handler_frame_values(
+        &mut self,
+        handler: &crate::parser::HandlerDecl,
+    ) -> Vec<(String, Option<(usize, Type)>)> {
+        let named = self
+            .handler_index(handler)
+            .and_then(|index| self.frame_value_args.get(index))
+            .cloned()
+            .unwrap_or_default();
+        self.install_value_params(&named)
     }
 
     fn with_params(
@@ -3749,7 +3885,10 @@ impl Lowerer {
                 self.scope.insert(name.clone(), binding.clone());
             }
         }
-        let captures: Vec<_> = self.scope.values().cloned().collect();
+        // §38: 外側の `with` の値引数も capture に載せる。継続の本体が呼ぶ
+        // 関数の `once` の腕が値引数を参照できるようにするためである。
+        let mut captures: Vec<_> = self.scope.values().cloned().collect();
+        captures.extend(self.carry_frame_value_args());
         let param = self.next;
         self.next += 1;
         let id = FunctionId(self.next_function);
@@ -3828,7 +3967,12 @@ impl Lowerer {
         if self.rewriting_return {
             return Ok(value);
         }
-        self.apply_return_arm(&handler, value)
+        // §38: `return` の腕も値引数を見る。腕の本体は handler の宣言の中に
+        // あり、`with` の本体の束縛は見えない。
+        let saved_scope = self.install_handler_frame_values(&handler);
+        let result = self.apply_return_arm(&handler, value);
+        self.restore_value_params(saved_scope);
+        result
     }
 
     fn take_done(&mut self, value: Expression) -> Result<Expression, String> {
@@ -3888,22 +4032,51 @@ impl Lowerer {
         self.next_function += 1;
         let convert_param = self.next;
         self.next += 1;
+        // §38: このフレームの値引数を convert の追加引数にする。convert は
+        // 直接呼ぶ別の関数なので、新しい id を引数に取り、腕を lower する間は
+        // その id で値引数を引く。
+        let call_arguments = self.frame_value_captures();
+        let mut convert_extras = Vec::new();
+        let mut convert_frame = Vec::new();
+        for (index, values) in self.frame_value_args.iter().enumerate() {
+            if self.arm_handlers.contains(&index) {
+                convert_frame.push(Vec::new());
+                continue;
+            }
+            let mut carried = Vec::new();
+            for (name, (_, ty)) in values {
+                let id = self.next;
+                self.next += 1;
+                convert_extras.push((id, ty.clone()));
+                carried.push((name.clone(), (id, ty.clone())));
+            }
+            convert_frame.push(carried);
+        }
+        let mut convert_parameters = vec![incoming.clone()];
+        convert_parameters.extend(convert_extras.iter().map(|(_, ty)| ty.clone()));
         let convert = ConvertCtx {
             incoming: incoming.clone(),
             outgoing: outgoing.clone(),
             success,
             convert_id,
             convert_sig: Signature {
-                parameters: vec![incoming.clone()],
+                parameters: convert_parameters,
                 result: outgoing.clone(),
             },
             forwarding,
+            value_params: convert_extras.clone(),
         };
         let variable = Expression::Variable {
             id: convert_param,
             ty: incoming,
         };
-        let arms = self.convert_arms(handler, &variable, &convert)?;
+        let named = convert_frame.last().cloned().unwrap_or_default();
+        let saved_scope = self.install_value_params(&named);
+        let saved_frame = std::mem::replace(&mut self.frame_value_args, convert_frame);
+        let arms = self.convert_arms(handler, &variable, &convert);
+        self.frame_value_args = saved_frame;
+        self.restore_value_params(saved_scope);
+        let arms = arms?;
         let fallback = forwarding.then(|| {
             Box::new(Expression::Unreachable {
                 result: outgoing.clone(),
@@ -3914,11 +4087,13 @@ impl Lowerer {
         {
             return Err("handler arms disagree on the answer type".into());
         }
+        let mut parameters = vec![convert_param];
+        parameters.extend(convert_extras.iter().map(|(id, _)| *id));
         self.functions.push(Function {
             id: convert_id,
             name: format!("convert_{}", convert_id.0),
             signature: convert.convert_sig.clone(),
-            parameters: vec![convert_param],
+            parameters,
             captures: Vec::new(),
             body: Expression::Switch {
                 value: Box::new(variable),
@@ -3928,7 +4103,38 @@ impl Lowerer {
             }
             .in_tail_position(),
         });
-        Expression::call_direct(convert_id, &convert.convert_sig, vec![value])
+        let mut arguments = vec![value];
+        arguments.extend(call_arguments);
+        Expression::call_direct(convert_id, &convert.convert_sig, arguments)
+    }
+
+    /// 腕を lower する間だけ、handler の値引数の名前を convert の追加引数に
+    /// 向け直す。戻すための元の値を返す。
+    fn install_value_params(
+        &mut self,
+        named: &[(String, (usize, Type))],
+    ) -> Vec<(String, Option<(usize, Type)>)> {
+        let mut saved = Vec::new();
+        for (name, (id, ty)) in named {
+            saved.push((
+                name.clone(),
+                self.scope.insert(name.clone(), (*id, ty.clone())),
+            ));
+        }
+        saved
+    }
+
+    fn restore_value_params(&mut self, saved: Vec<(String, Option<(usize, Type)>)>) {
+        for (name, previous) in saved.into_iter().rev() {
+            match previous {
+                Some(value) => {
+                    self.scope.insert(name, value);
+                }
+                None => {
+                    self.scope.remove(&name);
+                }
+            }
+        }
     }
 
     // 宣言では型引数を具体化できないため、本体を先に単相化して登録した操作だけを扱う。
@@ -4118,14 +4324,26 @@ impl Lowerer {
                 ty: input.clone(),
             }],
         )?;
-        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, vec![called])?;
+        let mut arguments = vec![called];
+        arguments.extend(
+            convert
+                .value_params
+                .iter()
+                .map(|(id, ty)| Expression::Variable {
+                    id: *id,
+                    ty: ty.clone(),
+                }),
+        );
+        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, arguments)?;
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         let result = body.ty();
+        let mut captures = vec![(captured, continuation_ty)];
+        captures.extend(convert.value_params.iter().cloned());
         let closure = self.continuation_function(
             id,
             (param, input),
-            vec![(captured, continuation_ty)],
+            captures,
             body.in_tail_position(),
             &result,
         )?;
@@ -4650,7 +4868,10 @@ impl Lowerer {
                 self.scope.insert(name.clone(), binding.clone());
             }
         }
-        let captures: Vec<_> = self.scope.values().cloned().collect();
+        // §38: 外側の `with` の値引数も capture に載せる。本体が呼ぶ関数の
+        // `once` の腕が値引数を参照できるようにするためである。
+        let mut captures: Vec<_> = self.scope.values().cloned().collect();
+        captures.extend(self.carry_frame_value_args());
         let mut parameters = Vec::new();
         for (param, ty) in params.iter().zip(types) {
             let id = self.next;
@@ -5359,14 +5580,14 @@ impl Lowerer {
             .map_err(|_| "definition reference needs concrete types")?;
         if self.is_value_definition(&self.resolve_definition(name)) {
             let (function, signature) = self.specialize_function(name, vec![], Some(&ty))?;
-            return Expression::call_direct(function, &signature, vec![]);
+            return self.specialized_call(function, &signature, vec![]);
         }
         let Type::Closure(parameters, result) = ty else {
             return Err("function definition requires a function type".into());
         };
         let (function, signature) = self.specialize_function(name, parameters, Some(&result))?;
         Ok(Expression::MakeClosure {
-            captures: vec![],
+            captures: self.frame_value_captures(),
             function,
             signature,
         })
@@ -5621,6 +5842,10 @@ impl Lowerer {
         self.next_function += 1;
         self.active.push((key.clone(), id, signature.clone()));
         let saved_answer = std::mem::replace(&mut self.context_answer, outcome_answer.clone());
+        // §38: 外側の `with` の値引数を capture として引き継ぐ。呼んだ先の
+        // `once` の腕が値引数を参照できるようにするためである。値引数が
+        // 無ければ capture も無く、今までどおりの関数になる。
+        let captures = self.carry_frame_value_args();
         let lowered = self.expression(&body);
         self.context_answer = saved_answer;
         self.active.pop();
@@ -5628,7 +5853,7 @@ impl Lowerer {
         self.scope = saved;
         let body = self.reconcile_outcome(lowered?.in_tail_position(), &mut signature, &name)?;
         self.functions.push(Function {
-            captures: vec![],
+            captures,
             id,
             name: key,
             signature: signature.clone(),

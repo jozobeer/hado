@@ -5,8 +5,8 @@
 type User = { id: Int }
 def saved | Some(user) => (UserStore.save user ->
   true) | false
-def main = UserStore.find 1 |> saved as ok ->
-  if ok => 1 | 0
+def main = Int.to_string (UserStore.find 1 |> saved as ok ->
+  if ok => 1 | 0)
 module UserStore
 type T
 def find (id: Int): T Option

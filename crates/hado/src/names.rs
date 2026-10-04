@@ -233,7 +233,7 @@ pub fn resolve(ast: &Ast, path: &str) -> Result<(), crate::parser::Diagnostic> {
     } else {
         crate::Inspection::Library
     };
-    resolve_with_prelude(ast, path, None, inspection)
+    resolve_with_prelude(ast, path, None, inspection, 0)
 }
 
 pub(crate) fn resolve_with_prelude(
@@ -241,9 +241,10 @@ pub(crate) fn resolve_with_prelude(
     path: &str,
     trusted_start: Option<usize>,
     inspection: crate::Inspection,
+    prelude_items: usize,
 ) -> Result<(), crate::parser::Diagnostic> {
     let mut diagnostics = crate::name_resolution::diagnostics(ast, path, trusted_start);
-    if let Err(error) = crate::type_realizations::check(ast, path) {
+    if let Err(error) = crate::type_realizations::check(ast, path, prelude_items) {
         diagnostics.push(error);
     }
     if let Err(error) = declarations(&ast.items, path) {
@@ -633,6 +634,7 @@ fn resolve_type_names(
     if let TypeKind::Name(name) | TypeKind::Apply(name, _) = &ty.kind {
         if !types.contains(name) {
             diagnostics.push(crate::parser::Diagnostic {
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),
@@ -695,6 +697,7 @@ fn resolve_effect_label(
         TypeKind::Name(name) | TypeKind::Apply(name, _) => {
             if !effects.contains(name) {
                 diagnostics.push(crate::parser::Diagnostic {
+                    mentions: None,
                     suggestion: None,
                     related: None,
                     path: path.into(),
@@ -735,6 +738,7 @@ fn entry_form(
     }
     let span = main.map_or(crate::parser::Span::point(1, 1), |def| def.span);
     Err(crate::parser::Diagnostic {
+        mentions: None,
         suggestion: None,
         related: None,
         path: path.into(),
@@ -846,6 +850,7 @@ fn register(
 ) -> Result<(), crate::parser::Diagnostic> {
     if let Some(&first) = names.get(name) {
         return Err(crate::parser::Diagnostic {
+            mentions: None,
             suggestion: None,
             related: Some(Box::new(crate::parser::Related {
                 path: path.into(),
@@ -903,6 +908,7 @@ fn collect_cycle_violations(
         }
         if let Some((code, message)) = cycle_violation(def) {
             diagnostics.push(crate::parser::Diagnostic {
+                mentions: None,
                 suggestion: None,
                 related: None,
                 path: path.into(),

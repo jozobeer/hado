@@ -206,9 +206,14 @@ add('38-c(1) §21 Array compare', 'def main = [' + ', '.join(calls) + ']\n', str
 lower, upper = -(2**63), 2**63 - 1
 for value in ['007', '+42', ' 42', '1_000', '1.0', '４２', *map(str, [upper, lower, upper+1, lower-1])]:
     accepted = bool(re.fullmatch(r'-?[0-9]+', value)) and lower <= int(value) <= upper
-    add('38-c(2) §55 Int.parse ' + json.dumps(value, ensure_ascii=False),
-        'def main = Int.parse ' + json.dumps(value, ensure_ascii=False) + '\n',
-        str(int(value)) if accepted else 'InvalidInt', int(not accepted))
+    # §54: Int の main は印字しない。受理した値は Int.to_string で包んで出し、
+    # 拒否は Int.parse の raise が届いて 1 で終わる（stderr の InvalidInt が期待）。
+    quoted = json.dumps(value, ensure_ascii=False)
+    source = 'def main = Int.parse ' + quoted + '\n'
+    if accepted:
+        source = 'def main = Int.to_string (Int.parse ' + quoted + ')\n'
+    add('38-c(2) §55 Int.parse ' + quoted,
+        source, str(int(value)) if accepted else 'InvalidInt', int(not accepted))
 names = ['.hidden', 'z' + str(rng.randrange(10000)), 'A', 'あ', 'é', 'child']
 directory = add('38-c(3) §55 read_dir', 'def main = read_dir "entries"\n',
                 json.dumps(sorted(names, key=lambda s: s.encode()), ensure_ascii=False))

@@ -1,11 +1,17 @@
+build-json-diagnostics	core
 canonical-in-syntax-errors	full
 char-and-float-conversions	core
 ci	quick
 clippy	core
 cognitive-complexity	core
+cranelift-opt-level	full
+do-option-absent	core
+dogfood-text-tool	core
 embed-runtime	full
+exit-code-from-main	core
 frozen-docs	core
 gate-cache	quick
+localize-message-positions	core
 lsp-minimal	core
 m0	core
 m1-corpus	core
@@ -16,6 +22,7 @@ m4	core
 m5	core
 m6	core
 m7	core
+map-by-builtin-compare	full
 parallel-rounds	full
 postfix-binding	full
 prelude-tail-recursion	core
@@ -64,6 +71,7 @@ r75	full
 r76	full
 r77	full
 r81	full
+restore-option-question	core
 rustfmt	quick
 spec-contracts	core
 spec-model	quick

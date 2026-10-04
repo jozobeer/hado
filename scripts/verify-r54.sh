@@ -42,9 +42,10 @@ def project(directory, files):
     return path
 PY
 
-# --- 54-a: 合格するテストが順に走る ---
+# --- 54-a: 終了コードがそのまま報告され、順に走る ---
 r54_passing() {
     python3 - "$workdir" "$hado" <<'PY'
+import os
 import sys
 from pathlib import Path
 
@@ -53,21 +54,25 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import project, run
 
+# 範囲内の終了コードを 2 つ選び、報告される値が仕込みと同じことを直接見る。
+# 期待値はここで作り、門番には書き写さない。
+code = 2 + int.from_bytes(os.urandom(1), 'big') % 254
+other = 2 + (code + 100) % 254
 root = project(Path(sys.argv[1]) / 'a', {
     'main.hd': 'def main = 0\n',
-    'b_test.hd': 'def main = 22\n',
-    'a_test.hd': 'def main = 11\n',
-    'c_test.hd': 'def main = 33\n',
+    'a_test.hd': f'def main = {code}\n',
+    'b_test.hd': f'def main = {other}\n',
+    'c_test.hd': 'def main = 0\n',
 })
 result = run('test', str(root / 'main.hd'))
-assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
-expected = (b'11\ntest: a_test.hd ok\n'
-            b'22\ntest: b_test.hd ok\n'
-            b'33\ntest: c_test.hd ok\n'
-            b'test: 3/3 passed\n')
+assert result.returncode == 1, (result.returncode, result.stdout)
+expected = (f'test: a_test.hd failed (exit {code})\n'
+            f'test: b_test.hd failed (exit {other})\n'
+            'test: c_test.hd ok\n'
+            'test: 1/3 passed\n').encode()
 assert result.stdout == expected, result.stdout
 assert result.stderr == b'', result.stderr
-print('passing: three tests run in path order and the summary is 3/3')
+print('passing: each test reports its own exit code in path order')
 PY
 }
 
@@ -84,15 +89,15 @@ from harness import project, run
 
 root = project(Path(sys.argv[1]) / 'b', {
     'main.hd': 'def main = 0\n',
-    'a_test.hd': 'def main = 11\n',
+    'a_test.hd': 'def main = 0\n',
     'b_test.hd': 'def main = raise { message = "boom" }\n',
-    'c_test.hd': 'def main = 33\n',
+    'c_test.hd': 'def main = 0\n',
 })
 result = run('test', str(root / 'main.hd'))
 assert result.returncode == 1, (result.returncode, result.stdout)
-expected = (b'11\ntest: a_test.hd ok\n'
+expected = (b'test: a_test.hd ok\n'
             b'test: b_test.hd failed (exit 1)\n'
-            b'33\ntest: c_test.hd ok\n'
+            b'test: c_test.hd ok\n'
             b'test: 2/3 passed\n')
 assert result.stdout == expected, result.stdout
 assert b'boom' in result.stderr, result.stderr
@@ -116,7 +121,7 @@ from harness import project, run
 root = project(Path(sys.argv[1]) / 'c', {
     'main.hd': 'def main = 0\n',
     'a_test.hd': 'def main = 1 + true\n',
-    'b_test.hd': 'def main = 33\n',
+    'b_test.hd': 'def main = 0\n',
 })
 result = run('test', str(root / 'main.hd'))
 assert result.returncode == 1, (result.returncode, result.stdout)
@@ -178,7 +183,7 @@ from harness import project, run
 # 名前は `*_test.hd` なので、根の直下の規則が無ければ選ばれてしまう。
 root = project(Path(sys.argv[1]) / 'e', {
     'main.hd': 'def main = 0\n',
-    'main_test.hd': 'def main = sub::Util.helper 7\n',
+    'main_test.hd': 'def main = Int.to_string (sub::Util.helper 7)\n',
     'sub/util_test.hd': 'library\nmodule Util\ndef helper (x: Int): Int Pure\n/module\nimplement Util as Util\ndef helper x => x\n/implement\n',
 })
 result = run('test', str(root / 'main.hd'))
@@ -188,7 +193,7 @@ print('root only: a subdirectory *_test.hd is a project member but is not run')
 PY
 }
 
-check '54-a passing tests run in path order' r54_passing
+check '54-a each test reports its own exit code in path order' r54_passing
 check '54-b a failing test does not stop the run' r54_failing
 check '54-c build failures are reported as build failures' r54_build_failure
 check '54-d no test files is an error' r54_no_tests

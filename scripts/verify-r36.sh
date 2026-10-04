@@ -31,10 +31,14 @@ seed = int(os.environ['SEED'])
 rng = random.Random(seed)
 manifest = []
 
-def add(group, label, expression, expected, mode='print', handler=''):
+def add(group, label, expression, expected, mode='print', handler='', prints=False):
     directory = base / str(len(manifest))
     directory.mkdir()
-    (directory / 'main.hd').write_text('def main = ' + expression + '\n' + handler)
+    # `prints=True` は結果が `Int` の探針。`Int` の `main` は印字せず終了コードに
+    # なる（§54）ので、値を印字させるために `Int.to_string` で包む。結果が
+    # `String` の探針（36-e の render）はそのまま。包むと型が合わない（E305）。
+    entry = 'Int.to_string (' + expression + ')' if prints else expression
+    (directory / 'main.hd').write_text('def main = ' + entry + '\n' + handler)
     (directory / 'expect').write_text(str(expected) + '\n')
     manifest.append((directory.name, group + ' ' + label, mode))
     return directory
@@ -65,7 +69,7 @@ for s in sorted(inputs):
     label = json.dumps(s, ensure_ascii=False)
     call = 'Int.parse ' + literal(s)
     if expected != 'InvalidInt':
-        add('36-a', label, call, expected)
+        add('36-a', label, call, expected, prints=True)
     else:
         add('36-b', label, call, expected, 'error')
         # 各拒否形に、文法を修復し範囲内へ戻した対照を伴わせる。
@@ -73,12 +77,15 @@ for s in sorted(inputs):
         neighbor = (-1 if s.startswith('-') else 1) * int(digits)
         neighbor = max(-2**63, min(2**63 - 1, neighbor))
         add('36-b', 'valid control for ' + label,
-            'Int.parse ' + literal(str(neighbor)), neighbor)
-    add('36-c', label, 'with H -> Int.to_string (' + call + ')', expected, handler=handler)
+            'Int.parse ' + literal(str(neighbor)), neighbor, prints=True)
+    # 包む位置は `with` の内側。外側に置くと handler の `abort` の腕
+    # （`String` を返す）と本体（`Int`）が食い違って E305 になる。
+    add('36-c', label, 'with H -> Int.to_string (' + call + ')',
+        expected, handler=handler)
 values = [-2**63, 2**63 - 1, 0] + [rng.randrange(-2**63, 2**63) for _ in range(24)]
 for n in values:
     value = '(-9223372036854775807 - 1)' if n == -2**63 else '(' + str(n) + ')'
-    add('36-a', 'roundtrip ' + str(n), 'Int.parse (Int.to_string ' + value + ')', n)
+    add('36-a', 'roundtrip ' + str(n), 'Int.parse (Int.to_string ' + value + ')', n, prints=True)
 # 36-e: fields の文法と Int.parse の文法を別々の入力分類で測る。
 def report_case(label, lines, expected=None):
     if isinstance(lines, str):
