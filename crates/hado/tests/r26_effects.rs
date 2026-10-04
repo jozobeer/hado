@@ -1893,6 +1893,30 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
 }
 
+// §38: 腕は自分の handler の外で走る。同じ handler を入れ子にしたとき、内側の
+// 腕が呼ぶ操作は外側の同じ handler の枠が捕まえる。値引数もその枠のものでなけれ
+// ばならない。`handler_index` が名前だけで最も内側を選ぶと、外側の腕が内側の
+// 値引数を見て 2 になる。名前の違う 2 つの handler なら 1 になる（対照）。
+// Fallback は、腕の式を型検査すると効果が with の外へ残るための受け皿である。
+#[test]
+fn nested_same_handler_arm_sees_the_outer_value_argument() {
+    runs_effectful_closure_source(
+        "effect E\n\
+         once inner: Int\n\
+         once outer: Int\n\
+         handler E as H(n: Int)\n\
+         once inner => outer\n\
+         once outer => n\n\
+         return value => value\n\
+         handler E as Fallback\n\
+         once inner => 0\n\
+         once outer => 0\n\
+         return value => value\n\
+         def main = with Fallback -> with H(1) -> with H(2) -> inner\n",
+        "1",
+    );
+}
+
 // handler の腕の中の `with` は定義側の 1 節点なので、同じ handler を答え型の
 // 違う外側の `with` に使うと、内側の snapshot は最後の答え型で上書きされる。
 // 直す前は `handler arms disagree on the answer type` で赤。
