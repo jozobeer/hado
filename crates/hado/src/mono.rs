@@ -3125,7 +3125,11 @@ impl Lowerer {
         fields: Vec<Expression>,
         ty: &Ty,
     ) -> Result<Expression, String> {
-        let result = Type::try_from(&self.specialization.resolve(ty))
+        // `None` や `MapLeaf` のように field が無い構築子は、宣言側の型引数に
+        // 載った効果付き閉包を `actual_type` で `$Outcome` に直す。`try_from` は
+        // 行を落とすので、`Option.unwrap_or None fn(x => 8 / x)` が単一化できない。
+        let result = self
+            .actual_type(&self.specialization.resolve(ty))
             .map_err(|_| "constructor type is not concrete")?;
         if !matches!(result, Type::Data(..)) {
             return Err("constructor result must be data".into());
@@ -5668,7 +5672,10 @@ impl Lowerer {
             .value_types
             .get(&(span.line, span.col))
             .ok_or("missing function reference type")?;
-        let ty = Type::try_from(&self.specialization.resolve(inferred))
+        // 型引数に効果付き閉包が載っている値（`Map.empty` の V など）は、
+        // 行を落とすと `Fn(Int => Int)` になり、実体の `$Outcome` と単一化できない。
+        let ty = self
+            .actual_type(&self.specialization.resolve(inferred))
             .map_err(|_| "definition reference needs concrete types")?;
         if self.is_value_definition(&self.resolve_definition(name)) {
             let (function, signature) = self.specialize_function(name, vec![], Some(&ty))?;
@@ -5836,18 +5843,27 @@ impl Lowerer {
         scheme: &crate::types::Scheme,
         types: &[Type],
     ) -> Result<Option<Type>, String> {
-        // 効果を持つ関数値を引数に取る callee は、その効果を自分の効果行に載せる。
-        // scheme の行が未確定（省略された効果行）でも、渡された閉包が outcome を
-        // 返すなら handler の答えを使う。
-        let callback = if types
-            .iter()
-            .any(|ty| matches!(ty, Type::Closure(_, result) if is_outcome(result)))
-        {
+        // 高階の引数（scheme が `Fn` と書いた位置）に効果付き閉包を渡す callee は、
+        // その効果を自分の効果行に載せる。scheme の行が未確定でも、渡された閉包が
+        // outcome を返すなら handler の答えを使う。型変数に閉包を入れるだけ
+        // （`Map.insert` の V、`Option.unwrap_or` の A）は呼び出さないので載せない。
+        let callback = if Self::scheme_takes_effectful_callback(scheme, types) {
             self.callback_answer()?
         } else {
             None
         };
         Ok(self.specialization_answer(scheme)?.or(callback))
+    }
+
+    fn scheme_takes_effectful_callback(scheme: &crate::types::Scheme, types: &[Type]) -> bool {
+        let mut inference = crate::types::Inference::default();
+        let Ty::Fn(parameters, _, _) = inference.instantiate(scheme) else {
+            return false;
+        };
+        parameters.iter().zip(types).any(|(parameter, actual)| {
+            matches!(inference.resolve(parameter), Ty::Fn(..))
+                && matches!(actual, Type::Closure(_, result) if is_outcome(result))
+        })
     }
 
     fn outcome_signature(
