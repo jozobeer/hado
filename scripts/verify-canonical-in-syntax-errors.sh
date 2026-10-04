@@ -26,8 +26,16 @@ SPLIT = 'def rec bump (entries: Entry List) (word: String): Entry List =>\n  ent
 NESTED = 'def label n =>\n  if n\n    | 0 => "zero"\n    | _ => if n > 0 => "positive" | "negative"\n'
 # 腕の本体に括弧で包んで置いた Boolean branch も、腕の条件列が正準形（§26.1）。
 PAREN_IN_ARM = 'def label n =>\n  if n\n    | 0 => (if n > 0 => "positive" | "negative")\n    | _ => "zero"\n'
+# 腕の本体の `if` の else が続く腕の綴りを食う形。§24 は `|` の右を必ず else の式と
+# 定め、§26.1 は fallback を持たない条件列が続く `|` の腕を自分の条件として読むと
+# 明記するので、`if true => 1 | B` が Boolean branch として成り、続く `=>` が外側の
+# 腕の綴りとして余る。この貪欲な読み（決定 A）では、続く `| B` が else の式として
+# 読めるので `boolean_branch_ahead` が真になり綴りが付く。else を欠く形
+# （`incomplete-boolean-branch`）がこの反対側を測っている。
+ARM_IF_ELSE_NEXT_ARM = 'def f x =>\n  if x\n    | A => if true => 1\n    | B => 2\n'
 TARGETS = (('split', SPLIT, 'E100', DEF_FORM), ('nested', NESTED, 'E101', ARM_FORM),
-           ('paren-in-arm', PAREN_IN_ARM, 'E101', ARM_FORM))
+           ('paren-in-arm', PAREN_IN_ARM, 'E101', ARM_FORM),
+           ('arm-if-else-next-arm', ARM_IF_ELSE_NEXT_ARM, 'E101', ARM_FORM))
 
 # 対照にする検体はコーパスの配置に依らせず、ここで作る（§58.4 の「他の形には
 # 添えない」を、split 形とは違う E100・E101 と、E520 の書き換えで見る）。
@@ -46,7 +54,8 @@ OTHER_E101 = (
     # 腕の本体ではないところの括弧付き Boolean branch は他の形（§58.4）。
     ('paren-not-in-arm', 'def f c d => if c => (if d => 1 | 2) | 3\n'),
     # 途中で終わる Boolean branch は Boolean branch として成っていない（§26.1）。
-    # 区切りの `|` だけを見て suggestion を付けてはならない。
+    # 区切りの `|` だけを見て suggestion を付けてはならない。`arm-if-else-next-arm`
+    # がこの反対側（else の式として読める形には付く）を測っている。
     ('incomplete-boolean-branch', 'def f x =>\n  if x\n    | 0 => if true => 1 |\n'),
 )
 OTHER_E100 = (
