@@ -506,6 +506,10 @@ struct Lowerer {
     /// 違う複数の `with` に現れると span 単位の表は最後のもので上書きされる
     /// ので、腕を lower する間だけその `with` の型に差し替える。
     with_types: std::collections::HashMap<(usize, usize), crate::WithTypes>,
+    /// 外側の `with` が型を差し替えている深さ。handler の腕の中の内側の
+    /// `with` は定義側の 1 節点なので、`with_types` は最後の答え型のまま。
+    /// 差し替え中は内側を再適用せず、外側の snapshot を使う。
+    with_type_installs: usize,
     operations: std::collections::HashMap<String, crate::parser::OpKind>,
     default_operations: std::collections::HashMap<String, String>,
     handlers: std::collections::HashMap<String, crate::parser::HandlerDecl>,
@@ -1798,14 +1802,82 @@ impl Lowerer {
     }
 
     /// §34: `e as p? ->` は `Some` の腕で `p` を束縛し、`None` の腕で `None` を返す。
+    /// `e` が効果を運ぶときは先に outcome をほどいてから Option を見る。`as p ->`
+    /// （`let_expression`）と同じ順であり、戻した `LetQ` が `$Outcome` を直に
+    /// Option と見なして `propagation requires Option` で落ちる穴を塞ぐ。
     fn propagation(
         &mut self,
         pattern: Option<&crate::parser::Pattern>,
         source: &crate::parser::Node,
         body: &crate::parser::Node,
     ) -> Result<Expression, String> {
+        if self.contains_again(source) || self.contains_handled_call(source) {
+            return self.bind_option_source(pattern, source, body);
+        }
         let value = self.expression(source)?;
+        if is_outcome(&value.ty()) {
+            return self.option_after_outcome(pattern, value, body);
+        }
         self.option_propagation(pattern, value, body)
+    }
+
+    /// 効果を持つ `e` を `as $q ->` でほどき、成功値に対して `as p? ->` を続ける。
+    fn bind_option_source(
+        &mut self,
+        pattern: Option<&crate::parser::Pattern>,
+        source: &crate::parser::Node,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let name = format!("$q{}", self.next);
+        self.next += 1;
+        let tmp = crate::parser::Pattern {
+            kind: crate::parser::PatternKind::Name(name.clone()),
+            span: source.span,
+        };
+        self.let_expression(
+            &tmp,
+            source,
+            &self.option_rest(pattern, &name, source.span, body),
+        )
+    }
+
+    fn option_after_outcome(
+        &mut self,
+        pattern: Option<&crate::parser::Pattern>,
+        value: Expression,
+        body: &crate::parser::Node,
+    ) -> Result<Expression, String> {
+        let name = format!("$q{}", self.next);
+        self.next += 1;
+        let span = body.span;
+        let tmp = crate::parser::Pattern {
+            kind: crate::parser::PatternKind::Name(name.clone()),
+            span,
+        };
+        self.propagate_outcome(&tmp, value, &self.option_rest(pattern, &name, span, body))
+    }
+
+    fn option_rest(
+        &self,
+        pattern: Option<&crate::parser::Pattern>,
+        name: &str,
+        span: crate::parser::Span,
+        body: &crate::parser::Node,
+    ) -> crate::parser::Node {
+        crate::parser::Node {
+            span,
+            kind: crate::parser::NodeKind::LetQ {
+                pat: pattern.cloned().unwrap_or(crate::parser::Pattern {
+                    kind: crate::parser::PatternKind::Underscore,
+                    span,
+                }),
+                value: Box::new(crate::parser::Node {
+                    kind: crate::parser::NodeKind::Name(name.into()),
+                    span,
+                }),
+                body: Box::new(body.clone()),
+            },
+        }
     }
 
     fn option_propagation(
@@ -3240,11 +3312,9 @@ impl Lowerer {
         // この `with` の本体と腕の節点を、この `with` が推論された型で lower
         // する。同じ節点が答え型の違う別の `with` にも現れると span 単位の表は
         // 最後のもので上書きされているため、ここで差し替える。
-        let installed = self
-            .with_types
-            .get(&(node.span.line, node.span.col))
-            .cloned()
-            .map(|types| self.install_with_types(&types));
+        // 内側の `with` は外側の snapshot に既に入っている。再適用すると
+        // handler 腕の共有節点が最後の答え型で上書きされる。
+        let installed = self.begin_with_types(node.span);
         // §38: 値引数は `with` の位置で 1 回だけ評価する。名前は腕からだけ
         // 見えるので `self.scope` には入れず、`frame_value_args` に持つ。
         let mut evaluated = Vec::new();
@@ -3283,9 +3353,7 @@ impl Lowerer {
         if answer.is_some() {
             self.again_answers.pop();
         }
-        if let Some(installed) = installed {
-            self.restore_with_types(installed);
-        }
+        self.end_with_types(installed);
         let mut value = value?;
         for (id, argument) in bindings.lets.into_iter().rev() {
             value = Expression::Let {
@@ -3295,6 +3363,26 @@ impl Lowerer {
             };
         }
         Ok(value)
+    }
+
+    fn begin_with_types(&mut self, span: crate::parser::Span) -> Option<InstalledTypes> {
+        let installed = if self.with_type_installs == 0 {
+            self.with_types
+                .get(&(span.line, span.col))
+                .cloned()
+                .map(|types| self.install_with_types(&types))
+        } else {
+            None
+        };
+        self.with_type_installs += 1;
+        installed
+    }
+
+    fn end_with_types(&mut self, installed: Option<InstalledTypes>) {
+        self.with_type_installs -= 1;
+        if let Some(installed) = installed {
+            self.restore_with_types(installed);
+        }
     }
 
     /// handler の値引数を、このフレームで参照できる id に束ねる。

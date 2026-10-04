@@ -1893,6 +1893,28 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
 }
 
+// handler の腕の中の `with` は定義側の 1 節点なので、同じ handler を答え型の
+// 違う外側の `with` に使うと、内側の snapshot は最後の答え型で上書きされる。
+// 直す前は `handler arms disagree on the answer type` で赤。
+// `Absent` は前口（stdlib/absent.hd）にあるので、ここでは宣言しない。
+const NESTED_WITH_IN_HANDLER_ARM: &str = "handler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n\nhandler Absent as Nested\nabort absent =>\n  with ToOption ->\n  raise { message = \"boom\" }\nreturn value => Some(value)\n";
+
+#[test]
+fn nested_with_in_a_shared_handler_arm_at_two_answer_types() {
+    for (source, expected) in [
+        (
+            format!("{NESTED_WITH_IN_HANDLER_ARM}type R = {{ a: Int Option; b: String Option }}\ndef main = {{ a = with Nested -> absent; b = with Nested -> absent }}\n"),
+            "{ a = None; b = None }",
+        ),
+        (
+            format!("{NESTED_WITH_IN_HANDLER_ARM}type R = {{ a: String Option; b: Int Option }}\ndef main = {{ a = with Nested -> absent; b = with Nested -> absent }}\n"),
+            "{ a = None; b = None }",
+        ),
+    ] {
+        runs_effectful_closure_source(&source, expected);
+    }
+}
+
 // §38: `with` の値引数は `with` の位置で 1 回だけ評価する。`again` の腕が
 // `resume` を繰り返して `convert` が複数回走る形で、実引数に置いた `log` の
 // 出力が 1 回であることを stdout の完全一致で見る。直す前は値引数を lower して
@@ -1909,5 +1931,25 @@ fn handler_value_argument_is_evaluated_once_at_the_with() {
          def rec loop (i: Int): Void {Int Yield} => if i <= 0 => () | yield i -> loop (i - 1) /if\n\
          def main = List.length (with Take(noisy 3) -> loop 3)\n",
         "arg\n6",
+    );
+}
+
+// §34: `as p? ->` の値 `e` が効果を持つ Option のとき、単相化は先に outcome を
+// ほどいてから Some/None を見る。`LetQ` を戻したとき `option_propagation` が
+// `$Outcome` を Option と見なして `propagation requires Option` で落ちた。
+// `Option.map` や `as opt -> opt as x? ->` は引数の lifting と `Let` がほどく
+// ので通り、直書きの `as p? ->` だけが赤だった。
+#[test]
+fn option_propagation_through_effectful_option() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\n\
+         abort raise _ => None\n\
+         return value => value\n\
+         type R = { ok: Int Option; raised: Int Option; none: Int Option }\n\
+         def lookup (id: Int): Int Option {Error} => if id == 0 => raise { message = \"neg\" } | Some(id)\n\
+         def missing (id: Int): Int Option {Error} => if id == 0 => raise { message = \"neg\" } | None\n\
+         def main =\n\
+           { ok = with Catch -> lookup 2 as x? -> Some(x + 1); raised = with Catch -> lookup 0 as x? -> Some(x + 1); none = with Catch -> missing 3 as x? -> Some(x + 1) }\n",
+        "{ ok = Some(3); raised = None; none = None }",
     );
 }
