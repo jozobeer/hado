@@ -1893,6 +1893,28 @@ fn all_nested_handler_orders_in_one_body_match_their_single_runs() {
     runs_effectful_closure_source(&source, &format!("{{ {} }}", expected.join("; ")));
 }
 
+// handler の腕の中の `with` は定義側の 1 節点なので、同じ handler を答え型の
+// 違う外側の `with` に使うと、内側の snapshot は最後の答え型で上書きされる。
+// 直す前は `handler arms disagree on the answer type` で赤。
+// `Absent` は前口（stdlib/absent.hd）にあるので、ここでは宣言しない。
+const NESTED_WITH_IN_HANDLER_ARM: &str = "handler Error as ToOption\nabort raise _ => None\nreturn value => Some(value)\n\nhandler Absent as Nested\nabort absent =>\n  with ToOption ->\n  raise { message = \"boom\" }\nreturn value => Some(value)\n";
+
+#[test]
+fn nested_with_in_a_shared_handler_arm_at_two_answer_types() {
+    for (source, expected) in [
+        (
+            format!("{NESTED_WITH_IN_HANDLER_ARM}type R = {{ a: Int Option; b: String Option }}\ndef main = {{ a = with Nested -> absent; b = with Nested -> absent }}\n"),
+            "{ a = None; b = None }",
+        ),
+        (
+            format!("{NESTED_WITH_IN_HANDLER_ARM}type R = {{ a: String Option; b: Int Option }}\ndef main = {{ a = with Nested -> absent; b = with Nested -> absent }}\n"),
+            "{ a = None; b = None }",
+        ),
+    ] {
+        runs_effectful_closure_source(&source, expected);
+    }
+}
+
 // §38: `with` の値引数は `with` の位置で 1 回だけ評価する。`again` の腕が
 // `resume` を繰り返して `convert` が複数回走る形で、実引数に置いた `log` の
 // 出力が 1 回であることを stdout の完全一致で見る。直す前は値引数を lower して
