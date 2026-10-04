@@ -39,7 +39,7 @@
 | `localize-message-positions` | F 前段 | 2 | 中 | `check.rs`・`parser.rs`・`project.rs`・`lsp.rs` | F1（`parser.rs`） |
 | `build-json-diagnostics` | F 前段 | 3 | 中 | `main.rs`・`project.rs` | F2（`project.rs`） |
 | `e101-suggestion-scope` | F 前段 | 4 | 低 | `parser.rs` | F1（`if` の文法が変わる） |
-| `fmt-layout` | F 前段 | 5 | 中 | `source_print.rs`・`fixes.rs`・`lexer.rs` | F1（issue に明記） |
+| `fmt-layout` | F 前段 | 5 | 中 | `source_print.rs`・`fixes.rs`・`lexer.rs` | F1（issue に明記）。**停止**（2026-10-04）。レビューで fatal 2 件。`docs/issues/fmt-reprints-nested-application-as-one-call.md` と `docs/issues/whole-program-reprint-breaks-fmt-gates-and-idempotence.md` を先に解く |
 | `repl` | F 前段 | 6 | 低 | `main.rs`・`lexer.rs` | F1（`e as x ->` を使う） |
 
 以下、`M1` は M レーンの 1 番目を指す。
