@@ -635,11 +635,11 @@ fn polymorphic_comparison_constraints_keep_their_source_anchor() {
 fn field_name_errors_are_ordered_with_unresolved_value_names() {
     for field_first in [false, true] {
         let field = "def field (x: R) => x.missing";
-        let value = "def value = absent";
+        let value = "def value = no_such_value";
         let (first, second, anchor) = if field_first {
             (field, value, "missing")
         } else {
-            (value, field, "absent")
+            (value, field, "no_such_value")
         };
         let source = format!(
             "type R = {{ known: Int }}\n{first}\n{second}\ndef main = field {{ known = 1 }}"

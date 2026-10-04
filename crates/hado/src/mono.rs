@@ -1797,6 +1797,7 @@ impl Lowerer {
         )
     }
 
+    /// §34: `e as p? ->` は `Some` の腕で `p` を束縛し、`None` の腕で `None` を返す。
     fn propagation(
         &mut self,
         pattern: Option<&crate::parser::Pattern>,
@@ -3140,6 +3141,7 @@ impl Lowerer {
     fn abort_raise(
         &mut self,
         node: &crate::parser::Node,
+        name: &str,
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
         let ty = self
@@ -3152,11 +3154,12 @@ impl Lowerer {
             Err(UnresolvedType::Variable(_)) => Type::Void,
             Err(_) => return Err("abort result type is not concrete".into()),
         };
-        self.abort_raise_with(arguments, result)
+        self.abort_raise_with(name, arguments, result)
     }
 
     fn abort_raise_with(
         &mut self,
+        fallback: &str,
         arguments: Vec<Expression>,
         result: Type,
     ) -> Result<Expression, String> {
@@ -3166,7 +3169,7 @@ impl Lowerer {
                 field: "message".into(),
                 result: Type::String,
             },
-            0 => Expression::Constant(Constant::String(String::new())),
+            0 => Expression::Constant(Constant::String(fallback.into())),
             _ => return Err("abort operation has too many arguments".into()),
         };
         let call = Expression::call_runtime(
@@ -3192,7 +3195,7 @@ impl Lowerer {
         };
         match self.handler_for("raise") {
             Some(_) => self.abort_outcome_with(vec![exception], "raise", success),
-            None => self.abort_raise_with(vec![exception], success),
+            None => self.abort_raise_with("raise", vec![exception], success),
         }
     }
 
@@ -3216,7 +3219,7 @@ impl Lowerer {
                 if self.handler_for(name).is_some() {
                     self.abort_outcome(node, arguments, name)
                 } else {
-                    self.abort_raise(node, arguments)
+                    self.abort_raise(node, name, arguments)
                 }
             }
         }

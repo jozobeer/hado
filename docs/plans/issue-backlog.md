@@ -52,11 +52,11 @@
 |---|---|---|---|
 | D0 | `docs/wants.md` の低に残る「`as` パターン」（`docs/plan.md` 7 節 Q17' の保留）を消すか | 消した（2026-09-27）。`postfix-binding` で `as` を名付け専用にした。照合対象全体は `e as whole ->` で束縛できる | なし（記録の整合だけ） |
 | D1 | `postfix-binding` を採るか、`if` の閉じの規則を有力案で確定するか | 決めた（2026-09-27）。採る。`if(` は最上位の `=>` で読み分け、区切りの前の `if` は印なし、複数引数は `fn a, b => … /fn`（試作のブランチ `postfix-binding-probe`） | F1・F4〜F6 |
-| D2 | `do-option-absent` の推奨（不在を効果にする）と次善のどちらか | M5・M6 の着地後、`absent-effect-draft` の実測を見て決める | M7 |
+| D2 | `do-option-absent` の推奨（不在を効果にする）と次善のどちらか | 決めた（2026-09-30）。推奨。prelude に `Absent` 効果と handler `Maybe` を置き、`Option` の伝播を効果に一本化する。`as p? ->` は `restore-option-question` で戻して残す | M7 |
 | D3 | `dropped-spec-contracts` の案 A・B・C | 決めた（2026-09-27）。C を改めた形（針は `verify-spec-contracts.sh` に隔離、層の所属は生成物） | G1 |
 | D4 | `frozen-ledger-guard` の案 A・B・C | 決めた（2026-09-27）。A。`docs/ledger.md` と `docs/plan.md` を丸ごと凍結する | G4 |
 | D5 | `lint-docs-hardening` の案 A・B・C | 決めた（2026-09-27）。issue ごと退けた | G5 |
-| D6 | `e101-suggestion-scope` の読み | F1 の後に、新しい `if` の文法で issue を書き直してから決める | F4 |
+| D6 | `e101-suggestion-scope` の読み | 決めた（2026-10-03）。A。§24・§26.1 の貪欲な読みを維持し、else を欠く形には添えず、続く `\|` が else として読める形には添える | F4 |
 
 ## 1 ラウンドの手順
 

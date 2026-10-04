@@ -408,7 +408,7 @@ impl Checker<'_> {
             }
             let message = match constraint.code {
                 "E308" => "effects are not allowed in branch conditions",
-                "E303" => "`e ->` requires an effect or Option",
+                "E303" => "`e ->` requires an effect",
                 _ => "effect row mismatch",
             };
             self.deferred.push(self.error(
@@ -2559,6 +2559,8 @@ impl Checker<'_> {
         Ok(result)
     }
 
+    /// §34・§35: `e as p? ->`（`pattern` は `Some`）は `Option` の伝播、`e ->`
+    /// （`None`）は効果の継続。`?` の無い `e ->` は `Option` を受けない（E303）。
     fn propagation(
         &mut self,
         pattern: Option<&Pattern>,
@@ -2578,6 +2580,11 @@ impl Checker<'_> {
             self.values = saved;
             checked?;
             return Ok(Ty::Error);
+        }
+        // `?` の無い `e ->` は効果の破棄である。`Option` の中身を取り出すのは
+        // `as p? ->` の仕事なので、`Option` をここに置くと E303 とする。
+        if pattern.is_none() && self.option_container(&container) {
+            return Err(self.error(value.span, Some("E303"), "`e ->` requires an effect"));
         }
         if self.option_container(&container)
             || (pattern.is_some() && matches!(self.inference.resolve(&container), Ty::Var(_)))
@@ -2632,6 +2639,29 @@ impl Checker<'_> {
         Ok(self.inference.resolve(&result))
     }
 
+    fn propagation_body(
+        &mut self,
+        pattern: Option<&Pattern>,
+        payload: &Ty,
+        body: &Node,
+    ) -> Result<Ty, Diagnostic> {
+        if let Some(pattern) = pattern {
+            self.pattern(pattern, payload)?;
+            self.check_irrefutable(pattern);
+        }
+        self.expression(body)
+    }
+
+    fn propagation_types(&mut self, container: &Ty, span: Span) -> Result<(Ty, Ty), Diagnostic> {
+        match self.inference.resolve(container) {
+            Ty::Adt(name, args) if name == "Option" && args.len() == 1 => {
+                let output = self.inference.fresh();
+                Ok((args[0].clone(), Ty::Adt(name, vec![output])))
+            }
+            _ => Err(self.error(span, Some("E303"), "`e as p? ->` requires Option")),
+        }
+    }
+
     fn constructor_groups(&self) -> HashMap<String, Vec<(String, usize)>> {
         let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
         for (name, scheme) in &self.constructors {
@@ -2663,29 +2693,6 @@ impl Checker<'_> {
                 Some("E402"),
                 "binding pattern does not cover its type",
             ));
-        }
-    }
-
-    fn propagation_body(
-        &mut self,
-        pattern: Option<&Pattern>,
-        payload: &Ty,
-        body: &Node,
-    ) -> Result<Ty, Diagnostic> {
-        if let Some(pattern) = pattern {
-            self.pattern(pattern, payload)?;
-            self.check_irrefutable(pattern);
-        }
-        self.expression(body)
-    }
-
-    fn propagation_types(&mut self, container: &Ty, span: Span) -> Result<(Ty, Ty), Diagnostic> {
-        match self.inference.resolve(container) {
-            Ty::Adt(name, args) if name == "Option" && args.len() == 1 => {
-                let output = self.inference.fresh();
-                Ok((args[0].clone(), Ty::Adt(name, vec![output])))
-            }
-            _ => Err(self.error(span, Some("E303"), "`e as p? ->` requires Option")),
         }
     }
 

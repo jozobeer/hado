@@ -123,7 +123,7 @@ fn close_defects_are_e100() {
 /// 書いた結果を読み直して検査できる。旧形の `let`・`do` を書き戻さない。
 #[test]
 fn canonical_rewrites_write_parseable_postfix() {
-    for name in ["E504", "E506", "E507", "E508", "E520"] {
+    for name in ["E506", "E507", "E508", "E520"] {
         let path = repo_root().join("tests/reject").join(name).join("main.hd");
         let source = fs::read_to_string(&path).expect("readable");
 
