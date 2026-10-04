@@ -30,7 +30,31 @@ main では `fmt` がこのファイルを変えず、`run` は `42` のまま�
 
 `crates/hado/src/postfix_print.rs` の `apply_text`（764 行）が、呼び手を `expr_prec(f, indent, false, 8)`（適用と同じ優先度）で印字する。そのため呼び手が `Apply` のとき括弧が付かない。
 
-この印字器の欠陥は以前からあるが、受理コーパスに `(f a) b` の形が無いので表に出ていなかった。`crates/hado/src/fixes.rs` の `format` が `canonical_program` で全体を印字し直すようになり、任意の入力に当たるようになって現れた。
+この印字器の欠陥は以前からある。main でも `print-postfix` は同じ出力を出す。
+
+```
+$ ./target/debug/hado print-postfix target/m1 target/m2
+$ cat target/m2/main.hd
+def add a => fn(b => a + b)
+def main = Int.to_string (add 1 41)
+$ ./target/debug/hado run target/m3/main.hd   # 出力を読み直す
+error[E301]: cannot unify Fn(Int => Fn(Int => Int {A}) {B}) with Fn(Int, Int => C {D})
+```
+
+受理コーパスに `(f a) b` の形が無いので表に出ていなかった。`crates/hado/src/fixes.rs` の `format` が `canonical_program` で全体を印字し直すようになり、`fmt` と `build --fix` から任意の入力に当たるようになって、**main で動いていたプログラムを壊す**形で現れた。
+
+```
+$ cat > target/w1/main.hd <<'EOF'
+def main = fn(a => fn(b => a + b)) as add -> Int.to_string ((add 1) 41)
+EOF
+$ ./target/debug/hado run target/w1/main.hd     # main
+42
+$ ./target/debug/hado fmt target/w1/main.hd     # main は無音（変えない）
+$ ./target/debug/hado run target/w1/main.hd     # この設計では
+exit=1
+```
+
+つまり印字器の欠陥そのものは main にもあるが、main では `print-postfix` と `dump-*` の中だけに閉じている。この設計はそれを `fmt` の経路へ広げる。
 
 「コーパス 181 ファイルが 1 バイトも変わらない」という確認は、正準形でない入力の AST が往復で保たれるかを見ていない。
 
