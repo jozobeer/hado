@@ -1,5 +1,4 @@
 # 全体の印字し直しが既存の fmt 門番を赤にし、冪等でもない（whole-program-reprint-breaks-fmt-gates-and-idempotence）
-
 優先度: 高。
 
 ## 現象

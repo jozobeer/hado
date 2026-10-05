@@ -102,6 +102,10 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+fn same_specialization_result(stored: &Type, requested: &Type) -> bool {
+    stored == requested || logical_argument(stored) == logical_argument(requested)
+}
+
 // 呼び出しの形を callee と引数の並びに解く。`|>` は左辺を先頭に足した `Apply`
 // と同じ形にする（`lift_again_arguments` の書き換えと同じ規則）。効果の判定は
 // `Apply` と同じく callee を見るので、`|>` の target も同じ経路に載せる。
@@ -523,6 +527,11 @@ struct Lowerer {
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
     context_answer: Option<Type>,
+    /// 本体を lower している間に見た再帰呼び出しの `(呼ばれた単相化, 呼び出しに付く結果型)`。
+    /// 相互再帰では、自分を呼ぶ控えが呼んだ先の単相化の本体を lower している間に積まれる。
+    /// 呼ばれた単相化の id を持たないと、その控えを呼んだ先の署名と比べてしまい、
+    /// 本来見るべき自分の再帰呼び出しの食い違いを見逃す。
+    recursive_results: Vec<(FunctionId, Type)>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
     /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
@@ -1043,7 +1052,68 @@ impl Lowerer {
     // 結果を `done` で包む閉包に直す。呼び出し側は要素を outcome として
     // 解釈する（`g 4` の結果が handler の答えになる）ので、値の側でも
     // 同じ型に揃える。直せない不一致はそのまま返し、`cons_list` が止める。
+    // `Option` のように field が 0〜1 個の値は、中身の閉包を直して型を付け替える。
     fn as_outcome_closure(
+        &mut self,
+        value: Expression,
+        element: &Type,
+    ) -> Result<Expression, String> {
+        match element {
+            Type::Data(name, arguments) => self.retag_unit_data(value, name, arguments),
+            Type::Closure(..) => self.wrap_pure_closure(value, element),
+            _ => Ok(value),
+        }
+    }
+
+    fn retag_unit_data(
+        &mut self,
+        value: Expression,
+        name: &str,
+        arguments: &[Type],
+    ) -> Result<Expression, String> {
+        let [inner] = arguments else {
+            return Ok(value);
+        };
+        let target = Type::Data(name.to_owned(), vec![inner.clone()]);
+        if logical_argument(&value.ty()) != logical_argument(&target) {
+            return Ok(value);
+        }
+        match value {
+            Expression::Let { id, value, body } => {
+                let body = self.as_outcome_closure(*body, &target)?;
+                Ok(Expression::Let {
+                    id,
+                    value,
+                    body: Box::new(body),
+                })
+            }
+            Expression::Construct {
+                constructor,
+                fields,
+                result,
+            } if fields.len() <= 1 => {
+                let fields = fields
+                    .into_iter()
+                    .map(|field| self.as_outcome_closure(field, inner))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if fields.first().is_some_and(|field| field.ty() != *inner) {
+                    return Ok(Expression::Construct {
+                        constructor,
+                        fields,
+                        result,
+                    });
+                }
+                Ok(Expression::Construct {
+                    constructor,
+                    fields,
+                    result: target,
+                })
+            }
+            other => Ok(other),
+        }
+    }
+
+    fn wrap_pure_closure(
         &mut self,
         value: Expression,
         element: &Type,
@@ -4583,12 +4653,12 @@ impl Lowerer {
     }
 
     fn align_outcomes(
-        &self,
+        &mut self,
         left: Expression,
         right: Expression,
     ) -> Result<(Expression, Expression), String> {
         match (is_outcome(&left.ty()), is_outcome(&right.ty())) {
-            (false, false) => Ok((left, right)),
+            (false, false) => self.align_closure_outcomes(left, right),
             (true, true) if left.ty() == right.ty() => Ok((left, right)),
             (true, false) => {
                 let ty = left.ty();
@@ -4602,8 +4672,25 @@ impl Lowerer {
         }
     }
 
+    // 片腕が結果に `$Outcome` を載せる閉包なら、効果を運ばない腕も
+    // `as_outcome_closure` で同じ型に揃える。リストリテラルと同じ規則。
+    fn align_closure_outcomes(
+        &mut self,
+        left: Expression,
+        right: Expression,
+    ) -> Result<(Expression, Expression), String> {
+        if left.ty() == right.ty() {
+            return Ok((left, right));
+        }
+        let wrapped_right = self.as_outcome_closure(right.clone(), &left.ty())?;
+        if wrapped_right.ty() == left.ty() {
+            return Ok((left, wrapped_right));
+        }
+        Ok((self.as_outcome_closure(left, &right.ty())?, right))
+    }
+
     fn align_switch_arms(
-        &self,
+        &mut self,
         mut arms: Vec<(String, Expression)>,
         mut fallback: Option<Box<Expression>>,
     ) -> Result<SwitchArms, String> {
@@ -4613,7 +4700,7 @@ impl Lowerer {
             .chain(fallback.as_ref().map(|body| body.ty()))
             .find(is_outcome);
         let Some(outcome) = outcome else {
-            return Ok((arms, fallback));
+            return self.align_switch_closures(arms, fallback);
         };
         for (_, body) in &mut arms {
             if !is_outcome(&body.ty()) {
@@ -4624,6 +4711,28 @@ impl Lowerer {
             if !is_outcome(&body.ty()) {
                 **body = self.done(body.as_ref().clone(), &outcome)?;
             }
+        }
+        Ok((arms, fallback))
+    }
+
+    fn align_switch_closures(
+        &mut self,
+        mut arms: Vec<(String, Expression)>,
+        mut fallback: Option<Box<Expression>>,
+    ) -> Result<SwitchArms, String> {
+        let target = arms
+            .iter()
+            .map(|(_, body)| body.ty())
+            .chain(fallback.as_ref().map(|body| body.ty()))
+            .find(|ty| matches!(ty, Type::Closure(_, result) if is_outcome(result)));
+        let Some(target) = target else {
+            return Ok((arms, fallback));
+        };
+        for (_, body) in &mut arms {
+            *body = self.as_outcome_closure(body.clone(), &target)?;
+        }
+        if let Some(body) = fallback.as_mut() {
+            **body = self.as_outcome_closure(body.as_ref().clone(), &target)?;
         }
         Ok((arms, fallback))
     }
@@ -5877,13 +5986,13 @@ impl Lowerer {
             .find(|function| {
                 function.name == key
                     && function.signature.parameters == types
-                    && function.signature.result == *result
+                    && same_specialization_result(&function.signature.result, result)
             })
             .map(|function| (function.id, function.signature.clone()))
     }
 
     fn recursive_specialization(
-        &self,
+        &mut self,
         key: &str,
         types: &[Type],
         result: &Type,
@@ -5895,9 +6004,11 @@ impl Lowerer {
         else {
             return Ok(None);
         };
-        if active.parameters != types || active.result != *result {
+        if active.parameters != types || !same_specialization_result(&active.result, result) {
             return Err("recursive specialization changes argument types".into());
         }
+        // 呼び出しに実際に付くのは `active.clone()` の結果型なので、そちらを控える。
+        self.recursive_results.push((*id, active.result.clone()));
         Ok(Some((*id, active.clone())))
     }
 
@@ -5932,6 +6043,7 @@ impl Lowerer {
         let parameters = self.bind_parameters(&params, &types);
         let id = FunctionId(self.next_function);
         self.next_function += 1;
+        let recursive_marker = self.recursive_results.len();
         self.active.push((key.clone(), id, signature.clone()));
         let saved_answer = std::mem::replace(&mut self.context_answer, outcome_answer.clone());
         // §38: 外側の `with` の値引数を capture として引き継ぐ。呼んだ先の
@@ -5943,7 +6055,41 @@ impl Lowerer {
         self.active.pop();
         self.specialization = saved_specialization;
         self.scope = saved;
-        let body = self.reconcile_outcome(lowered?.in_tail_position(), &mut signature, &name)?;
+        // 早期 return でも控えを残さない。残すと外側の単相化の検査に混ざる。
+        let lowered = match lowered {
+            Ok(lowered) => lowered,
+            Err(error) => {
+                self.recursive_results.truncate(recursive_marker);
+                return Err(error);
+            }
+        };
+        // 自分の id を指す控えだけを取り、ほかの単相化のぶんは戻す。本体を lower して
+        // いる間に別の単相化が走ると、その中から自分を呼ぶ控えがここへ積まれる。
+        // 戻さないと呼び出し元の検査から消え、食い違いを見逃す。
+        let tail = self.recursive_results.split_off(recursive_marker);
+        let mut seen = Vec::new();
+        for entry in tail {
+            if entry.0 == id {
+                seen.push(entry.1);
+            } else {
+                self.recursive_results.push(entry);
+            }
+        }
+        let body = self.reconcile_outcome(lowered.in_tail_position(), &mut signature, &name)?;
+        // 効果をすべて落とした成功型が一致するのに、実際の型が違うものを見る。
+        // `logical_argument` は閉包の結果の位置の `$Outcome` だけを外し、top-level の
+        // `$Outcome` は外さない。`reconcile_outcome` が確定した署名から top-level の
+        // `$Outcome` を外す形（本体が閉包を返すとき）では、控えにだけ外側の `$Outcome`
+        // が付く。両方から外して比べないと、その食い違いを飛ばしてしまう。
+        if let Some(s) = seen.iter().find(|s| {
+            strip_outcome(logical_argument(s)) == strip_outcome(logical_argument(&signature.result))
+                && **s != signature.result
+        }) {
+            return Err(format!(
+                "recursive call to {name} was lowered with {s:?} but the specialization returns {:?}",
+                signature.result
+            ));
+        }
         self.functions.push(Function {
             captures,
             id,
@@ -5982,6 +6128,11 @@ impl Lowerer {
         }
         if is_outcome(&signature.result) && !is_outcome(&body.ty()) {
             body = self.done(body, &signature.result)?;
+        }
+        // 閉包やリストの要素に載った `$Outcome` は top-level ではない。
+        // lambda と同じく、論理型が一致するなら lower した型を署名にする。
+        if body.ty() != signature.result && logical_argument(&body.ty()) == signature.result {
+            signature.result = body.ty();
         }
         if body.ty() != signature.result {
             return Err(format!(

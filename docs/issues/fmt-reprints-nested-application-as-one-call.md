@@ -1,5 +1,4 @@
 # fmt が入れ子の適用を 1 回の呼び出しに印字し直し、意味を変える（fmt-reprints-nested-application-as-one-call）
-
 優先度: 高。
 
 ## 現象
