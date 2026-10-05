@@ -109,14 +109,16 @@ fn carries_outcome(ty: &Type) -> bool {
 
 /// `$Outcome` を入れ子も含めてすべて落とした型。
 fn strip_all_outcomes(ty: &Type) -> Type {
-    // `$Outcome` 自身は中身の成功型に置き換える。引数へ降りてから置き換えると
-    // `$Outcome` が残り、`carries_outcome` が偽になる。
-    let ty = strip_outcome(ty.clone());
     match ty {
         Type::Closure(parameters, result) => Type::Closure(
             parameters.iter().map(strip_all_outcomes).collect(),
-            Box::new(strip_all_outcomes(&result)),
+            Box::new(strip_all_outcomes(result)),
         ),
+        // `$Outcome` 自身は中身の成功型に置き換え、そこから更に落とす。引数へ
+        // 降りてから置き換えると `$Outcome` が残り、名前と食い違う。
+        Type::Data(name, arguments) if name == OUTCOME && !arguments.is_empty() => {
+            strip_all_outcomes(&arguments[0])
+        }
         Type::Data(name, arguments) => Type::Data(
             name.clone(),
             arguments.iter().map(strip_all_outcomes).collect(),
@@ -125,7 +127,7 @@ fn strip_all_outcomes(ty: &Type) -> Type {
             name.clone(),
             arguments.iter().map(strip_all_outcomes).collect(),
         ),
-        other => other,
+        other => other.clone(),
     }
 }
 
@@ -554,8 +556,11 @@ struct Lowerer {
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
     context_answer: Option<Type>,
-    /// 本体を lower している間に見た再帰呼び出しの結果型。
-    recursive_results: Vec<Type>,
+    /// 本体を lower している間に見た再帰呼び出しの `(呼ばれた単相化, 呼び出しに付く結果型)`。
+    /// 相互再帰では、自分を呼ぶ控えが呼んだ先の単相化の本体を lower している間に積まれる。
+    /// 呼ばれた単相化の id を持たないと、その控えを呼んだ先の署名と比べてしまい、
+    /// 本来見るべき自分の再帰呼び出しの食い違いを見逃す。
+    recursive_results: Vec<(FunctionId, Type)>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
     /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
@@ -6031,7 +6036,8 @@ impl Lowerer {
         if active.parameters != types || !same_specialization_result(&active.result, result) {
             return Err("recursive specialization changes argument types".into());
         }
-        self.recursive_results.push(result.clone());
+        // 呼び出しに実際に付くのは `active.clone()` の結果型なので、そちらを控える。
+        self.recursive_results.push((*id, active.result.clone()));
         Ok(Some((*id, active.clone())))
     }
 
@@ -6086,8 +6092,19 @@ impl Lowerer {
                 return Err(error);
             }
         };
+        // 自分の id を指す控えだけを取り、ほかの単相化のぶんは戻す。本体を lower して
+        // いる間に別の単相化が走ると、その中から自分を呼ぶ控えがここへ積まれる。
+        // 戻さないと呼び出し元の検査から消え、食い違いを見逃す。
+        let tail = self.recursive_results.split_off(recursive_marker);
+        let mut seen = Vec::new();
+        for entry in tail {
+            if entry.0 == id {
+                seen.push(entry.1);
+            } else {
+                self.recursive_results.push(entry);
+            }
+        }
         let body = self.reconcile_outcome(lowered.in_tail_position(), &mut signature, &name)?;
-        let seen = self.recursive_results.split_off(recursive_marker);
         if let Some(s) = seen.iter().find(|s| {
             logical_argument(s) == logical_argument(&signature.result)
                 && carries_outcome(s) != carries_outcome(&signature.result)

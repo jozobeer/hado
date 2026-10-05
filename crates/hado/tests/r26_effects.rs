@@ -2124,3 +2124,37 @@ fn recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value() {
         "{stderr}"
     );
 }
+
+// 相互再帰では、自分を呼ぶ控えが「呼んだ先の単相化の本体」を lower している間に
+// 積まれる。控えを呼ばれた単相化の id で区別しないと、その控えを呼んだ先の署名と
+// 比べてしまい、本来見るべき自分の再帰呼び出しの食い違いを見逃す。`pick` が `pock` を
+// 呼び、`pock` が `pick` を呼ぶ形で、`pick` の再帰呼び出しが純粋な閉包として下り、
+// 実行時に `$Outcome` を素の値として読んでいた。main は同じ入力で `invalid branch
+// types` により停止する。
+#[test]
+fn mutual_recursion_does_not_hide_the_recursive_closure_outcome() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | pock (n - 2)\n\
+                  def rec pock n => pick n\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}
