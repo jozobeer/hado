@@ -1789,31 +1789,65 @@ fn list_literal_of_closures_with_different_effects_keeps_their_outcome() {
     );
 }
 
-// 型変数に効果付き閉包を入れる callee（`Map.insert` の V）は、閉包を呼ぶのではなく
-// 値として持つ。scheme の引数が Fn でないのに callback の outcome を載せると、
-// 純粋な `insert` の結果型が `$Outcome` になり `specialization failed: Mismatch`
-// で落ちる。
+// 効果の違う閉包を Boolean 分岐の両腕に置いても、§36 の型では受理される。
+// リストリテラルは `as_outcome_closure` で揃えるが、分岐は top-level の
+// `$Outcome` しか包まないので、直す前は `invalid branch types` で落ちる。
 #[test]
-fn map_insert_of_an_effectful_closure_keeps_its_outcome() {
+fn branch_of_closures_with_different_effects_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 0 | 99\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if true => fn(x => 8 / x) | fn(x => x + 1)) 0\n",
         "0",
     );
 }
 
 #[test]
-fn map_insert_of_an_effectful_closure_runs_when_the_call_succeeds() {
+fn branch_of_closures_with_different_effects_runs_the_pure_arm() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 2 | 99\n",
-        "4",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if false => fn(x => 8 / x) | fn(x => x + 1)) 4\n",
+        "5",
+    );
+}
+
+// 名前付き関数が効果の違う閉包を返すとき、lower した本体は入れ子の
+// `$Outcome` の閉包になる。署名は効果行を落とした論理型のままなので、
+// 直す前は `lowered return type differs from inferred signature` で落ちる。
+#[test]
+fn named_function_returning_mixed_closures_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef pick b => if b => fn(x => 1 / x) | fn(x => x + 1)\ndef main =\n  with Catch ->\n  pick true as f ->\n  pick false as g ->\n  f 1 + g 1\n",
+        "3",
     );
 }
 
 #[test]
-fn option_unwrap_or_of_an_effectful_closure_keeps_its_outcome() {
+fn named_function_returning_effectful_closures_keeps_their_outcome() {
     runs_effectful_closure_source(
-        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Option.unwrap_or None fn(x => 8 / x) as f ->\n  f 0\n",
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef pick b => if b => fn(x => 1 / x) | fn(x => 8 / x)\ndef main =\n  with Catch ->\n  pick true as f ->\n  f 1\n",
+        "1",
+    );
+}
+
+#[test]
+fn named_function_returning_list_of_mixed_closures_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef choose b => if b => [fn(x => 1 / x)] | [fn(x => x + 1)]\ndef main =\n  with Catch ->\n  choose true as fs ->\n  if fs | [f] => f 1 | 0\n",
+        "1",
+    );
+}
+
+#[test]
+fn branch_of_option_closures_with_different_effects_keeps_their_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if true => Some(fn(x => 8 / x)) | None) as opt ->\n  if opt | Some(f) => f 0 | 99\n",
         "0",
+    );
+}
+
+#[test]
+fn branch_of_option_closures_none_arm_stays_none() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  (if false => Some(fn(x => 8 / x)) | None) as opt ->\n  if opt | Some(f) => f 0 | 99\n",
+        "99",
     );
 }
 
@@ -2054,5 +2088,170 @@ fn option_propagation_through_effectful_option() {
          def main =\n\
            { ok = with Catch -> lookup 2 as x? -> Some(x + 1); raised = with Catch -> lookup 0 as x? -> Some(x + 1); none = with Catch -> missing 3 as x? -> Some(x + 1) }\n",
         "{ ok = Some(3); raised = None; none = None }",
+    );
+}
+
+// 再帰する関数の結果が「`$Outcome` を返す閉包」のとき、本体の中の再帰呼び出しを
+// 効果を落とした論理型（純粋な閉包）で lower してはいけない。分岐の腕を outcome に
+// 揃える `align_closure_outcomes` が、この純粋な型を目標に再帰呼び出しを包むと、
+// 実際に返る `$Outcome` を素の値として読み、例外の答えがそのまま整数として出る。
+// `pick 3` が `5` ではなく巨大な整数を返していた（`pick 1` は再帰しないので
+// 正しく 5 を返し、そこが発見を遅らせた）。
+// `docs/issues/recursive-effectful-closure-specialization-reads-outcome-as-int.md`
+#[test]
+fn recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | pick (n - 2)\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}
+
+// 相互再帰では、自分を呼ぶ控えが「呼んだ先の単相化の本体」を lower している間に
+// 積まれる。控えを呼ばれた単相化の id で区別しないと、その控えを呼んだ先の署名と
+// 比べてしまい、本来見るべき自分の再帰呼び出しの食い違いを見逃す。`pick` が `pock` を
+// 呼び、`pock` が `pick` を呼ぶ形で、`pick` の再帰呼び出しが純粋な閉包として下り、
+// 実行時に `$Outcome` を素の値として読んでいた。main は同じ入力で `invalid branch
+// types` により停止する。
+#[test]
+fn mutual_recursion_does_not_hide_the_recursive_closure_outcome() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | pock (n - 2)\n\
+                  def rec pock n => pick n\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}
+
+// 関数自身が top-level の効果を持つと、控えと確定した署名の両方に外側の `$Outcome`
+// が付く。`$Outcome` の有無だけを見る判定では、内側の閉包に `$Outcome` があるかの
+// 食い違いを覆い隠す。`pick` の署名は `$Outcome[Closure([Int], $Outcome[..]), ..]`
+// なのに、本体の再帰呼び出しには `$Outcome[Closure([Int], Int), ..]` が付き、
+// `wrap` に純粋な閉包として渡って誤った値になっていた。main は同じ入力で
+// `invalid branch types` により停止する。
+#[test]
+fn nested_closure_outcome_under_a_top_level_outcome_is_not_read_as_plain() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def wrap n g => if n > 100 => fn(x => 8 / x) | g\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => (8 / n) as k -> fn(x => k / x)\n\
+                  | pick (n - 2) as g -> wrap n g\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}
+
+// 本体が閉包を返すと、`reconcile_outcome` が確定した署名から top-level の `$Outcome`
+// を外す。`logical_argument` は閉包の結果の位置の `$Outcome` だけを外し、top-level は
+// 外さない。そのため控えにだけ外側の `$Outcome` が付き、論理型が一致しないものとして
+// 検査が飛ばされていた。build は通り、できた実行ファイルが SIGILL で落ちていた。
+// main は同じ入力で `invalid branch types` により停止する。
+#[test]
+fn top_level_outcome_dropped_from_the_signature_is_not_read_as_plain() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n cb\n\
+                  | n < 1 => fn(x => cb x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | fn x =>\n\
+                  \x20   pick (n - 2) cb as g ->\n\
+                  \x20   g x\n\
+                  \x20 /fn\n\
+                  def main = Int.to_string (with Catch -> pick 3 (fn(x => 8 / x)) as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    let built = case.build("main.hd");
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}
+
+// 型変数に効果付き閉包を入れる callee（`Map.insert` の V）は、閉包を呼ぶのではなく
+// 値として持つ。scheme の引数が Fn でないのに callback の outcome を載せると、
+// 純粋な `insert` の結果型が `$Outcome` になり `specialization failed: Mismatch`
+// で落ちる。
+#[test]
+fn map_insert_of_an_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 0 | 99\n",
+        "0",
+    );
+}
+
+#[test]
+fn map_insert_of_an_effectful_closure_runs_when_the_call_succeeds() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 2 | 99\n",
+        "4",
+    );
+}
+
+#[test]
+fn option_unwrap_or_of_an_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Option.unwrap_or None fn(x => 8 / x) as f ->\n  f 0\n",
+        "0",
     );
 }

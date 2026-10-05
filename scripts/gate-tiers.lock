@@ -72,6 +72,7 @@ r75	full
 r76	full
 r77	full
 r81	full
+recursive-effectful-closure-specialization-reads-outcome-as-int	core
 restore-option-question	core
 rustfmt	quick
 spec-contracts	core
