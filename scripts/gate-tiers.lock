@@ -26,6 +26,7 @@ map-by-builtin-compare	full
 parallel-rounds	full
 postfix-binding	full
 prelude-tail-recursion	core
+pure-closure-in-type-variable-argument-fails-specialization	core
 r11	full
 r12	full
 r29	full

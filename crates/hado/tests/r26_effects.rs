@@ -2227,3 +2227,31 @@ fn top_level_outcome_dropped_from_the_signature_is_not_read_as_plain() {
         "{stderr}"
     );
 }
+
+// 型変数に効果付き閉包を入れる callee（`Map.insert` の V）は、閉包を呼ぶのではなく
+// 値として持つ。scheme の引数が Fn でないのに callback の outcome を載せると、
+// 純粋な `insert` の結果型が `$Outcome` になり `specialization failed: Mismatch`
+// で落ちる。
+#[test]
+fn map_insert_of_an_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 0 | 99\n",
+        "0",
+    );
+}
+
+#[test]
+fn map_insert_of_an_effectful_closure_runs_when_the_call_succeeds() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => 8 / x) as m ->\n  if Map.find m 1 | Some(f) => f 2 | 99\n",
+        "4",
+    );
+}
+
+#[test]
+fn option_unwrap_or_of_an_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Option.unwrap_or None fn(x => 8 / x) as f ->\n  f 0\n",
+        "0",
+    );
+}
