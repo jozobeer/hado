@@ -2192,3 +2192,38 @@ fn nested_closure_outcome_under_a_top_level_outcome_is_not_read_as_plain() {
         "{stderr}"
     );
 }
+
+// 本体が閉包を返すと、`reconcile_outcome` が確定した署名から top-level の `$Outcome`
+// を外す。`logical_argument` は閉包の結果の位置の `$Outcome` だけを外し、top-level は
+// 外さない。そのため控えにだけ外側の `$Outcome` が付き、論理型が一致しないものとして
+// 検査が飛ばされていた。build は通り、できた実行ファイルが SIGILL で落ちていた。
+// main は同じ入力で `invalid branch types` により停止する。
+#[test]
+fn top_level_outcome_dropped_from_the_signature_is_not_read_as_plain() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n cb\n\
+                  | n < 1 => fn(x => cb x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | fn x =>\n\
+                  \x20   pick (n - 2) cb as g ->\n\
+                  \x20   g x\n\
+                  \x20 /fn\n\
+                  def main = Int.to_string (with Catch -> pick 3 (fn(x => 8 / x)) as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    let built = case.build("main.hd");
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}

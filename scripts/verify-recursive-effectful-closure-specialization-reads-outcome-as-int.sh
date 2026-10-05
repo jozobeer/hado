@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=8
+total=9
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -19,7 +19,7 @@ TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
 # 検体。`Catch` の重複を避けるため入力根を分ける。
-for name in rec plain top mutual mut-ok nested-effect; do
+for name in rec plain top mutual mut-ok nested-effect top-level-dropped; do
     mkdir -p "$TMPD/$name"
 done
 cat >"$TMPD/rec/main.hd" <<'EOF'
@@ -76,6 +76,40 @@ def rec pick n
 | pick (n - 2) as g -> wrap n g
 def main = Int.to_string (with Catch -> pick 3 as f -> f 4)
 EOF
+
+# 本体が閉包を返すので `reconcile_outcome` が確定した署名から top-level の
+# `$Outcome` を外す形。`logical_argument` は top-level を外さないので、控えにだけ
+# 外側の `$Outcome` が付く。build は通り、できた実行ファイルが SIGILL で落ちていた。
+cat >"$TMPD/top-level-dropped/main.hd" <<'EOF'
+handler Error as Catch
+abort raise _ => 0
+return value => value
+def rec pick n cb
+| n < 1 => fn(x => cb x)
+| n < 2 => fn(x => x + 1)
+| fn x =>
+    pick (n - 2) cb as g ->
+    g x
+  /fn
+def main = Int.to_string (with Catch -> pick 3 (fn(x => 8 / x)) as f -> f 4)
+EOF
+
+# `build` を通してしまったら、できた実行ファイルが期待値ちょうどを返すこと。
+# build が止まるのは許す。
+builds_and_runs_exactly_or_stops() {
+    local file="$1" expected="$2"
+    local out code
+    if ! cargo run --offline -q -- build "$file" >"$TMPD/build.log" 2>&1; then
+        return 0
+    fi
+    out=$("${file%.hd}" 2>"$TMPD/exec.log")
+    code=$?
+    if [ "$code" -eq 0 ] && [ "$out" = "$expected" ]; then
+        return 0
+    fi
+    echo "wrong-value exit=$code out=[$out] expected=[$expected]" >&2
+    return 1
+}
 
 # 終了コード 0 なら標準出力が期待値ちょうどであること。停止は許す。
 # 誤った値を返したら赤。
@@ -155,7 +189,14 @@ else
     fail 7 "nested-outcome-under-top-level-outcome-not-read-as-plain"
 fi
 
-# --- check 8: 変異。型の食い違いを見る判定を殺すと赤になる ---
+# --- check 8: 控えにだけ top-level の `$Outcome` が付く形でも誤った値を返さない ---
+if builds_and_runs_exactly_or_stops "$TMPD/top-level-dropped/main.hd" "5"; then
+    pass 8 "top-level-outcome-dropped-from-the-signature-not-read-as-plain"
+else
+    fail 8 "top-level-outcome-dropped-from-the-signature-not-read-as-plain"
+fi
+
+# --- check 9: 変異。型の食い違いを見る判定を殺すと赤になる ---
 cp crates/hado/src/mono.rs "$TMPD/mono.rs.bak"
 restore() { cp "$TMPD/mono.rs.bak" crates/hado/src/mono.rs; }
 trap 'restore; rm -rf "$TMPD"' EXIT
@@ -163,8 +204,13 @@ python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 source = path.read_text()
-old = """            logical_argument(s) == logical_argument(&signature.result) && **s != signature.result"""
-new = """            let _ = (logical_argument(s), **s != signature.result);
+old = """            strip_outcome(logical_argument(s))
+                == strip_outcome(logical_argument(&signature.result))
+                && **s != signature.result"""
+new = """            let _ = (
+                strip_outcome(logical_argument(s)),
+                strip_outcome(logical_argument(&signature.result)),
+            );
             false"""
 if old not in source:
     raise SystemExit("mutation site not found")
@@ -172,14 +218,14 @@ path.write_text(source.replace(old, new, 1))
 PY
 mutate_status=$?
 if [ "$mutate_status" -ne 0 ]; then
-    fail 8 "mutation-site-missing"
+    fail 9 "mutation-site-missing"
 elif ! cargo build >"$TMPD/mutate.log" 2>&1; then
     # 変異が壊れたコードだと、赤の理由を欠陥と区別できない。
-    fail 8 "mutation-build-failed"
+    fail 9 "mutation-build-failed"
 elif runs_exactly_or_stops "$TMPD/rec/main.hd" "5"; then
-    fail 8 "mutation-not-caught"
+    fail 9 "mutation-not-caught"
 else
-    pass 8 "mutation-turns-check-2-red"
+    pass 9 "mutation-turns-check-2-red"
 fi
 restore
 

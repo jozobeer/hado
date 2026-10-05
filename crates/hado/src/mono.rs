@@ -6076,11 +6076,14 @@ impl Lowerer {
             }
         }
         let body = self.reconcile_outcome(lowered.in_tail_position(), &mut signature, &name)?;
-        // 論理型が一致するのに実際の型が違うものを見る。`$Outcome` の有無だけを
-        // 見ると、関数自身が top-level の効果を持つとき、外側の `$Outcome` が
-        // 両側に付いて内側の閉包の食い違いを覆い隠す。
+        // 効果をすべて落とした成功型が一致するのに、実際の型が違うものを見る。
+        // `logical_argument` は閉包の結果の位置の `$Outcome` だけを外し、top-level の
+        // `$Outcome` は外さない。`reconcile_outcome` が確定した署名から top-level の
+        // `$Outcome` を外す形（本体が閉包を返すとき）では、控えにだけ外側の `$Outcome`
+        // が付く。両方から外して比べないと、その食い違いを飛ばしてしまう。
         if let Some(s) = seen.iter().find(|s| {
-            logical_argument(s) == logical_argument(&signature.result) && **s != signature.result
+            strip_outcome(logical_argument(s)) == strip_outcome(logical_argument(&signature.result))
+                && **s != signature.result
         }) {
             return Err(format!(
                 "recursive call to {name} was lowered with {s:?} but the specialization returns {:?}",
