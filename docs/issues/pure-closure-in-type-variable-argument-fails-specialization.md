@@ -1,5 +1,4 @@
 # 型変数の引数に純粋な閉包を置くと単相化が落ちる（pure-closure-in-type-variable-argument-fails-specialization）
-
 優先度: 高。
 
 ## 現象
