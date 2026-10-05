@@ -2158,3 +2158,37 @@ fn mutual_recursion_does_not_hide_the_recursive_closure_outcome() {
         "{stderr}"
     );
 }
+
+// 関数自身が top-level の効果を持つと、控えと確定した署名の両方に外側の `$Outcome`
+// が付く。`$Outcome` の有無だけを見る判定では、内側の閉包に `$Outcome` があるかの
+// 食い違いを覆い隠す。`pick` の署名は `$Outcome[Closure([Int], $Outcome[..]), ..]`
+// なのに、本体の再帰呼び出しには `$Outcome[Closure([Int], Int), ..]` が付き、
+// `wrap` に純粋な閉包として渡って誤った値になっていた。main は同じ入力で
+// `invalid branch types` により停止する。
+#[test]
+fn nested_closure_outcome_under_a_top_level_outcome_is_not_read_as_plain() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def wrap n g => if n > 100 => fn(x => 8 / x) | g\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => (8 / n) as k -> fn(x => k / x)\n\
+                  | pick (n - 2) as g -> wrap n g\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}

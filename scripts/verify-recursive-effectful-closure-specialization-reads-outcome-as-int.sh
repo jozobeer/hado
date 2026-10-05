@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=7
+total=8
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -19,7 +19,7 @@ TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
 # 検体。`Catch` の重複を避けるため入力根を分ける。
-for name in rec plain top mutual mut-ok; do
+for name in rec plain top mutual mut-ok nested-effect; do
     mkdir -p "$TMPD/$name"
 done
 cat >"$TMPD/rec/main.hd" <<'EOF'
@@ -61,6 +61,20 @@ return value => value
 def rec f n => if n < 1 => 7 | g (n - 1)
 def rec g n => f n
 def main = Int.to_string (with Catch -> f 3)
+EOF
+
+# 関数自身が top-level の効果を持ち、内側の閉包にも効果の食い違いがある形。
+# `$Outcome` の有無だけを見ると、外側の `$Outcome` が両側に付いて覆い隠される。
+cat >"$TMPD/nested-effect/main.hd" <<'EOF'
+handler Error as Catch
+abort raise _ => 0
+return value => value
+def wrap n g => if n > 100 => fn(x => 8 / x) | g
+def rec pick n
+| n < 1 => fn(x => 8 / x)
+| n < 2 => (8 / n) as k -> fn(x => k / x)
+| pick (n - 2) as g -> wrap n g
+def main = Int.to_string (with Catch -> pick 3 as f -> f 4)
 EOF
 
 # 終了コード 0 なら標準出力が期待値ちょうどであること。停止は許す。
@@ -134,7 +148,14 @@ else
     fail 6 "top-level-outcome-mutual-recursion-still-runs"
 fi
 
-# --- check 7: 変異。入れ子の `$Outcome` の有無を見る判定を殺すと赤になる ---
+# --- check 7: top-level の効果と内側の閉包の効果が重なる形でも誤った値を返さない ---
+if runs_exactly_or_stops "$TMPD/nested-effect/main.hd" "2"; then
+    pass 7 "nested-outcome-under-top-level-outcome-not-read-as-plain"
+else
+    fail 7 "nested-outcome-under-top-level-outcome-not-read-as-plain"
+fi
+
+# --- check 8: 変異。型の食い違いを見る判定を殺すと赤になる ---
 cp crates/hado/src/mono.rs "$TMPD/mono.rs.bak"
 restore() { cp "$TMPD/mono.rs.bak" crates/hado/src/mono.rs; }
 trap 'restore; rm -rf "$TMPD"' EXIT
@@ -142,27 +163,23 @@ python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 source = path.read_text()
-old = """fn carries_outcome(ty: &Type) -> bool {
-    strip_all_outcomes(ty) != *ty
-}"""
-new = """fn carries_outcome(ty: &Type) -> bool {
-    let _ = strip_all_outcomes(ty);
-    false
-}"""
+old = """            logical_argument(s) == logical_argument(&signature.result) && **s != signature.result"""
+new = """            let _ = (logical_argument(s), **s != signature.result);
+            false"""
 if old not in source:
     raise SystemExit("mutation site not found")
 path.write_text(source.replace(old, new, 1))
 PY
 mutate_status=$?
 if [ "$mutate_status" -ne 0 ]; then
-    fail 7 "mutation-site-missing"
+    fail 8 "mutation-site-missing"
 elif ! cargo build >"$TMPD/mutate.log" 2>&1; then
     # 変異が壊れたコードだと、赤の理由を欠陥と区別できない。
-    fail 7 "mutation-build-failed"
+    fail 8 "mutation-build-failed"
 elif runs_exactly_or_stops "$TMPD/rec/main.hd" "5"; then
-    fail 7 "mutation-not-caught"
+    fail 8 "mutation-not-caught"
 else
-    pass 7 "mutation-turns-check-2-red"
+    pass 8 "mutation-turns-check-2-red"
 fi
 restore
 

@@ -102,35 +102,6 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
-/// その型が `$Outcome` を（入れ子も含めて）持つか。
-fn carries_outcome(ty: &Type) -> bool {
-    strip_all_outcomes(ty) != *ty
-}
-
-/// `$Outcome` を入れ子も含めてすべて落とした型。
-fn strip_all_outcomes(ty: &Type) -> Type {
-    match ty {
-        Type::Closure(parameters, result) => Type::Closure(
-            parameters.iter().map(strip_all_outcomes).collect(),
-            Box::new(strip_all_outcomes(result)),
-        ),
-        // `$Outcome` 自身は中身の成功型に置き換え、そこから更に落とす。引数へ
-        // 降りてから置き換えると `$Outcome` が残り、名前と食い違う。
-        Type::Data(name, arguments) if name == OUTCOME && !arguments.is_empty() => {
-            strip_all_outcomes(&arguments[0])
-        }
-        Type::Data(name, arguments) => Type::Data(
-            name.clone(),
-            arguments.iter().map(strip_all_outcomes).collect(),
-        ),
-        Type::Abstract(name, arguments) => Type::Abstract(
-            name.clone(),
-            arguments.iter().map(strip_all_outcomes).collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
 fn same_specialization_result(stored: &Type, requested: &Type) -> bool {
     stored == requested || logical_argument(stored) == logical_argument(requested)
 }
@@ -6105,9 +6076,11 @@ impl Lowerer {
             }
         }
         let body = self.reconcile_outcome(lowered.in_tail_position(), &mut signature, &name)?;
+        // 論理型が一致するのに実際の型が違うものを見る。`$Outcome` の有無だけを
+        // 見ると、関数自身が top-level の効果を持つとき、外側の `$Outcome` が
+        // 両側に付いて内側の閉包の食い違いを覆い隠す。
         if let Some(s) = seen.iter().find(|s| {
-            logical_argument(s) == logical_argument(&signature.result)
-                && carries_outcome(s) != carries_outcome(&signature.result)
+            logical_argument(s) == logical_argument(&signature.result) && **s != signature.result
         }) {
             return Err(format!(
                 "recursive call to {name} was lowered with {s:?} but the specialization returns {:?}",
