@@ -11,7 +11,7 @@
 ### 決定
 
 - 決定 1: 本体を lower している間の再帰呼び出しの結果型を控え、本体を lower し終えたあとの確定した署名と比べる。論理型が一致するのに `$Outcome` の有無だけが食い違うなら、`recursive call to <name> was lowered with ... but the specialization returns ...` で止める。誤った値を出すより、確定できないことを報告する。
-- 決定 2: 判定は `carries_outcome`（`$Outcome` を入れ子も含めて持つか）で行う。`logical_argument` は効果を落とすので、落とす前と後で差があるかを見る。
+- 決定 2: 判定は「効果をすべて落とした成功型が一致するのに、実際の型が違う」で行う。`logical_argument` は閉包の結果の位置の `$Outcome` を外し、`strip_outcome` は top-level の `$Outcome` を外す。両方を通してから比べる。
 - 決定 3: 相互再帰で成功型が変わる正当な形（`$Outcome[String,..]` と `$Outcome[Int,..]`）は、`$Outcome` の有無が同じなので見逃す。`logical_argument` の一致だけでは足りないので、`$Outcome` の有無を第 2 の条件にする。
 - 決定 4: 再帰の結果型を先に確定させてから本体を lower する 2 段階の単相化（issue の案 B）は採らない。効果が大きく、この欠陥の停止で実害が無いためである。
 - 決定 5: 早期 return でも控えを残さない（`truncate`）。残すと外側の単相化の検査に混ざる。
@@ -19,11 +19,11 @@
 
 ### 期待値の根拠
 
-issue の完了条件をそのまま検査にする。「検体が `5` を返すか、止まる（誤った値を返さない）」。したがって門番は「終了コード 0 なら標準出力が期待値ちょうど、停止は許す」を測る。加えて、変異（`carries_outcome` を常に偽にする）で検査 2 が赤になることを測る。
+issue の完了条件をそのまま検査にする。「検体が `5` を返すか、止まる（誤った値を返さない）」。したがって門番は「終了コード 0 なら標準出力が期待値ちょうど、停止は許す」を測る。加えて、変異（判定の型の食い違いを見る項を偽にする）で検査 2 が赤になることを測る。
 
 ### 成果物
 
-- `crates/hado/src/mono.rs`: `Lowerer.recursive_results`、`recursive_specialization` の控え、`lower_specialization` の判定、`carries_outcome` と `strip_all_outcomes`。
+- `crates/hado/src/mono.rs`: `Lowerer.recursive_results`、`recursive_specialization` の控え、`lower_specialization` の判定。
 - `crates/hado/tests/r26_effects.rs`: `recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value` と `mutual_recursion_does_not_hide_the_recursive_closure_outcome`（新設）。
 - `scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh`（新設、`# tier: core`）。
 - 本ファイル。`docs/issues/recursive-effectful-closure-specialization-reads-outcome-as-int.md` の削除。
@@ -41,7 +41,7 @@ issue の完了条件をそのまま検査にする。「検体が `5` を返す
 
 1. 検体が誤った値を返さない → 門番の検査 2・3、相互再帰は検査 5。
 2. 上位の `$Outcome` を返す再帰は今までどおり動く → 門番の検査 4・6。
-3. 変異で検査 2 が赤になる → 門番の検査 7。
+3. 変異で検査 2 が赤になる → 門番の検査 9。
 4. `cargo test --offline` が 0 failed、`run-gates.sh --tier quick` が red なし、`verify-m0.sh` が 8/8。
 
 ### 許容される赤
@@ -117,7 +117,7 @@ $ ./target/debug/hado run target/rec/main.hd
 4
 ```
 
-門番は 7/7。
+門番は 9/9。
 
 ```
 $ bash scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh
@@ -127,19 +127,21 @@ OK: 3 non-recursive-outcome-not-read-as-plain
 OK: 4 top-level-outcome-recursion-still-runs
 OK: 5 mutual-recursion-outcome-not-read-as-plain
 OK: 6 top-level-outcome-mutual-recursion-still-runs
-OK: 7 mutation-turns-check-2-red
-PASSED: 7/7
+OK: 7 nested-outcome-under-top-level-outcome-not-read-as-plain
+OK: 8 top-level-outcome-dropped-from-the-signature-not-read-as-plain
+OK: 9 mutation-turns-check-2-red
+PASSED: 9/9
 ```
 
 ### 変異の実測
 
-`carries_outcome` を常に偽にすると、検体はふたたび誤った値を返す。門番の検査 2 が赤くなることを確かめた。
+判定の型の食い違いを見る項（`&& **s != signature.result`）を `&& false` にすると、検体はふたたび誤った値を返す。門番の検査 2 が赤くなることを確かめた。整形で行が変わっても当たるよう、置き換える文字列はこの 1 行だけにしてある。
 
 ```
 $ bash scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh
-wrong-value stdout=[125231229779872] expected=[5]
-OK: 7 mutation-turns-check-2-red
-PASSED: 7/7
+wrong-value stdout=[131625487302560] expected=[5]
+OK: 9 mutation-turns-check-2-red
+PASSED: 9/9
 ```
 
 ### レビューで見つけた相互再帰の穴
@@ -174,6 +176,21 @@ $ echo $?
 ```
 
 レビューが挙げた 4 形（`mutual`・`mutual_raise`・`mutual3`・`ok_mutual_mk`）は止まり、正当な 2 形（`ok_loopf`・`ok_mutual_outcome`）は main と同じ値（`2`・`7`）で通る。門番の検査 4 の検体は自分を呼んでいなかったので、実際に再帰する検体に直し、相互再帰の検査 5・6 を足した。
+
+### レビューで見つけた 2 つ目・3 つ目の穴
+
+2 回目のレビューは、`$Outcome` の有無だけを見る判定が、関数自身が top-level の効果を持つときに内側の閉包の食い違いを覆い隠す形（`b5`）を見つけた。判定を「論理型が一致するのに実際の型が違う」に変え、`carries_outcome` と `strip_all_outcomes` を消した。
+
+3 回目のレビューは、`logical_argument` が top-level の `$Outcome` を外さないため、本体が閉包を返す形（`e1`）がすり抜けることを見つけた。`build` は通り、できた実行ファイルが SIGILL（終了コード 132）で落ちていた。判定の左辺を `strip_outcome(logical_argument(..))` にし、効果をすべて落とした成功型で比べる形にした。
+
+```
+$ ./target/debug/hado build target/e1/main.hd
+recursive call to file0$pick was lowered with Data("$Outcome", [Closure([Int], Int), Int, Void]) but the specialization returns Closure([Int], Data("$Outcome", [Int, Int, Void]))
+$ echo $?
+1
+```
+
+4 回目のレビューは、コンパイラの修正を正しいと認め、残る fatal として門番の変異が当たる文字列のずれ（整形で 2 行になった）を挙げた。置き換える文字列を 1 行にして直した。
 
 `r26_effects` の `mutual_recursion_forwards_a_late_raise_across_a_success_type_change` が、`$Outcome` の有無だけを見る前の厳密比較（`active.result != result`）で赤になった。`$Outcome[String,..]` と `$Outcome[Int,..]` は正当な形なので、`$Outcome` の有無を条件に足して通した。
 
