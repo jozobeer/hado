@@ -4942,6 +4942,13 @@ impl Lowerer {
         else {
             return Err("expected function type".into());
         };
+        // 宣言側の行が効果を運ぶときの結果型。型引数の位置（`Map.insert` の V、
+        // `Option.unwrap_or` の A）は `actual_type` が行から `$Outcome` を作る。
+        // 本体が純粋でも、この型に揃えないと単一化できない。
+        let declared_result = match self.actual_type(&resolved) {
+            Ok(Type::Closure(_, declared)) => *declared,
+            _ => result.as_ref().clone(),
+        };
         // 引数の型に効果行があれば、その閉包も mono では結果に `$Outcome` を載せる。
         // 本体がその引数を呼ぶときに outcome をほどけるよう、実際の型で束縛する。
         let types = match &resolved {
@@ -4984,6 +4991,7 @@ impl Lowerer {
         let body = body?.in_tail_position();
         // 効果を持つ本体は Outcome へ落ちる。handler が解釈するのは呼び出し側なので、
         // 閉包の結果型も Outcome にして呼び出し側の outcome と型を揃える。
+        let mut body = body;
         let lowered = body.ty();
         let result = if is_outcome(&lowered) {
             let (success, _, _) = outcome_parts(&lowered)?;
@@ -4992,7 +5000,16 @@ impl Lowerer {
             }
             lowered
         } else if lowered == signature.result {
-            lowered
+            // 本体は純粋だが、宣言側だけが効果を運ぶ（`with` の下で、本体のほかの
+            // 場所が効果を出さないために型検査器が閉包の行へ効果を入れた形）。
+            // `done` で包んで宣言側の型に揃える。包まないと、型引数の位置で
+            // `actual_type` が作った `$Outcome` と単一化できずに落ちる。
+            if is_outcome(&declared_result) {
+                body = self.done(body, &declared_result)?;
+                declared_result
+            } else {
+                lowered
+            }
         } else if logical_argument(&lowered) == signature.result {
             // 効果を持つ閉包を返す lambda。宣言側の型は効果行を落としている。
             lowered
