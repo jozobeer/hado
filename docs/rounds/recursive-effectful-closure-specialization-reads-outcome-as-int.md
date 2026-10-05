@@ -15,6 +15,7 @@
 - 決定 3: 相互再帰で成功型が変わる正当な形（`$Outcome[String,..]` と `$Outcome[Int,..]`）は、`$Outcome` の有無が同じなので見逃す。`logical_argument` の一致だけでは足りないので、`$Outcome` の有無を第 2 の条件にする。
 - 決定 4: 再帰の結果型を先に確定させてから本体を lower する 2 段階の単相化（issue の案 B）は採らない。効果が大きく、この欠陥の停止で実害が無いためである。
 - 決定 5: 早期 return でも控えを残さない（`truncate`）。残すと外側の単相化の検査に混ざる。
+- 決定 6: 控えは `(呼ばれた単相化の id, 呼び出しに付く結果型)` にする。相互再帰では、自分を呼ぶ控えが呼んだ先の単相化の本体を lower している間に積まれる。id を持たないと、その控えを呼んだ先の署名と比べて見逃す（レビューで見つけた）。`lower_specialization` は自分の id を指す控えだけを取り、ほかを戻す。
 
 ### 期待値の根拠
 
@@ -23,7 +24,7 @@ issue の完了条件をそのまま検査にする。「検体が `5` を返す
 ### 成果物
 
 - `crates/hado/src/mono.rs`: `Lowerer.recursive_results`、`recursive_specialization` の控え、`lower_specialization` の判定、`carries_outcome` と `strip_all_outcomes`。
-- `crates/hado/tests/r26_effects.rs`: `recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value`（新設）。
+- `crates/hado/tests/r26_effects.rs`: `recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value` と `mutual_recursion_does_not_hide_the_recursive_closure_outcome`（新設）。
 - `scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh`（新設、`# tier: core`）。
 - 本ファイル。`docs/issues/recursive-effectful-closure-specialization-reads-outcome-as-int.md` の削除。
 
@@ -38,9 +39,9 @@ issue の完了条件をそのまま検査にする。「検体が `5` を返す
 
 ### 判定
 
-1. 検体が誤った値を返さない → 門番の検査 2・3。
-2. 上位の `$Outcome` を返す再帰は今までどおり動く → 門番の検査 4。
-3. 変異で検査 2 が赤になる → 門番の検査 5。
+1. 検体が誤った値を返さない → 門番の検査 2・3、相互再帰は検査 5。
+2. 上位の `$Outcome` を返す再帰は今までどおり動く → 門番の検査 4・6。
+3. 変異で検査 2 が赤になる → 門番の検査 7。
 4. `cargo test --offline` が 0 failed、`run-gates.sh --tier quick` が red なし、`verify-m0.sh` が 8/8。
 
 ### 許容される赤
@@ -116,7 +117,7 @@ $ ./target/debug/hado run target/rec/main.hd
 4
 ```
 
-門番は 5/5。
+門番は 7/7。
 
 ```
 $ bash scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh
@@ -124,8 +125,10 @@ OK: 1 cargo-build
 OK: 2 recursive-outcome-not-read-as-plain
 OK: 3 non-recursive-outcome-not-read-as-plain
 OK: 4 top-level-outcome-recursion-still-runs
-OK: 5 mutation-turns-check-2-red
-PASSED: 5/5
+OK: 5 mutual-recursion-outcome-not-read-as-plain
+OK: 6 top-level-outcome-mutual-recursion-still-runs
+OK: 7 mutation-turns-check-2-red
+PASSED: 7/7
 ```
 
 ### 変異の実測
@@ -134,27 +137,76 @@ PASSED: 5/5
 
 ```
 $ bash scripts/verify-recursive-effectful-closure-specialization-reads-outcome-as-int.sh
-wrong-value stdout=[126205707415456] expected=[5]
-OK: 5 mutation-turns-check-2-red
-PASSED: 5/5
+wrong-value stdout=[125231229779872] expected=[5]
+OK: 7 mutation-turns-check-2-red
+PASSED: 7/7
 ```
 
-### 相互再帰の切り分け
+### レビューで見つけた相互再帰の穴
 
-`r26_effects` の `mutual_recursion_forwards_a_late_raise_across_a_success_type_change` が、`$Outcome` の有無だけを見る前の厳密比較（`active.result != result`）で赤になった。`$Outcome[String,..]` と `$Outcome[Int,..]` は正当な形なので、`$Outcome` の有無を条件に足して通した。81 passed; 0 failed から、回帰テストを足して 82 passed; 0 failed。
+`claude -p --model claude-opus-5-5 --effort high` のレビューが fatal を返した。控えがどの関数への再帰呼び出しかを持たないため、相互再帰で検査をすり抜ける。
+
+```
+$ cat > target/mut/main.hd <<'EOF'
+handler Error as Catch
+abort raise _ => 0
+return value => value
+def rec pick n
+| n < 1 => fn(x => 8 / x)
+| n < 2 => fn(x => x + 1)
+| pock (n - 2)
+def rec pock n => pick n
+def main = Int.to_string (with Catch -> pick 3 as f -> f 4)
+EOF
+$ ./target/debug/hado run target/mut/main.hd
+130593672941472        # 期待は 5。終了コードは 0
+```
+
+`pick` を呼ぶ控えは `pock` の本体を lower している間に積まれる。`pock` の `split_off` がそれを取り込み、`pock` の署名（純粋な閉包）と比べて一致するので検査が通る。`pick` の側の控えは空のまま確定する。main は同じ入力で `invalid branch types` により停止する。
+
+控えを `(FunctionId, Type)` にし、`lower_specialization` が自分の id を指す控えだけを取り、ほかを戻す形にした。控える型は呼び出しに実際に付く `active.result` にした。
+
+```
+$ ./target/debug/hado run target/mut/main.hd
+recursive call to file0$pick was lowered with Closure([Int], Int) but the specialization returns Closure([Int], Data("$Outcome", [Int, Int, Void]))
+$ echo $?
+1
+```
+
+レビューが挙げた 4 形（`mutual`・`mutual_raise`・`mutual3`・`ok_mutual_mk`）は止まり、正当な 2 形（`ok_loopf`・`ok_mutual_outcome`）は main と同じ値（`2`・`7`）で通る。門番の検査 4 の検体は自分を呼んでいなかったので、実際に再帰する検体に直し、相互再帰の検査 5・6 を足した。
+
+`r26_effects` の `mutual_recursion_forwards_a_late_raise_across_a_success_type_change` が、`$Outcome` の有無だけを見る前の厳密比較（`active.result != result`）で赤になった。`$Outcome[String,..]` と `$Outcome[Int,..]` は正当な形なので、`$Outcome` の有無を条件に足して通した。
 
 ```
 $ cargo test --offline --test r26_effects
-test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 ### ラウンドの最後の全走
 
+レビューの指摘を直したあとで回した。
+
 ```
 $ cargo test --offline
-CARGO_TEST_RC=0
-$ bash scripts/run-gates.sh --tier quick target/.gates-fix73
+CARGO_TEST_RC=0                 # 73 suite ok, 0 failed
+$ bash scripts/run-gates.sh --tier quick target/.gates-fix73c
 TALLY: 41/41 passed; red: none
 $ bash scripts/verify-m0.sh
 PASSED: 8/8
+$ bash scripts/lint-docs.sh
+PASSED: 16/16
+$ bash scripts/verify-spec-contracts.sh
+PASSED: 2/2
+$ bash scripts/corpus-lock.sh --check
+CORPUS OK
+$ bash scripts/gate-tiers-lock.sh --check
+TIERS OK
+$ bash scripts/frozen-docs-lock.sh --check
+FROZEN OK
+$ cargo fmt --all --check
+FMT OK
 ```
+
+### main で赤かった `lint-docs`
+
+main の `lint-docs.sh` は 15/16 だった。PR #77 で入れた 3 件の issue が、見出しの次に空行を置いていた（検査は 2 行目が `優先度: 高|中|低。` であることを見る）。3 件とも空行を消し、16/16 にした。この 3 件以外に main の赤は無い。
