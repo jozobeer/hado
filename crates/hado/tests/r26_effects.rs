@@ -2090,3 +2090,37 @@ fn option_propagation_through_effectful_option() {
         "{ ok = Some(3); raised = None; none = None }",
     );
 }
+
+// 再帰する関数の結果が「`$Outcome` を返す閉包」のとき、本体の中の再帰呼び出しを
+// 効果を落とした論理型（純粋な閉包）で lower してはいけない。分岐の腕を outcome に
+// 揃える `align_closure_outcomes` が、この純粋な型を目標に再帰呼び出しを包むと、
+// 実際に返る `$Outcome` を素の値として読み、例外の答えがそのまま整数として出る。
+// `pick 3` が `5` ではなく巨大な整数を返していた（`pick 1` は再帰しないので
+// 正しく 5 を返し、そこが発見を遅らせた）。
+// `docs/issues/recursive-effectful-closure-specialization-reads-outcome-as-int.md`
+#[test]
+fn recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value() {
+    let source = "handler Error as Catch\n\
+                  abort raise _ => 0\n\
+                  return value => value\n\
+                  def rec pick n\n\
+                  | n < 1 => fn(x => 8 / x)\n\
+                  | n < 2 => fn(x => x + 1)\n\
+                  | pick (n - 2)\n\
+                  def main = Int.to_string (with Catch -> pick 3 as f -> f 4)\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    let built = case.build("main.hd");
+    // 誤った値を出すくらいなら、確定できないことを報告して止まる。
+    assert_ne!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(
+        stderr.contains("recursive call to") && stderr.contains("was lowered with"),
+        "{stderr}"
+    );
+}

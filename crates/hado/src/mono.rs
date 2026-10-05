@@ -102,6 +102,33 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+/// その型が `$Outcome` を（入れ子も含めて）持つか。
+fn carries_outcome(ty: &Type) -> bool {
+    strip_all_outcomes(ty) != *ty
+}
+
+/// `$Outcome` を入れ子も含めてすべて落とした型。
+fn strip_all_outcomes(ty: &Type) -> Type {
+    // `$Outcome` 自身は中身の成功型に置き換える。引数へ降りてから置き換えると
+    // `$Outcome` が残り、`carries_outcome` が偽になる。
+    let ty = strip_outcome(ty.clone());
+    match ty {
+        Type::Closure(parameters, result) => Type::Closure(
+            parameters.iter().map(strip_all_outcomes).collect(),
+            Box::new(strip_all_outcomes(&result)),
+        ),
+        Type::Data(name, arguments) => Type::Data(
+            name.clone(),
+            arguments.iter().map(strip_all_outcomes).collect(),
+        ),
+        Type::Abstract(name, arguments) => Type::Abstract(
+            name.clone(),
+            arguments.iter().map(strip_all_outcomes).collect(),
+        ),
+        other => other,
+    }
+}
+
 fn same_specialization_result(stored: &Type, requested: &Type) -> bool {
     stored == requested || logical_argument(stored) == logical_argument(requested)
 }
@@ -527,6 +554,8 @@ struct Lowerer {
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
     context_answer: Option<Type>,
+    /// 本体を lower している間に見た再帰呼び出しの結果型。
+    recursive_results: Vec<Type>,
     resume_binding: Option<(usize, Type)>,
     rewriting_return: bool,
     /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
@@ -5987,7 +6016,7 @@ impl Lowerer {
     }
 
     fn recursive_specialization(
-        &self,
+        &mut self,
         key: &str,
         types: &[Type],
         result: &Type,
@@ -6002,6 +6031,7 @@ impl Lowerer {
         if active.parameters != types || !same_specialization_result(&active.result, result) {
             return Err("recursive specialization changes argument types".into());
         }
+        self.recursive_results.push(result.clone());
         Ok(Some((*id, active.clone())))
     }
 
@@ -6036,6 +6066,7 @@ impl Lowerer {
         let parameters = self.bind_parameters(&params, &types);
         let id = FunctionId(self.next_function);
         self.next_function += 1;
+        let recursive_marker = self.recursive_results.len();
         self.active.push((key.clone(), id, signature.clone()));
         let saved_answer = std::mem::replace(&mut self.context_answer, outcome_answer.clone());
         // §38: 外側の `with` の値引数を capture として引き継ぐ。呼んだ先の
@@ -6047,7 +6078,25 @@ impl Lowerer {
         self.active.pop();
         self.specialization = saved_specialization;
         self.scope = saved;
-        let body = self.reconcile_outcome(lowered?.in_tail_position(), &mut signature, &name)?;
+        // 早期 return でも控えを残さない。残すと外側の単相化の検査に混ざる。
+        let lowered = match lowered {
+            Ok(lowered) => lowered,
+            Err(error) => {
+                self.recursive_results.truncate(recursive_marker);
+                return Err(error);
+            }
+        };
+        let body = self.reconcile_outcome(lowered.in_tail_position(), &mut signature, &name)?;
+        let seen = self.recursive_results.split_off(recursive_marker);
+        if let Some(s) = seen.iter().find(|s| {
+            logical_argument(s) == logical_argument(&signature.result)
+                && carries_outcome(s) != carries_outcome(&signature.result)
+        }) {
+            return Err(format!(
+                "recursive call to {name} was lowered with {s:?} but the specialization returns {:?}",
+                signature.result
+            ));
+        }
         self.functions.push(Function {
             captures,
             id,
