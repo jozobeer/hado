@@ -785,7 +785,18 @@ impl Lowerer {
             result.kind = Apply(callee, args);
         }
         let children: Vec<&mut crate::parser::Node> = match &mut result.kind {
-            Apply(_, args) | Call(_, args) => args.iter_mut().collect(),
+            Apply(callee, args) | Call(callee, args) => {
+                // 入れ子の適用 `(f 8) 0` は callee 側が `$Outcome` の閉包を返すことがある。
+                // 引数だけ ANF すると、呼び出し側が `$Outcome` を閉包として呼んで落ちる。
+                // `List.length` のような module 修飾は `Field` なので、名前と同じく
+                // `direct_call` に載せる。複合の callee（適用・分岐）だけ外す。
+                let mut children = Vec::new();
+                if !matches!(callee.kind, Name(_) | Field(..)) {
+                    children.push(callee.as_mut());
+                }
+                children.extend(args.iter_mut());
+                children
+            }
             Neg(value) | Not(value) | Field(value, _) => vec![value],
             Bin(BinOp::And | BinOp::Or, left, _) => vec![left],
             Bin(_, left, right) => vec![left, right],
@@ -5108,17 +5119,17 @@ impl Lowerer {
                 return Err("lambda return type mismatch".into());
             }
             lowered
+        } else if is_outcome(&declared_result)
+            && outcome_parts(&declared_result).is_ok_and(|(success, _, _)| success == lowered)
+        {
+            // 本体は成功型（入れ子の outcome 閉包を含む）だが、宣言側の行が外側にも
+            // 効果を載せている。型変数の位置（`Map.insert` の V、`Option.unwrap_or`
+            // の A）は `actual_type` が外側も `$Outcome` にする。包むのは結果が
+            // 素の値のとき（PR #75）に限らず、入れ子の `$Outcome` を返すときも同じ。
+            body = self.done(body, &declared_result)?;
+            declared_result
         } else if lowered == signature.result {
-            // 本体は純粋だが、宣言側だけが効果を運ぶ（`with` の下で、本体のほかの
-            // 場所が効果を出さないために型検査器が閉包の行へ効果を入れた形）。
-            // `done` で包んで宣言側の型に揃える。包まないと、型引数の位置で
-            // `actual_type` が作った `$Outcome` と単一化できずに落ちる。
-            if is_outcome(&declared_result) {
-                body = self.done(body, &declared_result)?;
-                declared_result
-            } else {
-                lowered
-            }
+            lowered
         } else if logical_argument(&lowered) == signature.result {
             // 効果を持つ閉包を返す lambda。宣言側の型は効果行を落としている。
             lowered
