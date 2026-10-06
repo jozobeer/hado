@@ -114,14 +114,10 @@ python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 source = path.read_text()
-old = """            if is_outcome(&declared_result) {
-                body = self.done(body, &declared_result)?;
-                declared_result
-            } else {
-                lowered
-            }"""
-new = """            let _ = is_outcome(&declared_result);
-            lowered"""
+# 整形で行が変わっても当たるよう、包む代入だけを置き換える。
+old = """            body = self.done(body, &declared_result)?;
+            declared_result"""
+new = """            lowered"""
 if old not in source:
     raise SystemExit("mutation site not found")
 path.write_text(source.replace(old, new, 1))
