@@ -68,6 +68,83 @@ fn is_outcome(ty: &Type) -> bool {
     matches!(ty, Type::Data(name, _) if name == OUTCOME)
 }
 
+fn carries_nested_outcome(ty: &Type) -> bool {
+    match ty {
+        Type::Closure(_, result) => is_outcome(result) || carries_nested_outcome(result),
+        Type::Data(_, arguments) | Type::Abstract(_, arguments) => {
+            arguments.iter().any(carries_nested_outcome)
+        }
+        _ => false,
+    }
+}
+
+// 単相の record / ADT は型引数が無いので、field に載せた `$Outcome` 閉包の型が
+// `Data("Box", [])` から消える。射影が宣言側の `Fn(Int => Int)` を使うと、
+// 実際の閉包（`$Outcome`）を `Int` として読んでゴミを印字する。型引数が空の
+// ときだけ、実際の field 型を `Data` の引数に載せて射影へ渡す。
+fn stored_data_type(declared: &Type, fields: &[Type]) -> Type {
+    let Type::Data(name, arguments) = declared else {
+        return declared.clone();
+    };
+    if !arguments.is_empty() || fields.is_empty() {
+        return declared.clone();
+    }
+    if fields.iter().any(carries_nested_outcome) {
+        Type::Data(name.clone(), fields.to_vec())
+    } else {
+        declared.clone()
+    }
+}
+
+fn scheme_type_params(result: &Ty) -> usize {
+    match result {
+        Ty::Adt(_, parameters) | Ty::Abstract(_, parameters) => parameters.len(),
+        _ => 0,
+    }
+}
+
+fn extra_nominal_args(declared: &Type, actual: &Type) -> bool {
+    matches!(
+        (declared, actual),
+        (Type::Data(declared_name, declared_args), Type::Data(actual_name, actual_args))
+            if declared_name == actual_name
+                && declared_args.is_empty()
+                && !actual_args.is_empty()
+    )
+}
+
+// 単相の record / ADT に載せた実際の field 型は scheme の型引数より多い。
+// 単一化はその余分を切ってから行う。束縛は実際の型のまま残す。
+fn truncate_nominal_args(parameter: &Ty, actual: &Type) -> Type {
+    match (parameter, actual) {
+        (Ty::Adt(name, params), Type::Data(actual_name, arguments)) if name == actual_name => {
+            Type::Data(
+                actual_name.clone(),
+                arguments
+                    .iter()
+                    .take(params.len())
+                    .zip(params.iter())
+                    .map(|(argument, parameter)| truncate_nominal_args(parameter, argument))
+                    .collect(),
+            )
+        }
+        (Ty::Abstract(name, params), Type::Abstract(actual_name, arguments))
+            if name == actual_name =>
+        {
+            Type::Abstract(
+                actual_name.clone(),
+                arguments
+                    .iter()
+                    .take(params.len())
+                    .zip(params.iter())
+                    .map(|(argument, parameter)| truncate_nominal_args(parameter, argument))
+                    .collect(),
+            )
+        }
+        _ => actual.clone(),
+    }
+}
+
 // 効果を持つ関数値は mono では結果型に `$Outcome` を載せる。callee を
 // 単一化するときは source 側の型に戻す。ADT の型引数・入れ子の閉包の結果・
 // 閉包の引数に載っている場合も、内側を戻す。本体を実際の型で下ろすと閉包の
@@ -930,13 +1007,38 @@ impl Lowerer {
             .composite_types
             .get(&(node.span.line, node.span.col))
             .ok_or("missing record type")?;
-        let result = Type::try_from(&self.specialization.resolve(ty))
+        // `try_from` は行を落とす。多相 record の型引数に効果付き閉包が載ると
+        // `$Outcome` が消え、射影が素の `Int` として読む。
+        let declared = self
+            .actual_type(&self.specialization.resolve(ty))
             .map_err(|_| "record type is not concrete")?;
         let fields = fields
             .iter()
             .map(|(name, value)| Ok((name.name.clone(), self.expression(value)?)))
             .collect::<Result<Vec<_>, String>>()?;
+        let result = self.refine_record_type(&declared, &fields)?;
         Ok(Expression::Record { fields, result })
+    }
+
+    fn refine_record_type(
+        &self,
+        declared: &Type,
+        fields: &[(String, Expression)],
+    ) -> Result<Type, String> {
+        let Type::Data(name, _) = declared else {
+            return Ok(declared.clone());
+        };
+        let Some((names, _)) = self.records.get(name) else {
+            return Ok(declared.clone());
+        };
+        let mut actual = Vec::with_capacity(names.len());
+        for field_name in names {
+            let Some((_, value)) = fields.iter().find(|(name, _)| name == field_name) else {
+                return Ok(declared.clone());
+            };
+            actual.push(value.ty());
+        }
+        Ok(stored_data_type(declared, &actual))
     }
 
     fn list_expression(
@@ -1003,7 +1105,9 @@ impl Lowerer {
             .first()
             .map(Expression::ty)
             .filter(|first| values.iter().all(|value| &value.ty() == first))
-            .filter(|first| logical_argument(first) == *declared)
+            .filter(|first| {
+                logical_argument(first) == *declared || extra_nominal_args(declared, first)
+            })
     }
 
     fn cons_list(
@@ -2971,6 +3075,11 @@ impl Lowerer {
             Ty::Fn(fields, result, _) => (fields, *result),
             result => (vec![], result),
         };
+        if let (Type::Data(name, arguments), Ty::Adt(result_name, params)) = (ty, &result) {
+            if name == result_name && params.is_empty() && arguments.len() == fields.len() {
+                return Ok(arguments.clone());
+            }
+        }
         let expected = ty_with_fresh_rows(ty, &mut inference);
         inference
             .unify(&result, &expected)
@@ -3003,7 +3112,10 @@ impl Lowerer {
         if declared_fields.len() != fields.len() {
             return Ok(declared.clone());
         }
-        Ok(substitute_fields(declared, &declared_fields, fields))
+        Ok(stored_data_type(
+            &substitute_fields(declared, &declared_fields, fields),
+            fields,
+        ))
     }
 
     fn named_constructor(
@@ -3043,7 +3155,8 @@ impl Lowerer {
                     .ok_or_else(|| "missing named field".to_owned())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let declared_type = Type::try_from(&self.specialization.resolve(&ty))
+        let declared_type = self
+            .actual_type(&self.specialization.resolve(&ty))
             .map_err(|_| "named constructor type is not concrete")?;
         let result = self.constructed_type(
             &name,
@@ -3173,6 +3286,15 @@ impl Lowerer {
         let Ty::Fn(fields, result, _) = inference.instantiate(scheme) else {
             return Err("invalid record schema".into());
         };
+        if let Type::Data(_, arguments) = &ty {
+            if scheme_type_params(&result) == 0 && arguments.len() == names.len() {
+                return Ok(Expression::RecordGet {
+                    record: Box::new(record),
+                    field: field.into(),
+                    result: arguments[index].clone(),
+                });
+            }
+        }
         let expected = ty_with_fresh_rows(&ty, &mut inference);
         inference
             .unify(&result, &expected)
@@ -3250,7 +3372,8 @@ impl Lowerer {
                     .composite_types
                     .get(&(node.span.line, node.span.col))
                     .ok_or("missing constructor result type")?;
-                let declared = Type::try_from(&self.specialization.resolve(ty))
+                let declared = self
+                    .actual_type(&self.specialization.resolve(ty))
                     .map_err(|_| "constructor type is not concrete")?;
                 let result = self.constructed_type(
                     &self.resolve_constructor(name),
@@ -5835,17 +5958,30 @@ impl Lowerer {
         }
         let outcome_answer = self.outcome_answer(&scheme, &types)?;
         let outcome = outcome_answer.is_some();
+        let mut probe = crate::types::Inference::default();
+        let (scheme_parameters, scheme_result) = match probe.instantiate(&scheme) {
+            Ty::Fn(parameters, result, _) => (parameters, *result),
+            other => (Vec::new(), other),
+        };
         // 期待する結果型を渡す単一化用に、source 側の結果型（outcome を外した形）
         // を用意する。引数から結果型が決まらない形（契約の member が返す閉包の
         // 引数など）はこちらから取る。期待する結果型も本体が実際の型で下ろれて
-        // いるので、論理型に戻してから単一化する。
-        let logical: Vec<Type> = types.iter().map(logical_argument).collect();
+        // いるので、論理型に戻してから単一化する。単相 record の余分な field 型は
+        // scheme の型引数に合わせて切る。
+        let logical: Vec<Type> = types
+            .iter()
+            .enumerate()
+            .map(|(index, actual)| match scheme_parameters.get(index) {
+                Some(parameter) => logical_argument(&truncate_nominal_args(parameter, actual)),
+                None => logical_argument(actual),
+            })
+            .collect();
         let inferred = Signature::specialize_result(
             &scheme,
             &logical,
             expected_result
                 .filter(|_| !outcome)
-                .map(logical_argument)
+                .map(|ty| logical_argument(&truncate_nominal_args(&scheme_result, ty)))
                 .as_ref(),
         )?;
         // 本体も引数の実際の型で下ろす。scheme が関数型を書いた位置は、本体が
@@ -5853,11 +5989,6 @@ impl Lowerer {
         // を外した成功型を使う（`mixed_argument`）。引数の型とデータの型引数は
         // 実際の型のまま残す。全体を論理型で下ろすと、引数から来た値（実際の型）
         // と本体が組み立てる値（論理型）が食い違う。
-        let mut probe = crate::types::Inference::default();
-        let scheme_parameters = match probe.instantiate(&scheme) {
-            Ty::Fn(parameters, _, _) => parameters,
-            _ => Vec::new(),
-        };
         let body_parameters: Vec<Type> = types
             .iter()
             .enumerate()

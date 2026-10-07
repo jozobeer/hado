@@ -1,5 +1,17 @@
 use crate::{mono::Type, types::Ty, Checked};
 
+/// 単相の record / ADT は、field に載せた `$Outcome` 閉包の型を `Data` の引数に
+/// 載せて射影へ渡す。scheme の型引数の個数を超えた分は表現の単一化には使わない。
+fn data_for_scheme(result: &Ty, ty: &Type) -> Type {
+    match (result, ty) {
+        (Ty::Adt(_, parameters), Type::Data(name, arguments)) => Type::Data(
+            name.clone(),
+            arguments.iter().take(parameters.len()).cloned().collect(),
+        ),
+        _ => ty.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineType {
     I8,
@@ -110,7 +122,7 @@ pub fn record_layout(
         return Err("invalid record schema".into());
     };
     inference
-        .unify(&result, &Ty::from(ty))
+        .unify(&result, &Ty::from(&data_for_scheme(&result, ty)))
         .map_err(|error| format!("record specialization failed: {error:?}"))?;
     let fields = fields
         .iter()
@@ -158,7 +170,7 @@ pub fn constructor_layout(
         result => (vec![], result),
     };
     inference
-        .unify(&result, &Ty::from(ty))
+        .unify(&result, &Ty::from(&data_for_scheme(&result, ty)))
         .map_err(|error| format!("constructor specialization failed: {error:?}"))?;
     let fields = fields
         .iter()
@@ -222,7 +234,7 @@ pub fn constructor_tag(constructor: &str, ty: &Type, checked: &Checked) -> Resul
         ty => ty,
     };
     inference
-        .unify(result, &Ty::from(ty))
+        .unify(result, &Ty::from(&data_for_scheme(result, ty)))
         .map_err(|error| format!("constructor type mismatch: {error:?}"))?;
     checked
         .constructor_tags
