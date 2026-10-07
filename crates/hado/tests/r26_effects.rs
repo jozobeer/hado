@@ -1126,6 +1126,54 @@ fn an_effectful_parameter_does_not_restore_a_written_result() {
 }
 
 #[test]
+fn an_effectful_closure_in_a_pure_typed_record_field_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = { f: Fn(Int => Int) }\ndef main = with Catch -> { f = fn(x => 8 / x) } as b ->\n  b.f 0",
+        "0",
+    );
+}
+
+#[test]
+fn an_effectful_closure_in_a_pure_typed_record_field_keeps_its_success() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = { f: Fn(Int => Int) }\ndef main = with Catch -> { f = fn(x => 8 / x) } as b ->\n  b.f 2",
+        "4",
+    );
+}
+
+#[test]
+fn a_pure_closure_built_outside_a_handler_keeps_its_record_field() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = { f: Fn(Int => Int) }\ndef main = { f = fn(x => x + 1) } as b ->\n  with Catch -> b.f 2",
+        "3",
+    );
+}
+
+#[test]
+fn an_effectful_closure_in_a_pure_typed_adt_field_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int))\ndef main = with Catch -> Box(fn(x => 8 / x)) as Box(f) ->\n  f 0",
+        "0",
+    );
+}
+
+#[test]
+fn an_effectful_closure_in_a_polymorphic_record_field_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype A Box = { f: A }\ndef main = with Catch -> { f = fn(x => 8 / x) } as b ->\n  b.f 0",
+        "0",
+    );
+}
+
+#[test]
+fn an_effectful_closure_in_a_list_of_pure_typed_records_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = { f: Fn(Int => Int) }\ndef main = with Catch -> [{ f = fn(x => 8 / x) }] as xs ->\n  if xs | [b, ..._] => b.f 0 | 1",
+        "0",
+    );
+}
+
+#[test]
 fn an_effectful_closure_in_a_monomorphic_adt_field_keeps_its_outcome() {
     let case = Case::new();
     case.write("main.hd", "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ntype Box = | Box(Fn(Int => Int {Error}))\ndef main = with Catch -> Box(fn(x => 8 / x)) as Box(f) ->\n  f 0\n");
