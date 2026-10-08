@@ -69,6 +69,34 @@
 - `cargo test --offline --test r26_effects` が 0 failed。
 - `cargo test --offline` が 0 failed、`cargo fmt --all --check` と clippy が赤なし。
 
+### 審査の結果（着地不可）
+
+別モデル系（`claude -p --model claude-opus-5-5 --effort high`）の審査が「欠陥あり」。
+`6747eb1` は main では正しく走る 4 系統を壊す。どれも #79 の枝では main と同じ値なので、
+本ラウンドの修正が持ち込んだ退行である。
+
+| 探針 | main | #79 の枝 | 直した枝 |
+|---|---|---|---|
+| `def mk = { f = fn(x => x + 1) }` / `with Catch -> mk as b -> b.f 2` | 3 | 3 | BUILD 失敗 `lowered return type differs from inferred signature for mk` |
+| `def call(b: Sh) => b.f 2` / `with Catch -> call({ f = fn(x => x + 1) })` | 3 | 3 | BUILD 失敗（同上、`file0$call`） |
+| `Map.insert Map.empty "b" { f = fn(x => x + 1) }` を `Map.find` で取り出す | 3 | 3 | BUILD 失敗 `Arity` |
+| `type Sh = { f: Fn(Int => Fn(Int => Int)) }` に `fn(x => fn(y => x + y))` | 42 | 42 | exit=132（SIGILL、core dump） |
+
+4 件目は `outcome_form` が入れ子の閉包まで直すのに、`wrap_pure_closure` が包めずに値を
+そのまま返すためである（`mono.rs` の `wrap_pure_closure` が `value_result != success` で
+何もせず返す）。record の型と値が食い違ったまま codegen に進む。
+
+**筋が破綻する理由。** 「実際の field 型を `Data` の引数に載せる」にせよ「handler の下で
+`$Outcome` の形に揃える」にせよ、同じソースの型が効果の文脈によって 2 つの mono の型に
+割れる。単相の型は型引数を持たないので、`$Outcome` が要る答え型を載せる場所が無い。
+record を値で作った場所だけ揃えても、関数の境界・型を書いた引数・`Map` の型引数は
+宣言側の型のままになる。`a3` と `a4` が #79 の枝で `invalid branch types` になったのも
+同じ理由である。
+
+このラウンドは着地させない（PR #80 は下書きに戻した）。表現の決め方を人が決めるまで
+止める。`docs/issues/effectful-closure-in-pure-typed-field.md` を戻し、分かったことを
+書いた。
+
 ### 許容される赤
 
 無し。
