@@ -407,9 +407,12 @@ fn main() -> ExitCode {
 
 /// `check --fix` applies the canonical rewrites at the reported anchor and
 /// re-checks, until a check passes or a diagnostic has no local rewrite.
+/// §58.1: once it has applied a rewrite it also reprints, like `fmt`, so the
+/// three tools agree. A source it did not rewrite is left alone.
 /// The default `check` / `build` never write to a source file.
 fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
     const LIMIT: usize = 16;
+    let mut applied = false;
     for _ in 0..LIMIT {
         let project = match Project::load(input) {
             Ok(project) => project,
@@ -420,6 +423,13 @@ fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
         };
         match project.check() {
             Ok(checked) => {
+                // 書き換えを当てたときだけ印字し直す。診断の無いソースを
+                // `--fix` が整形してしまわないようにする。
+                if applied {
+                    if let Err(code) = format_sources(input, false) {
+                        return code;
+                    }
+                }
                 if let Some(name) = type_name {
                     if let Err(code) = print_type(&checked, &project, Some(name), input) {
                         return code;
@@ -428,7 +438,10 @@ fn check_with_fix(input: &Path, type_name: Option<&str>) -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             Err(error) => match project.apply_canonical_fix(&error) {
-                Ok(true) => continue,
+                Ok(true) => {
+                    applied = true;
+                    continue;
+                }
                 Ok(false) => {
                     print_diagnostic(&project, &error);
                     return ExitCode::from(1);
