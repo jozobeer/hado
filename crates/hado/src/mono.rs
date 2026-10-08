@@ -78,6 +78,61 @@ fn carries_nested_outcome(ty: &Type) -> bool {
     }
 }
 
+/// handler の下では、宣言が効果行を書いていなくても閉包の field は効果を運びうる
+/// （§36。型検査器は handler の下の効果付き閉包を field に許す）。mono の表現を
+/// 1 つに決めるため、閉包を outcome の閉包の形へ直す。直した箇所があったかを返す。
+///
+/// 直さないと、同じソースの型が field の中身によって 2 つの mono の型に割れる。
+/// 効果を運ぶ値は `$Outcome` の閉包、運ばない値は素の閉包になるので、分岐や
+/// リストや型を書いた引数で合流できず、内部エラーで落ちる。
+fn outcome_form(ty: &Type, answer: &Type) -> (Type, bool) {
+    match ty {
+        Type::Closure(parameters, result) => {
+            let mut changed = false;
+            let parameters = parameters
+                .iter()
+                .map(|parameter| {
+                    let (converted, nested) = outcome_form(parameter, answer);
+                    changed |= nested;
+                    converted
+                })
+                .collect();
+            let (result, nested) = outcome_form(result, answer);
+            changed |= nested;
+            if is_outcome(&result) {
+                return (Type::Closure(parameters, Box::new(result)), changed);
+            }
+            let outcome = Type::Data(OUTCOME.into(), vec![result, answer.clone(), Type::Void]);
+            (Type::Closure(parameters, Box::new(outcome)), true)
+        }
+        Type::Data(name, arguments) => {
+            let mut changed = false;
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    let (converted, nested) = outcome_form(argument, answer);
+                    changed |= nested;
+                    converted
+                })
+                .collect();
+            (Type::Data(name.clone(), arguments), changed)
+        }
+        Type::Abstract(name, arguments) => {
+            let mut changed = false;
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    let (converted, nested) = outcome_form(argument, answer);
+                    changed |= nested;
+                    converted
+                })
+                .collect();
+            (Type::Abstract(name.clone(), arguments), changed)
+        }
+        _ => (ty.clone(), false),
+    }
+}
+
 // 単相の record / ADT は型引数が無いので、field に載せた `$Outcome` 閉包の型が
 // `Data("Box", [])` から消える。射影が宣言側の `Fn(Int => Int)` を使うと、
 // 実際の閉包（`$Outcome`）を `Int` として読んでゴミを印字する。型引数が空の
@@ -1027,29 +1082,67 @@ impl Lowerer {
             .iter()
             .map(|(name, value)| Ok((name.name.clone(), self.expression(value)?)))
             .collect::<Result<Vec<_>, String>>()?;
-        let result = self.refine_record_type(&declared, &fields)?;
+        let (result, fields) = self.refine_record_type(&declared, fields)?;
         Ok(Expression::Record { fields, result })
     }
 
+    /// 単相の record の型は `Data("Box", [])` で field の型を持たない。field に
+    /// `$Outcome` の閉包を載せると、射影が宣言側の `Fn(Int => Int)` を使って実際の
+    /// 閉包を `Int` として読む。実際の field 型を `Data` の引数に載せ、値もその形へ
+    /// 揃える（`stored_data_type` と `outcome_form`）。揃えないと、同じソースの型が
+    /// 中身によって 2 つの mono の型に割れる。
     fn refine_record_type(
-        &self,
+        &mut self,
         declared: &Type,
-        fields: &[(String, Expression)],
-    ) -> Result<Type, String> {
-        let Type::Data(name, _) = declared else {
-            return Ok(declared.clone());
+        fields: Vec<(String, Expression)>,
+    ) -> Result<(Type, Vec<(String, Expression)>), String> {
+        let fallback = |fields: Vec<(String, Expression)>| (declared.clone(), fields);
+        let Type::Data(name, declared_arguments) = declared else {
+            return Ok(fallback(fields));
         };
+        // 多相の record は型引数が実際の field 型を運ぶ。`actual_type` が既に効果行を
+        // 見ているので、ここで揃える必要はない。揃えると値だけが変わり、record の型と
+        // 食い違う。
+        if !declared_arguments.is_empty() {
+            return Ok(fallback(fields));
+        }
         let Some((names, _)) = self.records.get(name) else {
-            return Ok(declared.clone());
+            return Ok(fallback(fields));
         };
+        let names = names.clone();
+        // handler の下では、field の閉包は handler の答えを返す形（`$Outcome`）で
+        // 呼ばれる。揃えないと、同じソースの型が中身によって 2 つの mono の型に割れる。
+        let answer = self.callback_answer()?;
         let mut actual = Vec::with_capacity(names.len());
-        for field_name in names {
+        for field_name in &names {
             let Some((_, value)) = fields.iter().find(|(name, _)| name == field_name) else {
-                return Ok(declared.clone());
+                return Ok(fallback(fields));
             };
             actual.push(value.ty());
         }
-        Ok(stored_data_type(declared, &actual))
+        // handler の下では閉包を outcome の形に揃える。揃えないと同じ型が中身で割れる。
+        let stored: Vec<Type> = match &answer {
+            Some(answer) => actual
+                .iter()
+                .map(|field| outcome_form(field, answer).0)
+                .collect(),
+            None => actual.clone(),
+        };
+        let result = stored_data_type(declared, &stored);
+        if !matches!(&result, Type::Data(_, arguments) if !arguments.is_empty()) {
+            return Ok(fallback(fields));
+        }
+        let mut converted = Vec::with_capacity(fields.len());
+        for (field_name, value) in fields {
+            match names.iter().position(|name| name == &field_name) {
+                Some(index) => {
+                    let target = stored[index].clone();
+                    converted.push((field_name, self.as_outcome_closure(value, &target)?));
+                }
+                None => converted.push((field_name, value)),
+            }
+        }
+        Ok((result, converted))
     }
 
     fn list_expression(
@@ -3086,8 +3179,15 @@ impl Lowerer {
             Ty::Fn(fields, result, _) => (fields, *result),
             result => (vec![], result),
         };
-        if let (Type::Data(name, arguments), Ty::Adt(result_name, params)) = (ty, &result) {
-            if name == result_name && params.is_empty() && arguments.len() == fields.len() {
+        // 単相の ADT の型は `Data("Box", [])` で field の型を持たない。構築子が 1 つ
+        // のときだけ `constructed_type` が実際の field 型を `Data` の引数に載せる。
+        // その形が来たら推論で組み直さない（`Ty::Adt` の型引数は空で単一化できない）。
+        if let (Type::Data(adt, arguments), Ty::Adt(result_name, params)) = (ty, &result) {
+            if adt == result_name
+                && params.is_empty()
+                && arguments.len() == fields.len()
+                && self.single_constructor_adt(adt)
+            {
                 return Ok(arguments.clone());
             }
         }
@@ -3111,22 +3211,69 @@ impl Lowerer {
 
     // 効果を持つ関数値は mono では結果が outcome の閉包になる。constructor の
     // 結果型も、宣言側の field 型ではなく実際の field 型で組む。
+    //
+    // 多相の ADT は型引数が実際の field 型を運ぶので、これで射影が `$Outcome` を
+    // 保つ。単相の ADT は型引数が無いので、構築子が 1 つのときだけ `Data` の引数に
+    // field 型を載せる。2 つ以上あると構築子ごとに field の並びが違い、`Fun(...)` と
+    // `Num(...)` が同じ `Data("Sh", ...)` に合流できない。
     fn constructed_type(
-        &self,
+        &mut self,
         name: &str,
         declared: &Type,
-        fields: &[Type],
-    ) -> Result<Type, String> {
+        fields: Vec<Expression>,
+    ) -> Result<(Type, Vec<Expression>), String> {
         let declared_fields = self
             .constructor_declared_fields(name, declared)
             .unwrap_or_default();
         if declared_fields.len() != fields.len() {
-            return Ok(declared.clone());
+            return Ok((declared.clone(), fields));
         }
-        Ok(stored_data_type(
-            &substitute_fields(declared, &declared_fields, fields),
-            fields,
-        ))
+        let actual: Vec<Type> = fields.iter().map(Expression::ty).collect();
+        let substituted = substitute_fields(declared, &declared_fields, &actual);
+        let Type::Data(adt, arguments) = &substituted else {
+            return Ok((substituted, fields));
+        };
+        if !arguments.is_empty() || !self.single_constructor_adt(adt) {
+            return Ok((substituted, fields));
+        }
+        // handler の下では閉包を outcome の形に揃える。揃えないと同じ型が中身で割れる。
+        let answer = self.callback_answer()?;
+        let stored: Vec<Type> = match &answer {
+            Some(answer) => actual
+                .iter()
+                .map(|field| outcome_form(field, answer).0)
+                .collect(),
+            None => actual.clone(),
+        };
+        let result = stored_data_type(&substituted, &stored);
+        if !matches!(&result, Type::Data(_, fields) if !fields.is_empty()) {
+            return Ok((substituted, fields));
+        }
+        let mut converted = Vec::with_capacity(fields.len());
+        for (index, field) in fields.into_iter().enumerate() {
+            let target = stored[index].clone();
+            converted.push(self.as_outcome_closure(field, &target)?);
+        }
+        Ok((result, converted))
+    }
+
+    /// 単相の ADT は型引数を持たない。構築子が 1 つなら `Data` の引数にその
+    /// 構築子の field 型を載せて射影へ渡せるが、2 つ以上あると載せられない。
+    fn single_constructor_adt(&self, name: &str) -> bool {
+        let mut found = false;
+        for scheme in self.constructors.values() {
+            let result = match scheme.body() {
+                Ty::Fn(_, result, _) => result.as_ref(),
+                other => other,
+            };
+            if matches!(result, Ty::Adt(adt, _) if adt == name) {
+                if found {
+                    return false;
+                }
+                found = true;
+            }
+        }
+        found
     }
 
     fn named_constructor(
@@ -3169,11 +3316,7 @@ impl Lowerer {
         let declared_type = self
             .actual_type(&self.specialization.resolve(&ty))
             .map_err(|_| "named constructor type is not concrete")?;
-        let result = self.constructed_type(
-            &name,
-            &declared_type,
-            &fields.iter().map(Expression::ty).collect::<Vec<_>>(),
-        )?;
+        let (result, fields) = self.constructed_type(&name, &declared_type, fields)?;
         let mut body = Expression::Construct {
             constructor: name.clone(),
             fields,
@@ -3386,14 +3529,11 @@ impl Lowerer {
                 let declared = self
                     .actual_type(&self.specialization.resolve(ty))
                     .map_err(|_| "constructor type is not concrete")?;
-                let result = self.constructed_type(
-                    &self.resolve_constructor(name),
-                    &declared,
-                    &arguments.iter().map(Expression::ty).collect::<Vec<_>>(),
-                )?;
+                let constructor = self.resolve_constructor(name);
+                let (result, fields) = self.constructed_type(&constructor, &declared, arguments)?;
                 return Ok(Expression::Construct {
-                    constructor: self.resolve_constructor(name),
-                    fields: arguments,
+                    constructor,
+                    fields,
                     result,
                 });
             }
