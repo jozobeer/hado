@@ -762,7 +762,13 @@ fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8) -> String {
 }
 
 fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
-    let mut out = expr_prec(f, indent, false, 8);
+    // 呼び手が適用のときは括弧で囲む。`(f a) b` を `f a b` と印字すると、2 回の
+    // 適用が 1 回の 2 引数呼び出しに変わり、意味が変わる（§36）。
+    let mut out = if matches!(f.kind, NodeKind::Apply(..)) {
+        format!("({})", expr(f, indent, false))
+    } else {
+        expr_prec(f, indent, false, 8)
+    };
     for argument in args {
         out.push(' ');
         if matches!(argument.kind, NodeKind::Apply(..))
