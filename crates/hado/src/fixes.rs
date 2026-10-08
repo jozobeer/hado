@@ -134,38 +134,54 @@ pub fn hint(source: &str, code: &str, line: usize, col: usize) -> Option<String>
 /// 診断のアンカーに一致する書き換えだけを当てるので、ここを通らない。
 pub fn format(source: &str) -> Result<Option<(String, usize)>, usize> {
     const LIMIT: usize = 64;
+    // 空のファイルは触らない。印字し直すと空のプログラムが末尾の改行 1 つになり、
+    // 中身の無いファイルへ改行を足してしまう。
+    if source.is_empty() {
+        return Ok(None);
+    }
     let mut text = source.to_string();
-    let mut applied = 0;
+    let mut rewrites = 0;
+    let mut blanks = 0;
+    let mut reprinted = false;
     let mut settled = false;
+    // 書き換えと印字し直しを、木が動かなくなるまで交互に当てる。印字し直しが
+    // 書き換えの範囲の外へコメントを移すと、次の書き換えが新たに届くようになる
+    // （E507 の範囲にコメントがあると書き換えを出さない、§57）。1 度だけだと
+    // `fmt` を 2 回当てた結果が 1 回目と変わり、冪等でなくなる。
     for _ in 0..LIMIT {
         let edits = fixes(&text);
-        if edits.is_empty() {
+        if !edits.is_empty() {
+            rewrites += edits.len();
+            text = splice(&text, &edits);
+            continue;
+        }
+        // §58.1: 印字し直して字下げと改行を正準形へ揃える。コメントは構文木が
+        // 位置を持っているので消えない（§57）。
+        let printed = match crate::parser::parse_source(&text, "<fmt>") {
+            Ok(ast) => crate::parser::canonical_program(&ast),
+            // 読めない入力は印字し直さない。呼ぶ側が検査で報告する。
+            Err(_) => text.clone(),
+        };
+        // 行末の空白とファイル末尾の改行も揃える。
+        let (laid_out, layout_applied) = layout(&printed);
+        if laid_out == text {
             settled = true;
             break;
         }
-        applied += edits.len();
-        text = splice(&text, &edits);
+        reprinted = true;
+        blanks += layout_applied;
+        text = laid_out;
     }
     if !settled {
         return Err(LIMIT);
     }
-    // §58.1: 印字し直して字下げと改行を正準形へ揃える。コメントは構文木が
-    // 位置を持っているので消えない（§57）。
-    let printed = match crate::parser::parse_source(&text, "<fmt>") {
-        Ok(ast) => crate::parser::canonical_program(&ast),
-        // 読めない入力は印字し直さない。呼ぶ側が検査で報告する。
-        Err(_) => text.clone(),
-    };
-    // 行末の空白とファイル末尾の改行も揃える。
-    let (laid_out, layout_applied) = layout(&printed);
-    if laid_out != source {
-        applied += 1;
-    }
-    applied += layout_applied;
-    if laid_out == source {
+    if text == source {
         return Ok(None);
     }
-    Ok(Some((laid_out, applied)))
+    // §58.1: 数えるのは「§57 の書き換えを当てた回数 + 印字し直しで変わった
+    // ファイルごとの 1」。
+    let applied = rewrites + blanks + usize::from(reprinted);
+    Ok(Some((text, applied)))
 }
 
 /// §58.1: 行末の空白（スペースとタブ）を消し、ファイルの終わりを改行 1 つにする。
@@ -965,9 +981,10 @@ fn condition_arm_fix(
     if !matches!(if_token.kind, TokKind::KwIf) {
         return None;
     }
-    // Take the surrounding blanks too, so the rewrite leaves no trailing space.
+    // `=> if` とその前の空白を消す。`if` の後ろの空白は残す。条件列の `|` の
+    // 前の空白がそれなので、一緒に消すと `score| score >= 70` になる。
     let start = trim_blanks_back(source, lines.offset(source, tokens[at].span));
-    let end = skip_blanks(source, lines.offset(source, if_token.span) + 2);
+    let end = lines.offset(source, if_token.span) + 2;
     let def = def_at(&ast.items, span)?;
     Some(Fix {
         code: "E517",
