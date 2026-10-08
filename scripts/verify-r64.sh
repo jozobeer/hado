@@ -90,22 +90,23 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import fmt_check, run, source_of
 
+# §58.1 の印字し直しで、行末の空白もタブの字下げも同じ 1 回で正準形へ寄る。
 TAB = 'def main =\n\t1   '
-FIXED = 'def main =\n\t1\n'
+FIXED = 'def main = 1\n'
 result = run(sys.argv[1], 'a', TAB, 'fmt', '--check')
 assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
-assert b'is not canonical (2 rewrites)' in result.stdout, result.stdout
+assert b'is not canonical (1 rewrites)' in result.stdout, result.stdout
 assert source_of(sys.argv[1], 'a') == TAB, 'fmt --check must not write'
 result = run(sys.argv[1], 'a', TAB, 'fmt')
 assert result.returncode == 0 and result.stderr == b'', (result.returncode, result.stderr)
-assert b'fmt: main.hd (2 rewrites)' in result.stdout, result.stdout
+assert b'fmt: main.hd (1 rewrites)' in result.stdout, result.stdout
 text = source_of(sys.argv[1], 'a')
 assert text == FIXED, (repr(text), repr(FIXED))
 result = run(sys.argv[1], 'a', FIXED, 'fmt')
 assert result.returncode == 0 and result.stdout == b'', (result.returncode, result.stdout)
 assert source_of(sys.argv[1], 'a') == FIXED, 'fmt must be idempotent'
 fmt_check(sys.argv[1], 'a', FIXED, 0)
-print('layout: the trailing blanks go and one final newline stays, the tab indent remains')
+print('layout: the trailing blanks go, one final newline stays, the body joins the arrow')
 PYEOF3
 }
 
@@ -119,7 +120,8 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import fmt_check, run, source_of
 
-CANON = 'def main =\n  1\n'
+# §58.1 の印字し直しでは、腕を持たない本体は `=>` と同じ行に置く。
+CANON = 'def main = 1\n'
 result = run(sys.argv[1], 'b', CANON, 'fmt')
 assert result.returncode == 0 and result.stdout == b'' and result.stderr == b'', (result.returncode, result.stdout)
 assert source_of(sys.argv[1], 'b') == CANON, 'fmt must not write a canonical file'

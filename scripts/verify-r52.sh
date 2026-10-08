@@ -197,7 +197,7 @@ root = project(Path(sys.argv[1]) / 'd', {
 before = (root / 'lib/util.hd').read_text()
 result = run('fmt', str(root / 'main.hd'))
 assert result.returncode == 0, (result.returncode, result.stderr)
-assert result.stdout == b'fmt: lib/util.hd (1 rewrites)\n', result.stdout
+assert result.stdout == b'fmt: lib/util.hd (2 rewrites)\n', result.stdout
 assert (root / 'lib/util.hd').read_text() != before, 'the subdirectory file was not rewritten'
 assert (root / 'main.hd').read_text() == 'def main = lib::Util.helper 3\n', 'an already canonical file changed'
 checked = run('check', str(root / 'main.hd'))

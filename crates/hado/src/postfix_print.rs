@@ -13,16 +13,328 @@ use super::source_print::{literal, parameters, return_type, type_parameters, typ
 use super::*;
 
 /// 1 ファイル分の綴り。`library` 見出しのあとに項目を並べる。
+///
+/// §58.1: 字句が読み飛ばした行コメントは、構文木が持つ位置へ置き直す。
+/// コメントは直後の項目に属し、その項目の見出しから行数分だけ上に来る
+/// （§57 の「コメントを消さない」）。
 pub fn program(ast: &Ast) -> String {
     let mut out = String::new();
     if ast.library.is_some() {
         out.push_str("library\n");
     }
-    out.push_str(&items_text(&ast.items));
+    out.push_str(&items_text_with_breaks(&ast.items, &ast.comments));
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
+    place_comments(ast, out)
+}
+
+/// 項目を並べる。本体の中にコメントを持つ項目は、本体を次の行へ送る。
+///
+/// §57: コメントは同じ定義の中に残す。1 行に収まる本体にコメントがあると
+/// その行の中に置けないので、`=>` の後ろで改行して本体を次の行へ置く。
+fn items_text_with_breaks(items: &[Item], comments: &[crate::lexer::Comment]) -> String {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            // この項目の本体は、次の項目が始まる行で終わる。次の項目が
+            // 無ければファイルの末尾まで。
+            let next = items.get(index + 1).map_or(usize::MAX, item_start_line);
+            item_text_with_breaks(item, comments, next)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `module` と `implement` の本体を閉じの印と一緒に組む。本体が空のときは空行を
+/// 入れない。空行は §58.1 で残すので、空の本体の中の空行が本体の一部として読まれ、
+/// 印字し直すたびに 1 つ増える。
+fn closed_body(header: String, body: String, close: &str) -> String {
+    if body.is_empty() {
+        format!("{header}\n{close}")
+    } else {
+        format!("{header}\n{body}\n{close}")
+    }
+}
+
+fn item_text_with_breaks(
+    item: &Item,
+    comments: &[crate::lexer::Comment],
+    next_line: usize,
+) -> String {
+    match item {
+        Item::ModuleSig(module) => closed_body(
+            format!("module {}", module.name),
+            items_text_with_breaks(&module.items, comments),
+            "/module",
+        ),
+        Item::ModuleImpl(module) => match &module.form {
+            ImplementationForm::Ordinary => closed_body(
+                format!("implement {} as {}", module.sig, module.name),
+                items_text_with_breaks(&module.items, comments),
+                "/implement",
+            ),
+            ImplementationForm::Functor(parameters) => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                closed_body(
+                    format!("implement {} as {}({parameters})", module.sig, module.name),
+                    items_text_with_breaks(&module.items, comments),
+                    "/implement",
+                )
+            }
+            form => {
+                let _ = form;
+                item_text(item)
+            }
+        },
+        Item::Def(def) => match body_break_line(def, comments, next_line) {
+            // 本体の中にコメントがあるので、`=>` の後ろで改行する。
+            Some(_) => split_body(item_text(item)),
+            None => item_text(item),
+        },
+        _ => item_text(item),
+    }
+}
+
+/// 本体の中にコメントを持つ `def` なら `true`。
+///
+/// 本体は見出しの行から本体の式の最終行まで。コメントがその範囲に入って
+/// いれば本体の中である。範囲の外にあるコメント（次の項目に付くもの、
+/// 次のまとまりの見出し）は本体の中ではない。
+fn body_break_line(
+    def: &Def,
+    comments: &[crate::lexer::Comment],
+    next_line: usize,
+) -> Option<usize> {
+    let DefKind::Function { body, .. } = &def.kind else {
+        return None;
+    };
+    // 本体の最終行。見出しと同じ行を指すことがあるので、見出しの行で下限を取る。
+    let last = body.span.end_line.max(def.span.line);
+    // 本体の中のコメントは、本体の行の範囲に入るもの。ただし次の項目の
+    // 直上（1 行上）にあるものは、その項目に付くので本体の中ではない。
+    comments
+        .iter()
+        .any(|comment| {
+            comment.span.line > def.span.line
+                && comment.span.line <= last
+                && comment.span.line + 1 != next_line
+        })
+        .then_some(def.span.line)
+}
+
+/// `item` の印字を、本体が始まる `=>` で 2 行に割る。
+fn split_body(text: String) -> String {
+    // 印字は `def … => <本体>` の形なので、最初の ` => ` で割る。
+    match text.find(" => ") {
+        Some(at) => format!(
+            "{}\n  {}",
+            text[..at + 3].trim_end(),
+            text[at + 4..].trim_start()
+        ),
+        None => text,
+    }
+}
+
+/// コメントの 1 つを印字する行。行頭のコメントはそのまま、字下げの付いた
+/// 位置のコメントは 2 の字下げを付ける（本体の内側のコメントを保つ）。
+fn comment_line(comment: &crate::lexer::Comment) -> String {
+    let text = comment.text.trim_end();
+    if comment.span.col == 1 {
+        text.to_string()
+    } else {
+        format!("  {text}")
+    }
+}
+
+/// コメントを、属する項目の高さへ戻す。
+///
+/// 印字し直した行と元のソースの行を突き合わせるのではなく、**項目の印字が
+/// 何行目から始まるかを積み上げて**求める。`items_text` は `module` の本体の
+/// 入れ子項目も印字するので、印字の行数は `ast.items` の数より多い。項目の
+/// 印字の行数をそのまま積めば、入れ子の分も自然に数えられる。
+///
+/// コメントが `module` や `implement` の本体の中にあるときは、**入れ子の
+/// 項目**を基準にする。外側の項目で数えると、本体の中のコメントが本体の
+/// 外へ出てしまう（§57 の「同じ定義の前後に残す」）。
+fn place_comments(ast: &Ast, canonical: String) -> String {
+    let mut lines: Vec<String> = canonical
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_string)
+        .collect();
+    // 入れ子の項目も含めた、各項目の印字が始まる行。
+    // `library` 見出しの分だけ後ろへずれる。
+    let items = ItemLines::new(&ast.items, usize::from(ast.library.is_some()));
+    // 挿入するものを (印字の位置, 元のソースの行, 中身) で集める。
+    let mut inserts: Vec<(usize, usize, Vec<String>)> = Vec::new();
+    // §58.1: 空行は残す。印字し直した結果には空行が無いので、元のソースで
+    // 空行が挟まっていたところへ入れ直す。空行は「その次に来るもの」の
+    // 直前に付く。次に来るものは項目のことも、コメントの塊のこともある。
+    // どちらの位置に置くかは、下のコメントの処理と突き合わせて決める。
+    let mut blank_before: Vec<usize> = Vec::new();
+    for line in &ast.blank_lines {
+        // 空行の次が空行のこともある。連なりは 1 つにまとめる。
+        if blank_before.last().is_some_and(|prev| *prev + 1 == *line) {
+            continue;
+        }
+        blank_before.push(*line);
+    }
+    // 連続するコメントは 1 つの塊として置く。1 行ずつ置くと、同じ項目に
+    // 付く複数行のコメントが互いの間に項目を挟んでしまう。
+    let mut blocks: Vec<Vec<crate::lexer::Comment>> = Vec::new();
+    for comment in &ast.comments {
+        match blocks.last_mut() {
+            Some(block)
+                if block
+                    .last()
+                    .is_some_and(|c| c.span.line + 1 == comment.span.line) =>
+            {
+                block.push(comment.clone());
+            }
+            _ => blocks.push(vec![comment.clone()]),
+        }
+    }
+    blocks.reverse();
+    // 空行は、その次に来るコメントの塊か項目の位置へ置く。
+    for line in blank_before {
+        // この空行より後ろで最初に始まるものの位置。
+        let next_comment = ast
+            .comments
+            .iter()
+            .find(|c| c.span.line > line)
+            .map(|c| c.span.line);
+        let next_item = items.flat.iter().find(|(source, _, _)| *source > line);
+        // 後ろに何も無い空行は置かない。空の本体の中の空行などがこれに当たり、
+        // 置くと本体の外（ファイルの末尾）へ出て、走らせるたびに増える。
+        if next_comment.is_none() && next_item.is_none() {
+            continue;
+        }
+        let at = match (next_comment, next_item) {
+            // 次が項目で、その項目の方がコメントより先なら、項目の位置。
+            (Some(comment), Some((source, printed, _))) if comment >= *source => *printed,
+            (Some(comment), _) => match items.slot(comment) {
+                Some(index) => items.flat[index].1,
+                None => continue,
+            },
+            (None, Some((_, printed, _))) => *printed,
+            (None, None) => continue,
+        };
+        inserts.push((at.min(lines.len()), line, vec![String::new()]));
+    }
+    for block in blocks {
+        let first = block.first().expect("block is never empty");
+        let at = match items.slot(first.span.line) {
+            Some(index) => {
+                let (_, printed, _) = items.flat[index];
+                // 空行は入れ直すので、コメントの塊はその項目の直上に来る。
+                printed
+            }
+            None => {
+                // 後ろに項目が無い。本体の中のコメントなら、その本体を持つ
+                // 項目の**中**の元の相対位置へ置く（§57 の「同じ定義の
+                // 前後に残す」）。どの項目より後ろなら、ファイルの末尾へ置く。
+                match items.enclosing(first.span.line) {
+                    Some(index) => {
+                        let (source, printed, height) = items.flat[index];
+                        // 見出しの行から何行目か。コメントは本体の中にあるので、
+                        // 見出しの次の行から数える。本体の外へは出さない。
+                        let offset = (first.span.line - source).min(height);
+                        printed + offset
+                    }
+                    None => lines.len(),
+                }
+            }
+        };
+        let text: Vec<String> = block.iter().map(comment_line).collect();
+        inserts.push((at.min(lines.len()), first.span.line, text));
+    }
+    // 印字の位置、次にソースの行の順に並べ、後ろから差し込む。後ろから
+    // 入れると、前へ入れるときに後ろの位置がずれない。
+    inserts.sort_by_key(|(at, source, _)| (*at, *source));
+    for (at, _, chunk) in inserts.into_iter().rev() {
+        let at = at.min(lines.len());
+        for (offset, line) in chunk.into_iter().enumerate() {
+            lines.insert((at + offset).min(lines.len()), line);
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
     out
+}
+
+/// 入れ子の項目も含めた、各項目の印字開始行。
+///
+/// `items_text` は入れ子の項目も印字するので、平坦化した順が印字の順と
+/// 一致する。外側の項目は自分の見出しの 1 行を占め、本体は入れ子の項目が
+/// 占め、閉じの 1 行で終わる。
+struct ItemLines {
+    /// `(元のソースの開始行, 印字の開始行, 印字の行数)` を印字の順に並べたもの。
+    flat: Vec<(usize, usize, usize)>,
+}
+
+impl ItemLines {
+    fn new(items: &[Item], start: usize) -> Self {
+        let mut flat = Vec::new();
+        Self::walk(items, start, &mut flat);
+        Self { flat }
+    }
+
+    /// `items` を平坦化し、次に使える印字行を返す。
+    fn walk(items: &[Item], start: usize, flat: &mut Vec<(usize, usize, usize)>) -> usize {
+        let mut cursor = start;
+        for item in items {
+            let here = flat.len();
+            flat.push((item_start_line(item), cursor, 0));
+            match item {
+                // 見出しの次の行から本体が始まり、閉じの 1 行で終わる。
+                Item::ModuleSig(module) => {
+                    cursor = Self::walk(&module.items, cursor + 1, flat) + 1;
+                }
+                Item::ModuleImpl(module) => {
+                    cursor = Self::walk(&module.items, cursor + 1, flat) + 1;
+                }
+                _ => cursor += item_text(item).lines().count(),
+            }
+            // 自分の見出しから、次の項目が始まるまでが自分の占める範囲。
+            flat[here].2 = cursor - flat[here].1;
+        }
+        cursor
+    }
+
+    /// その行を含む項目（コメントより前に始まる最後の項目）。
+    /// 本体の中のコメントを、その本体を持つ項目へ収めるのに使う。
+    fn enclosing(&self, line: usize) -> Option<usize> {
+        self.flat.iter().rposition(|(source, _, _)| *source <= line)
+    }
+
+    /// コメントが付く項目の位置。コメントより後ろで最初に始まる項目である。
+    /// 後ろに項目が無ければ `None`（そのコメントより後ろに項目が無い）。
+    fn slot(&self, line: usize) -> Option<usize> {
+        self.flat.iter().position(|(source, _, _)| *source > line)
+    }
+}
+
+/// 項目が始まる元のソースの行。
+fn item_start_line(item: &Item) -> usize {
+    item_span(item).line
+}
+
+fn item_span(item: &Item) -> &Span {
+    match item {
+        Item::Def(def) => &def.span,
+        Item::SigDef(def) => &def.span,
+        Item::TypeDef(def) => &def.span,
+        Item::ModuleSig(module) => &module.span,
+        Item::ModuleImpl(module) => &module.span,
+        Item::Effect(effect) => &effect.span,
+        Item::Handler(handler) => &handler.span,
+    }
 }
 
 /// 式 1 つを、末尾の位置として 1 行で綴る。正準形の案内（`canonical form:`）に使う。
@@ -213,7 +525,7 @@ fn implementation_text(module: &ModuleImpl) -> String {
     let header = format!("implement {} as {}", module.sig, module.name);
     match &module.form {
         ImplementationForm::Ordinary => {
-            format!("{header}\n{}\n/implement", items_text(&module.items))
+            closed_body(header, items_text(&module.items), "/implement")
         }
         ImplementationForm::Functor(parameters) => {
             let parameters = parameters
@@ -221,9 +533,10 @@ fn implementation_text(module: &ModuleImpl) -> String {
                 .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(
-                "{header}({parameters})\n{}\n/implement",
-                items_text(&module.items)
+            closed_body(
+                format!("{header}({parameters})"),
+                items_text(&module.items),
+                "/implement",
             )
         }
         ImplementationForm::Application { functor, arguments } => {
@@ -459,7 +772,13 @@ fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8) -> String {
 }
 
 fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
-    let mut out = expr_prec(f, indent, false, 8);
+    // 呼び手が適用のときは括弧で囲む。`(f a) b` を `f a b` と印字すると、2 回の
+    // 適用が 1 回の 2 引数呼び出しに変わり、意味が変わる（§36）。
+    let mut out = if matches!(f.kind, NodeKind::Apply(..)) {
+        format!("({})", expr(f, indent, false))
+    } else {
+        expr_prec(f, indent, false, 8)
+    };
     for argument in args {
         out.push(' ');
         if matches!(argument.kind, NodeKind::Apply(..))

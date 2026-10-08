@@ -9,6 +9,7 @@ do-option-absent	core
 dogfood-text-tool	core
 embed-runtime	full
 exit-code-from-main	core
+fmt-layout	core
 frozen-docs	core
 gate-cache	quick
 localize-message-positions	core
