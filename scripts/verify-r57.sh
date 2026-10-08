@@ -89,7 +89,12 @@ def no_rewrite(root, name, source, code):
     result = run(root, name, source, 'check', '--fix')
     assert result.returncode == 1, (name, result.returncode)
     assert source_of(root, name) == source, (name, 'check --fix must not write')
-    fmt_check(root, name, source, 0)
+    # §58.1 の印字し直しは当たるので `fmt --check` は 1 を返す。書き換えは出さない
+    # ままなので、印字し直したあとも同じコードで書き換え無しのままでなければならない。
+    fmt_check(root, name, source, 1)
+    after = run(root, name, source, 'fmt')
+    assert after.returncode == 0, (name, after.returncode, after.stderr.decode())
+    fmt_check(root, name, source_of(root, name), 0)
 
 def build_run(root, name, expect):
     directory = Path(root) / name
@@ -120,10 +125,10 @@ import random
 rng = random.Random(57)
 value, printed = value_of(rng)
 
-# 単純な scrutinee: 正準形は名前そのもの。
+# 単純な scrutinee: 正準形は名前そのもの。腕の並びでなくなった本体は `=>` と同じ行。
 body = 'if x\n  | Some(v) => Some(v)\n  | None => None'
 source = f'def f (x: Int Option): Int Option Pure =>\n  {body}\ndef main = f {value}\n'
-expected = f'def f (x: Int Option): Int Option Pure =>\n  x\ndef main = f {value}\n'
+expected = f'def f (x: Int Option): Int Option Pure => x\ndef main = f {value}\n'
 root = Path(sys.argv[1]) / 'a'
 check_code(root, 'plain', source, 'E507', 'x')
 check_fix(root, 'plain', source, expected)
@@ -131,11 +136,11 @@ build_run(root, 'plain', printed)
 fmt(root, 'plain2', source, expected)
 fmt_check(root, 'plain', source, 1)
 
-# 複合の scrutinee: 正準形は 1 行の括弧付きの形。
+# 複合の scrutinee: 本体の位置では括弧が要らないので、印字し直しで落ちる。
 head = 'def id_opt (x: Int Option): Int Option Pure => x\n'
 body = 'if (x |> id_opt)\n  | Some(v) => Some(v)\n  | None => None'
 source = head + f'def f (x: Int Option): Int Option Pure =>\n  {body}\ndef main = f {value}\n'
-expected = head + f'def f (x: Int Option): Int Option Pure =>\n  (x |> id_opt)\ndef main = f {value}\n'
+expected = head + f'def f (x: Int Option): Int Option Pure => x |> id_opt\ndef main = f {value}\n'
 check_code(root, 'pipe', source, 'E507', '(x |> id_opt)')
 check_fix(root, 'pipe', source, expected)
 build_run(root, 'pipe', printed)
@@ -167,7 +172,7 @@ build_run(root, 'def', printed)
 fmt(root, 'def2', source, expected)
 
 source = f'def main = (fn(| Some(v) => Some(v) | None => None)) {value}\n'
-expected = f'def main = (fn(value => value)) {value}\n'
+expected = f'def main = fn(value => value) {value}\n'
 check_code(root, 'fn', source, 'E507', 'fn(value => value)')
 check_fix(root, 'fn', source, expected)
 build_run(root, 'fn', printed)
@@ -194,7 +199,7 @@ printed = f'Some({id_value + 1})'
 head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None\n'
 body = 'if find_user id\n  | Some(user) => Some(user + 1)\n  | None => None'
 source = head + f'def g (id: Int): Int Option Pure =>\n  {body}\ndef main = g {id_value}\n'
-expected = head + f'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g {id_value}\n'
+expected = head + f'def g (id: Int): Int Option Pure => find_user id as user? ->\n  Some(user + 1)\ndef main = g {id_value}\n'
 root = Path(sys.argv[1]) / 'c'
 check_code(root, 'some', source, 'E508', 'find_user id as user? -> Some(user + 1)')
 check_fix(root, 'some', source, expected)
@@ -204,7 +209,7 @@ fmt_check(root, 'some', source, 1)
 
 # 不在は伝播する: 囲む関数が None を返す。
 absent = head + f'def g (id: Int): Int Option Pure =>\n  {body}\ndef main = g (-{id_value})\n'
-expected_absent = head + f'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g (-{id_value})\n'
+expected_absent = head + f'def g (id: Int): Int Option Pure => find_user id as user? ->\n  Some(user + 1)\ndef main = g (-{id_value})\n'
 check_fix(root, 'none', absent, expected_absent)
 build_run(root, 'none', 'None')
 print('repropagate: the tail branch becomes as p? -> and None propagates')
@@ -229,7 +234,7 @@ printed = f'Some({id_value + 1})'
 
 head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None\n'
 source = head + f'def g\n| Some(user) => Some(user + 1)\n| None => None\ndef main = g (find_user {id_value})\n'
-expected = head + f'def g value => value as user? -> Some(user + 1)\ndef main = g (find_user {id_value})\n'
+expected = head + f'def g value => value as user? ->\n  Some(user + 1)\ndef main = g (find_user {id_value})\n'
 root = Path(sys.argv[1]) / 'd'
 check_code(root, 'def', source, 'E508', 'def g value => value as user? -> Some(user + 1)')
 check_fix(root, 'def', source, expected)
@@ -237,7 +242,7 @@ build_run(root, 'def', printed)
 fmt(root, 'def2', source, expected)
 
 source = head + f'def main = (fn(| Some(user) => Some(user + 1) | None => None)) (find_user {id_value})\n'
-expected = head + f'def main = (fn value => value as user? -> Some(user + 1) /fn) (find_user {id_value})\n'
+expected = head + f'def main = fn value =>\n    value as user? ->\n    Some(user + 1)\n  /fn (find_user {id_value})\n'
 check_code(root, 'fn', source, 'E508', 'fn value => value as user? -> Some(user + 1) /fn')
 check_fix(root, 'fn', source, expected)
 build_run(root, 'fn', printed)
@@ -296,11 +301,11 @@ root = Path(sys.argv[1]) / 'f'
 head = 'def find_user (id: Int): Int Option Pure => if id > 0 => Some(id) | None\n'
 shapes = [
     ('if', 'def f (x: Int Option): Int Option Pure =>\n  if x\n  | Some(v) => Some(v)\n  | None => None\ndef main = f (Some(2))\n',
-     'def f (x: Int Option): Int Option Pure =>\n  x\ndef main = f (Some(2))\n'),
+     'def f (x: Int Option): Int Option Pure => x\ndef main = f Some(2)\n'),
     ('def', 'def f\n| Some(v) => Some(v)\n| None => None\ndef main = f (Some(2))\n',
-     'def f value => value\ndef main = f (Some(2))\n'),
+     'def f value => value\ndef main = f Some(2)\n'),
     ('repropagate', head + 'def g (id: Int): Int Option Pure =>\n  if find_user id\n  | Some(user) => Some(user + 1)\n  | None => None\ndef main = g 2\n',
-     head + 'def g (id: Int): Int Option Pure =>\n  find_user id as user? -> Some(user + 1)\ndef main = g 2\n'),
+     head + 'def g (id: Int): Int Option Pure => find_user id as user? ->\n  Some(user + 1)\ndef main = g 2\n'),
 ]
 for index, (name, source, expected) in enumerate(shapes):
     by_fix = check_fix(root, f'{name}-fix', source, expected)
