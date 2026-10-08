@@ -612,6 +612,8 @@ impl Checker<'_> {
                 equality_anchors: Vec::new(),
                 qualified_type_anchors: Vec::new(),
                 name_sites: Vec::new(),
+                comments: Vec::new(),
+                blank_lines: Vec::new(),
             };
             let result = self.infer_module_items(&ast, signatures);
             let mut diagnostics = self.deferred.split_off(saved.deferred.len());
@@ -1068,6 +1070,8 @@ impl Checker<'_> {
             equality_anchors: Vec::new(),
             qualified_type_anchors: Vec::new(),
             name_sites: Vec::new(),
+            comments: Vec::new(),
+            blank_lines: Vec::new(),
         };
         let (definitions, ambiguous_values) = self.infer_module_items(&ast, signatures)?;
         let abstract_names = self.register_module_realizations(&ast, module, signature)?;

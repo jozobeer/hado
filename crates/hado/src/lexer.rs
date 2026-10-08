@@ -229,12 +229,33 @@ fn single_char_token(c: char) -> Option<TokKind> {
     })
 }
 
+/// A line comment: its text (without the trailing newline) and its position.
+/// §57・§58.1 の印字し直しがコメントを消さないために要る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    pub text: String,
+    pub span: Span,
+}
+
 /// Lex a whole source into a token stream ending in `Eof`.
 pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
     lex_full(src).map_err(|e| e.to_string())
 }
 
 pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
+    lex_with_comments(src).map(|lexed| lexed.tokens)
+}
+
+/// 字句の結果。トークン列と、読み飛ばした行コメントの位置。
+pub struct Lexed {
+    pub tokens: Vec<Tok>,
+    pub comments: Vec<Comment>,
+    /// §58.1: 空白だけの行。印字し直した結果へ区切りの空行として戻す。
+    pub blank_lines: Vec<usize>,
+}
+
+/// `lex_full` と同じ字句だが、行コメントも返す（§58.1 の印字し直しが使う）。
+pub fn lex_with_comments(src: &str) -> Result<Lexed, LexError> {
     let mut lx = Lexer {
         src,
         i: 0,
@@ -243,6 +264,7 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
         tok_start: Span::point(1, 1),
     };
     let mut toks = Vec::new();
+    let mut comments = Vec::new();
     loop {
         let span = lx.span();
         lx.tok_start = span;
@@ -264,6 +286,11 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
                     }
                     lx.bump();
                 }
+                // 印字し直しの位置は行だけを見るので、範囲は始まりの行に閉じる。
+                comments.push(Comment {
+                    text: src[lx.offset(span)..lx.i].to_string(),
+                    span: Span::point(span.line, span.col),
+                });
             }
             Some(_) => {
                 let kind = lx.lex_token()?;
@@ -276,7 +303,22 @@ pub fn lex_full(src: &str) -> Result<Vec<Tok>, LexError> {
             }
         }
     }
-    Ok(toks)
+    Ok(Lexed {
+        tokens: toks,
+        comments,
+        blank_lines: blank_lines(src),
+    })
+}
+
+/// 空白だけの行の番号（1 始まり）。§58.1 の印字し直しが区切りを戻すのに使う。
+fn blank_lines(src: &str) -> Vec<usize> {
+    // 末尾の改行の後ろには行が無いので、最後の空文字は数えない。
+    let body = src.strip_suffix('\n').unwrap_or(src);
+    body.split('\n')
+        .enumerate()
+        .filter(|(_, line)| line.trim().is_empty())
+        .map(|(index, _)| index + 1)
+        .collect()
 }
 
 struct Lexer<'a> {
@@ -310,6 +352,26 @@ impl Lexer<'_> {
 
     fn span(&self) -> Span {
         Span::point(self.line, self.col)
+    }
+
+    /// A byte offset in the source as a span's position. The comment record
+    /// needs the text as well as the position, and `Span` carries no offset.
+    fn offset(&self, span: Span) -> usize {
+        self.src
+            .char_indices()
+            .scan((1usize, 1usize), |(line, col), (at, ch)| {
+                let here = (*line, *col);
+                if ch == '\n' {
+                    *line += 1;
+                    *col = 1;
+                } else {
+                    *col += 1;
+                }
+                Some((at, here))
+            })
+            .find(|(_, (line, col))| (*line, *col) == (span.line, span.col))
+            .map(|(at, _)| at)
+            .unwrap_or(self.i)
     }
 
     fn err(&self, code: Option<&'static str>, message: impl Into<String>) -> LexError {
