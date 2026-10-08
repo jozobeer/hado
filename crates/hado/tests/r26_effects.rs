@@ -1169,6 +1169,17 @@ fn a_lambda_may_return_an_effectful_lambda() {
     assert!(output.stderr.is_empty());
 }
 
+// 宣言側が外側にも `{Error}` を載せる入れ子の lambda は、結果を `$Done` で包む。
+// 包んだあと `(make 8) 0` の callee は `$Outcome` になるので、複合の callee を
+// ANF してほどいてから適用する。
+#[test]
+fn nested_application_of_a_returned_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  fn(x => fn(y => x / y)) as make ->\n  (make 8) 0\n",
+        "0",
+    );
+}
+
 #[test]
 fn a_handled_once_operation_with_a_yielding_arm_is_lifted() {
     let case = Case::new();
@@ -2252,6 +2263,33 @@ fn map_insert_of_an_effectful_closure_runs_when_the_call_succeeds() {
 fn option_unwrap_or_of_an_effectful_closure_keeps_its_outcome() {
     runs_effectful_closure_source(
         "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Option.unwrap_or None fn(x => 8 / x) as f ->\n  f 0\n",
+        "0",
+    );
+}
+
+// 型変数の位置の閉包が入れ子のときも、宣言側が外側に載せた `{Error}` に
+// 本体を揃える。直す前は `Map.empty` / `None` の V だけが二重の `$Outcome` になり、
+// `specialization failed: Mismatch` で落ちる。
+#[test]
+fn map_insert_of_a_nested_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => fn(y => x / y)) as m ->\n  if Map.find m 1 | Some(f) => (f 8) 0 | 99\n",
+        "0",
+    );
+}
+
+#[test]
+fn map_insert_of_a_nested_effectful_closure_runs_when_the_call_succeeds() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Map.insert Map.empty 1 fn(x => fn(y => x / y)) as m ->\n  if Map.find m 1 | Some(f) => (f 8) 2 | 99\n",
+        "4",
+    );
+}
+
+#[test]
+fn option_unwrap_or_of_a_nested_effectful_closure_keeps_its_outcome() {
+    runs_effectful_closure_source(
+        "handler Error as Catch\nabort raise _ => 0\nreturn value => value\ndef main =\n  with Catch ->\n  Option.unwrap_or None fn(x => fn(y => x / y)) as f ->\n  (f 8) 0\n",
         "0",
     );
 }
