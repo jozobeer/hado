@@ -1404,7 +1404,11 @@ fn grammar_generated_programs_preserve_every_declaration() {
             shapes(&restored.items),
             "sample {sample}: {source}\n{canonical}"
         );
-        assert_eq!(canonical, parser::canonical_program(&restored));
+        assert_eq!(
+            canonical,
+            parser::canonical_program(&restored),
+            "sample {sample}: the canonical form must be a fixed point\n{source}"
+        );
     }
     assert!(library_seen, "generator never emitted library");
     assert!(

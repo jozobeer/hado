@@ -47,23 +47,33 @@ fn items_text_with_breaks(items: &[Item], comments: &[crate::lexer::Comment]) ->
         .join("\n")
 }
 
+/// `module` と `implement` の本体を閉じの印と一緒に組む。本体が空のときは空行を
+/// 入れない。空行は §58.1 で残すので、空の本体の中の空行が本体の一部として読まれ、
+/// 印字し直すたびに 1 つ増える。
+fn closed_body(header: String, body: String, close: &str) -> String {
+    if body.is_empty() {
+        format!("{header}\n{close}")
+    } else {
+        format!("{header}\n{body}\n{close}")
+    }
+}
+
 fn item_text_with_breaks(
     item: &Item,
     comments: &[crate::lexer::Comment],
     next_line: usize,
 ) -> String {
     match item {
-        Item::ModuleSig(module) => format!(
-            "module {}\n{}\n/module",
-            module.name,
-            items_text_with_breaks(&module.items, comments)
+        Item::ModuleSig(module) => closed_body(
+            format!("module {}", module.name),
+            items_text_with_breaks(&module.items, comments),
+            "/module",
         ),
         Item::ModuleImpl(module) => match &module.form {
-            ImplementationForm::Ordinary => format!(
-                "implement {} as {}\n{}\n/implement",
-                module.sig,
-                module.name,
-                items_text_with_breaks(&module.items, comments)
+            ImplementationForm::Ordinary => closed_body(
+                format!("implement {} as {}", module.sig, module.name),
+                items_text_with_breaks(&module.items, comments),
+                "/implement",
             ),
             ImplementationForm::Functor(parameters) => {
                 let parameters = parameters
@@ -71,11 +81,10 @@ fn item_text_with_breaks(
                     .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!(
-                    "implement {} as {}({parameters})\n{}\n/implement",
-                    module.sig,
-                    module.name,
-                    items_text_with_breaks(&module.items, comments)
+                closed_body(
+                    format!("implement {} as {}({parameters})", module.sig, module.name),
+                    items_text_with_breaks(&module.items, comments),
+                    "/implement",
                 )
             }
             form => {
@@ -516,7 +525,7 @@ fn implementation_text(module: &ModuleImpl) -> String {
     let header = format!("implement {} as {}", module.sig, module.name);
     match &module.form {
         ImplementationForm::Ordinary => {
-            format!("{header}\n{}\n/implement", items_text(&module.items))
+            closed_body(header, items_text(&module.items), "/implement")
         }
         ImplementationForm::Functor(parameters) => {
             let parameters = parameters
@@ -524,9 +533,10 @@ fn implementation_text(module: &ModuleImpl) -> String {
                 .map(|parameter| format!("{}: {}", parameter.name, parameter.contract))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(
-                "{header}({parameters})\n{}\n/implement",
-                items_text(&module.items)
+            closed_body(
+                format!("{header}({parameters})"),
+                items_text(&module.items),
+                "/implement",
             )
         }
         ImplementationForm::Application { functor, arguments } => {
