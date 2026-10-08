@@ -240,3 +240,104 @@ $ bash scripts/corpus-lock.sh --check; echo $?
 
 検査 e は、`place_comments` がコメントを捨てる変異（`let text: Vec<String> = Vec::new();`）で赤になる。変異を当てると stdlib の 6 ファイルが変わり、赤を検出する。
 
+### レビューで見つかった 6 件
+
+自分の門番 6/6 が緑でも着地できなかった。レビューで見つかった順に記録する。
+
+**1. 印字し直しが入れ子の適用の意味を変える。** `(f a) b` を `f a b` と印字し直し、2 回の適用が 1 回の 2 引数呼び出しに変わっていた。`fmt` が全体を印字し直すようになって、main で動いていたプログラムを壊す形で表に出た。`apply_text` が呼び手を適用と同じ優先度で印字していたので、呼び手が `Apply` のときは括弧で囲む。
+
+```
+$ cat target/fatal/main.hd
+def main = fn(a => fn(b => a + b)) as add -> Int.to_string ((add 1) 41)
+$ ./target/debug/hado run target/fatal/main.hd
+42
+$ ./target/debug/hado fmt target/fatal/main.hd
+fmt: main.hd (1 rewrites)
+$ cat target/fatal/main.hd
+def main = fn(a => fn(b => a + b)) as add ->
+  Int.to_string ((add 1) 41)
+$ ./target/debug/hado run target/fatal/main.hd
+42
+```
+
+**2. 印字し直しが冪等でない。** 印字し直しを書き換えのループの外に置いていた。印字し直しがコメントを書き換えの範囲の外へ移すと、次の書き換えが新たに届く。木が動かなくなるまで交互に当てる。
+
+```
+$ ./target/debug/hado fmt target/keep/main.hd
+fmt: main.hd (2 rewrites)
+$ ./target/debug/hado fmt target/keep/main.hd
+$ cat target/keep/main.hd
+def f (x: Int Option): Int Option Pure =>
+  // keep
+  x
+def main = f Some(1)
+```
+
+**3. 空のファイルに改行を足していた。** 空のプログラムを印字し直すと末尾の改行 1 つになり、中身の無いファイルへ改行を足して `(1 rewrites)` と報告していた。
+
+```
+$ : > target/empty/main.hd
+$ ./target/debug/hado fmt target/empty/main.hd; echo "exit=$? size=$(wc -c < target/empty/main.hd)"
+exit=0 size=0
+```
+
+**4. E517 の書き換えが条件列の `|` の前の空白を消していた。** `=> if` の後ろの空白まで消していた。`fmt` の出力と `check --fix` の出力が食い違い、`fmt` は `score | score`、`check --fix` は `score| score` になっていた。
+
+**5. 空の本体の印字し直しが冪等でない。** 空の `module`・`implement` の本体に空行を入れていた。空行は §58.1 で残すので、本体の中の空行が本体の一部として読まれ、印字し直すたびに 1 つ増えていた。`grammar_generated_programs_preserve_every_declaration` が赤だった（生成した 1200 例で正準形が不動点であることを測る）。
+
+```
+$ ./target/debug/hado print-postfix target/s11/in target/s11/o1
+$ ./target/debug/hado print-postfix target/s11/o1 target/s11/o2
+$ diff target/s11/o1/main.hd target/s11/o2/main.hd && echo SAME
+SAME
+```
+
+**6. `check --fix` が `fmt` と違う正準形を残していた。** 正準形でない入力では、`check --fix` は書き換えだけを当てて `fmt` は印字し直すので、残るバイト列が違っていた。1 つでも書き換えを当てたら `fmt` と同じ印字し直しまでする（§58.1 に追記）。書き換えを当てなかったソースには触らないので、r64-d（診断の無いソースを `--fix` が整形しない）はそのままである。
+
+### 過去ラウンドの門番の期待値
+
+§58.1 の印字し直しと数の綴りが変わったので、r52・r53・r57・r64 の期待値を新しい正準形に合わせた。変えたのは次の 8 件で、いずれもこのラウンドが決めた「配置の規則」と「数の綴り」から導ける。
+
+| 検査 | 前 | 後 | 根拠 |
+|---|---|---|---|
+| r52-d | `(1 rewrites)` | `(2 rewrites)` | 数の綴り（§57 の書き換え 1 + 印字し直し 1） |
+| r64-a | `(2 rewrites)` | `(1 rewrites)` | 数の綴り（印字し直しが行末の空白も末尾の改行も同時に直す） |
+| r64-b | `def main =` の本体は次の行 | `def main = 1` と 1 行 | 規則 2・3 |
+| r57-a | `=>` の本体は次の行 | `=> x` と 1 行 | 規則 2・3（腕の並びでなくなった本体） |
+| r57-c | `=>` の次で折る | `as user? ->` の後ろで折る | 規則 5 |
+| r57-d | 同上 | 同上 | 規則 5 |
+| r57-e | `fmt --check` が 0 | 1（書き換えは出さないまま） | 印字し直しが当たる |
+| r57-f | 3 つが同じ | 3 つが同じ（`check --fix` も印字し直す） | 上の 6 |
+
+r57 の `no_rewrite` は、書き換えを出さないことと `check --fix` が書かないことをそのまま測り、加えて印字し直しが当たることと、印字し直したあとが冪等であることを測るようにした。
+
+### 仕様への疑義
+
+- **`fn … /fn` の本体の字下げが 2 段深い。** 規則 1 は「入れ子のたびに 2 ずつ深くする」と定めるが、実測では `def main = fn value =>` の本体が字下げ 4、`/fn` が字下げ 2 になる。受理コーパス・`stdlib`・`tools` に複数行の `fn` が 1 件も無いので、この形はどの門番も測っていない。`docs/issues/fn-body-indent-is-two-levels-deep.md` に切り出した。
+- **正準形の案内と `fmt` の綴りが 2 つある。** 診断の `canonical form:` は `parser.rs` の `canonical` が、`fmt` の印字し直しは `postfix_print.rs` の `program` が作る。括弧の要らない位置で綴りが分かれる（案内は `(x |> id_opt)`、`fmt` は `x |> id_opt`）。`docs/issues/canonical-form-hint-uses-a-second-printer.md` に切り出した。
+
+### 着地の実測
+
+```
+$ bash scripts/verify-fmt-layout.sh
+PASSED: 6/6
+$ bash scripts/verify-r52.sh; bash scripts/verify-r53.sh; bash scripts/verify-r57.sh; bash scripts/verify-r64.sh
+PASSED: 5/5
+PASSED: 5/5
+PASSED: 6/6
+PASSED: 4/4
+$ cargo test --offline
+ok suites: 74
+failed suites: 0
+失敗テスト総数: 0
+$ cargo fmt --all --check && echo FMT_OK
+FMT_OK
+$ cargo clippy --offline --all-targets -- -D warnings; echo $?
+0
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/corpus-lock.sh --check; echo $?
+0
+```
+
+
