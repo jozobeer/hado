@@ -153,3 +153,123 @@ fn repl_defers_definition_input_to_a_later_stage() {
     let err = String::from_utf8(err).unwrap();
     assert!(err.contains("定義の入力"), "{err}");
 }
+
+/// 完了条件: 前の入力の効果が再実行されないこと。`log` の出力だけでは
+/// 「出力を /dev/null へ向けてやり直す」実装を通してしまうので、ファイルへの
+/// 書き込みの回数で数える。1 入力につき 1 文字増える入力を 2 回、束縛と長さの
+/// 読み出しを挟んで 8 入力流す。期待は実装から独立に決まる。
+#[test]
+fn repl_counts_file_writes_once_per_input() {
+    let dir = scratch("count");
+    let path = dir.join("count.txt");
+    std::fs::write(&path, "").unwrap();
+    let path = path.to_str().unwrap();
+    let script = format!(
+        "read_file \"{path}\" as old -> write_file \"{path}\" (Bytes.of_string (String.concat (Bytes.to_string old) \"x\"))\n\
+         1 as y ->\n\
+         read_file \"{path}\" as now -> Bytes.length now\n\
+         y + 1\n\
+         read_file \"{path}\" as now -> Bytes.length now\n\
+         read_file \"{path}\" as old -> write_file \"{path}\" (Bytes.of_string (String.concat (Bytes.to_string old) \"x\"))\n\
+         y + 2\n\
+         read_file \"{path}\" as now -> Bytes.length now\n"
+    );
+    let (code, out, err) = repl(&script, None);
+    assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&err));
+    assert_eq!(String::from_utf8(out).unwrap(), "1\n2\n1\n3\n2\n");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "xx");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 欠陥 1: 束縛した値は、そのあとの入力の割り当てで回収されてはならない。
+/// Boehm GC は Rust のヒープを走査しないので、束縛を GC の根に登録する。
+/// 登録しないと、割り当ての多い入力を挟んだあとの `xs` の読み出しで
+/// セッションがシグナルで落ちる。
+#[test]
+fn repl_keeps_a_bound_value_alive_across_allocating_inputs() {
+    let out = stdout(
+        "List.map [1, 2, 3, 4, 5, 6, 7, 8] fn(v => String.concat \"value-\" (Int.to_string v)) as xs ->\n\
+         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as a ->\n\
+         List.fold a [] fn(acc, i => List.append (List.map a fn(j => i * 10 + j)) acc) as b ->\n\
+         List.fold b 0 fn(s, i => s + i + List.length (List.map b fn(j => String.concat \"zzzzzzzzzzzzzzzz\" (Int.to_string j))))\n\
+         List.fold b 0 fn(s, i => s + i + List.length (List.map b fn(j => String.concat \"yyyyyyyyyyyyyyyy\" (Int.to_string j))))\n\
+         xs\n",
+    );
+    assert_eq!(
+        out,
+        "14950\n14950\n[\"value-1\", \"value-2\", \"value-3\", \"value-4\", \"value-5\", \"value-6\", \"value-7\", \"value-8\"]\n"
+    );
+}
+
+/// 欠陥 6: 最上位に届いた `raise` は、その入力だけを捨ててセッションを続ける。
+/// §54 の `main` の規則はプログラムを終えるが、セッションには次の入力がある。
+#[test]
+fn repl_continues_after_a_raise() {
+    let (code, out, err) = repl("Bytes.get (Bytes.of_string \"\") 5\n7\n", None);
+    assert_eq!(code, Some(0));
+    assert_eq!(String::from_utf8(out).unwrap(), "7\n");
+    let err = String::from_utf8(err).unwrap();
+    assert!(err.contains("IndexOutOfRange"), "{err}");
+}
+
+/// 欠陥 2: ライブラリの実装は、1 つの入力がその一部しか使わなくても未使用では
+/// ない。§52 の利用側の検査を 1 歩ごとに当てると、A だけ使う入力も B だけ使う
+/// 入力も `1 + 1` も E513 で断られる。
+#[test]
+fn repl_uses_library_implementations_one_input_at_a_time() {
+    let dir = scratch("two");
+    let library = dir.join("two");
+    std::fs::create_dir_all(library.join("a")).unwrap();
+    std::fs::create_dir_all(library.join("b")).unwrap();
+    std::fs::write(library.join("two.hd"), "library\n").unwrap();
+    std::fs::write(
+        library.join("a/a.hdi"),
+        "module A\ndef one (n: Int): Int\n/module\n",
+    )
+    .unwrap();
+    std::fs::write(
+        library.join("a/a.hd"),
+        "implement A as A\ndef one n => n + 1\n/implement\n",
+    )
+    .unwrap();
+    std::fs::write(
+        library.join("b/b.hdi"),
+        "module B\ndef two (n: Int): Int\n/module\n",
+    )
+    .unwrap();
+    std::fs::write(
+        library.join("b/b.hd"),
+        "implement B as B\ndef two n => n + 2\n/implement\n",
+    )
+    .unwrap();
+    let (code, out, err) = repl("two::a::A.one 1\ntwo::b::B.two 1\n1 + 1\n", Some(&library));
+    assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&err));
+    assert_eq!(String::from_utf8(out).unwrap(), "2\n3\n2\n");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// §53.1: スタックの枯渇は実行時の診断で、シグナル死ではない。ゲストの `main`
+/// が入れる番人を JIT の経路でも入れる（欠陥 5）。
+#[test]
+fn repl_reports_stack_exhaustion_without_a_signal() {
+    let dir = scratch("deep");
+    let library = dir.join("deep");
+    std::fs::create_dir_all(library.join("d")).unwrap();
+    std::fs::write(library.join("deep.hd"), "library\n").unwrap();
+    std::fs::write(
+        library.join("d/d.hdi"),
+        "module D\ndef down (n: Int): Int\n/module\n",
+    )
+    .unwrap();
+    std::fs::write(
+        library.join("d/d.hd"),
+        "implement D as D\ndef rec down n => if n == 0 => 0 | 1 + down (n - 1)\n/implement\n",
+    )
+    .unwrap();
+    let (code, out, err) = repl("deep::d::D.down 1000000\n7\n", Some(&library));
+    assert_eq!(code, Some(1));
+    assert!(out.is_empty(), "{}", String::from_utf8_lossy(&out));
+    let err = String::from_utf8(err).unwrap();
+    assert!(err.contains("hado: stack overflow"), "{err}");
+    let _ = std::fs::remove_dir_all(dir);
+}

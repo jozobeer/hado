@@ -5,6 +5,9 @@
 # 完了条件の 2 つ（対話の入口があること・前の入力の効果が再実行されないこと）を
 # そのまま測る。値は §54 の `main` の規則で出る（Int を終了コードにする規則だけは
 # 当てない）。入力はファイル名ではなく、ここで組み立てた列をそのまま与える。
+#
+# 効果の再実行は `log` の出力だけでは数えられない（出力を隠してやり直す実装が
+# 緑になる）。検査 3 はファイルへの書き込みの回数で数える。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,7 +61,7 @@ prints_each_step() {
 }
 check '1 repl evaluates each complete input and prints its value' prints_each_step
 
-# --- 2. 完了条件: 前の入力の効果は再実行されない ---
+# --- 2. 完了条件: 前の入力の効果は再実行されない（`log` の出力） ---
 effect_once() {
     session effect 'log "a"\nlog "b"\n' || return 1
     [ "$status" -eq 0 ] || { echo "  status=$status" >&2; return 1; }
@@ -72,7 +75,25 @@ effect_once() {
 }
 check '2 an earlier input effect is not re-executed' effect_once
 
-# --- 3. 束縛の持ち越しと、入力の完結 ---
+# --- 3. 効果の回数をファイルで数える。1 入力につき 1 文字増える入力を 2 回、
+#        束縛と長さの読み出しを挟んで 8 入力流す。期待は実装から独立に決まる ---
+counts_file_writes() {
+    local dir="$workdir/count"
+    mkdir -p "$dir"
+    : >"$dir/count.txt"
+    local path="$dir/count.txt"
+    local script
+    script=$(printf 'read_file "%s" as old -> write_file "%s" (Bytes.of_string (String.concat (Bytes.to_string old) "x"))\n1 as y ->\nread_file "%s" as now -> Bytes.length now\ny + 1\nread_file "%s" as now -> Bytes.length now\nread_file "%s" as old -> write_file "%s" (Bytes.of_string (String.concat (Bytes.to_string old) "x"))\ny + 2\nread_file "%s" as now -> Bytes.length now\n' \
+        "$path" "$path" "$path" "$path" "$path" "$path" "$path")
+    session count "$script" || return 1
+    [ "$status" -eq 0 ] || { echo "  status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '1\n2\n1\n3\n2')" ] || { echo "  stdout=$stdout" >&2; return 1; }
+    [ "$(cat "$dir/count.txt")" = "xx" ] || { echo "  file=$(cat "$dir/count.txt") want=xx" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  stderr=$stderr" >&2; return 1; }
+}
+check '3 the file counts one write per input, not one per replay' counts_file_writes
+
+# --- 4. 束縛の持ち越しと、入力の完結 ---
 carries_bindings() {
     session binding '1 as x ->\nx + 1\n' || return 1
     [ "$status" -eq 0 ] || { echo "  status=$status" >&2; return 1; }
@@ -85,19 +106,28 @@ carries_bindings() {
     [ "$stdout" = "$(printf '[1, 2, 3]')" ] || { echo "  complete stdout=$stdout" >&2; return 1; }
     [ -z "$stderr" ] || { echo "  complete stderr=$stderr" >&2; return 1; }
 }
-check '3 repl carries bindings and waits for a balanced input' carries_bindings
+check '4 repl carries bindings and waits for a balanced input' carries_bindings
 
-# --- 4. §52: `hado repl <dir>` はそのライブラリを読み込む ---
+# --- 5. §52: `<dir>` のライブラリ。実装は 1 つの入力がその一部しか使わなくても
+#        未使用ではない（1 歩ごとに E513 を当てると全部の入力が断られる） ---
 loads_library() {
     local dir="$workdir/library"
-    mkdir -p "$dir/counter/box"
-    printf 'library\n' >"$dir/counter/counter.hd"
-    printf 'module Box\ndef value (n: Int): Int\n/module\n' >"$dir/counter/box/box.hdi"
-    printf 'implement Box as Box\ndef value n => n + 41\n/implement\n' >"$dir/counter/box/box.hd"
-    session library 'counter::box::Box.value 1\n' "$dir/counter" || return 1
-    [ "$status" -eq 0 ] || { echo "  status=$status stderr=$stderr" >&2; return 1; }
-    [ "$stdout" = "$(printf '42')" ] || { echo "  stdout=$stdout" >&2; return 1; }
-    [ -z "$stderr" ] || { echo "  stderr=$stderr" >&2; return 1; }
+    mkdir -p "$dir/two/a" "$dir/two/b"
+    printf 'library\n' >"$dir/two/two.hd"
+    printf 'module A\ndef one (n: Int): Int\n/module\n' >"$dir/two/a/a.hdi"
+    printf 'implement A as A\ndef one n => n + 1\n/implement\n' >"$dir/two/a/a.hd"
+    printf 'module B\ndef two (n: Int): Int\n/module\n' >"$dir/two/b/b.hdi"
+    printf 'implement B as B\ndef two n => n + 2\n/implement\n' >"$dir/two/b/b.hd"
+    session a-only 'two::a::A.one 1\n' "$dir/two" || return 1
+    [ "$status" -eq 0 ] || { echo "  a-only status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '2')" ] || { echo "  a-only stdout=$stdout" >&2; return 1; }
+    session b-only 'two::b::B.two 1\n' "$dir/two" || return 1
+    [ "$stdout" = "$(printf '3')" ] || { echo "  b-only stdout=$stdout" >&2; return 1; }
+    session neither '1 + 1\n' "$dir/two" || return 1
+    [ "$stdout" = "$(printf '2')" ] || { echo "  neither stdout=$stdout" >&2; return 1; }
+    session mixed 'two::a::A.one 1\ntwo::b::B.two 1\n1 + 1\n' "$dir/two" || return 1
+    [ "$stdout" = "$(printf '2\n3\n2')" ] || { echo "  mixed stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  mixed stderr=$stderr" >&2; return 1; }
     # 名前空間にならないディレクトリ名は受け取らない（§51）。
     local bad="$dir/Bad"
     mkdir -p "$bad"
@@ -118,9 +148,9 @@ loads_library() {
     [ -z "$stdout" ] || { echo "  stdlib stdout=$stdout" >&2; return 1; }
     [ "$(printf '%s\n' "$stderr" | wc -l)" -le 2 ] || { echo "  stdlib stderr has too many lines" >&2; return 1; }
 }
-check '4 hado repl <dir> loads that library and rejects a bad name' loads_library
+check '5 hado repl <dir> loads that library and rejects a bad name' loads_library
 
-# --- 5. §10 の規則: 単相でない値は受けない。診断のあともセッションは続く ---
+# --- 6. §10 の規則: 単相でない値は受けない。診断のあともセッションは続く ---
 monomorphic() {
     session polymorphic '[]\n7\n' || return 1
     [ "$status" -eq 0 ] || { echo "  status=$status" >&2; return 1; }
@@ -132,9 +162,46 @@ monomorphic() {
     [ "$stdout" = "$(printf 'x\n2')" ] || { echo "  typed stdout=$stdout" >&2; return 1; }
     [ -n "$stderr" ] || { echo "  typed stderr is empty" >&2; return 1; }
 }
-check '5 a non-monomorphic input is diagnosed and the session continues' monomorphic
+check '6 a non-monomorphic input is diagnosed and the session continues' monomorphic
 
-# --- 6. 使い方: `repl` は <dir> を高々 1 つ取る ---
+# --- 7. 最上位に届いた raise は、その入力だけを捨ててセッションを続ける ---
+raise_continues() {
+    session raise 'Bytes.get (Bytes.of_string "") 5\n7\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  status=$status" >&2; return 1; }
+    [ "$stdout" = "$(printf '7')" ] || { echo "  stdout=$stdout" >&2; return 1; }
+    case "$stderr" in
+        *IndexOutOfRange*) ;;
+        *) echo "  stderr=$stderr" >&2; return 1 ;;
+    esac
+}
+check '7 a raise at the top abandons that input and the session continues' raise_continues
+
+# --- 8. §53.1: スタックの枯渇は診断で、シグナル死ではない ---
+stack_diagnostic() {
+    local dir="$workdir/deep"
+    mkdir -p "$dir/deep/d"
+    printf 'library\n' >"$dir/deep/deep.hd"
+    printf 'module D\ndef down (n: Int): Int\n/module\n' >"$dir/deep/d/d.hdi"
+    printf 'implement D as D\ndef rec down n => if n == 0 => 0 | 1 + down (n - 1)\n/implement\n' >"$dir/deep/d/d.hd"
+    session stack 'deep::d::D.down 1000000\n7\n' "$dir/deep" || return 1
+    [ "$status" -eq 1 ] || { echo "  status=$status want=1（シグナル死なら 132/134/139）" >&2; return 1; }
+    [ -z "$stdout" ] || { echo "  stdout=$stdout" >&2; return 1; }
+    case "$stderr" in
+        *"hado: stack overflow"*) ;;
+        *) echo "  stderr=$stderr" >&2; return 1 ;;
+    esac
+}
+check '8 stack exhaustion is a diagnostic, not a signal death' stack_diagnostic
+
+# --- 9. 束縛した値は、割り当ての多い入力を挟んでも生きている（Boehm GC の根） ---
+bound_value_survives_gc() {
+    session gc 'List.map [1, 2, 3, 4, 5, 6, 7, 8] fn(v => String.concat "value-" (Int.to_string v)) as xs ->\n[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as a ->\nList.fold a [] fn(acc, i => List.append (List.map a fn(j => i * 10 + j)) acc) as b ->\nList.fold b 0 fn(s, i => s + i + List.length (List.map b fn(j => String.concat "zzzzzzzzzzzzzzzz" (Int.to_string j))))\nList.fold b 0 fn(s, i => s + i + List.length (List.map b fn(j => String.concat "yyyyyyyyyyyyyyyy" (Int.to_string j))))\nxs\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  status=$status want=0（回収されるとシグナルで落ちる）" >&2; return 1; }
+    [ "$stdout" = "$(printf '14950\n14950\n["value-1", "value-2", "value-3", "value-4", "value-5", "value-6", "value-7", "value-8"]')" ] || { echo "  stdout=$stdout" >&2; return 1; }
+}
+check '9 a bound value survives the allocations of later inputs' bound_value_survives_gc
+
+# --- 10. 使い方: `repl` は <dir> を高々 1 つ取る ---
 repl_usage() {
     local dir="$workdir/usage"
     mkdir -p "$dir"
@@ -145,7 +212,7 @@ repl_usage() {
     grep -q '^usage: hado ' "$dir/err" || { echo "  stderr=$(cat "$dir/err")" >&2; return 1; }
     grep -q 'repl \[<dir>\]' "$dir/err" || { echo "  usage does not name repl" >&2; return 1; }
 }
-check '6 repl takes at most one library directory' repl_usage
+check '10 repl takes at most one library directory' repl_usage
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
