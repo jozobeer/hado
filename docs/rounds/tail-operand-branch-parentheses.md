@@ -16,6 +16,11 @@
 - 再審査 `target/reviews/pr81-rereview.md` が、さらに 6 つの位置を示した。演算子を
   `(…)` で包んで、その後ろに続きが来る位置である。`wrap` が足した `)` が §12.1 の
   閉じを兼ねるので、包まれた中の右端も「続きの無い位置」になる。
+- 三回目の審査 `target/reviews/pr81-rereview2.md` が、同じ取りこぼしを 1 つ示した。
+  単項 `-` を重ねて、その後ろに続きがある位置である。`neg_text` は被演算子も `-` の
+  とき `wrap` を通さず自分で `-(…)` と綴る（`--` がコメントの印になるのを避けるため、
+  §7）。この `)` も §12.1 の閉じを兼ねるのに、内側へ渡す `tail` は
+  `enclosed_by_wrap` のままだった。
 
 ### 意図
 
@@ -33,6 +38,8 @@
    右端へ渡す `tail` に `prec < min` を足せば、包まれた中も `(if …)` になる。
    `tail` を引き継ぐのは演算子だけで、束縛や `with` は裸で被演算子に置けないので
    引き継がない。
+3. 自分で `(…)` を足す場所も `wrap` と同じである。括弧を足す側がその分を `tail`
+   （続きの無い位置か）に足せば、内側の右端も `(if …)` になる。
 
 ### code-complete の一周目（右端の被演算子）
 
@@ -61,6 +68,32 @@
   （`f (1 + (if …)) 2`）も、内側の `min` が包みを表すので同じ経路で直る。
 - 次の一手: 全走と層別。
 
+### code-complete の三周目（入れ子の `-`）
+
+- 意図: 入れ子の `-` の後ろに続きがある位置でも `fmt` が壊さない。
+- 仮説: 3。三回目の審査の直し案（`nested || enclosed_by_wrap(...)`）を鵜呑みに
+  せず、6 件を自分で探針に置き直して赤を確かめた。
+- 判定器: 下の「判定」。
+- 赤: 探針 `target/probe/neg_nested.sh` の 6 件（`+`・`|>`・`as`・`<`・3 重・
+  implement の本体）が `check` で E100。テスト
+  `nested_negation_branches_survive_the_reprint` も `0 passed; 1 failed`
+  （`-(-if(true => 1 | 0)) + 5`）。
+- 直し: `neg_text` で `nested = matches!(c.kind, NodeKind::Neg(_))` を求め、内側へ
+  `nested || enclosed_by_wrap(tail, 7, min)` を渡す。`wrap` が足す括弧を見る
+  `enclosed_by_wrap` と同じ規則を、自分で足す括弧にも当てる。
+- 洗い: 括弧を足す場所を全部読み直した（`neg_text` の `-(…)`・`arm_value`・
+  `apply_argument`・`call_text`・`field_text`・`with_text`・`binding`・
+  `branch_text`・`branch_inner`・`fn_text`・`fields_text`）。分岐を中に置ける位置は
+  `neg_text` の自分で足す括弧と、分岐用の `enclosed`（`(if …)`）だけで、後者は
+  元から続きの無い位置として印字している。腕の中は分岐を入れられない（E101）ので
+  対象外である。三回目の審査の探針 90 件（`c1`・`c2`・`c3`）を直した印字器で回し、
+  有効な 78 件が `check` ok・`run` の値が不変・冪等で、残りは入力が元から不正
+  （E101・E502・E706・E501）と既知の `field-app`（E305、`docs/issues/...`）だけ
+  だった。
+- 判明: 欠けていたのは `neg_text` の自分で足す括弧 1 か所だけだった。型・引数の
+  括弧と、分岐を入れられない腕は元から安全である。
+- 次の一手: main を取り込み、`verify-r63.sh` を測り直し、全走と層別。
+
 ### 期待値の根拠
 
 - §12.1: `if` の本体に `->` が無いとき、`if` の全体に続き（`->`、`as`、`|>`、
@@ -82,38 +115,33 @@
 ### 工程
 
 6 つの位置を探針で測る（赤の全部書き出し）→ 赤のテスト → `operand_text` と
-`tail` の受け渡し → 再審査の 6 位置を探針で測る → 赤のテスト →
-`enclosed_by_wrap` → 周辺の位置の実測 → 門番 → 全走。
+`tail` の受け渡し → 再審査の 6 位置を探針で測る → 赤のテスト → `enclosed_by_wrap`
+→ 周辺の位置の実測 → 三回目の審査の 6 位置を探針で測る → 赤のテスト → `neg_text`
+の自分で足す括弧 → 括弧を足す場所の洗い直しと 90 件の探針 → main の取り込み →
+門番 → 全走。
 
 ### 判定
 
-- 最初の 6 つの位置と包まれた 6 つの位置のすべてで、`fmt` の後も `check` が通り、
-  `run` の値が変わらない。
+- 最初の 6 つの位置と包まれた 6 つの位置、入れ子の `-` の 6 つの位置のすべてで、
+  `fmt` の後も `check` が通り、`run` の値が変わらない。
 - `fmt` を 2 回当てて同じバイト列（冪等）。
+- 括弧を足す場所を洗い、分岐を中に置ける位置に取りこぼしが無い（探針 90 件）。
 - `cargo test --offline --test fmt_layout`。
 - `bash scripts/verify-fmt-layout.sh` が 6/6。
 - `verify-r52.sh`・`verify-r53.sh`・`verify-r57.sh`・`verify-r64.sh` が緑。
-- `verify-r63.sh` が悪化しない（土台と同じ `2/4`）。
+- `verify-r63.sh` が 4/4（main を取り込んだ後）。
 - `cargo fmt --all --check` と
   `cargo clippy --offline --all-targets -- -D warnings` が 0 件。
 - 最後に 1 回だけ `cargo test --offline` と
-  `bash scripts/run-gates.sh --tier quick target/.gates-tailoperand`。
+  `bash scripts/run-gates.sh --tier quick target/.gates-tailoperand2`。
 
-### 許容される赤
+### 赤の門番
 
-`verify-r63.sh` の `2/4` の 2 件は、この枝の土台（PR #81 の印字器）でも同じ赤で、
-本ラウンドの起因ではない。F5 の印字し直しで古くなった期待値と、別レーンの欠陥で
-ある。
-
-- `63-c` の `c/mixed`: `check` が E520 を期待される入力で E402
-  （`not all constructor values are covered`）を返す。ADT の実装と名前の同一視の
-  欠陥（別レーン）で、審査も main（`4baca98`）で同じ赤と報告している。
-- `63-d` の `d/let-fix`: `check --fix` の印字し直しが本体を `=>` の次の行から
-  同じ行へ移す。門番の期待値 `LET_VALUE_FIXED` は改行したままである。同じ
-  `63-d` の `d/argument-fix` は土台でも本ラウンドの後でも緑である。
-
-どちらも門番の期待値を書き換えずに直せない。門番を緩めない規約に従い、赤のまま
-報告する。
+無し。`verify-r63.sh` は main を取り込む前は `2/4` だった（`63-c` の `c/mixed` が
+E402、`63-d` の `d/let-fix` が F5 の印字し直しで古くなった期待値）。main が ADT の
+欠陥と `check --fix` の期待値を直し（PR #85・#86）、本ラウンドの印字器が `63-d` の
+`d/argument-fix` を緑にして、取り込み後は `4/4` である。門番の期待値は書き換えて
+いない。
 
 ### スコープ外
 
@@ -123,6 +151,10 @@
 - 審査の「スコープ外の所見」5 件（`check --fix` が壊れた結果でも exit 0 を返す、
   書き換えが閉じの印と食い違う、コメントの置き場、条件列の空白 2 つ、E100 の
   勧める形が通らない）。直していない。報告に書く。
+- 三回目の審査の「スコープ外の所見」。`type R = { a: Int; b: Int }` と
+  `def r = { a = 1; b = 2 }` の `r.a + r.b` は `check` が exit 0 なのに、`run` が
+  エラーコードの無い `Mismatch` で exit 1 になる。`(g inc) 1`（`g x => x`）も同じ。
+  base でも同じで、原因は未確認である。
 - `docs/spec.md` の疑義。仕様は変えず、報告に書く。
 
 ### 中断の条件
@@ -152,6 +184,10 @@
 | §12.1 | 続きの無い `if(...)` は E100。`(` の閉じの `)` が `if` の閉じを兼ねる | 構文 | E100 | `crates/hado/tests/fmt_layout.rs` |
 | §59 | `unary`・`application` は `prefix_form` を取らないので、裸の `if …` は被演算子と引数に置けない | 構文 | E100 | `crates/hado/tests/fmt_layout.rs` |
 | §58.1 | `fmt` の印字し直した綴りが、動くプログラムの綴りでなければならない | 冗長 | — | `crates/hado/tests/fmt_layout.rs`・`scripts/verify-fmt-layout.sh` |
+
+PR #81（`17e644f`）が並置の最後の引数を直し、このラウンドが残りの位置（二項の
+右辺・単項 `-` と `not` の被演算子・`|>` の右辺・入れ子の適用の引数・`wrap` の
+括弧の中・入れ子の `-` の内側）を直した。
 
 ## 実測
 
@@ -211,6 +247,75 @@ run(after): exit=0 out=18
 fmt 2 回目: 同じ
 ```
 
+### 入れ子の `-` の 6 つの位置（探針 `target/probe/neg_nested.sh`）
+
+`neg_text` は被演算子も `-` のとき `wrap` を通さず自分で `-(…)` と綴る。足した `)`
+の直前も「続きの無い位置」である。直す前は 6 つとも `fmt` の後が E100 だった。
+`- (- (if …))` のように後ろに何も続かない形は `-(-(if …))` になって通るので、
+続きを足したときにだけ壊れる。
+
+| 位置 | 入力 | `run` | `fmt` の後（直す前 → 直した後） | `check` |
+|---|---|---|---|---|
+| `+` の左辺 | `- (- (if true => 1 \| 0)) + 5` | 6 | `-(-if(…)) + 5` → `-(-(if …)) + 5` | E100 → ok |
+| `\|>` の左辺 | `- (- (if true => 1 \| 0)) \|> inc` | 2 | `-(-if(…)) \|> inc` → `-(-(if …)) \|> inc` | E100 → ok |
+| `as` の左 | `- (- (if true => 1 \| 0)) as y -> y + 1` | 2 | `-(-if(…)) as y ->` → `-(-(if …)) as y ->` | E100 → ok |
+| 引数の中の `<` | `b2i (- (- (if true => 1 \| 0)) < 5)` | 1 | `-(-if(…)) < 5` → `-(-(if …)) < 5` | E100 → ok |
+| 3 重の `-` | `- (- (- (if true => 1 \| 0))) + 5` | 4 | `-(-(-if(…))) + 5` → `-(-(-(if …))) + 5` | E100 → ok |
+| implement の本体 | `def n = - (- (if true => 2 \| 0)) + 1` | 3 | `-(-if(…)) + 1` → `-(-(if …)) + 1` | E100 → ok |
+
+`inc` は `def inc x => x + 1`、`b2i` は `def b2i b => if b => 1 | 0`。implement は
+`module M` / `implement M as M` の中の `def n` である。
+
+```
+$ bash target/probe/neg_nested.sh | sed -n '/=== n1/,/=== n2/p'
+=== n1 ===
+run(before): exit=0 out=6
+fmt 後: def main = Int.to_string (-(-(if true => 1 | 0)) + 5)~
+check: exit=0 out=
+run(after): exit=0 out=6
+fmt 2 回目: 同じ
+=== n2 ===
+```
+
+### 洗った結果（三回目の審査の探針 90 件）
+
+同じ種類の取りこぼしが他に無いかを 2 通りで洗った。まず括弧を足す場所を全部読み、
+次に三回目の審査が残した探針 90 件（`c1` 6 件・`c2` 68 件・`c3` 16 件）を、直した
+印字器で回した。
+
+- 自分で `(…)` を足す場所: `neg_text` の `-(…)`、`arm_value` の `({text})`、
+  `apply_argument`・`call_text` の引数、`field_text` の整数 base、`with_text`・
+  `binding` の包み、`branch_text`・`branch_inner` の `if(...)`、`fn_text` の
+  `fn(...)`、`fields_text`。
+- 分岐を中に置けるのは `neg_text` と分岐用の `enclosed`（`(if …)`）だけで、後者は
+  元から続きの無い位置として印字している。`apply_argument`・`call_text` の引数は
+  `enclosed`（続きの無い位置）で、`with_text`・`binding` の本体も続きの無い位置で
+  ある。腕（`arm_value`・`branch_inner`・`fn_text` の腕）は分岐を入れられないので
+  対象外。`field_text` の整数と型・引数の括弧は式を持たない。
+- したがって欠けていたのは `neg_text` の自分で足す括弧 1 か所だけである。
+
+```
+$ for c in c1 c2 c3; do python3 target/probe/r3sweep.py target/r3/$c.txt > target/probe/$c.mine; done
+c1: 有効 6 件すべて check ok・run の値が不変・冪等
+c2: 有効 57 件 + 入力が元から不正 10 件 + 既知の field-app 1 件（E305）
+c3: 有効 15 件 + 入力が元から不正 1 件
+```
+
+入力が元から不正な 11 件は E101（腕の中の分岐）・E502（同じ腕）・E706（`main` の
+効果）・E501（値を変えない束縛）で、`fmt` の前から `run` が失敗している。既知の
+`field-app` は `(k (if …)).a` が E305 になる別件（`docs/issues/`）で、base でも
+同じである。
+
+### main の取り込み
+
+`git merge origin/main`（main は `b5b52d4`）で 2 ファイルが競合した。
+`crates/hado/src/postfix_print.rs` は main が `apply_text` の引数の処理を
+`apply_argument` へ切り出していたので、その抽出を残したまま `last`・`tail` を
+渡す形に広げ、分岐の包みと `operand_text` を移した。`crates/hado/tests/fmt_layout.rs`
+は main の `a_comment_on_the_definition_line_stays_inside_the_definition` とこちらの
+テストを両方残した。取り込み後は 10 テストである。`bash scripts/corpus-lock.sh
+--check` は差分なし（exit 0）だったので作り直していない。
+
 ### 周辺の位置（探針 `target/probe/positions_all.sh`）
 
 右端の被演算子は並置の引数だけではない。同じ規則が効く位置を先に赤の一覧として
@@ -248,10 +353,12 @@ field-base               OK   type R = { a: Int }~def main = Int.to_string if(tr
 
 ### 赤のテスト
 
-`crates/hado/tests/fmt_layout.rs` に 2 つのテストを足した。直す前の
+`crates/hado/tests/fmt_layout.rs` に 3 つのテストを足した。直す前の
 `rightmost_operand_branches_survive_the_reprint` は `5 passed; 2 failed`。
 `wrapped_operand_branches_survive_the_reprint` は包みを直す前の印字器
 （`c337f37` の `crates/hado/src/postfix_print.rs`）に対して `0 passed; 1 failed`。
+`nested_negation_branches_survive_the_reprint` は `569f8c9` の直す前の印字器に
+対して `0 passed; 1 failed` である。
 
 ```
 $ cargo test --offline --test fmt_layout wrapped_operand_branches_survive_the_reprint
@@ -260,11 +367,19 @@ def main = Int.to_string (f (-if(true => 1 | 0)) 2)
 test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out
 ```
 
-直した後。
+```
+$ cargo test --offline --test fmt_layout nested_negation_branches_survive_the_reprint
+nested-neg-add: t:1:30: error[E100]: `if(...)` with nothing after it; write it without parentheses; canonical form: if true => 1 | 0:
+def main = Int.to_string (-(-if(true => 1 | 0)) + 5)
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out
+```
+
+直した後（main の取り込みを含む。main の
+`a_comment_on_the_definition_line_stays_inside_the_definition` を足した 10 テスト）。
 
 ```
 $ cargo test --offline --test fmt_layout
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 ### 判定条件ごとの実測
@@ -287,36 +402,31 @@ $ bash scripts/verify-r57.sh | tail -1
 PASSED: 6/6
 $ bash scripts/verify-r64.sh | tail -1
 PASSED: 4/4
+$ bash scripts/verify-r63.sh | tail -1
+PASSED: 4/4
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
 $ cargo fmt --all --check; echo "exit=$?"
 exit=0
 $ cargo clippy --offline --all-targets -- -D warnings > /dev/null 2>&1; echo "exit=$?"
 exit=0
 ```
 
-### `verify-r63.sh` の赤（土台でも同じ、`2/4`）
+### `verify-r63.sh`（main の取り込み後は `4/4`）
+
+main を取り込む前のこの枝は `2/4` だった。`63-c` の `c/mixed` は ADT の欠陥
+（別レーン）で E520 の代わりに E402、`63-d` の `d/let-fix` は F5 の印字し直しで
+古くなった期待値である。main が両方を直し（PR #85・#86）、`63-d` の
+`d/argument-fix` は本ラウンドの印字器が直した。取り込み後は 4 件とも緑である。
+門番の期待値は書き換えていない。
 
 ```
-$ bash scripts/verify-r63.sh
+$ bash scripts/verify-r63.sh | grep -E '^(OK|NG|PASSED)'
 OK: 63-a two Boolean arms become a Boolean branch
 OK: 63-b an arm and a fallback become a Boolean branch
-AssertionError: ('c/mixed', 'E520', 'main.hd:255:1: error[E402]: not all constructor values are covered')
-NG: 63-c E503 and E520 settle together
-AssertionError: ('d/let-fix', "'def f (b: Bool): Int => if(b => 1 | 2) as v ->\\n  v + 1\\n…'",
-                              "'def f (b: Bool): Int =>\\n  if(b => 1 | 2) as v ->\\n  v + 1\\n…'")
-NG: 63-d the exclusions and the argument position
-PASSED: 2/4
-```
-
-`63-c` の `c/mixed` は ADT の実装と名前の同一視の欠陥（別レーン）、`63-d` の
-`d/let-fix` は F5 の印字し直しで古くなった期待値である。土台（`d852e77` の
-印字器）でも同じ 2 件が赤になる。`d/argument-fix` は土台でも本ラウンドの後でも
-緑である。
-
-```
-$ git checkout d852e77 -- crates/hado/src/postfix_print.rs
-$ bash scripts/verify-r63.sh | tail -2
-NG: 63-d the exclusions and the argument position
-PASSED: 2/4
+OK: 63-c E503 and E520 settle together
+OK: 63-d the exclusions and the argument position
+PASSED: 4/4
 ```
 
 ### ラウンド最後の全走
