@@ -750,8 +750,12 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
 /// `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
 /// 入れ子の `-` の被演算子は括弧で包む（§7）。
 fn neg_text(c: &Node, indent: usize, min: u8, tail: bool) -> String {
-    let inner = operand_text(c, indent, enclosed_by_wrap(tail, 7, min), 7);
-    let text = if matches!(c.kind, NodeKind::Neg(_)) {
+    // 入れ子の `-` は `wrap` を通さず自分で `-(…)` と綴る（`--` がコメントの
+    // 印になるのを避けるため、§7）。この `)` も §12.1 の閉じを兼ねるので、
+    // 中身の右端は入力の終わりと同じ「続きの無い位置」になる。
+    let nested = matches!(c.kind, NodeKind::Neg(_));
+    let inner = operand_text(c, indent, nested || enclosed_by_wrap(tail, 7, min), 7);
+    let text = if nested {
         format!("-({inner})")
     } else {
         format!("-{inner}")
