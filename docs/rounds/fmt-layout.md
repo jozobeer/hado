@@ -340,4 +340,36 @@ $ bash scripts/corpus-lock.sh --check; echo $?
 0
 ```
 
+### 着地後の全走（2026-10-04、main `4baca98`）
 
+main を checkout した側で回した。`cargo test --offline` は緑、full 層は 7 本が赤。
+`red:` に `verify-r42` が出るが、これは削除済みの門番の古いログ（`target/gates-full/verify-r42.log`
+の時刻が 09-16）を TALLY が数えたもので、門番は `b542797` で消えている。
+
+```
+$ cd /home/zyun/git/local/hado && cargo test --offline; echo "exit=$?"
+exit=0
+$ grep -c '^test result: ok' target/main-full-cargo-test.log
+74
+$ grep -cE '^test result: FAILED' target/main-full-cargo-test.log
+0
+$ bash scripts/run-gates.sh --tier full target/gates-full | tail -1
+TALLY: 3909/3922 passed; red: verify-cognitive-complexity.log verify-r42.log verify-r46.log verify-r47.log verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+```
+
+赤の内訳を `bf1310c`（F5 の直前）と比べた。**F5 が赤にしたのは 4 本**である。
+
+| 門番 | `bf1310c` | main | 差分 |
+|---|---|---|---|
+| `verify-cognitive-complexity.sh` | 2/3（エラー 1 件） | エラー 4 件 | F5 が 3 件増やした（`postfix_print.rs` の `place_comments` 16/7・`apply_text` 8/7 ほか）。`mono.rs` の `lift_again_arguments` 9/7 は F5 以前から |
+| `verify-r46.sh` | 5/5 | 4/5 | F5 が赤にした。§57 の「書き換えのあと印字し直す」で `check --fix` の出力が変わったため |
+| `verify-r47.sh` | 4/4 | 3/4 | 同上 |
+| `verify-r63.sh` | 3/4 | 2/4 | F5 以前から 1 件赤。F5 がもう 1 件増やした |
+| `verify-r62.sh` | 1/4 | 1/4 | F5 以前から同じ |
+| `verify-r68.sh` | 1/4 | 1/4 | 同上 |
+| `verify-string-split-linear.sh` | 10/11 | 10/11 | 同上（`join: small median 0.182s is below the 0.200s floor`。測定が床を下回る） |
+
+`verify-r46.sh`・`verify-r47.sh`・`verify-r63.sh` の期待値の更新は
+`docs/rounds/check-fix-reprint-expectations.md`、`verify-cognitive-complexity.sh` の
+修理は `docs/rounds/printer-cognitive-complexity.md` で行う。この 2 本が着地するまで
+full 層は赤のままである。
