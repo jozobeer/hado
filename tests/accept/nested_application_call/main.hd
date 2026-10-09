@@ -1,0 +1,4 @@
+// spec: §13
+// expect: 42
+// needs: prelude
+def main = Int.to_string ((fn(a => fn(b => a + b)) 1) 41)

@@ -1,0 +1,4 @@
+// spec: §13
+// expect: 6
+// needs: prelude
+def main = Int.to_string (((fn(a => fn(b => fn(c => a + b + c))) 1) 2) 3)
