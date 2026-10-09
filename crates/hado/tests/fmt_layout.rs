@@ -233,6 +233,58 @@ fn rightmost_operand_branches_survive_in_every_position() {
     }
 }
 
+/// 演算子を `(…)` で包む位置（`wrap` が足す括弧の中）も「後ろに何も続かない
+/// 位置」である。包んだ `)` が §12.1 の閉じを兼ねるので、その中の右端の分岐も
+/// `(if …)` にする。ここを漏らすと `fmt` が E100 を書く。
+#[test]
+fn wrapped_operand_branches_survive_the_reprint() {
+    let cases = [
+        (
+            "wrapped-neg-argument",
+            "def f (a: Int, b: Int): Int => a + b\ndef main = Int.to_string (f (- (if true => 1 | 0)) 2)\n",
+            "1\n",
+        ),
+        (
+            "wrapped-bin-left",
+            "def main = Int.to_string ((1 + (if true => 1 | 0)) * 2)\n",
+            "4\n",
+        ),
+        (
+            "wrapped-bin-argument",
+            "def f (a: Int, b: Int): Int => a + b\ndef main = Int.to_string (f (1 + (if true => 1 | 0)) 2)\n",
+            "4\n",
+        ),
+        (
+            "wrapped-not-argument",
+            "def f (a: Bool, b: Int): Int => if a => b | 0\ndef main = Int.to_string (f (not (if true => false | true)) 3)\n",
+            "3\n",
+        ),
+        (
+            "wrapped-pipe-left",
+            "def inc x => x + 1\ndef dec x => x - 1\ndef main = Int.to_string ((1 |> (if true => inc | dec)) + 1)\n",
+            "3\n",
+        ),
+        (
+            "wrapped-nested-bin",
+            "def main = Int.to_string ((10 - (2 - (if true => 1 | 0))) * 2)\n",
+            "18\n",
+        ),
+    ];
+    for (name, source, want) in cases {
+        assert_eq!(
+            run_source(source, &format!("{name}-before")),
+            want,
+            "{name}: 入力が動かない:\n{source}"
+        );
+        let once = assert_reprints(name, source);
+        assert_eq!(
+            run_source(&once, &format!("{name}-after")),
+            want,
+            "{name}: fmt の後で値が変わった:\n{once}"
+        );
+    }
+}
+
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
 #[test]
 fn formatting_is_idempotent_and_settles() {
