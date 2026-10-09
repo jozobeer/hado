@@ -701,13 +701,20 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         // `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
         // 入れ子の `-` の被演算子は括弧で包む（§7）。
         NodeKind::Neg(c) => neg_text(c, indent, min, tail),
-        NodeKind::Not(c) => wrap(format!("not {}", operand_text(c, indent, tail, 7)), 7, min),
+        NodeKind::Not(c) => wrap(
+            format!(
+                "not {}",
+                operand_text(c, indent, enclosed_by_wrap(tail, 7, min), 7)
+            ),
+            7,
+            min,
+        ),
         NodeKind::Bin(op, l, r) => bin_text(*op, l, r, indent, min, tail),
         NodeKind::Pipe(l, r) => wrap(
             format!(
                 "{} |> {}",
                 expr_prec(l, indent, false, 1),
-                operand_text(r, indent, tail, 2)
+                operand_text(r, indent, enclosed_by_wrap(tail, 1, min), 2)
             ),
             1,
             min,
@@ -743,7 +750,7 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
 /// `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
 /// 入れ子の `-` の被演算子は括弧で包む（§7）。
 fn neg_text(c: &Node, indent: usize, min: u8, tail: bool) -> String {
-    let inner = operand_text(c, indent, tail, 7);
+    let inner = operand_text(c, indent, enclosed_by_wrap(tail, 7, min), 7);
     let text = if matches!(c.kind, NodeKind::Neg(_)) {
         format!("-({inner})")
     } else {
@@ -764,7 +771,7 @@ fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8, tail: bool) -
             "{} {} {}",
             operand_text(l, indent, false, left_min),
             op.as_str(),
-            operand_text(r, indent, tail, right_min)
+            operand_text(r, indent, enclosed_by_wrap(tail, prec, min), right_min)
         ),
         prec,
         min,
@@ -782,6 +789,8 @@ fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8, tail: bool) -
 ///
 /// 続きの有無は右端の被演算子がそのまま引き継ぐ。引き継ぐのは演算子だけで、
 /// 束縛や `with` は引き継がない（裸で被演算子に置けず、括弧が要るため）。
+/// 演算子が `wrap` の括弧で包まれるときは、その中の右端も続きが無い
+/// （`enclosed_by_wrap`）。親から見て続きがあっても、包まれた中には無い。
 fn operand_text(node: &Node, indent: usize, tail: bool, min: u8) -> String {
     match &node.kind {
         NodeKind::Bin(..)
@@ -898,6 +907,13 @@ fn single_argument(node: &Node, indent: usize) -> String {
         | NodeKind::PatternBranch { .. } => enclosed(node, indent),
         _ => operand_text(node, indent, true, 0),
     }
+}
+
+/// `wrap` が括弧を足す位置（`prec < min`）では、その `)` が §12.1 の閉じを
+/// 兼ねるので、中身の右端は入力の終わりと同じ「続きの無い位置」になる。
+/// 外から来た `tail` に、包まれた分を足して返す。
+fn enclosed_by_wrap(tail: bool, prec: u8, min: u8) -> bool {
+    tail || prec < min
 }
 
 fn wrap(text: String, prec: u8, min: u8) -> String {
