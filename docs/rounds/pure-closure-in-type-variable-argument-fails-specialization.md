@@ -169,3 +169,27 @@ NG: each issue document has the required name, priority and sections
 - 後者は PR #77 が入れた 3 件の issue の 2 行目が空行になっているため。同じく #73 の枝で直してある。
 
 どちらもこのラウンドの成果物ではない。`main` を取り込んだあとで作り直し、16/16 になったことを確かめてから着地する。
+
+### 着地後の全走（2026-10-04、main `4baca98`）
+
+main を checkout した側で回した。このラウンドの門番と `cargo test --offline` は緑である。
+full 層の赤はこのラウンドの成果物ではない（内訳は `docs/rounds/fmt-layout.md` の
+「着地後の全走」にある）。
+
+```
+$ cd /home/zyun/git/local/hado && cargo test --offline; echo "exit=$?"
+exit=0
+$ grep -c '^test result: ok' target/main-full-cargo-test.log
+74
+$ grep -cE '^test result: FAILED' target/main-full-cargo-test.log
+0
+$ bash scripts/verify-pure-closure-in-type-variable-argument-fails-specialization.sh | tail -1
+PASSED: 6/6
+$ bash scripts/run-gates.sh --tier full target/gates-full | tail -1
+TALLY: 3909/3922 passed; red: verify-cognitive-complexity.log verify-r42.log verify-r46.log verify-r47.log verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+```
+
+このラウンドの `実測` が「main も 14/16」と書いていた `lint-docs.sh` の 2 件は、
+#73（`3eae984`）とこのラウンドで解消し、16/16 になった。
