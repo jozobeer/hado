@@ -285,6 +285,58 @@ fn wrapped_operand_branches_survive_the_reprint() {
     }
 }
 
+/// 入れ子の `-` は `neg_text` が `wrap` を通さず自分で `-(…)` と綴る（`--` が
+/// コメントの印になるのを避けるため、§7）。この `)` も §12.1 の閉じを兼ねるので、
+/// 中身の右端は続きの無い位置になる。続きを足したときだけ壊れる。
+#[test]
+fn nested_negation_branches_survive_the_reprint() {
+    let cases = [
+        (
+            "nested-neg-add",
+            "def main = Int.to_string (- (- (if true => 1 | 0)) + 5)\n",
+            "6\n",
+        ),
+        (
+            "nested-neg-pipe",
+            "def inc x => x + 1\ndef main = Int.to_string (- (- (if true => 1 | 0)) |> inc)\n",
+            "2\n",
+        ),
+        (
+            "nested-neg-binding",
+            "def main = Int.to_string (- (- (if true => 1 | 0)) as y -> y + 1)\n",
+            "2\n",
+        ),
+        (
+            "nested-neg-comparison",
+            "def b2i b => if b => 1 | 0\ndef main = Int.to_string (b2i (- (- (if true => 1 | 0)) < 5))\n",
+            "1\n",
+        ),
+        (
+            "nested-neg-triple",
+            "def main = Int.to_string (- (- (- (if true => 1 | 0))) + 5)\n",
+            "4\n",
+        ),
+        (
+            "nested-neg-implement",
+            "module M\ndef n: Int\n/module\nimplement M as M\ndef n = - (- (if true => 2 | 0)) + 1\n/implement\ndef main = Int.to_string M.n\n",
+            "3\n",
+        ),
+    ];
+    for (name, source, want) in cases {
+        assert_eq!(
+            run_source(source, &format!("{name}-before")),
+            want,
+            "{name}: 入力が動かない:\n{source}"
+        );
+        let once = assert_reprints(name, source);
+        assert_eq!(
+            run_source(&once, &format!("{name}-after")),
+            want,
+            "{name}: fmt の後で値が変わった:\n{once}"
+        );
+    }
+}
+
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
 #[test]
 fn formatting_is_idempotent_and_settles() {
