@@ -163,9 +163,12 @@ for index in range(10):
     if index % 2 == 0:
         source = f'def g n => n + ({added})\ndef main = Int.to_string (\n  g ({value}) as x -> x)\n'
         expected = value + added
-        # §58.1 の印字し直しが正準形である。適用の引数は式として並べ、負の
-        # Int リテラルは括弧で包む（`g -9` は `g - 9` と同じに読めて E305）。
-        # 0 以上はそのまま並べる。診断の `canonical form:` は別の印字器で、
+        # §58.1 は「印字し直した形が正準形である」とだけ定め、括弧の置き方を
+        # 定めていない。この期待値は、文法（付録C の `unary := "-" unary |
+        # application` と、引数が `primary` であること）から言える「要る括弧
+        # だけを付ける」読みに合わせたもので、§58.1 の文から導いたものではない。
+        # 負の引数は `g -9` が `g - 9` と同じに読めて E305 になるので括弧が
+        # 要る。0 以上は要らない。診断の `canonical form:` は別の印字器で、
         # 正の引数にも `g (9)` と括弧を付けるが、正準形ではない。
         expected_text = f'g ({value})' if value < 0 else f'g {value}'
     else:
