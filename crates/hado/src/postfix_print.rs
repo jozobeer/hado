@@ -779,17 +779,30 @@ fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
     } else {
         expr_prec(f, indent, false, 8)
     };
-    for argument in args {
+    for (index, argument) in args.iter().enumerate() {
         out.push(' ');
+        let last = index + 1 == args.len();
         if matches!(argument.kind, NodeKind::Apply(..))
             || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
         {
             out.push_str(&format!("({})", expr(argument, indent, false)));
+        } else if last && is_branch(argument) {
+            // 並置の最後の引数の後ろには続きが無い。`if(...)` は続きが無いと
+            // E100。括弧で囲み、閉じは `)` に任せる（§12.1）。並置の `f if …`
+            // も E100 なので、括弧は外さない。
+            out.push_str(&format!("({})", enclosed(argument, indent)));
         } else {
             out.push_str(&expr_prec(argument, indent, false, 9));
         }
     }
     out
+}
+
+fn is_branch(node: &Node) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::BoolBranch { .. } | NodeKind::CondBranch { .. } | NodeKind::PatternBranch { .. }
+    )
 }
 
 fn call_text(f: &Node, args: &[Node], indent: usize) -> String {
