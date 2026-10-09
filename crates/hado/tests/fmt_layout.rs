@@ -62,6 +62,26 @@ def g y =>
     assert!(index("// 腕の中のコメント") < index("if y > 0"));
 }
 
+/// §58.1: 見出しと同じ行の `=>` の後ろにコメントがある定義も、本体を次の行へ
+/// 送ってコメントを同じ定義の中に残す（`verify-r62.sh` の 62-b と同じ形）。
+/// 本体の最後の後ろのコメント（同じ行の行末）は本体の中ではない。
+#[test]
+fn a_comment_on_the_definition_line_stays_inside_the_definition() {
+    let source = "def f x => // 腕の中のコメント\n  x + 1\ndef main = f 1\n";
+    let text = formatted(source);
+    assert_eq!(
+        text,
+        "def f x =>\n  // 腕の中のコメント\n  x + 1\ndef main = f 1\n"
+    );
+    assert_eq!(formatted(&text), text);
+    // 本体の最後の後ろのコメント（同じ行の行末）は本体の中ではない。次の項目の
+    // 直前に置く（§58.1 の第 1 文。字下げは元の位置のまま）。
+    let trailing = "def f x => x + 1 // 行末\ndef main = f 1\n";
+    let text = formatted(trailing);
+    assert_eq!(text, "def f x => x + 1\n  // 行末\ndef main = f 1\n");
+    assert_eq!(formatted(&text), text);
+}
+
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
 #[test]
 fn formatting_is_idempotent_and_settles() {
