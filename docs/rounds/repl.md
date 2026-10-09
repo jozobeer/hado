@@ -21,6 +21,14 @@
 - **決定 7: `<dir>` は §52 のライブラリでなければならない。** セッションの根を一時ディレクトリに作り、`<dir>` をその名前の下へ写して `name::実装.member` で見えるようにする（§51）。名前が名前空間の字句でないディレクトリと、`library` を宣言しないディレクトリは入口で断る。`stdlib/` は §52 のライブラリではなく、根の宣言として読むと prelude と衝突して入力ごとに大量の E205 が出るためである。
 - **決定 8: 入力の完結は字句で決める。** 括弧（`(` `[` `{`）が釣り合い、`fn`・`module`・`implement`・`effect`・`handler` の開きと `/…` の閉じが釣り合い、最後の字句が `=>`・`|>`・`|`・`,`・`=` でなければ送る。`->` で終わる入力は束縛の印として送る（未完にしない）。字句が読めない入力は未完として続きを待つ。
 
+- **決定 9: 読み込んだライブラリの E513 は 1 歩の検査で当てない。** §52 の「利用側の入口検査」を 1 入力ごとに当てると、実装を 2 つ持つライブラリで片方だけ使う入力も `1 + 1` も未使用と判定される。段階 1 の入力はトップレベル宣言を持てないので根のファイルに E513 は出ない。ライブラリの宣言が使われるかはセッションの残りで決まるので、1 歩では決められない。根のファイル以外に出た E513 を落とす（審査の欠陥 2）。
+- **決定 10: 束縛の値は Boehm GC の根に登録する。** 値は 1 語の箱に置き、`hado_gc_add_root` でその 1 語を根にする。Rust のヒープは GC が走査しないので、登録しないと割り当ての多い入力を挟んだ次の読み出しで回収される（審査の欠陥 1）。
+- **決定 11: ゲストの `main` がやる初期化を JIT の経路でも行う。** `GC_INIT` とスタック枯渇の番人を `hado_runtime_init` にまとめ、`main` と REPL の両方が呼ぶ。スタック枯渇は「hado: stack overflow」の診断と終了コード 1 になり、§53.1 が言うシグナル死ではなくなる。セッションはそこで終わる（続けるには枯渇したスタックから戻す設計が要る。スコープ外）。
+- **決定 12: 最上位に届いた `raise` はその入力だけを捨ててセッションを続ける。** `hado_repl_run` が `setjmp` で 1 歩を囲み、`hado_abort_error` が捕獲中なら `longjmp` で戻る。AOT の経路は捕獲を arm しないので `exit(1)` のまま。§54 の `main` の規則はプログラムを終えるが、セッションには次の入力があるため（審査の欠陥 6）。
+- **決定 13: 効果の再実行はファイルへの書き込みの回数で測る。** `log` の出力だけを見ると、出力を `/dev/null` へ向けてやり直す実装が緑のまま通る（審査のテストの穴）。
+- **決定 14: `read_stdin` は REPL の入力と同じ標準入力を取り合う。** パイプが先に Rust 側のバッファへ入ると 0 バイトを読み、入力が遅れて届くと残りを飲み込む。段階 1 では直さない（人が決める決定）。
+- **決定 15: 一時ファイルは `/tmp/hado-repl-<pid>.so`。** 名前が予測でき、セッションが異常終了すると残る。`CC` に空白を含む値（`ccache cc`）を入れると `Command::new` が失敗する（人が決める決定）。
+
 ### 期待値の根拠
 
 - §11: 「`->` の後ろ全部が継続」をセッションの残りに当てる。1 入力が継続の 1 歩である。
@@ -34,8 +42,10 @@
 - `crates/hado/src/repl.rs`: セッション（完結判定・束縛・合成・JIT・橋・印字）。
 - `crates/hado/src/lib.rs`・`crates/hado/src/main.rs`・`crates/hado/src/project.rs`・`crates/hado/src/emit.rs`: `repl` コマンドの受け付け、`Project::lower_repl_step`、`define_mono_function` の共有。
 - `crates/hado/build.rs`: `libhado_repl_runtime.so` の組立。
+- `runtime/hado_runtime.c`: `hado_runtime_init`（`GC_INIT` とスタック枯渇の番人）、`hado_gc_add_root`、`hado_repl_run`（raise の捕獲）。
 - `crates/hado/tests/repl.rs`: 完了条件を測るテスト。
-- `scripts/verify-repl.sh`（quick・`# round: repl`）。
+- `scripts/verify-repl.sh`（quick・`# round: repl`・10 検査）。
+- `scripts/gate-tiers.lock`: 門番の層の一覧に `repl quick` を足す。
 - `docs/rounds/repl.md`（本ファイル）、`docs/plans/repl.md`（方式の決定）。
 - `docs/issues/repl.md` は着地で消す。段階 2（シェル向けライブラリ）の文面はそこに残っているので、切り出しは着地側で行う。
 
@@ -47,19 +57,21 @@
 4. テスト: `crates/hado/tests/repl.rs` と門番（`test:`）。
 5. 記録: 本ファイルと方式の決定（`docs:`）。
 6. 最後に 1 回だけ `bash scripts/run-gates.sh --tier quick target/.gates-repl` と `cargo test --offline`。
+7. 審査（`target/reviews/repl-review.md`）の欠陥 1〜6 とテストの穴を、欠陥ごとに再現を先に見てから直す（`fix:`・`test:`）。quick 層と core 層、`verify-spec-contracts.sh`、`gate-tiers-lock.sh --check` を回し、最後に `cargo test --offline` を 1 回。
 
 ### 判定
 
-- `bash scripts/verify-repl.sh` が `PASSED: 6/6`。
+- `bash scripts/verify-repl.sh` が `PASSED: 10/10`。
 - `cargo test --offline --test repl` が 0 failed（完了条件の照合テストを含む）。
-- `bash scripts/run-gates.sh --tier quick` が `red: none`。
+- `bash scripts/run-gates.sh --tier quick` と `bash scripts/run-gates.sh --tier core` が `red: none`。
 - `cargo test --offline` が 0 failed。
-- `bash scripts/verify-rustfmt.sh`、`bash scripts/verify-clippy.sh` が緑。
+- `bash scripts/verify-rustfmt.sh`、`bash scripts/verify-clippy.sh` が緑。`bash scripts/verify-cognitive-complexity.sh` は 2/3（許容される赤を参照）。
+- `bash scripts/verify-spec-contracts.sh` が 2/2、`bash scripts/gate-tiers-lock.sh --check` が rc 0。
 - `bash scripts/lint-docs.sh` が PASSED。`bash scripts/corpus-lock.sh --check` と `bash scripts/frozen-docs-lock.sh --check` が差分なし。
 
 ### 許容される赤
 
-なし。`bash scripts/verify-cognitive-complexity.sh` は 2/3 で赤になるが、これは base（`4baca98`）から変わっていない `crates/hado/src/postfix_print.rs` と `crates/hado/src/mono.rs` の 3 関数を指しており、このラウンドの変更ではない（実測を参照）。自分の変更で緑にできる赤ではないので、門番は緩めない。
+`bash scripts/verify-cognitive-complexity.sh` の 1 本（`cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity` が clean であること）が赤で、`PASSED: 2/3`。指しているのは `crates/hado/src/postfix_print.rs` の 2 関数（`place_comments` 16、`apply_text` 8）と `crates/hado/src/mono.rs` の 2 関数（`lift_again_arguments` 9、`lambda` 9）である。このラウンドが足した `repl.rs` の関数は 1 件も挙がっていない（審査の指摘の 3 件は分割で直した）。4 件とも base `4baca98` からも main `5b15cc5` からも変わっていない（`git diff` が空）ので、この赤はこのラウンドより前からある。自分の変更で緑にできる赤ではないので門番は緩めない。`postfix_print.rs` と `mono.rs` の分割は `fmt-layout`・`pipe-in-tail-argument` などの側なので、このラウンドでは触らない（人が決める決定）。
 
 ### スコープ外
 
@@ -68,6 +80,9 @@
 - JIT したコードのメモリを入力ごとに返すこと。セッションの間は落とさない（閉包のコードを指すため）。`JITModule::free_memory` は明示的で、入力ごとの解放は閉包の寿命の設計が要る。
 - 段階 2（シェル向けライブラリ、`Process` 効果）。`docs/issues/repl.md` の段階 2 として切り出す。
 - 対話の前口上・プロンプトの体裁。標準入力が端末のときだけ `> ` を標準エラーへ出す。
+- `crates/hado/src/postfix_print.rs` と `crates/hado/src/mono.rs` の 4 関数の分割（許容される赤を参照）。他のラウンドの側である。
+- スタック枯渇のあとセッションを続けること。枯渇したスタックから戻す設計（`siglongjmp` など）が要る。
+- `read_stdin` と REPL の入力の取り合いを直すこと（決定 14）。
 
 ### 中断の条件
 
@@ -239,4 +254,148 @@ error: the function has a cognitive complexity of (9/7)
    --> crates/hado/src/mono.rs:776:8
 $ git diff 4baca98 -- clippy.toml crates/hado/src/postfix_print.rs crates/hado/src/mono.rs | wc -l
 0
+```
+
+### 審査の欠陥とテストの穴（2026-10-10）
+
+審査は `target/reviews/repl-review.md`。欠陥 6 件とテストの穴 1 件で、どれも直す前に再現を取った。審査が `target/review-repl/` に置いた入力と、`target/probe/` に作った短い検体を使う（どちらも `target/` の下で追跡しない）。
+
+**欠陥 1（GC の根）。** 直す前の木（`a755c79`）では、束縛した `xs` を割り当ての多い入力のあとで読むと 3 回ともシグナルで落ちた。`GC_DONT_GC=1` を付けると 3 回とも通る（審査の実測）。
+
+```
+$ timeout 600 target/debug/hado repl < target/review-repl/gc.in; echo "exit $?"
+1499500
+1499500
+exit=139
+```
+
+短い検体（`target/probe/gc-small.in`、6 入力）でも 3 回とも落ちる。直したあとは 3 回とも正しい値を出す。
+
+```
+$ timeout 300 target/naive-src/target/debug/hado repl < target/probe/gc-small.in; echo "exit $?"
+14950
+14950
+exit=132
+$ for i in 1 2 3; do /usr/bin/time -f "run $i exit=%x %es" timeout 300 target/debug/hado repl < target/probe/gc-small.in > /dev/null; done
+run 1 exit=0 9.83s
+run 2 exit=0 14.22s
+run 3 exit=0 9.54s
+```
+
+**欠陥 2（E513）。** 実装 A・B を持つライブラリで、片方だけ使う入力も `1 + 1` も断られていた。直したあとは 1 つの入力が使う実装だけを参照してよい。
+
+```
+$ printf 'two::a::A.one 1\n' | target/debug/hado repl target/review-repl/lib/two
+two/b/b.hd:1:1: error[E513]: unused top-level declaration
+$ printf '1 + 1\n' | target/debug/hado repl target/review-repl/lib/two
+two/a/a.hd:1:1: error[E513]: unused top-level declaration
+two/b/b.hd:1:1: error[E513]: unused top-level declaration
+$ printf 'two::a::A.one 1\ntwo::b::B.two 1\n1 + 1\n' | target/debug/hado repl target/review-repl/lib/two
+2
+3
+2
+```
+
+**欠陥 5（スタック枯渇）。** 直す前はシグナル死（rc 134）。直したあとは診断と終了コード 1 で、§53.1 が禁じる死に方ではなくなる。
+
+```
+$ printf 'deep::d::D.down 1000000\n7\n' | target/debug/hado repl target/review-repl/lib/deep; echo "exit $?"
+thread 'main' (5) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+exit=134
+$ printf 'deep::d::D.down 1000000\n7\n' | target/debug/hado repl target/review-repl/lib/deep; echo "exit $?"
+hado: stack overflow
+exit=1
+```
+
+**欠陥 6（最上位の raise）。** 直す前はその入力でセッションごと終わっていた。直したあとはその入力だけを捨てて続く。
+
+```
+$ printf 'Bytes.get (Bytes.of_string "") 5\n7\n' | target/debug/hado repl; echo "exit $?"
+IndexOutOfRange
+exit=1
+$ printf 'Bytes.get (Bytes.of_string "") 5\n7\n' | target/debug/hado repl; echo "exit $?"
+IndexOutOfRange
+7
+exit=0
+```
+
+**欠陥 4（認知複雑度）。** 審査が指した `repl.rs` の 3 件は分割で直した。残る 4 件は base から変わっていない（許容される赤を参照）。
+
+```
+$ cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity 2>&1 | grep -E '^error|-->'
+error: the function has a cognitive complexity of (16/7)
+   --> crates/hado/src/postfix_print.rs:165:4
+error: the function has a cognitive complexity of (8/7)
+   --> crates/hado/src/postfix_print.rs:774:4
+error: the function has a cognitive complexity of (9/7)
+   --> crates/hado/src/mono.rs:776:8
+error: the function has a cognitive complexity of (9/7)
+    --> crates/hado/src/mono.rs:5049:8
+```
+
+**欠陥 3（門番の層）。** `scripts/gate-tiers.lock` に `repl quick` を足した。差分はその 1 行だけである。
+
+```
+$ bash scripts/gate-tiers-lock.sh --check
+--- scripts/gate-tiers.lock	2026-10-09 01:41:11.805322167 +0900
++++ /tmp/tmp.g4vkHhbhUm	2026-10-10 03:26:28.150226496 +0900
+@@ -74,6 +74,7 @@
+ r81	full
+ recursive-effectful-closure-specialization-reads-outcome-as-int	core
++repl	quick
+ restore-option-question	core
+ rustfmt	quick
+ spec-contracts	core
+rc=1
+$ bash scripts/gate-tiers-lock.sh && bash scripts/gate-tiers-lock.sh --check; echo "rc=$?"
+83
+rc=0
+$ bash scripts/verify-spec-contracts.sh 2>&1 | tail -1
+PASSED: 2/2
+```
+
+**テストの穴。** 検査 2 は `log` の出力しか見ていないので、「出力を `/dev/null` へ向けて毎回まるごとやり直す」実装が緑のまま通る。検査 3（ファイルへの書き込みの回数）を足し、いまの木のコピー（`target/naive-src`。`HADO_NAIVE` で素朴な実装へ切り替える）で赤になることを確かめた。切替なしのコピーは直した実装と同じで 10/10。
+
+```
+$ bash target/probe/verify-repl-naive.sh 2>&1 | tail -1
+PASSED: 10/10
+$ HADO_NAIVE=2 bash target/probe/verify-repl-naive.sh 2>&1 | grep -E '^(OK: 2|NG: 2|OK: 3|NG: 3|PASSED)'
+OK: 2 an earlier input effect is not re-executed
+NG: 3 the file counts one write per input, not one per replay
+PASSED: 9/10
+$ HADO_NAIVE=1 bash target/probe/verify-repl-naive.sh 2>&1 | grep -E '^(OK: 2|NG: 2|OK: 3|NG: 3|PASSED)'
+NG: 2 an earlier input effect is not re-executed
+NG: 3 the file counts one write per input, not one per replay
+PASSED: 4/10
+```
+
+出力を隠す差し替え（`HADO_NAIVE=2`）では検査 2 が緑のまま（誤った緑）で、検査 3 だけが赤になる。まるごとやり直す差し替え（`HADO_NAIVE=1`）では両方が赤になる。
+
+**直す前の木に新しい門番を当てる。** 審査のコピーの binary に 10 検査を当てると 6/10 で、欠陥 1・2・5・6 に対応する 9・5・8・7 が赤になる。
+
+```
+$ bash target/probe/verify-repl-old.sh 2>&1 | grep -E '^(OK|NG|PASSED)'
+OK: 1 repl evaluates each complete input and prints its value
+OK: 2 an earlier input effect is not re-executed
+OK: 3 the file counts one write per input, not one per replay
+OK: 4 repl carries bindings and waits for a balanced input
+NG: 5 hado repl <dir> loads that library and rejects a bad name
+OK: 6 a non-monomorphic input is diagnosed and the session continues
+NG: 7 a raise at the top abandons that input and the session continues
+NG: 8 stack exhaustion is a diagnostic, not a signal death
+NG: 9 a bound value survives the allocations of later inputs
+OK: 10 repl takes at most one library directory
+PASSED: 6/10
+```
+
+**直したあとの門番とテスト。**
+
+```
+$ bash scripts/verify-repl.sh 2>&1 | tail -1
+PASSED: 10/10
+$ cargo test --offline -q --test repl 2>&1 | tail -3
+running 14 tests
+..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.21s
 ```
