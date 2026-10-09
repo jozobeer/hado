@@ -4,7 +4,12 @@
 
 ### 背景
 
-main（`4baca98`）で 3 本の門番が赤い。
+main（`4baca98`）で 5 本の門番が赤い（`verify-r62` 1/4・`verify-r68` 1/4・
+`verify-r63` 2/4・`verify-r46` 4/5・`verify-r47` 3/4）。このラウンドが直すのは
+r62 と r68 で、r63 の 63-c も同じ根から直る。**r46・r47 と r63 の 63-d は F5 の
+印字し直しで期待値が古くなった別の原因**で、r46 と r47 は
+`check-fix-reprint-expectations`（PR #85、着地済み）が、63-d は PR #81 が担当する。
+このラウンドでは直さない。
 
 - `scripts/verify-r62.sh`（1/4）: 62-a と 62-b が `E503` を期待する探針に
   `main.hd:254:1: error[E402]` が先に立つ。62-d は `check --fix` が残す
@@ -81,7 +86,10 @@ issue `implement-local-adt-identity-is-name-only` が、残った型同一性の
 - `scripts/verify-r62.sh` — 62-a・62-b・62-d の期待値を §58.1 の正準形へ。
 - `scripts/verify-r63.sh` — 63-c の期待値を §58.1 の正準形へ。
 - `docs/issues/implement-local-adt-identity-is-name-only.md` — 削除（型同一性の
-  欠陥はこのラウンドで直り、回帰テストが固定する）。
+  欠陥はこのラウンドで直り、回帰テストが固定する）。**issue の完了条件には
+  「`verify-r63.sh` が赤なし」もあったが、残る 63-d は印字器の別の欠陥で
+  PR #81 が担当するため、形式上は満たしていない。** 63-d は base でも同じ
+  assert（`id if(b => 1 | 2)` の綴り）で落ちており、型同一性とは無関係である。
 - `docs/issues/flaky-string-split-timing-gate.md` — 検査 i の床の原因と案を
   実測つきで追記。
 - `docs/rounds/landed-gate-reds.md`。
