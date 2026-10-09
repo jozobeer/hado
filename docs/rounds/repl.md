@@ -199,6 +199,15 @@ running 9 tests
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.95s
 ```
 
+記録を足したあとの木でもう一度だけ quick 層を回した（2026-10-10）。この走りのあとに変えたのは本ファイルの記述だけである。
+
+```
+$ bash scripts/run-gates.sh --tier quick target/.gates-repl-final 2>&1 | tail -3
+RUN: verify-rustfmt -> .../target/.gates-repl-final/verify-rustfmt.log
+RUN: verify-spec-model -> .../target/.gates-repl-final/verify-spec-model.log
+TALLY: 47/47 passed; red: none
+```
+
 形と lint の門番（2026-10-10）。
 
 ```
