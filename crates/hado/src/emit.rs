@@ -924,7 +924,7 @@ pub fn compile_mono_to_object(
 }
 
 fn define_mono_function(
-    module: &mut ObjectModule,
+    module: &mut dyn Module,
     source: &crate::mono::Function,
     checked: &crate::Checked,
     ids: &std::collections::HashMap<usize, cranelift_module::FuncId>,
@@ -1005,7 +1005,7 @@ fn define_mono_function(
 /// never normalizes a negative value or 256. Every other type keeps the older
 /// rule -- print the value and return the printer's status.
 fn define_entry(
-    module: &mut ObjectModule,
+    module: &mut dyn Module,
     main: cranelift_module::FuncId,
     print: cranelift_module::FuncId,
     main_type: &crate::mono::Type,
@@ -1048,7 +1048,7 @@ fn define_entry(
 
 /// Return an Int main's value as the exit code, or diagnose and return 1.
 fn emit_int_exit_code(
-    module: &mut ObjectModule,
+    module: &mut dyn Module,
     builder: &mut FunctionBuilder<'_>,
     result: cranelift_codegen::ir::Value,
 ) -> Result<(), String> {
