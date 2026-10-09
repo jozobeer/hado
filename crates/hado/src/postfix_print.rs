@@ -700,19 +700,19 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
         NodeKind::Name(name) => name.clone(),
         // `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
         // 入れ子の `-` の被演算子は括弧で包む（§7）。
-        NodeKind::Neg(c) => neg_text(c, indent, min),
-        NodeKind::Not(c) => wrap(format!("not {}", expr_prec(c, indent, false, 7)), 7, min),
-        NodeKind::Bin(op, l, r) => bin_text(*op, l, r, indent, min),
+        NodeKind::Neg(c) => neg_text(c, indent, min, tail),
+        NodeKind::Not(c) => wrap(format!("not {}", operand_text(c, indent, tail, 7)), 7, min),
+        NodeKind::Bin(op, l, r) => bin_text(*op, l, r, indent, min, tail),
         NodeKind::Pipe(l, r) => wrap(
             format!(
                 "{} |> {}",
                 expr_prec(l, indent, false, 1),
-                expr_prec(r, indent, false, 2)
+                operand_text(r, indent, tail, 2)
             ),
             1,
             min,
         ),
-        NodeKind::Apply(f, args) => apply_text(f, args, indent),
+        NodeKind::Apply(f, args) => apply_text(f, args, indent, tail),
         NodeKind::Call(f, args) => call_text(f, args, indent),
         NodeKind::Field(l, r) => field_text(l, r, indent),
         NodeKind::Record(fields) => format!("{{ {} }}", fields_text(fields, indent)),
@@ -742,8 +742,8 @@ fn expr_prec(node: &Node, indent: usize, tail: bool, min: u8) -> String {
 
 /// `- - x` を `--x` と綴ると、字句が `--` をコメントの印と読んで E104。
 /// 入れ子の `-` の被演算子は括弧で包む（§7）。
-fn neg_text(c: &Node, indent: usize, min: u8) -> String {
-    let inner = expr_prec(c, indent, false, 7);
+fn neg_text(c: &Node, indent: usize, min: u8, tail: bool) -> String {
+    let inner = operand_text(c, indent, tail, 7);
     let text = if matches!(c.kind, NodeKind::Neg(_)) {
         format!("-({inner})")
     } else {
@@ -752,7 +752,7 @@ fn neg_text(c: &Node, indent: usize, min: u8) -> String {
     wrap(text, 7, min)
 }
 
-fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8) -> String {
+fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8, tail: bool) -> String {
     let prec = bin_prec(op);
     let (left_min, right_min) = if is_comparison(op) {
         (prec + 1, prec + 1)
@@ -762,20 +762,44 @@ fn bin_text(op: BinOp, l: &Node, r: &Node, indent: usize, min: u8) -> String {
     wrap(
         format!(
             "{} {} {}",
-            expr_prec(l, indent, false, left_min),
+            operand_text(l, indent, false, left_min),
             op.as_str(),
-            expr_prec(r, indent, false, right_min)
+            operand_text(r, indent, tail, right_min)
         ),
         prec,
         min,
     )
 }
 
-fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
+/// 演算子の被演算子（二項演算子の両辺、単項演算子の被演算子、`|>` の右辺）と
+/// 並置の引数に置く式。`tail` は、その位置に続きが無いこと。
+///
+/// 続きの無い位置の分岐は裸でも `if(...)` でも置けない。裸の `if …` は
+/// `prefix_form` を取り得ない位置（§59 の `unary`・`application`）に置けず
+/// （`expected an expression, found if`）、`if(...)` は閉じの `)` の直後に
+/// 閉じ・区切り・入力の終わりが来ると E100 になる（§12.1）。どちらでも通る
+/// `(if …)` だけがこの位置の綴りなので、明示の括弧で包み、閉じは `)` に任せる。
+///
+/// 続きの有無は右端の被演算子がそのまま引き継ぐ。引き継ぐのは演算子だけで、
+/// 束縛や `with` は引き継がない（裸で被演算子に置けず、括弧が要るため）。
+fn operand_text(node: &Node, indent: usize, tail: bool, min: u8) -> String {
+    match &node.kind {
+        NodeKind::Bin(..)
+        | NodeKind::Neg(..)
+        | NodeKind::Not(..)
+        | NodeKind::Pipe(..)
+        | NodeKind::Apply(..) => expr_prec(node, indent, tail, min),
+        _ if tail && is_branch(node) => format!("({})", enclosed(node, indent)),
+        _ => expr_prec(node, indent, false, min),
+    }
+}
+
+fn apply_text(f: &Node, args: &[Node], indent: usize, tail: bool) -> String {
     // 呼び手が適用のときは括弧で囲む。`(f a) b` を `f a b` と印字すると、2 回の
-    // 適用が 1 回の 2 引数呼び出しに変わり、意味が変わる（§36）。
+    // 適用が 1 回の 2 引数呼び出しに変わり、意味が変わる（§36）。括弧の中は
+    // 入力の終わりと同じなので、右端の被演算子は続きの無い位置として印字する。
     let mut out = if matches!(f.kind, NodeKind::Apply(..)) {
-        format!("({})", expr(f, indent, false))
+        format!("({})", expr(f, indent, true))
     } else {
         expr_prec(f, indent, false, 8)
     };
@@ -785,14 +809,16 @@ fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
         if matches!(argument.kind, NodeKind::Apply(..))
             || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
         {
-            out.push_str(&format!("({})", expr(argument, indent, false)));
+            out.push_str(&format!("({})", expr(argument, indent, true)));
         } else if last && is_branch(argument) {
             // 並置の最後の引数の後ろには続きが無い。`if(...)` は続きが無いと
             // E100。括弧で囲み、閉じは `)` に任せる（§12.1）。並置の `f if …`
             // も E100 なので、括弧は外さない。
             out.push_str(&format!("({})", enclosed(argument, indent)));
         } else {
-            out.push_str(&expr_prec(argument, indent, false, 9));
+            // 最後の引数は、適用の後ろに続きが無ければ「続きの無い位置」である。
+            // 引数の中の二項演算子・単項演算子の右端もそこに当たる。
+            out.push_str(&operand_text(argument, indent, last && tail, 9));
         }
     }
     out
@@ -870,7 +896,7 @@ fn single_argument(node: &Node, indent: usize) -> String {
         NodeKind::BoolBranch { .. }
         | NodeKind::CondBranch { .. }
         | NodeKind::PatternBranch { .. } => enclosed(node, indent),
-        _ => expr(node, indent, false),
+        _ => operand_text(node, indent, true, 0),
     }
 }
 
