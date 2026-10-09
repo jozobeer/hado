@@ -321,4 +321,13 @@ PASSED: 2/4
 
 ### ラウンド最後の全走
 
-（下に追記する。）
+```
+$ cargo test --offline > target/final-cargo-test.log 2>&1; echo "exit=$?"
+exit=0
+$ grep -c '^test result: ok' target/final-cargo-test.log
+74
+$ grep -cE '^test result: FAILED' target/final-cargo-test.log
+0
+$ bash scripts/run-gates.sh --tier quick target/.gates-tailoperand | tail -1
+TALLY: 41/41 passed; red: none
+```
