@@ -21,12 +21,12 @@ fn repl(script: &str, library: Option<&Path>) -> (Option<i32>, Vec<u8>, Vec<u8>)
     command.stderr(std::process::Stdio::piped());
     let mut child = command.spawn().unwrap();
     use std::io::Write;
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(script.as_bytes())
-        .unwrap();
+    // 入口で断る入力（名前空間でない名前・`library` の無いディレクトリ）では、
+    // セッションは標準入力を読む前に終わる。書き込みの失敗はその合図なので、
+    // ここで panic にしない。
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(script.as_bytes());
+    }
     let out = child.wait_with_output().unwrap();
     (out.status.code(), out.stdout, out.stderr)
 }
@@ -124,6 +124,23 @@ fn repl_rejects_a_directory_name_that_is_not_a_namespace() {
     assert!(out.is_empty());
     let err = String::from_utf8(err).unwrap();
     assert!(err.contains("namespace"), "{err}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// §52: `library` を宣言しないディレクトリはライブラリではない。`stdlib/` の
+/// ように名詞が prelude と重なるディレクトリを根の宣言として読むと、入力ごとに
+/// 大量の E205 が出てしまうので、入口で断る。
+#[test]
+fn repl_rejects_a_directory_that_declares_no_library() {
+    let dir = scratch("no-library");
+    let plain = dir.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    std::fs::write(plain.join("plain.hd"), "def value => 1\n").unwrap();
+    let (code, out, err) = repl("1\n", Some(&plain));
+    assert_eq!(code, Some(1));
+    assert!(out.is_empty());
+    let err = String::from_utf8(err).unwrap();
+    assert!(err.contains("§52"), "{err}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

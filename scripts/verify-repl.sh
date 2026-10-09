@@ -104,6 +104,19 @@ loads_library() {
     session bad-name '1\n' "$bad" || return 1
     [ "$status" -eq 1 ] || { echo "  bad name status=$status want=1" >&2; return 1; }
     [ -z "$stdout" ] || { echo "  bad name stdout=$stdout" >&2; return 1; }
+    # `library` を宣言しないディレクトリはライブラリではない（§52）。
+    local plain="$dir/plain"
+    mkdir -p "$plain"
+    printf 'def value => 1\n' >"$plain/plain.hd"
+    session no-library '1\n' "$plain" || return 1
+    [ "$status" -eq 1 ] || { echo "  no library status=$status want=1" >&2; return 1; }
+    [ -z "$stdout" ] || { echo "  no library stdout=$stdout" >&2; return 1; }
+    # issue の現象にあった `repl stdlib` も入口で断る。stdlib は §52 のライブラリ
+    # ではなく、根の宣言として読むと prelude と衝突して入力ごとに E205 が出る。
+    session stdlib '1\n' stdlib || return 1
+    [ "$status" -eq 1 ] || { echo "  stdlib status=$status want=1" >&2; return 1; }
+    [ -z "$stdout" ] || { echo "  stdlib stdout=$stdout" >&2; return 1; }
+    [ "$(printf '%s\n' "$stderr" | wc -l)" -le 2 ] || { echo "  stdlib stderr has too many lines" >&2; return 1; }
 }
 check '4 hado repl <dir> loads that library and rejects a bad name' loads_library
 
