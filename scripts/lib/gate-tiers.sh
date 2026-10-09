@@ -95,11 +95,12 @@ hado_tier_all_gates() {
 #   gate-cache      : リポジトリ直下に probe を置いて消す（内容ハッシュを揺らす）
 #   m0              : ビルドと全走テスト。full-test の証拠を確定させる barrier
 #   m1-corpus/m2/m3 : tests/accept・tests/reject に probe を置き、入れ替える
+#   nested-application-round-trip : postfix_print.rs へ変異を当ててビルドし直す
 # ため直列にする。run-gates はこの一覧 ∩ 走行する門番を前段に置く。
 # ツリーを書く門番を足したら、ここにも足す。verify-gate-cache.sh が一覧が
 # 実在の門番の部分集合であることを機械で見る。
 hado_tier_serial_gates() {
-    printf '%s\n' gate-cache m0 m1-corpus m2 m3
+    printf '%s\n' gate-cache m0 m1-corpus m2 m3 nested-application-round-trip
 }
 
 hado_tiers() {
