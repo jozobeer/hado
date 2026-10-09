@@ -47,7 +47,7 @@
 - `scripts/verify-repl.sh`（quick・`# round: repl`・10 検査）。
 - `scripts/gate-tiers.lock`: 門番の層の一覧に `repl quick` を足す。
 - `docs/rounds/repl.md`（本ファイル）、`docs/plans/repl.md`（方式の決定）。
-- `docs/issues/repl.md` は着地で消す。段階 2（シェル向けライブラリ）の文面はそこに残っているので、切り出しは着地側で行う。
+- `docs/issues/repl-stage2-shell-library.md`: 段階 2（シェル向けライブラリ・`Process` 効果）の切り出し先。`docs/issues/repl.md` は段階 1 の完了条件だけを持ち、着地で消す。
 
 ### 工程
 
@@ -78,7 +78,7 @@
 - 定義（`def`・`type`・`module`・`implement`・`effect`・`handler`）を入力として受けること。段階 1 は式と `e as x ->` だけを受ける。定義の入力は 1 行の断りを出して次の入力へ進む。
 - prelude の検査結果をセッションで使い回すこと。入力ごとに prelude を検査し直すので、1 入力あたり数秒かかる（実測を参照）。速さは段階 1 の条件ではない。
 - JIT したコードのメモリを入力ごとに返すこと。セッションの間は落とさない（閉包のコードを指すため）。`JITModule::free_memory` は明示的で、入力ごとの解放は閉包の寿命の設計が要る。
-- 段階 2（シェル向けライブラリ、`Process` 効果）。`docs/issues/repl.md` の段階 2 として切り出す。
+- 段階 2（シェル向けライブラリ、`Process` 効果）。`docs/issues/repl-stage2-shell-library.md` に切り出した（2026-10-10）。
 - 対話の前口上・プロンプトの体裁。標準入力が端末のときだけ `> ` を標準エラーへ出す。
 - `crates/hado/src/postfix_print.rs` と `crates/hado/src/mono.rs` の 4 関数の分割（許容される赤を参照）。他のラウンドの側である。
 - スタック枯渇のあとセッションを続けること。枯渇したスタックから戻す設計（`siglongjmp` など）が要る。
@@ -398,4 +398,36 @@ $ cargo test --offline -q --test repl 2>&1 | tail -3
 running 14 tests
 ..............
 test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.21s
+```
+
+### core 層と clippy（2026-10-10）
+
+core 層を 1 回走らせた（`bash scripts/run-gates.sh --tier core target/.gates-repl-core`）。32 本の門番のうち 31 本が緑で、赤は `verify-cognitive-complexity` の 2/3 だけである（許容される赤を参照）。集計は走行のログから道具で出した。
+
+```
+$ target/debug/hado run tools/gates/main.hd -- target/.gates-repl-core
+764/765 passed; red: verify-cognitive-complexity.log
+```
+
+`run-gates.sh --tier core` はこの環境では `TALLY` を出さずに終了コード 1 を返す。`full-only gates` の一覧を作る `comm` が、`LC_ALL=C sort` で並べた一覧を既定のロケール（`en_US.UTF-8`）で読むためである。`repl` を一覧から外しても同じで、この変更より前からある。集計そのものは上の 1 行で取れる。
+
+```
+$ bash -c '. scripts/lib/gate-tiers.sh
+> hado_tier_all_gates | LC_ALL=C sort > /tmp/b.txt
+> for name in $(hado_tier_gates core); do printf "%s\n" "${name#verify-}"; done | LC_ALL=C sort > /tmp/a.txt
+> comm -23 /tmp/b.txt /tmp/a.txt > /dev/null; echo "rc=$?"
+> LC_ALL=C comm -23 /tmp/b.txt /tmp/a.txt > /dev/null; echo "rc=$?"'
+comm: file 1 is not in sorted order
+comm: file 2 is not in sorted order
+comm: input is not in sorted order
+rc=1
+rc=0
+```
+
+走行の中で私の新しいテストに clippy の指摘が 1 件出た（`crates/hado/tests/repl.rs` の `std::fs::read_to_string(&path)`。`path` はすでに `&str` なので `&` が不要）。`&` を外して `verify-clippy.sh` を単独で回し、緑を確かめた。
+
+```
+$ bash scripts/verify-clippy.sh 2>&1 | tail -2
+OK: clippy-driver --crate-type staticlib -D warnings on crates/hado/float_format.rs is clean
+PASSED: 2/2
 ```
