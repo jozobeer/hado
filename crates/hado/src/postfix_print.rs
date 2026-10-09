@@ -186,18 +186,44 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
     // 空行が挟まっていたところへ入れ直す。空行は「その次に来るもの」の
     // 直前に付く。次に来るものは項目のことも、コメントの塊のこともある。
     // どちらの位置に置くかは、下のコメントの処理と突き合わせて決める。
-    let mut blank_before: Vec<usize> = Vec::new();
-    for line in &ast.blank_lines {
+    let blank_before = blank_runs(&ast.blank_lines);
+    let blocks = comment_blocks(&ast.comments);
+    // 空行は、その次に来るコメントの塊か項目の位置へ置く。
+    for line in blank_before {
+        if let Some(at) = blank_insert_position(line, ast, &items, lines.len()) {
+            inserts.push((at, line, vec![String::new()]));
+        }
+    }
+    for block in blocks {
+        let first = block.first().expect("block is never empty");
+        let at = comment_insert_position(first, &items, lines.len());
+        let text: Vec<String> = block.iter().map(comment_line).collect();
+        inserts.push((at.min(lines.len()), first.span.line, text));
+    }
+    insert_collected(&mut lines, inserts);
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// 空行の連なりを 1 つにまとめ、それぞれの先頭の行を返す。
+fn blank_runs(blank_lines: &[usize]) -> Vec<usize> {
+    let mut runs = Vec::new();
+    for line in blank_lines {
         // 空行の次が空行のこともある。連なりは 1 つにまとめる。
-        if blank_before.last().is_some_and(|prev| *prev + 1 == *line) {
+        if runs.last().is_some_and(|prev| *prev + 1 == *line) {
             continue;
         }
-        blank_before.push(*line);
+        runs.push(*line);
     }
-    // 連続するコメントは 1 つの塊として置く。1 行ずつ置くと、同じ項目に
-    // 付く複数行のコメントが互いの間に項目を挟んでしまう。
+    runs
+}
+
+/// 連続するコメントを 1 つの塊にする。1 行ずつ置くと、同じ項目に付く
+/// 複数行のコメントが互いの間に項目を挟んでしまう。塊は後ろから処理する。
+fn comment_blocks(comments: &[crate::lexer::Comment]) -> Vec<Vec<crate::lexer::Comment>> {
     let mut blocks: Vec<Vec<crate::lexer::Comment>> = Vec::new();
-    for comment in &ast.comments {
+    for comment in comments {
         match blocks.last_mut() {
             Some(block)
                 if block
@@ -210,61 +236,69 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
         }
     }
     blocks.reverse();
-    // 空行は、その次に来るコメントの塊か項目の位置へ置く。
-    for line in blank_before {
-        // この空行より後ろで最初に始まるものの位置。
-        let next_comment = ast
-            .comments
-            .iter()
-            .find(|c| c.span.line > line)
-            .map(|c| c.span.line);
-        let next_item = items.flat.iter().find(|(source, _, _)| *source > line);
-        // 後ろに何も無い空行は置かない。空の本体の中の空行などがこれに当たり、
-        // 置くと本体の外（ファイルの末尾）へ出て、走らせるたびに増える。
-        if next_comment.is_none() && next_item.is_none() {
-            continue;
+    blocks
+}
+
+/// 空行を入れ直す印字の位置。後ろに何も無い空行は置かない（`None`）。
+/// 空の本体の中の空行などがこれに当たり、置くと本体の外（ファイルの末尾）へ
+/// 出て、走らせるたびに増える。
+fn blank_insert_position(
+    line: usize,
+    ast: &Ast,
+    items: &ItemLines,
+    height: usize,
+) -> Option<usize> {
+    // この空行より後ろで最初に始まるものの位置。
+    let next_comment = ast
+        .comments
+        .iter()
+        .find(|c| c.span.line > line)
+        .map(|c| c.span.line);
+    let next_item = items.flat.iter().find(|(source, _, _)| *source > line);
+    let at = match (next_comment, next_item) {
+        // 次が項目で、その項目の方がコメントより先なら、項目の位置。
+        (Some(comment), Some((source, printed, _))) if comment >= *source => *printed,
+        (Some(comment), _) => {
+            let index = items.slot(comment)?;
+            items.flat[index].1
         }
-        let at = match (next_comment, next_item) {
-            // 次が項目で、その項目の方がコメントより先なら、項目の位置。
-            (Some(comment), Some((source, printed, _))) if comment >= *source => *printed,
-            (Some(comment), _) => match items.slot(comment) {
-                Some(index) => items.flat[index].1,
-                None => continue,
-            },
-            (None, Some((_, printed, _))) => *printed,
-            (None, None) => continue,
-        };
-        inserts.push((at.min(lines.len()), line, vec![String::new()]));
-    }
-    for block in blocks {
-        let first = block.first().expect("block is never empty");
-        let at = match items.slot(first.span.line) {
+        (None, Some((_, printed, _))) => *printed,
+        (None, None) => return None,
+    };
+    Some(at.min(height))
+}
+
+/// コメントの塊を入れ直す印字の位置。後ろに項目が無いときは、その本体を持つ
+/// 項目の**中**の元の相対位置へ置く（§57 の「同じ定義の前後に残す」）。
+/// どの項目より後ろなら、ファイルの末尾へ置く。
+fn comment_insert_position(
+    first: &crate::lexer::Comment,
+    items: &ItemLines,
+    height: usize,
+) -> usize {
+    match items.slot(first.span.line) {
+        Some(index) => {
+            let (_, printed, _) = items.flat[index];
+            // 空行は入れ直すので、コメントの塊はその項目の直上に来る。
+            printed
+        }
+        None => match items.enclosing(first.span.line) {
             Some(index) => {
-                let (_, printed, _) = items.flat[index];
-                // 空行は入れ直すので、コメントの塊はその項目の直上に来る。
-                printed
+                let (source, printed, item_height) = items.flat[index];
+                // 見出しの行から何行目か。コメントは本体の中にあるので、
+                // 見出しの次の行から数える。本体の外へは出さない。
+                let offset = (first.span.line - source).min(item_height);
+                printed + offset
             }
-            None => {
-                // 後ろに項目が無い。本体の中のコメントなら、その本体を持つ
-                // 項目の**中**の元の相対位置へ置く（§57 の「同じ定義の
-                // 前後に残す」）。どの項目より後ろなら、ファイルの末尾へ置く。
-                match items.enclosing(first.span.line) {
-                    Some(index) => {
-                        let (source, printed, height) = items.flat[index];
-                        // 見出しの行から何行目か。コメントは本体の中にあるので、
-                        // 見出しの次の行から数える。本体の外へは出さない。
-                        let offset = (first.span.line - source).min(height);
-                        printed + offset
-                    }
-                    None => lines.len(),
-                }
-            }
-        };
-        let text: Vec<String> = block.iter().map(comment_line).collect();
-        inserts.push((at.min(lines.len()), first.span.line, text));
+            None => height,
+        },
     }
-    // 印字の位置、次にソースの行の順に並べ、後ろから差し込む。後ろから
-    // 入れると、前へ入れるときに後ろの位置がずれない。
+}
+
+/// 集めた挿入を、印字の位置・次にソースの行の順に並べ、後ろから差し込む。
+/// 後ろから入れると、前へ入れるときに後ろの位置がずれない。
+fn insert_collected(lines: &mut Vec<String>, inserts: Vec<(usize, usize, Vec<String>)>) {
+    let mut inserts = inserts;
     inserts.sort_by_key(|(at, source, _)| (*at, *source));
     for (at, _, chunk) in inserts.into_iter().rev() {
         let at = at.min(lines.len());
@@ -272,9 +306,6 @@ fn place_comments(ast: &Ast, canonical: String) -> String {
             lines.insert((at + offset).min(lines.len()), line);
         }
     }
-    let mut out = lines.join("\n");
-    out.push('\n');
-    out
 }
 
 /// 入れ子の項目も含めた、各項目の印字開始行。
@@ -790,15 +821,21 @@ fn apply_text(f: &Node, args: &[Node], indent: usize) -> String {
     };
     for argument in args {
         out.push(' ');
-        if matches!(argument.kind, NodeKind::Apply(..))
-            || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
-        {
-            out.push_str(&format!("({})", expr(argument, indent, false)));
-        } else {
-            out.push_str(&expr_prec(argument, indent, false, 9));
-        }
+        out.push_str(&apply_argument(argument, indent));
     }
     out
+}
+
+/// 適用の引数 1 つを印字する。適用の引数と大文字の名前参照は括弧で包む。
+/// 包まないと `(f a) b` が `f a b` になり、適用の回数が変わる（§36）。
+fn apply_argument(argument: &Node, indent: usize) -> String {
+    if matches!(argument.kind, NodeKind::Apply(..))
+        || matches!(&argument.kind, NodeKind::Name(name) if crate::names::is_upper_reference(name))
+    {
+        format!("({})", expr(argument, indent, false))
+    } else {
+        expr_prec(argument, indent, false, 9)
+    }
 }
 
 fn call_text(f: &Node, args: &[Node], indent: usize) -> String {

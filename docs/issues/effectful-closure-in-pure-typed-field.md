@@ -62,10 +62,21 @@ CallClosure { ..., result: Int }
 
 ## 案
 
-- 推奨: 単相の record / ADT でも、格納したフィールド値が outcome の閉包なら、射影の結果型を
-  その実際の型にし、呼び出しが outcome を継続に載せる。リストリテラルの `as_outcome_closure`
-  （宣言が outcome のとき純粋側を包む）とは逆向きで、宣言が純粋でも値側が outcome なら
-  射影を合わせる。
+- 退ける: 実際の field 型を `Data` の引数に載せる（PR #79 で試した）。同じソースの型が
+  値の中身によって 2 つの mono の型に割れる。効果を運ぶ値は `$Outcome` の閉包、運ばない値は
+  素の閉包になるので、`Fun(fn(x => 8 / x))` と `Num(7)` が同じ `Data("Sh", …)` に合流できない。
+  main で `107` と `3` になる形が `invalid branch types` でビルドに失敗する。
+- 退ける: handler の下で field の閉包を `$Outcome` の形に揃える（PR #80 の `6747eb1` で試した）。
+  揃える範囲が値を作った場所だけでは足りず、関数の境界・型を書いた引数・`Map` の型引数で
+  宣言側の型と食い違う。main で `3` になる形が `lowered return type differs from inferred
+  signature` や `Arity` でビルドに失敗し、入れ子の閉包では型と値が食い違ったまま codegen に
+  進んで SIGILL になる。
+- 推奨: 単相の型の閉包の field をどう表すかを型ごとに 1 つに決める。`$Outcome` の答え型を
+  載せる場所が要るので、`Box` を答え型について多相にする（`Data("Box", [答え型])` とし、
+  宣言側の signature も同じ形にする）か、型に「field が outcome の閉包か」の印を付けて
+  signature・引数・コンテナへ同じ形を伝える。どちらも §36 の型の読みに関わるので、人が決める。
+- 記録: 試した 2 つの筋と退行の実測は `docs/rounds/effectful-closure-in-pure-typed-field.md`
+  にある。枝 `effectful-closure-in-pure-typed-field`（PR #80、下書き）がその実装を持つ。
 - 退ける: 型検査で `Fn(…)` フィールドへの効果付き閉包の代入を拒否する。§36 は record field に
   効果を許しており、既存の受理（`effect_position`）と食い違う。
 
@@ -73,6 +84,10 @@ CallClosure { ..., result: Int }
 
 - 上の record 入力が `0` を印字して終了コード 0 になる（`b.f 2` は `4`）。
 - 上の単相 ADT 入力も `0` を印字して終了コード 0 になる。
+- 関数の境界を通す形（`def mk = { f = fn(x => x + 1) }` を `with Catch -> mk as b -> b.f 2` で
+  呼ぶ）、型を書いた引数（`def call(b: Sh) => b.f 2`）、`Map` の値（`Map.insert` して
+  `Map.find` で取り出す）、入れ子の閉包（`Fn(Int => Fn(Int => Int))`）が、いずれも
+  main と同じ値のままである。
 - 同じ入力が `crates/hado/tests/r26_effects.rs` のテストになり、直す前は赤。
 - `cargo test --offline` が 0 failed、`bash scripts/verify-m4.sh` が赤なし。
 

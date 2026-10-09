@@ -171,8 +171,14 @@ for index in range(10):
     fixed = check_fix(root, name, source)
     assert fixed.returncode == 0 and fixed.stderr == b'', (name, fixed.returncode, fixed.stderr.decode())
     text = (Path(root) / name / 'main.hd').read_text()
-    # 正準形の印字は負の Int を括弧で包む（§54 の印字ではなく元の式の印字）。
-    written_after = '[' + ', '.join(f'({value})' if value < 0 else str(value) for value in values) + ']'
+    # §58.1 は「印字し直した形が正準形である」とだけ定め、括弧の置き方は
+    # 定めていない。この期待値は、文法（付録C の `unary := "-" unary |
+    # application`）から言える「要る括弧だけを付ける」読みに合わせたもので、
+    # §58.1 の文から導いたものではない（印字器が決めた形）。`-2` は単項 `-` の
+    # 式で、`,` が要素を分けるので List の要素としては括弧が要らない。診断の
+    # `canonical form:` は別の印字器（parser.rs の canonical）で、そこでは
+    # `[(-2), ...]` と括弧が付くが、正準形ではない。
+    written_after = '[' + ', '.join(str(value) for value in values) + ']'
     assert text == f'def main = {written_after}\n', (name, text)
     build_run(root, name, '[' + ', '.join(str(value) for value in values) + ']\n')
 print(f'expression lists: seed {seed}, 10 rewritten lists run')

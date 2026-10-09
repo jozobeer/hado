@@ -163,7 +163,14 @@ for index in range(10):
     if index % 2 == 0:
         source = f'def g n => n + ({added})\ndef main = Int.to_string (\n  g ({value}) as x -> x)\n'
         expected = value + added
-        expected_text = f'g ({value})'
+        # §58.1 は「印字し直した形が正準形である」とだけ定め、括弧の置き方を
+        # 定めていない。この期待値は、文法（付録C の `unary := "-" unary |
+        # application` と、引数が `primary` であること）から言える「要る括弧
+        # だけを付ける」読みに合わせたもので、§58.1 の文から導いたものではない。
+        # 負の引数は `g -9` が `g - 9` と同じに読めて E305 になるので括弧が
+        # 要る。0 以上は要らない。診断の `canonical form:` は別の印字器で、
+        # 正の引数にも `g (9)` と括弧を付けるが、正準形ではない。
+        expected_text = f'g ({value})' if value < 0 else f'g {value}'
     else:
         source = f'def main = Int.to_string (\n  {value} as x -> x)\n'
         expected = value
