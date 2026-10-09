@@ -3,13 +3,15 @@
 //! ソースは同じバイト列になる。§57 の「書き換える範囲に `//` を含むときは、
 //! その書き換えを出さない」は印字し直しにも効くので、コメントは消えない。
 //!
-//! 測るのは 5 つ。flat と ragged の同一、コメントの前後関係、冪等、
-//! 受理コーパス・stdlib・tools の往復、並置の最後の引数の `if`。
+//! 測るのは 6 つ。flat と ragged の同一、コメントの前後関係、冪等、
+//! 受理コーパス・stdlib・tools の往復、並置の最後の引数の `if`、右端の
+//! 被演算子の `if`。
 
 use hado::fixes::format;
 use hado::parser::parse_source;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -89,6 +91,145 @@ fn last_juxtaposition_argument_if_stays_grouped() {
         parse_source(&text, "t").unwrap_or_else(|error| panic!("{error}: {text}"));
         hado::check_source(&text, "t").unwrap_or_else(|error| panic!("{error}: {text}"));
         assert_eq!(formatted(&text), text, "冪等でない:\n{text}");
+    }
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("hado-fmt-layout-{}-{name}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// 入力の隣に `main.hd` を置いて `hado run` する。`hado` は入力の親を根として
+/// 配下の `.hd` を読むので、1 つの根に 1 ファイルだけを置く。
+fn run_source(source: &str, name: &str) -> String {
+    let dir = scratch(name);
+    let path = dir.join("main.hd");
+    fs::write(&path, source).expect("書ける");
+    let out = Command::new(env!("CARGO_BIN_EXE_hado"))
+        .arg("run")
+        .arg(&path)
+        .output()
+        .expect("hado run");
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "{name}: run が失敗した:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// 印字し直した綴りが解析と検査を通ることを確かめる。
+fn assert_reprints(name: &str, source: &str) -> String {
+    let once = formatted(source);
+    assert_eq!(formatted(&once), once, "{name}: 冪等でない:\n{once}");
+    parse_source(&once, "t").unwrap_or_else(|error| panic!("{name}: {error}:\n{once}"));
+    hado::check_source(&once, "t").unwrap_or_else(|error| panic!("{name}: {error}:\n{once}"));
+    once
+}
+
+/// 分岐が「右端の被演算子で、後ろに何も続かない位置」に来るとき、`fmt` は
+/// `(if …)` と括弧で囲む。`if(...)` は閉じの `)` の直後に閉じ・区切り・入力の
+/// 終わりが来ると E100 になる（§12.1）。並置の最後の引数だけでは足りない。
+#[test]
+fn rightmost_operand_branches_survive_the_reprint() {
+    let cases = [
+        (
+            "sub",
+            "def main = Int.to_string (100 - (if true => 59 | 0))\n",
+            "41\n",
+        ),
+        (
+            "neg",
+            "def main = Int.to_string (- (if true => 41 | 0))\n",
+            "-41\n",
+        ),
+        (
+            "neg-argument",
+            "def f x => x\ndef main = Int.to_string (f (- (if true => 42 | 0)))\n",
+            "-42\n",
+        ),
+        (
+            "not",
+            "def b = not (if true => false | true)\ndef main = Int.to_string (if b => 1 | 0)\n",
+            "1\n",
+        ),
+        (
+            "and",
+            "def b = true && (if true => true | false)\ndef main = Int.to_string (if b => 1 | 0)\n",
+            "1\n",
+        ),
+        (
+            "lt",
+            "def b = 1 < (if true => 2 | 0)\ndef main = Int.to_string (if b => 1 | 0)\n",
+            "1\n",
+        ),
+    ];
+    for (name, source, want) in cases {
+        assert_eq!(
+            run_source(source, &format!("{name}-before")),
+            want,
+            "{name}: 入力が動かない:\n{source}"
+        );
+        let once = assert_reprints(name, source);
+        assert_eq!(
+            run_source(&once, &format!("{name}-after")),
+            want,
+            "{name}: fmt の後で値が変わった:\n{once}"
+        );
+    }
+}
+
+/// 右端の被演算子は並置の引数だけではない。入れ子・リストの要素・record の
+/// field・束縛の本体・`fn` の本体・`|>` の右辺も同じ規則で囲む。
+#[test]
+fn rightmost_operand_branches_survive_in_every_position() {
+    let cases = [
+        (
+            "nested-bin",
+            "def main = Int.to_string (1 + (2 - (if true => 1 | 0)))\n",
+        ),
+        (
+            "nested-neg",
+            "def main = Int.to_string (1 + (- (if true => 1 | 0)))\n",
+        ),
+        (
+            "list-element",
+            "def v = [1 + (if true => 1 | 0)]\ndef main = Int.to_string (List.length v)\n",
+        ),
+        (
+            "list-element-neg",
+            "def v = [- (if true => 1 | 0)]\ndef main = Int.to_string (List.length v)\n",
+        ),
+        (
+            "record-field",
+            "type R = { a: Int }\ndef r = { a = 1 + (if true => 1 | 0) }\ndef main = Int.to_string r.a\n",
+        ),
+        (
+            "binding-body",
+            "def main = 1 as y -> Int.to_string (y + (if true => 1 | 0))\n",
+        ),
+        (
+            "fn-body",
+            "def main = Int.to_string (fn(x => x + (if true => 1 | 0)) 0)\n",
+        ),
+        (
+            "fn-last-argument",
+            "def main = Int.to_string (List.length (List.map [1] fn(x => x + (if true => 1 | 0))))\n",
+        ),
+        (
+            "pipe-right",
+            "def inc x => x + 1\ndef dec x => x - 1\ndef main = Int.to_string (1 |> (if true => inc | dec))\n",
+        ),
+        (
+            "call-argument",
+            "def main = Int.to_string (Option.unwrap_or (Some (1 + (if true => 1 | 0))) 0)\n",
+        ),
+    ];
+    for (name, source) in cases {
+        assert_reprints(name, source);
     }
 }
 
