@@ -131,8 +131,9 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import check_code, fmt
 
+# §58.1: `fmt` は印字し直すので、並置の引数の constructor は括弧で囲む（`g (A)`）。
 MIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b | true => 2 | false => 3\ndef g (t: T): Int => if t | A => 1 | _ => 0\ndef main = f true + g A\n'
-FIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b => 2 | 3\ndef g (t: T): Int => if t | A => 1 | 0\ndef main = f true + g A\n'
+FIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b => 2 | 3\ndef g (t: T): Int => if t | A => 1 | 0\ndef main = f true + g (A)\n'
 check_code(sys.argv[1], 'c/mixed', MIXED, 'E520')
 assert fmt(sys.argv[1], 'c/mixed-fmt', MIXED, FIXED) == FIXED
 print('mixed: both rewrites settle in one fmt')

@@ -90,8 +90,10 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import accepted, check_code, check_fix, fmt, fmt_check
 
+# §58.1: `check --fix` も `fmt` と同じ印字し直しをするので、残るのは正準形である。
+# 並置の引数の constructor は括弧で囲む（`f (A)`。受理コーパスの `name (Guest)` と同じ）。
 SOURCE = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => 0\ndef main = f A\n'
-EXPECTED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main = f A\n'
+EXPECTED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main = f (A)\n'
 check_code(sys.argv[1], 'a/hint', SOURCE, 'E503', '| 0')
 fixed = check_fix(sys.argv[1], 'a/fix', SOURCE, EXPECTED)
 accepted(sys.argv[1], 'a/fixed', fixed)
@@ -111,8 +113,10 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import accepted, check_code, check_fix, source_of
 
+# §58.1: 本体の中にコメントを持つ定義は、本体を次の行へ送る。コメントは
+# 同じ定義の中に残る（`docs/rounds/fmt-layout.md` の実測 c と同じ形）。
 SOURCE = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => // why\n  0\ndef main = f A\n'
-EXPECTED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | // why\n  0\ndef main = f A\n'
+EXPECTED = 'type T = | A | B\ndef f (t: T): Int =>\n  // why\n  if t | A => 1 | 0\ndef main = f (A)\n'
 check_code(sys.argv[1], 'b/hint', SOURCE, 'E503', '| 0')
 fixed = check_fix(sys.argv[1], 'b/comment', SOURCE, EXPECTED)
 assert '// why' in source_of(sys.argv[1], 'b/comment'), 'the comment must survive'
@@ -160,10 +164,12 @@ harness.HADO = sys.argv[2]
 from harness import check_code, check_fix, fmt
 
 # E501: そのまま返す束縛。R57 の門番と同じ形。
-check_fix(sys.argv[1], 'd/e501', 'def main =\n  1 as v ->\n  v\n', 'def main =\n  1\n')
+# §58.1: 裸のリテラルの本体は改行を持たないので `def main = 1` が正準形である
+# （`docs/rounds/fmt-layout.md` の r64-b と同じ根拠）。
+check_fix(sys.argv[1], 'd/e501', 'def main =\n  1 as v ->\n  v\n', 'def main = 1\n')
 # E503 と E501 を同じファイルに置くと、一括の fmt が両方を直す。
 MIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | _ => 0\ndef main =\n  f A as v ->\n  v\n'
-FIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main =\n  f A\n'
+FIXED = 'type T = | A | B\ndef f (t: T): Int => if t | A => 1 | 0\ndef main = f (A)\n'
 check_code(sys.argv[1], 'd/mixed', MIXED, 'E503')
 assert fmt(sys.argv[1], 'd/mixed-fmt', MIXED, FIXED) == FIXED
 print('existing: an earlier rewrite still applies, and both settle together')
