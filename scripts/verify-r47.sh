@@ -163,7 +163,11 @@ for index in range(10):
     if index % 2 == 0:
         source = f'def g n => n + ({added})\ndef main = Int.to_string (\n  g ({value}) as x -> x)\n'
         expected = value + added
-        expected_text = f'g ({value})'
+        # §58.1 の印字し直しが正準形である。適用の引数は式として並べ、負の
+        # Int リテラルは括弧で包む（`g -9` は `g - 9` と同じに読めて E305）。
+        # 0 以上はそのまま並べる。診断の `canonical form:` は別の印字器で、
+        # 正の引数にも `g (9)` と括弧を付けるが、正準形ではない。
+        expected_text = f'g ({value})' if value < 0 else f'g {value}'
     else:
         source = f'def main = Int.to_string (\n  {value} as x -> x)\n'
         expected = value

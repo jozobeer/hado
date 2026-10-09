@@ -159,7 +159,13 @@ check_code(sys.argv[1], 'd/rule', 'def f (b: Bool): Int => if b | true => 1 | fa
 ARGUMENT = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b | true => 1 | false => 2)\ndef main = f true\n'
 ARGUMENT_FIXED = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b => 1 | 2)\ndef main = f true\n'
 LET_VALUE = 'def f (b: Bool): Int =>\n  if(b | true => 1 | false => 2) as v ->\n  v + 1\ndef main = f true\n'
-LET_VALUE_FIXED = 'def f (b: Bool): Int =>\n  if(b => 1 | 2) as v ->\n  v + 1\ndef main = f true\n'
+# §58.1 の印字し直しが正準形である。この定義の本体は束縛
+# `if(b => 1 | 2) as v -> v + 1` で、腕の並びではない。腕の並びを改行するのは
+# 「その腕の並びが定義の本体ちょうどか `fn` の本体ちょうどのときだけ」なので、
+# ここでは `def f … =>` と束縛の頭が同じ行に並び、束縛自身の改行（`as v ->` の
+# 後ろ）だけが残る。旧期待の `=>` 直後の改行は `fmt --check` が 1 rewrite を
+# 報告する（§58.1 の不動点でない）。規則の出どころは §58.1 の 2 文である。
+LET_VALUE_FIXED = 'def f (b: Bool): Int => if(b => 1 | 2) as v ->\n  v + 1\ndef main = f true\n'
 accepted(sys.argv[1], 'd/argument-ok', check_fix(sys.argv[1], 'd/argument-fix', ARGUMENT, ARGUMENT_FIXED))
 accepted(sys.argv[1], 'd/let-ok', check_fix(sys.argv[1], 'd/let-fix', LET_VALUE, LET_VALUE_FIXED))
 print('controls: the exclusions are accepted and other positions are rewritten too')
