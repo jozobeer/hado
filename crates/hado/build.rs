@@ -47,10 +47,11 @@ fn main() {
         .arg(&runtime)
         .arg(format!("{manifest}/runtime_print.c"))
         .arg(format!("{output}/libhado_float_format.a"))
-        // `--gc-sections` は、ゲストの入口 `main`（`hado_entry` を呼ぶ）と、
-        // panic=abort では呼ばれない `rust_eh_personality` の参照を落とす。
-        // 共有ライブラリでは未定義のまま残り、`dlopen(RTLD_NOW)` が失敗する。
-        // 落ちきらない参照は 0 に束ねる。どちらも JIT からは呼ばない。
+        // ゲスト向けの `main` は `.so` に残る（`--gc-sections` は入口として
+        // 残す）。その `hado_entry` の参照と、panic=abort では呼ばれない
+        // `rust_eh_personality` の参照が未定義のまま残り、`dlopen(RTLD_NOW)`
+        // が失敗する。落ちきらない参照は 0 に束ねる。どちらも JIT からは
+        // 呼ばない（JIT は `RuntimeFunction` の記号しか引かない）。
         .args([
             "-Wl,--gc-sections",
             "-Wl,--defsym=rust_eh_personality=0",

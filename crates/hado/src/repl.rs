@@ -114,6 +114,15 @@ impl Runtime {
         Ok(address as *const u8)
     }
 
+    /// `.so` が公開する関数の住所。`dlopen` した側の関数は直接は呼べないので、
+    /// `dlsym` の住所を関数の型へ読み替える。`hado_runtime_init`・`hado_repl_run`・
+    /// `hado_gc_add_root` はこの経路で取る。
+    fn function<T: Copy>(&self, name: &str) -> Result<T, String> {
+        let address = self.symbol(name)?;
+        debug_assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<*const u8>());
+        Ok(unsafe { std::mem::transmute_copy(&address) })
+    }
+
     fn register(&self, builder: &mut JITBuilder) -> Result<(), String> {
         for function in RuntimeFunction::ALL {
             // この 2 つは `emit` がインラインで展開し、`declaration` を持たない。
@@ -136,12 +145,14 @@ impl Drop for Runtime {
     }
 }
 
-/// `e as x ->` で持ち越した束縛。値は機械語のビット列のまま持つ。
+/// `e as x ->` で持ち越した束縛。値は機械語のビット列のまま、Boehm GC の根と
+/// して登録した 1 語に持つ。Rust のヒープは GC が走査しないので、根にしないと
+/// 次の入力までに回収されうる（`docs/rounds/repl.md` の欠陥 1）。
 struct Binder {
     name: String,
     /// 次の入力の仮引数の型注釈に使う、ソースの綴りの型。
     ty: Ty,
-    value: u64,
+    slot: Box<u64>,
 }
 
 struct Session {
@@ -151,6 +162,10 @@ struct Session {
     /// JIT したモジュールは閉包のコードを指したままにするため、セッションの
     /// 間は落とさない。
     modules: Vec<JITModule>,
+    /// JIT した 1 歩を raise の捕獲つきで走らせる（`hado_repl_run`）。
+    run: unsafe extern "C" fn(*const u8, *mut u8, *mut i64) -> i32,
+    /// 束縛の 1 語を GC の根として登録する（`hado_gc_add_root`）。
+    add_root: unsafe extern "C" fn(*mut core::ffi::c_void),
 }
 
 impl Session {
@@ -163,11 +178,19 @@ impl Session {
             embed_library(dir, &root)?;
         }
         let runtime = Runtime::load()?;
+        // ゲストの `main` がやることを先に済ませる。`GC_INIT` とスタック枯渇の
+        // 番人は `main` の中にしか無く、JIT の経路では誰も呼ばない（欠陥 1・5）。
+        let init: unsafe extern "C" fn() = runtime.function("hado_runtime_init")?;
+        let run = runtime.function("hado_repl_run")?;
+        let add_root = runtime.function("hado_gc_add_root")?;
+        unsafe { init() };
         Ok(Self {
             root,
             runtime,
             binders: Vec::new(),
             modules: Vec::new(),
+            run,
+            add_root,
         })
     }
 
@@ -177,62 +200,22 @@ impl Session {
 
     /// 入力 1 つを評価する。診断は標準エラーへ出し、セッションは続ける。
     fn step(&mut self, text: &str) {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        if starts_with_definition(trimmed) {
-            eprintln!("repl: 定義の入力はまだ使えない（式と `e as x ->` だけを受ける）");
+        if self.reject_input(text) {
             return;
         }
         let step = split_step(text);
-        let used: Vec<usize> = self
-            .binders
-            .iter()
-            .enumerate()
-            .filter(|(_, binder)| occurs(&step.body, &binder.name))
-            .map(|(index, _)| index)
-            .collect();
-        let source = compose(&step.body, &self.binders, &used);
-        let entry = self.root.join("main.hd");
-        if let Err(error) = std::fs::write(&entry, source) {
-            eprintln!("repl: write {}: {error}", entry.display());
-            return;
-        }
-        let project = match Project::load(&entry) {
-            Ok(project) => project,
-            Err(error) => {
-                eprintln!("{error}");
-                return;
-            }
-        };
-        let (program, checked) = match project.lower_repl_step() {
-            Ok(lowered) => lowered,
-            Err(errors) => {
-                for error in errors {
-                    eprintln!("{}", project.report(&error));
-                }
-                return;
-            }
-        };
-        let Some((function, result)) = resolve_step(&program, &checked, !used.is_empty()) else {
-            eprintln!("repl: 1 歩の関数が読めない");
+        let used = self.used_binders(&step.body);
+        let Some((program, checked, function, result)) = self.lower(&step.body, &used) else {
             return;
         };
-        if !result.is_monomorphic() {
-            eprintln!("repl: 値の型が単相でない（§10 と同じ規則）");
-            return;
-        }
         match self.evaluate(&program, &checked, &function, &used, step.display) {
-            Ok(bits) => {
+            Ok(Some(bits)) => {
                 if let Some(name) = step.binder {
-                    self.binders.push(Binder {
-                        name,
-                        ty: result,
-                        value: bits,
-                    });
+                    self.bind(name, result, bits);
                 }
             }
+            // raise が最上位に届いた入力は捨てる（メッセージはランタイムが出す）。
+            Ok(None) => {}
             Err(errors) => {
                 for error in errors {
                     eprintln!("{error}");
@@ -244,7 +227,79 @@ impl Session {
         }
     }
 
+    /// 何も評価しない入力を断る。断ったら true。定義の入力は段階 1 では受けない。
+    fn reject_input(&self, text: &str) -> bool {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        if starts_with_definition(trimmed) {
+            eprintln!("repl: 定義の入力はまだ使えない（式と `e as x ->` だけを受ける）");
+            return true;
+        }
+        false
+    }
+
+    /// 本体が字句として使う束縛の位置。使う束縛だけを仮引数にする（未使用の
+    /// 仮引数は E505 になる）。
+    fn used_binders(&self, body: &str) -> Vec<usize> {
+        self.binders
+            .iter()
+            .enumerate()
+            .filter(|(_, binder)| occurs(body, &binder.name))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// 合成したソースを書いて検査・単相化し、1 歩の関数と値の型を取る。断る
+    /// 場合は診断を出して `None`。
+    fn lower(
+        &self,
+        body: &str,
+        used: &[usize],
+    ) -> Option<(mono::Program, crate::Checked, mono::Function, Ty)> {
+        let source = compose(body, &self.binders, used);
+        let entry = self.root.join("main.hd");
+        if let Err(error) = std::fs::write(&entry, source) {
+            eprintln!("repl: write {}: {error}", entry.display());
+            return None;
+        }
+        let project = match Project::load(&entry) {
+            Ok(project) => project,
+            Err(error) => {
+                eprintln!("{error}");
+                return None;
+            }
+        };
+        let (program, checked) = match project.lower_repl_step() {
+            Ok(lowered) => lowered,
+            Err(errors) => {
+                for error in errors {
+                    eprintln!("{}", project.report(&error));
+                }
+                return None;
+            }
+        };
+        let Some((function, result)) = resolve_step(&program, &checked, !used.is_empty()) else {
+            eprintln!("repl: 1 歩の関数が読めない");
+            return None;
+        };
+        if !result.is_monomorphic() {
+            eprintln!("repl: 値の型が単相でない（§10 と同じ規則）");
+            return None;
+        }
+        Some((program, checked, function, result))
+    }
+
+    /// 束縛を 1 つ足す。値は GC の根として登録した 1 語に置く。
+    fn bind(&mut self, name: String, ty: Ty, bits: u64) {
+        let mut slot = Box::new(bits);
+        unsafe { (self.add_root)((&mut *slot as *mut u64).cast()) };
+        self.binders.push(Binder { name, ty, slot });
+    }
+
     /// 合成した 1 歩を JIT して 1 回呼ぶ。`display` ならプリンタを呼ぶ。
+    /// `None` は raise が最上位に届いてこの入力を捨てたことを表す。
     fn evaluate(
         &mut self,
         program: &mono::Program,
@@ -252,7 +307,39 @@ impl Session {
         step: &mono::Function,
         used: &[usize],
         display: bool,
-    ) -> Result<u64, Vec<String>> {
+    ) -> Result<Option<u64>, Vec<String>> {
+        let mut module = self.new_module()?;
+        let functions = step_functions(program, step);
+        let printers = if display {
+            mono::derive_printers(
+                FunctionId(max_id(&functions) + 2),
+                step.signature.result.clone(),
+                checked,
+            )
+            .map_err(|error| vec![format!("この入力の値は印字できない: {error}")])?
+        } else {
+            Vec::new()
+        };
+        let ids = declare_all(&mut module, &functions, &printers, checked)?;
+        define_all(&mut module, &functions, &printers, checked, &ids)?;
+        let bridge = define_bridge(
+            &mut module,
+            ids[&step.id.0],
+            printers.first().map(|printer| ids[&printer.id.0]),
+            step,
+            checked,
+        )
+        .map_err(|error| vec![error])?;
+        module
+            .finalize_definitions()
+            .map_err(|error| vec![error.to_string()])?;
+        let code = module.get_finalized_function(bridge);
+        // 閉包のコードを指したままにするので、モジュールはセッションが持つ。
+        self.modules.push(module);
+        self.call(code, used)
+    }
+
+    fn new_module(&self) -> Result<JITModule, Vec<String>> {
         let mut builder = JITBuilder::with_flags(
             &[("opt_level", "none"), ("preserve_frame_pointers", "true")],
             default_libcall_names(),
@@ -261,26 +348,52 @@ impl Session {
         self.runtime
             .register(&mut builder)
             .map_err(|error| vec![error])?;
-        let mut module = JITModule::new(builder);
+        Ok(JITModule::new(builder))
+    }
 
-        let mut functions = program.functions.clone();
-        if !functions.iter().any(|function| function.id == step.id) {
-            functions.push(step.clone());
-        }
-        let max = functions
+    /// 橋を呼ぶ。束縛は GC の根に置いた 1 語から読む。
+    fn call(&self, code: *const u8, used: &[usize]) -> Result<Option<u64>, Vec<String>> {
+        let mut environment: Vec<u64> = used
             .iter()
-            .map(|function| function.id.0)
-            .max()
-            .unwrap_or(0);
-        let printers = if display {
-            mono::derive_printers(FunctionId(max + 2), step.signature.result.clone(), checked)
-                .map_err(|error| vec![format!("この入力の値は印字できない: {error}")])?
-        } else {
-            Vec::new()
-        };
+            .map(|index| *self.binders[*index].slot)
+            .collect();
+        let mut value: i64 = 0;
+        let raised = unsafe { (self.run)(code, environment.as_mut_ptr().cast::<u8>(), &mut value) };
+        if raised != 0 {
+            return Ok(None);
+        }
+        Ok(Some(value as u64))
+    }
+}
 
-        let mut ids: HashMap<usize, FuncId> = HashMap::new();
-        for function in &functions {
+/// 1 歩で JIT する関数の列。合成した `hado_step` が単相化の結果に無いときだけ
+/// 足す（引数の無い形では入口の式を包んだものを別に作る）。
+fn step_functions(program: &mono::Program, step: &mono::Function) -> Vec<mono::Function> {
+    let mut functions = program.functions.clone();
+    if !functions.iter().any(|function| function.id == step.id) {
+        functions.push(step.clone());
+    }
+    functions
+}
+
+fn max_id(functions: &[mono::Function]) -> usize {
+    functions
+        .iter()
+        .map(|function| function.id.0)
+        .max()
+        .unwrap_or(0)
+}
+
+/// 関数とプリンタの名前を宣言して id を引く。id は `emit` が内部参照に使う。
+fn declare_all(
+    module: &mut JITModule,
+    functions: &[mono::Function],
+    printers: &[mono::Function],
+    checked: &crate::Checked,
+) -> Result<HashMap<usize, FuncId>, Vec<String>> {
+    let mut ids = HashMap::new();
+    for (prefix, list) in [("hado_fn_", functions), ("hado_printer_", printers)] {
+        for function in list {
             let signature = crate::emit::mono_signature(
                 &function.signature,
                 checked,
@@ -289,65 +402,35 @@ impl Session {
             .map_err(|error| vec![error])?;
             let id = module
                 .declare_function(
-                    &format!("hado_fn_{}", function.id.0),
+                    &format!("{prefix}{}", function.id.0),
                     Linkage::Local,
                     &signature,
                 )
                 .map_err(|error| vec![error.to_string()])?;
             ids.insert(function.id.0, id);
         }
-        for printer in &printers {
-            let signature = crate::emit::mono_signature(
-                &printer.signature,
-                checked,
-                module.target_config().pointer_type(),
-            )
-            .map_err(|error| vec![error])?;
-            let id = module
-                .declare_function(
-                    &format!("hado_printer_{}", printer.id.0),
-                    Linkage::Local,
-                    &signature,
-                )
-                .map_err(|error| vec![error.to_string()])?;
-            ids.insert(printer.id.0, id);
-        }
-        let mut errors = Vec::new();
-        for function in &functions {
-            if let Err(error) =
-                crate::emit::define_mono_function(&mut module, function, checked, &ids)
-            {
-                errors.push(error);
-            }
-        }
-        for printer in &printers {
-            if let Err(error) =
-                crate::emit::define_mono_function(&mut module, printer, checked, &ids)
-            {
-                errors.push(error);
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-        let step_id = ids[&step.id.0];
-        let printer_id = printers.first().map(|printer| ids[&printer.id.0]);
-        let bridge = define_bridge(&mut module, step_id, printer_id, step, checked)
-            .map_err(|error| vec![error])?;
-        module
-            .finalize_definitions()
-            .map_err(|error| vec![error.to_string()])?;
-
-        let mut environment: Vec<u64> = used
-            .iter()
-            .map(|index| self.binders[*index].value)
-            .collect();
-        let code = module.get_finalized_function(bridge);
-        let call: extern "C" fn(*mut u8) -> i64 = unsafe { std::mem::transmute(code) };
-        let bits = call(environment.as_mut_ptr().cast::<u8>()) as u64;
-        self.modules.push(module);
-        Ok(bits)
     }
+    Ok(ids)
+}
+
+/// 宣言した関数の本体を定義する。1 つの失敗で残りを止めない。
+fn define_all(
+    module: &mut JITModule,
+    functions: &[mono::Function],
+    printers: &[mono::Function],
+    checked: &crate::Checked,
+    ids: &HashMap<usize, FuncId>,
+) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
+    for function in functions.iter().chain(printers) {
+        if let Err(error) = crate::emit::define_mono_function(module, function, checked, ids) {
+            errors.push(error);
+        }
+    }
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(errors)
 }
 
 /// `e as x ->` を剥がした 1 歩。`display` は値を見せるか（`->` で終えなければ見せる）。
@@ -704,17 +787,31 @@ fn input_complete(text: &str) -> bool {
     else {
         return false;
     };
-    let mut depth: i64 = 0;
-    let mut open_blocks: i64 = 0;
-    let mut close_blocks: i64 = 0;
+    let balance = block_balance(&tokens);
+    if balance.depth > 0 || balance.open > balance.close {
+        return false;
+    }
+    !opens_next_input(&last.kind)
+}
+
+/// 括弧と、`fn`・`module`・`implement`・`effect`・`handler` の開き／閉じの数。
+#[derive(Default)]
+struct Balance {
+    depth: i64,
+    open: i64,
+    close: i64,
+}
+
+fn block_balance(tokens: &[Tok]) -> Balance {
+    let mut balance = Balance::default();
     for (index, token) in tokens.iter().enumerate() {
         let next = tokens.get(index + 1).map(|next| &next.kind);
         match &token.kind {
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth -= 1,
-            TokKind::KwFn if !matches!(next, Some(TokKind::LParen)) => open_blocks += 1,
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => balance.depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => balance.depth -= 1,
+            TokKind::KwFn if !matches!(next, Some(TokKind::LParen)) => balance.open += 1,
             TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler => {
-                open_blocks += 1;
+                balance.open += 1;
             }
             TokKind::Slash
                 if matches!(
@@ -722,16 +819,19 @@ fn input_complete(text: &str) -> bool {
                     Some(TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement | TokKind::KwIf)
                 ) =>
             {
-                close_blocks += 1;
+                balance.close += 1;
             }
             _ => {}
         }
     }
-    if depth > 0 || open_blocks > close_blocks {
-        return false;
-    }
-    !matches!(
-        last.kind,
+    balance
+}
+
+/// その字句で終わる入力を、続きを待つ未完として扱うか（§14 の行頭の `|>` を
+/// 含め、`=` は `def` の本体の前で切れるため開きに数える）。
+fn opens_next_input(kind: &TokKind) -> bool {
+    matches!(
+        kind,
         TokKind::Arrow | TokKind::PipeArrow | TokKind::Pipe | TokKind::Comma | TokKind::Eq
     )
 }
