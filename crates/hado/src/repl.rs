@@ -595,6 +595,9 @@ fn to_i64(
 /// `hado repl <dir>` の `<dir>` をセッションの根の下へ名前空間として置く（§51・§52）。
 /// ライブラリは `<dir>` の名前で `name::実装.member` として見える。
 fn embed_library(dir: &Path, root: &Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err(format!("library directory not found: {}", dir.display()));
+    }
     let name = dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -604,7 +607,47 @@ fn embed_library(dir: &Path, root: &Path) -> Result<(), String> {
             "library directory name is not a namespace: {name}（§51、小文字で始まる字句）"
         ));
     }
+    if !declares_library(dir)? {
+        return Err(format!(
+            "{} is not a §52 library: no `library` declaration（宣言の無いディレクトリは根の宣言として prelude と衝突する）",
+            dir.display()
+        ));
+    }
     copy_tree(dir, &root.join(name))
+}
+
+/// §52: `<dir>` のどれかのファイルが `library` を宣言しているか。
+fn declares_library(dir: &Path) -> Result<bool, String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|error| format!("read {}: {error}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name.starts_with("__") {
+            continue;
+        }
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            if declares_library(&path)? {
+                return Ok(true);
+            }
+        } else if matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("hd" | "hdi")
+        ) && std::fs::read_to_string(&path).is_ok_and(|text| {
+            tokens(&text)
+                .iter()
+                .any(|token| matches!(token.kind, TokKind::KwLibrary))
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn is_namespace(name: &str) -> bool {
