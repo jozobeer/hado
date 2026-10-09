@@ -3,10 +3,11 @@
 //! ソースは同じバイト列になる。§57 の「書き換える範囲に `//` を含むときは、
 //! その書き換えを出さない」は印字し直しにも効くので、コメントは消えない。
 //!
-//! 測るのは 4 つ。flat と ragged の同一、コメントの前後関係、冪等、
-//! 受理コーパス・stdlib・tools の往復。
+//! 測るのは 5 つ。flat と ragged の同一、コメントの前後関係、冪等、
+//! 受理コーパス・stdlib・tools の往復、並置の最後の引数の `if`。
 
 use hado::fixes::format;
+use hado::parser::parse_source;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -60,6 +61,35 @@ def g y =>
     assert!(index("def f x =>") < index("def g y =>"));
     assert!(index("// 腕の中のコメント") > index("def g y =>"));
     assert!(index("// 腕の中のコメント") < index("if y > 0"));
+}
+
+/// 並置の最後の引数の `if` は括弧で囲む。`if(...)` だと続きが無く E100 になる（§12.1）。
+#[test]
+fn last_juxtaposition_argument_if_stays_grouped() {
+    for (source, want) in [
+        (
+            "def main = Int.to_string (if true => 41 | 0)\n",
+            "def main = Int.to_string (if true => 41 | 0)\n",
+        ),
+        (
+            "def f x y => x + y\ndef main = Int.to_string (f 2 (if true => 40 | 0))\n",
+            "def f x y => x + y\ndef main = Int.to_string (f 2 (if true => 40 | 0))\n",
+        ),
+        (
+            "def main = Int.to_string (if Some(1) | Some(n) => n + 40 | 0)\n",
+            "def main = Int.to_string (if Some(1) | Some(n) => n + 40 | 0)\n",
+        ),
+        (
+            "def f x | x > 0 => x as y -> y | 0\ndef main = Int.to_string (f (if true => 41 | 0))\n",
+            "def f x | x > 0 => x | 0\ndef main = Int.to_string (f (if true => 41 | 0))\n",
+        ),
+    ] {
+        let text = formatted(source);
+        assert_eq!(text, want, "source:\n{source}");
+        parse_source(&text, "t").unwrap_or_else(|error| panic!("{error}: {text}"));
+        hado::check_source(&text, "t").unwrap_or_else(|error| panic!("{error}: {text}"));
+        assert_eq!(formatted(&text), text, "冪等でない:\n{text}");
+    }
 }
 
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
