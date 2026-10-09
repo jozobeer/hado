@@ -50,6 +50,11 @@ struct Checker<'a> {
     type_arities: HashMap<String, usize>,
     constructor_tags: HashMap<String, u32>,
     constructors: HashMap<String, Scheme>,
+    /// §47・§49・E402: constructor が属する宣言元の型の同一性。`implement` の
+    /// 本文の型は実装名で修飾した綴り（`Map.T`）で持ち、根の同名型と区別する。
+    /// 網羅性の family をこの綴りでまとめないと、実装の局所型と根の同名型の
+    /// constructor が 1 つの family になり、覆っていない値を要求してしまう。
+    constructor_owners: HashMap<String, String>,
     records: HashMap<String, (Vec<String>, Scheme)>,
     modules: HashMap<String, HashMap<String, Scheme>>,
     contracts: HashMap<String, HashMap<String, Scheme>>,
@@ -142,6 +147,7 @@ pub(crate) fn infer_with_diagnostics(
         type_arities: HashMap::from([(crate::mono::ARRAY.into(), 1)]),
         constructor_tags: HashMap::new(),
         constructors: HashMap::new(),
+        constructor_owners: HashMap::new(),
         records: HashMap::new(),
         modules: HashMap::new(),
         contracts: HashMap::new(),
@@ -541,6 +547,9 @@ impl Checker<'_> {
             if let Some(scheme) = self.constructors.remove(name) {
                 self.constructors.insert(hidden.clone(), scheme);
             }
+            if let Some(owner) = self.constructor_owners.remove(name) {
+                self.constructor_owners.insert(hidden.clone(), owner);
+            }
             if let Some(tag) = self.constructor_tags.remove(name) {
                 self.constructor_tags.insert(hidden.clone(), tag);
             }
@@ -676,6 +685,7 @@ impl Checker<'_> {
         self.named_constructors = saved.named_constructors;
         self.records = saved.records;
         self.constructors = saved.constructors;
+        self.constructor_owners = saved.constructor_owners;
         self.constructor_tags = saved.constructor_tags;
         self.values = saved.values;
         self.modules.insert(module.name.clone(), exports);
@@ -1640,8 +1650,9 @@ impl Checker<'_> {
             TypeKind::Adt(variants) => variants.as_slice(),
             _ => return Err(self.error(def.span, None, "record definitions are not implemented")),
         };
+        let owner = self.data_type_owner(&def.name);
         for (tag, variant) in variants.iter().enumerate() {
-            self.register_constructor(variant, &parameters, &result, def.span, rejected)?;
+            self.register_constructor(variant, &parameters, &result, &owner, def.span, rejected)?;
             let name = &variant.name.name;
             let tag = u32::try_from(tag)
                 .map_err(|_| self.error(def.span, None, "too many constructors"))?;
@@ -1655,6 +1666,7 @@ impl Checker<'_> {
         variant: &crate::parser::ConstructorDecl,
         parameters: &HashMap<String, Ty>,
         result: &Ty,
+        owner: &str,
         span: Span,
         rejected: &[Span],
     ) -> Result<(), Diagnostic> {
@@ -1682,7 +1694,20 @@ impl Checker<'_> {
         if self.constructors.insert(name.clone(), scheme).is_some() {
             return Err(self.error(span, None, "duplicate constructor"));
         }
+        self.constructor_owners
+            .insert(name.clone(), owner.to_string());
         Ok(())
+    }
+
+    /// §47・§49・E402: `implement` の本文の型に与える同一性。本文の外の根の型は
+    /// その名前のままで、実装の局所型は `qualify_module_exports` が本文の検査後に
+    /// 与える綴り（`Map.T`）と同じにする。
+    fn data_type_owner(&self, name: &str) -> String {
+        if self.module_path.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}.{}", self.module_path.join("."), name)
+        }
     }
 
     fn registered_payload_type(
@@ -2114,7 +2139,7 @@ impl Checker<'_> {
         if let Some(body) = fallback {
             self.branch_result(body, &result)?;
         }
-        let groups = self.constructor_groups();
+        let groups = self.constructor_families();
         let families = groups
             .values()
             .flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone())))
@@ -2666,7 +2691,12 @@ impl Checker<'_> {
         }
     }
 
-    fn constructor_groups(&self) -> HashMap<String, Vec<(String, usize)>> {
+    /// constructor を `(名前, 引数の数)` にほどき、`key` の返す綴りでまとめる。
+    /// `key` は constructor の名前と `Ty::Adt` の名前を受け取る。
+    fn group_constructors(
+        &self,
+        key: impl Fn(&str, &str) -> String,
+    ) -> HashMap<String, Vec<(String, usize)>> {
         let mut groups: HashMap<String, Vec<(String, usize)>> = HashMap::new();
         for (name, scheme) in &self.constructors {
             let (result, arity) = match scheme.body() {
@@ -2675,7 +2705,7 @@ impl Checker<'_> {
             };
             if let Ty::Adt(result, _) = result {
                 groups
-                    .entry(result.clone())
+                    .entry(key(name, result))
                     .or_default()
                     .push((name.clone(), arity));
             }
@@ -2683,8 +2713,28 @@ impl Checker<'_> {
         groups
     }
 
+    /// `Ty::Adt` の名前で引く group。名前付き constructor の field と
+    /// projection の schema を引くのに使う（`infer/named.rs`）。網羅性の
+    /// family には使わない（`constructor_families`）。
+    fn constructor_groups(&self) -> HashMap<String, Vec<(String, usize)>> {
+        self.group_constructors(|_name, result| result.to_string())
+    }
+
+    /// §47・§49・E402: 網羅性の family。constructor の宣言元の型でまとめるので、
+    /// `implement` の局所型と根の同名型が混ざらない。`Ty::Adt` の名前だけで
+    /// まとめると、`Map` の内部型 `T` と根の `T` の constructor が 1 つの family に
+    /// なり、覆っていない値を要求してしまう。
+    fn constructor_families(&self) -> HashMap<String, Vec<(String, usize)>> {
+        self.group_constructors(|name, result| {
+            self.constructor_owners
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| result.to_string())
+        })
+    }
+
     fn check_irrefutable(&mut self, pattern: &Pattern) {
-        let groups = self.constructor_groups();
+        let groups = self.constructor_families();
         let families = groups
             .values()
             .flat_map(|group| group.iter().map(|(name, _)| (name.clone(), group.clone())))
