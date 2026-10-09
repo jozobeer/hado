@@ -431,6 +431,9 @@ PASSED: 4/4
 
 ### ラウンド最後の全走
 
+main を取り込んだ後の木で 1 回だけ回した。`cargo test --offline` は 74 の判定が
+すべて `ok`（832 テスト）、`quick` 層は 41/41 で赤なしである。
+
 ```
 $ cargo test --offline > target/final-cargo-test.log 2>&1; echo "exit=$?"
 exit=0
@@ -438,6 +441,8 @@ $ grep -c '^test result: ok' target/final-cargo-test.log
 74
 $ grep -cE '^test result: FAILED' target/final-cargo-test.log
 0
-$ bash scripts/run-gates.sh --tier quick target/.gates-tailoperand | tail -1
+$ grep -oE '^test result: ok\. [0-9]+' target/final-cargo-test.log | awk '{s+=$4} END{print s}'
+832
+$ bash scripts/run-gates.sh --tier quick target/.gates-tailoperand2 | tail -1
 TALLY: 41/41 passed; red: none
 ```
