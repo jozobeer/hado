@@ -104,8 +104,10 @@ fn item_text_with_breaks(
 /// 本体の中にコメントを持つ `def` なら `true`。
 ///
 /// 本体は見出しの行から本体の式の最終行まで。コメントがその範囲に入って
-/// いれば本体の中である。範囲の外にあるコメント（次の項目に付くもの、
-/// 次のまとまりの見出し）は本体の中ではない。
+/// いれば本体の中である。`=>` の後ろで本体が次の行から始まるときのコメントは
+/// 本体の先頭より前にあるが、同じ定義の中に残す（§58.1）。本体の終わりより
+/// 後ろのコメント（同じ行の行末に付くもの）は本体の外である。範囲の外にある
+/// コメント（次の項目に付くもの、次のまとまりの見出し）も本体の中ではない。
 fn body_break_line(
     def: &Def,
     comments: &[crate::lexer::Comment],
@@ -116,16 +118,23 @@ fn body_break_line(
     };
     // 本体の最終行。見出しと同じ行を指すことがあるので、見出しの行で下限を取る。
     let last = body.span.end_line.max(def.span.line);
-    // 本体の中のコメントは、本体の行の範囲に入るもの。ただし次の項目の
-    // 直上（1 行上）にあるものは、その項目に付くので本体の中ではない。
+    // 本体の中のコメントは、見出しの行から本体の終わりまでの位置に入るもの。
+    // ただし次の項目の直上（1 行上）にあるものは、その項目に付くので本体の
+    // 中ではない。
     comments
         .iter()
         .any(|comment| {
-            comment.span.line > def.span.line
+            comment.span.line >= def.span.line
                 && comment.span.line <= last
+                && !after(comment.span, body.span)
                 && comment.span.line + 1 != next_line
         })
         .then_some(def.span.line)
+}
+
+/// `position` が `end` より後ろか。同じ行なら列で比べる。
+fn after(position: Span, end: Span) -> bool {
+    position.line > end.end_line || (position.line == end.end_line && position.col > end.end_col)
 }
 
 /// `item` の印字を、本体が始まる `=>` で 2 行に割る。
