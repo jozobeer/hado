@@ -68,6 +68,25 @@ fn is_outcome(ty: &Type) -> bool {
     matches!(ty, Type::Data(name, _) if name == OUTCOME)
 }
 
+/// 本体が Outcome のとき、宣言側の成功型と一致することを確かめて Outcome のまま返す。
+fn lambda_outcome_result(
+    body: Expression,
+    lowered: &Type,
+    signature_result: &Type,
+) -> Result<(Expression, Type), String> {
+    let (success, _, _) = outcome_parts(lowered)?;
+    if &success != signature_result {
+        return Err("lambda return type mismatch".into());
+    }
+    Ok((body, lowered.clone()))
+}
+
+/// 宣言側の行が外側にも効果を載せているか（本体の成功型を `$Outcome` で包むか）。
+fn wraps_declared_result(lowered: &Type, declared_result: &Type) -> bool {
+    is_outcome(declared_result)
+        && outcome_parts(declared_result).is_ok_and(|(success, _, _)| &success == lowered)
+}
+
 // 効果を持つ関数値は mono では結果型に `$Outcome` を載せる。callee を
 // 単一化するときは source 側の型に戻す。ADT の型引数・入れ子の閉包の結果・
 // 閉包の引数に載っている場合も、内側を戻す。本体を実際の型で下ろすと閉包の
@@ -774,7 +793,7 @@ impl Lowerer {
     }
 
     fn lift_again_arguments(&mut self, node: &crate::parser::Node) -> Option<crate::parser::Node> {
-        use crate::parser::{BinOp, NodeKind::*};
+        use crate::parser::NodeKind::*;
         let mut result = node.clone();
         if let Pipe(value, target) = &node.kind {
             let (callee, mut args) = match &target.kind {
@@ -784,7 +803,44 @@ impl Lowerer {
             args.insert(0, *value.clone());
             result.kind = Apply(callee, args);
         }
-        let children: Vec<&mut crate::parser::Node> = match &mut result.kind {
+        let children = Self::again_children(&mut result);
+        if !children
+            .iter()
+            .any(|child| self.contains_again(child) || self.contains_handled_call(child))
+        {
+            return None;
+        }
+        let mut bindings = Vec::new();
+        for child in children {
+            let name = format!("$anf{}", self.next);
+            self.next += 1;
+            let value = child.clone();
+            child.kind = Name(name.clone());
+            bindings.push((
+                crate::parser::Pattern {
+                    kind: crate::parser::PatternKind::Name(name),
+                    span: child.span,
+                },
+                value,
+            ));
+        }
+        for (pat, value) in bindings.into_iter().rev() {
+            result = crate::parser::Node {
+                span: node.span,
+                kind: Let {
+                    pat,
+                    value: Box::new(value),
+                    body: Box::new(result),
+                },
+            };
+        }
+        Some(result)
+    }
+
+    /// ANF で `let` に載せる子を選ぶ。載せないノードは空を返す。
+    fn again_children(result: &mut crate::parser::Node) -> Vec<&mut crate::parser::Node> {
+        use crate::parser::{BinOp, NodeKind::*};
+        match &mut result.kind {
             Apply(callee, args) | Call(callee, args) => {
                 // 入れ子の適用 `(f 8) 0` は callee 側が `$Outcome` の閉包を返すことがある。
                 // 引数だけ ANF すると、呼び出し側が `$Outcome` を閉包として呼んで落ちる。
@@ -817,38 +873,7 @@ impl Lowerer {
             // を外へ出すと、捕まえる handler が変わる）。
             With { args, .. } => args.iter_mut().collect(),
             _ => Vec::new(),
-        };
-        if !children
-            .iter()
-            .any(|child| self.contains_again(child) || self.contains_handled_call(child))
-        {
-            return None;
         }
-        let mut bindings = Vec::new();
-        for child in children {
-            let name = format!("$anf{}", self.next);
-            self.next += 1;
-            let value = child.clone();
-            child.kind = Name(name.clone());
-            bindings.push((
-                crate::parser::Pattern {
-                    kind: crate::parser::PatternKind::Name(name),
-                    span: child.span,
-                },
-                value,
-            ));
-        }
-        for (pat, value) in bindings.into_iter().rev() {
-            result = crate::parser::Node {
-                span: node.span,
-                kind: Let {
-                    pat,
-                    value: Box::new(value),
-                    body: Box::new(result),
-                },
-            };
-        }
-        Some(result)
     }
 
     fn expression(&mut self, node: &crate::parser::Node) -> Result<Expression, String> {
@@ -5109,33 +5134,7 @@ impl Lowerer {
         let body = self.expression(body);
         self.scope = saved;
         let body = body?.in_tail_position();
-        // 効果を持つ本体は Outcome へ落ちる。handler が解釈するのは呼び出し側なので、
-        // 閉包の結果型も Outcome にして呼び出し側の outcome と型を揃える。
-        let mut body = body;
-        let lowered = body.ty();
-        let result = if is_outcome(&lowered) {
-            let (success, _, _) = outcome_parts(&lowered)?;
-            if success != signature.result {
-                return Err("lambda return type mismatch".into());
-            }
-            lowered
-        } else if is_outcome(&declared_result)
-            && outcome_parts(&declared_result).is_ok_and(|(success, _, _)| success == lowered)
-        {
-            // 本体は成功型（入れ子の outcome 閉包を含む）だが、宣言側の行が外側にも
-            // 効果を載せている。型変数の位置（`Map.insert` の V、`Option.unwrap_or`
-            // の A）は `actual_type` が外側も `$Outcome` にする。包むのは結果が
-            // 素の値のとき（PR #75）に限らず、入れ子の `$Outcome` を返すときも同じ。
-            body = self.done(body, &declared_result)?;
-            declared_result
-        } else if lowered == signature.result {
-            lowered
-        } else if logical_argument(&lowered) == signature.result {
-            // 効果を持つ閉包を返す lambda。宣言側の型は効果行を落としている。
-            lowered
-        } else {
-            return Err("lambda return type mismatch".into());
-        };
+        let (body, result) = self.lambda_result(body, &declared_result, &signature.result)?;
         let signature = Signature {
             parameters: signature.parameters.clone(),
             result,
@@ -5156,6 +5155,35 @@ impl Lowerer {
                 .map(|(id, ty)| Expression::Variable { id, ty })
                 .collect(),
         })
+    }
+
+    /// 閉包の本体 `body` を、宣言側の結果型 `signature_result` に合わせる。
+    ///
+    /// 効果を持つ本体は Outcome へ落ちる。handler が解釈するのは呼び出し側なので、
+    /// 閉包の結果型も Outcome にして呼び出し側の outcome と型を揃える。
+    fn lambda_result(
+        &mut self,
+        body: Expression,
+        declared_result: &Type,
+        signature_result: &Type,
+    ) -> Result<(Expression, Type), String> {
+        let lowered = body.ty();
+        if is_outcome(&lowered) {
+            return lambda_outcome_result(body, &lowered, signature_result);
+        }
+        if wraps_declared_result(&lowered, declared_result) {
+            // 本体は成功型（入れ子の outcome 閉包を含む）だが、宣言側の行が外側にも
+            // 効果を載せている。型変数の位置（`Map.insert` の V、`Option.unwrap_or`
+            // の A）は `actual_type` が外側も `$Outcome` にする。包むのは結果が
+            // 素の値のとき（PR #75）に限らず、入れ子の `$Outcome` を返すときも同じ。
+            let body = self.done(body, declared_result)?;
+            return Ok((body, declared_result.clone()));
+        }
+        if &lowered == signature_result || &logical_argument(&lowered) == signature_result {
+            // 効果を持つ閉包を返す lambda。宣言側の型は効果行を落としている。
+            return Ok((body, lowered));
+        }
+        Err("lambda return type mismatch".into())
     }
 
     fn structural_equality(
