@@ -923,7 +923,7 @@ pub fn compile_mono_to_object(
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-fn define_mono_function(
+pub(crate) fn define_mono_function(
     module: &mut dyn Module,
     source: &crate::mono::Function,
     checked: &crate::Checked,

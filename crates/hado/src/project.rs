@@ -251,6 +251,32 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    /// §11: `repl` が合成した 1 歩を検査して単相化する。入口は `hado_step` を
+    /// 参照する `main` なので、§10 の E702（`main` は関数を含む値を返せない）が
+    /// 必ず出る。これは合成の副作用なので落とす。他の段の診断はそのまま返す。
+    pub(crate) fn lower_repl_step(
+        &self,
+    ) -> Result<(crate::mono::Program, crate::Checked), Vec<Diagnostic>> {
+        let (errors, checked) = self.check_all(true);
+        let errors: Vec<_> = errors
+            .into_iter()
+            .filter(|error| error.code.as_deref() != Some("E702"))
+            .collect();
+        let Some(checked) = checked else {
+            return Err(errors);
+        };
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        let program = crate::mono::lower_program(&self.parsed.ast, &checked).map_err(|error| {
+            vec![crate::project::input_diagnostic(
+                Path::new(&self.files[0].path),
+                &error,
+            )]
+        })?;
+        Ok((program, checked))
+    }
+
     /// §58.4: the end of a diagnostic's range, as the exclusive end of the
     /// tokens the local rewrite (§57) behind the anchor replaces. A diagnostic
     /// without a local rewrite ends where it starts. The bytes are the ones the
