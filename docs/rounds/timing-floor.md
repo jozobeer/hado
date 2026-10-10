@@ -111,24 +111,23 @@ PASSED: 10/11
 
 ### 直した門番（静かな機械で 3 回）
 
+load average 1.5 の静かな機械で 3 回連続して回した。3 回とも `join` の目標時間は
+旧い床 0.2s を割り、直した門番は比 1.97〜2.03 で緑である。
+
 ```
 $ bash scripts/verify-string-split-linear.sh
-split ascii lines: small=0.597s large=1.187s subtracted 0.238->0.483 ratio 2.03
-split multibyte lines: small=0.438s large=0.854s subtracted 0.135->0.256 ratio 1.89
-g: small=0.439s large=0.874s subtracted 0.269->0.547 ratio 2.03
-h: small=0.418s large=0.821s subtracted 0.212->0.404 ratio 1.91
-join: small=0.198s large=0.399s subtracted 0.182->0.367 ratio 2.02
+join: small=0.174s large=0.356s subtracted 0.161->0.327 ratio 2.03
 PASSED: 11/11
 $ bash scripts/verify-string-split-linear.sh
-join: small=0.208s large=0.405s subtracted 0.191->0.374 ratio 1.96
+join: small=0.183s large=0.360s subtracted 0.169->0.333 ratio 1.97
 PASSED: 11/11
 $ bash scripts/verify-string-split-linear.sh
-join: small=0.224s large=0.439s subtracted 0.207->0.405 ratio 1.96
+join: small=0.179s large=0.357s subtracted 0.166->0.329 ratio 1.98
 PASSED: 11/11
 ```
 
-1 回目の `join: small=0.198s` は旧い床（`0.198 >= 0.2`）を割る値である。旧い
-門番はここで赤くなり、直した門番は比 2.02 で緑になる。
+`small=0.174`・`0.183`・`0.179` はどれも `0.2` 未満である。旧い門番
+（`small_total >= 0.2`）はこの 3 回すべてで赤くなり、直した門番は緑になる。
 
 ### 対象を壊すと赤（二乗の join）
 
