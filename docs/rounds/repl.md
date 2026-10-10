@@ -71,7 +71,9 @@
 
 ### 許容される赤
 
-`bash scripts/verify-cognitive-complexity.sh` の 1 本（`cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity` が clean であること）が赤で、`PASSED: 2/3`。指しているのは `crates/hado/src/postfix_print.rs` の 2 関数（`place_comments` 16、`apply_text` 8）と `crates/hado/src/mono.rs` の 2 関数（`lift_again_arguments` 9、`lambda` 9）である。このラウンドが足した `repl.rs` の関数は 1 件も挙がっていない（審査の指摘の 3 件は分割で直した）。4 件とも base `4baca98` からも main `5b15cc5` からも変わっていない（`git diff` が空）ので、この赤はこのラウンドより前からある。自分の変更で緑にできる赤ではないので門番は緩めない。`postfix_print.rs` と `mono.rs` の分割は `fmt-layout`・`pipe-in-tail-argument` などの側なので、このラウンドでは触らない（人が決める決定）。
+取り込み前は `bash scripts/verify-cognitive-complexity.sh` が 2/3 で赤だった。指していたのは `crates/hado/src/postfix_print.rs` の 2 関数と `crates/hado/src/mono.rs` の 2 関数で、`base 4baca98` から変わっていないものだった。`origin/main` の `#84`（`e666fec refactor: 印字器と mono の認知複雑度を 7 以下に分割`）がそれを分割したので、取り込み後は 3/3 で緑である。このラウンドが足した `repl.rs` の関数は 1 件も挙がっていない。
+
+取り込み後の core 層には `verify-pure-closure-in-type-variable-argument-fails-specialization.sh` の検査 6（変異）の赤が 1 本だけある。この門番は `crates/hado/src/mono.rs` の 2 行を変異の錨にしており、その錨は `#84` が `mono.rs` を分けたときに消えた。このラウンドは `mono.rs` を触っていないので、この赤は `origin/main` の側にある（実測を参照）。門番は緩めない。
 
 ### スコープ外
 
@@ -465,3 +467,34 @@ $ grep -cE "test result: FAILED" target/cargo-test-final.log
 ```
 
 `real 43m29.121s` だった。core 層は取り込み前に 1 回通して 764/765（赤は `verify-cognitive-complexity` の 2/3 だけ）で、その赤の原因は取り込み後の 3/3 で消えている。取り込み後の core 層の全走は開始済みで、この記録を書いた時点では `verify-m0`（全走テスト）が実行中である。集計は次の段落に足す。
+
+取り込み後の core 層の全走（`bash scripts/run-gates.sh --tier core target/.gates-repl-core2`）の集計である。
+
+```
+$ target/debug/hado run tools/gates/main.hd -- target/.gates-repl-core2
+764/765 passed; red: verify-pure-closure-in-type-variable-argument-fails-specialization.log
+```
+
+赤は検査 6（変異）の 1 本だけで、`mutation site not found` である。
+
+```
+$ tail -2 target/.gates-repl-core2/verify-pure-closure-in-type-variable-argument-fails-specialization.log
+NG: 6 mutation-site-missing
+PASSED: 5/6
+```
+
+門番が探す錨は `crates/hado/src/mono.rs` の次の 2 行で、`base 4baca98` にはあり `origin/main` には無い。`#84` が `mono.rs` を分けたときに消えた。門番を足した `739119f` も直した `141f170` も `origin/main` にあるので、この赤はこのラウンドの変更ではない。
+
+```
+$ sed -n '117,122p' scripts/verify-pure-closure-in-type-variable-argument-fails-specialization.sh
+# 整形で行が変わっても当たるよう、包む代入だけを置き換える。
+old = """            body = self.done(body, &declared_result)?;
+            declared_result"""
+new = """            lowered"""
+if old not in source:
+    raise SystemExit("mutation site not found")
+$ git show 4baca98:crates/hado/src/mono.rs | grep -c 'body = self.done(body, &declared_result)?;'
+1
+$ git show origin/main:crates/hado/src/mono.rs | grep -c 'body = self.done(body, &declared_result)?;'
+0
+```
