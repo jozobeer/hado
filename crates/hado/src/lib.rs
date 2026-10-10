@@ -707,3 +707,5 @@ fn dump_parsed_with(
 pub mod runtime_abi;
 
 pub mod repr;
+
+pub mod repl;

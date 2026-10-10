@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <gc.h>
 #include <math.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -121,6 +122,13 @@ static void check_stdout(int wrote) {
 
 void *hado_alloc(size_t size) { return GC_malloc(size); }
 
+/* A REPL binding keeps its machine word here and registers the word as a GC
+   root. Boehm GC does not scan the Rust heap, so a binding held only by Rust
+   would be collected under the next input's allocations (docs/rounds/repl.md). */
+void hado_gc_add_root(void *slot) {
+  GC_add_roots(slot, (char *)slot + sizeof(int64_t));
+}
+
 HadoArray *hado_array_alloc(int64_t count) {
   if (count < 0 || (uint64_t)count > (SIZE_MAX - 8) / 8) {
     abort();
@@ -139,12 +147,19 @@ void hado_print_int(int64_t v) {
   check_stdout(printf("%lld\n", (long long)v) >= 0);
 }
 
-int main(int argc, char **argv) {
-  process_argc = argc;
-  process_argv = argv;
+/* The AOT path reaches these through main. The JIT path has no main, so the
+   shared library exports the one entry point and the REPL calls it
+   (docs/rounds/repl.md). */
+void hado_runtime_init(void) {
   signal(SIGPIPE, SIG_IGN);
   GC_INIT();
   install_stack_guard();
+}
+
+int main(int argc, char **argv) {
+  process_argc = argc;
+  process_argv = argv;
+  hado_runtime_init();
   int32_t code = hado_entry();
   check_stdout(1);
   return print_failed ? 1 : code;
@@ -779,8 +794,32 @@ void hado_print_error_string(const HadoString *string) {
   fflush(stderr);
 }
 
+/* A raise that reaches the top of a REPL step abandons that step and returns to
+   the session. §54 ends a program on a raise; a session has more inputs to run.
+   The AOT path never arms the catch, so it keeps exit(1) (docs/rounds/repl.md). */
+typedef int64_t (*hado_repl_body)(void *);
+static jmp_buf repl_jump;
+static volatile int repl_catching;
+
+/* Runs one JIT'd step with the raise catch armed. Returns 1 when a raise was
+   caught (the value is untouched) and 0 otherwise. */
+int hado_repl_run(hado_repl_body body, void *environment, int64_t *value) {
+  if (setjmp(repl_jump) != 0) {
+    repl_catching = 0;
+    return 1;
+  }
+  repl_catching = 1;
+  *value = body(environment);
+  repl_catching = 0;
+  return 0;
+}
+
 void hado_abort_error(const HadoString *string) {
   hado_print_error_string(string);
+  if (repl_catching) {
+    repl_catching = 0;
+    longjmp(repl_jump, 1);
+  }
   exit(1);
 }
 
