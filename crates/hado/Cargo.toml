@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 cranelift-codegen = "0.135"
 cranelift-frontend = "0.135"
+cranelift-jit = "0.135"
 cranelift-module = "0.135"
 cranelift-object = "0.135"
 cranelift-native = "0.135"

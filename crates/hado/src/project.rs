@@ -251,6 +251,33 @@ impl Project {
             .map_err(|error| source_diagnostic(&self.files, error))
     }
 
+    /// §11: `repl` が合成した 1 歩を検査して単相化する。落とす診断は
+    /// `is_repl_artifact` が決める（合成した `main` の E702 と、読み込んだ
+    /// ライブラリのファイルに出る E513）。他の段の診断はそのまま返す。
+    pub(crate) fn lower_repl_step(
+        &self,
+    ) -> Result<(crate::mono::Program, crate::Checked), Vec<Diagnostic>> {
+        let (errors, checked) = self.check_all(true);
+        let root = self.files[0].path.as_str();
+        let errors: Vec<_> = errors
+            .into_iter()
+            .filter(|error| !is_repl_artifact(error, root))
+            .collect();
+        let Some(checked) = checked else {
+            return Err(errors);
+        };
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        let program = crate::mono::lower_program(&self.parsed.ast, &checked).map_err(|error| {
+            vec![crate::project::input_diagnostic(
+                Path::new(&self.files[0].path),
+                &error,
+            )]
+        })?;
+        Ok((program, checked))
+    }
+
     /// §58.4: the end of a diagnostic's range, as the exclusive end of the
     /// tokens the local rewrite (§57) behind the anchor replaces. A diagnostic
     /// without a local rewrite ends where it starts. The bytes are the ones the
@@ -507,6 +534,15 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
 
 /// 読み込みの入力そのものの誤り（§51 の名前空間ディレクトリなど）を、位置を
 /// 持たない診断にする。読む前の誤りなので、位置は入口の先頭に置く。
+/// `lower_repl_step` が落とす診断か（`docs/rounds/repl.md` の決定 3・9）。
+fn is_repl_artifact(error: &Diagnostic, root: &str) -> bool {
+    match error.code.as_deref() {
+        Some("E702") => true,
+        Some("E513") => error.path != root,
+        _ => false,
+    }
+}
+
 pub fn input_diagnostic(input: &Path, message: &str) -> Diagnostic {
     Diagnostic {
         mentions: None,
