@@ -57,7 +57,12 @@ HADO = None
 LARGE_TIMEOUT = 10.0
 RATIO = 2.5
 RUNS = 5
-SMALL_FLOOR = 0.2
+# 床は「比の分母が時計の分解能に埋もれないこと」だけを測る。getrusage の時刻は
+# マイクロ秒なので、床は秒の絶対値ではなく分解能の tick 数で表す。速い機械でも
+# 遅い機械でも、同じ tick 数が同じ意味を持つ。旧 0.2s の床は目標時間の絶対値で、
+# 機械が速いほど割れやすかった（docs/rounds/timing-floor.md）。
+TIMER_RESOLUTION = 1e-6
+SMALL_FLOOR_TICKS = 1000
 
 
 def build(root, name, source):
@@ -143,9 +148,15 @@ def ratio_verdict(small_total, small_control, large_total, large_control):
 
 
 def assert_linear(label, small_total, small, large_total, large):
-    assert small_total >= SMALL_FLOOR, \
-        f'{label}: small median {small_total:.3f}s is below the {SMALL_FLOOR:.3f}s floor'
-    ratio = large / small if small > 0 else float('inf')
+    # 床は分母 small が時計の分解能の上にあることだけを見る。線形かどうかの判定は
+    # 下の比が持つ。分解能の 1000 倍（1 ms）は、引き算どうしの量子化に対して十分
+    # 大きく、実測した分母（0.13〜0.26s）より 2 桁小さい。
+    floor = SMALL_FLOOR_TICKS * TIMER_RESOLUTION
+    assert small >= floor, (
+        f'{label}: control-subtracted small {small:.6f}s is below the '
+        f'{SMALL_FLOOR_TICKS} tick ({floor:.0e}s) clock floor '
+        f'(small total {small_total:.3f}s)')
+    ratio = large / small
     assert ratio <= RATIO, (
         f'{label}: control-subtracted ratio {ratio:.2f} > {RATIO} '
         f'(small={small:.3f}s large={large:.3f}s)')
