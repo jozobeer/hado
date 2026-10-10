@@ -431,3 +431,37 @@ $ bash scripts/verify-clippy.sh 2>&1 | tail -2
 OK: clippy-driver --crate-type staticlib -D warnings on crates/hado/float_format.rs is clean
 PASSED: 2/2
 ```
+
+### main の取り込みと最終の木（2026-10-10）
+
+`git fetch origin main`（`045b3c9`、#81 まで着地済み）を取り込み、競合なしで merge した（`7198ec4`）。`#84`（`printer-cognitive-complexity`）が base の 4 関数を分割していたので、認知複雑度の赤は消えた。
+
+```
+$ bash scripts/verify-cognitive-complexity.sh 2>&1 | tail -1
+PASSED: 3/3
+$ bash scripts/verify-repl.sh 2>&1 | tail -1
+PASSED: 10/10
+$ bash scripts/run-gates.sh --tier quick target/.gates-repl-merged 2>&1 | tail -1
+TALLY: 51/51 passed; red: none
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+$ bash scripts/corpus-lock.sh --check; echo "rc=$?"
+rc=0
+$ bash scripts/gate-tiers-lock.sh --check; echo "rc=$?"
+rc=0
+$ bash scripts/frozen-docs-lock.sh --check; echo "rc=$?"
+rc=0
+```
+
+全走は最終の木で 1 回だけ回した。
+
+```
+$ time cargo test --offline > target/cargo-test-final.log 2>&1; echo "exit=$?"
+exit=0
+$ grep -E "^test result" target/cargo-test-final.log | awk '{p+=$4; f+=$6} END {print "passed="p, "failed="f}'
+passed=846 failed=0
+$ grep -cE "test result: FAILED" target/cargo-test-final.log
+0
+```
+
+`real 43m29.121s` だった。core 層は取り込み前に 1 回通して 764/765（赤は `verify-cognitive-complexity` の 2/3 だけ）で、その赤の原因は取り込み後の 3/3 で消えている。取り込み後の core 層の全走は開始済みで、この記録を書いた時点では `verify-m0`（全走テスト）が実行中である。集計は次の段落に足す。
