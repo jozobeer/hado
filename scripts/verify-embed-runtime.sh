@@ -12,7 +12,13 @@ set -u
 cd "$(dirname "$0")/.."
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# 途中成果（cranelift を含む debug のビルド）は worktree の ./target に置く。/tmp は
+# tmpfs で、全走のあいだ他の作業と RAM と inode を分け合う。ここにビルド先を置くと
+# 書き込みが失敗して偽の赤になる（2026-10-10 の全走で実測）。受理ケースを走らせる
+# 場所は、チェックアウトの外であることを測るため /tmp のままにする。
+mkdir -p target
+build=$(mktemp -d "$PWD/target/embed-runtime.XXXXXX")
+trap 'rm -rf "$work" "$build"' EXIT
 
 passed=0
 total=0
@@ -31,7 +37,7 @@ check() {
 # --- 1: 一時の --target-dir でビルドし、--root へ入れる ---
 install_from_path() {
     if ! cargo install --offline --debug --path crates/hado --root "$work/root" \
-        --target-dir "$work/target" >"$work/install.log" 2>&1; then
+        --target-dir "$build/target" >"$work/install.log" 2>&1; then
         tail -5 "$work/install.log"
         return 1
     fi
@@ -41,7 +47,7 @@ check 'cargo install --path crates/hado into a private root' install_from_path
 
 # --- 2: ビルド先を消す。以後の判定はこの状態で走る ---
 remove_build_dir() {
-    rm -rf "$work/target" && [ ! -e "$work/target" ]
+    rm -rf "$build/target" && [ ! -e "$build/target" ]
 }
 check 'the --target-dir of the install is removed' remove_build_dir
 
