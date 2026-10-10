@@ -114,10 +114,12 @@ python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 source = path.read_text()
-# 整形で行が変わっても当たるよう、包む代入だけを置き換える。
-old = """            body = self.done(body, &declared_result)?;
-            declared_result"""
-new = """            lowered"""
+# 変異は「本体を宣言側の outcome に包む分岐」そのものに当てる。包む代入と、
+# 包んだ型を返す 2 行を、包まない本体と下ろした型へ置き換える。分岐はいま
+# `lambda_result` にある。コードが移ったら、この anchor も移り先へ直す。
+old = """            let body = self.done(body, declared_result)?;
+            return Ok((body, declared_result.clone()));"""
+new = """            return Ok((body, lowered));"""
 if old not in source:
     raise SystemExit("mutation site not found")
 path.write_text(source.replace(old, new, 1))
