@@ -42,8 +42,7 @@ impl Checker<'_> {
             self.branch_result(value, &payload[index])?;
         }
         let result = self.inference.resolve(&result);
-        self.value_types
-            .insert((name.span.line, name.span.col), result.clone());
+        self.value_types.insert(name.span, result.clone());
         Ok(result)
     }
 
