@@ -357,6 +357,53 @@ fn nested_negation_branches_survive_the_reprint() {
     }
 }
 
+/// 適用の後ろの field は適用全体に付く（§7: `.` は適用より強い）。括弧を落とすと
+/// `(f 1).a` が `f 1.a` になり、E103 か、`.` が最後の引数に付いて意味が変わる。
+#[test]
+fn field_after_application_keeps_the_base_grouped() {
+    let cases = [
+        (
+            "int-arg",
+            "type R = { a: Int }\ndef f (x: Int): R => { a = x }\ndef v = (f 1).a\ndef main = Int.to_string v\n",
+            "(f 1).a",
+            "1\n",
+        ),
+        (
+            "nested-apply",
+            "type R = { a: Int }\ndef g x => { a = x }\ndef f (x: R): R => x\ndef v = (f (g 1)).a\ndef main = Int.to_string v\n",
+            "(f (g 1)).a",
+            "1\n",
+        ),
+        (
+            "if-arg",
+            "type R = { a: Int }\ndef f (x: R): R => x\ndef v = (f (if true => { a = 1 } | { a = 2 })).a\ndef main = Int.to_string v\n",
+            "(f (if true => { a = 1 } | { a = 2 })).a",
+            "1\n",
+        ),
+    ];
+    for (name, source, grouped, want) in cases {
+        assert_eq!(
+            run_source(source, &format!("{name}-before")),
+            want,
+            "{name}: 入力が動かない:\n{source}"
+        );
+        let once = assert_reprints(name, source);
+        assert!(
+            once.contains(grouped),
+            "{name}: 適用全体が括弧で残らない:\n{once}"
+        );
+        assert!(
+            !once.contains("1.a"),
+            "{name}: `.a` が整数リテラルに付いた:\n{once}"
+        );
+        assert_eq!(
+            run_source(&once, &format!("{name}-after")),
+            want,
+            "{name}: fmt の後で値が変わった:\n{once}"
+        );
+    }
+}
+
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
 #[test]
 fn formatting_is_idempotent_and_settles() {
