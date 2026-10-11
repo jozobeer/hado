@@ -109,8 +109,8 @@
 
 ### 成果物
 
-`crates/hado/src/postfix_print.rs`、`crates/hado/tests/fmt_layout.rs`、本ファイル、
-`docs/issues/parenthesize-field-base-after-application.md`（実測で見つけた別件）。
+`crates/hado/src/postfix_print.rs`、`crates/hado/tests/fmt_layout.rs`、本ファイル。
+適用の後ろの field は実測で見つけた別件として切り出したが、base を括弧で囲む修正は後から入った。
 
 ### 工程
 
@@ -147,7 +147,7 @@ E402、`63-d` の `d/let-fix` が F5 の印字し直しで古くなった期待�
 
 - `Field` の base が適用のとき `.a` が内側に付く欠陥。分岐に限らず、
   `(f (g 1)).a` も `f g 1.a` になり E103 で壊れる。本ラウンドの起因ではない。
-  `docs/issues/parenthesize-field-base-after-application.md` に切り出した。
+  切り出して後から直した。
 - 審査の「スコープ外の所見」5 件（`check --fix` が壊れた結果でも exit 0 を返す、
   書き換えが閉じの印と食い違う、コメントの置き場、条件列の空白 2 つ、E100 の
   勧める形が通らない）。直していない。報告に書く。
