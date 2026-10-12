@@ -350,8 +350,9 @@ map 9/9、fmt-layout 6/6）。r63 だけが 63-d の別原因で 3/4 である�
 main を checkout した側（`.worktrees/postlanding-main`）で回した。full 層（quick・
 core・full の累積に文書層を足した 84 本）は `TALLY: 3894/3894 passed; red: none` で
 赤は 1 本も無い。`cargo test --offline` は full 層の門番 `verify-m0` の検査 2 が
-`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。quick 層の門番
-6 本は full 層の走行に含まれ、すべて緑である。
+`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。同じ木で回し
+直しても 75 スイートすべて `test result: ok`、合計 850 passed で一致した。quick 層
+の門番 6 本は full 層の走行に含まれ、すべて緑である。
 
 ```
 $ bash scripts/run-gates.sh --tier full target/.gates-full | tail -1
