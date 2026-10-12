@@ -215,3 +215,31 @@ $ git log --oneline -2 -- scripts/verify-r34.sh
 302a321 test: 34-c(3) の上限を絶対時間から同じ要素数の対照に対する比へ
 dc4f328 test: 印字を期待する探針を Int の終了コードに合わせる
 ```
+
+### 着地後の全走（2026-10-13、main `b6f7126`）
+
+main を checkout した側（`.worktrees/postlanding-main`）で回した。full 層（quick・
+core・full の累積に文書層を足した 84 本）は `TALLY: 3894/3894 passed; red: none` で
+赤は 1 本も無い。`cargo test --offline` は full 層の門番 `verify-m0` の検査 2 が
+`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。quick 層の門番
+6 本は full 層の走行に含まれ、すべて緑である。
+
+```
+$ bash scripts/run-gates.sh --tier full target/.gates-full | tail -1
+TALLY: 3894/3894 passed; red: none
+$ ./target/debug/hado run tools/gates/main.hd -- target/.gates-full
+3894/3894 passed; red: none
+$ grep cargo-test target/.gates-full/verify-m0.log
+OK: 2 cargo-test passed=850
+$ for f in verify-ci verify-gate-cache verify-m1-spec verify-repl verify-rustfmt verify-spec-model; do tail -1 target/.gates-full/$f.log; done
+PASSED: 8/8
+PASSED: 26/26
+PASSED: 1/1
+PASSED: 10/10
+PASSED: 2/2
+PASSED: 3/3
+$ tail -1 target/.gates-full/verify-r34.log
+PASSED: 1360/1360
+```
+
+34-c(3) は同じ要素数の対照に対する比で判定され、負荷時の絶対値の揺れで赤にならない。

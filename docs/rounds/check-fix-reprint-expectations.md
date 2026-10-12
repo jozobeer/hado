@@ -325,3 +325,34 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 `cargo test` は失敗したテスト対象で止まる（`--no-fail-fast` を付けない既定）ので、最後の `Doc-tests hado` まで届いたことと、そこで `0 failed` であることが、全スイート 0 failed の根拠である。
 
+### 着地後の全走（2026-10-13、main `b6f7126`）
+
+main を checkout した側（`.worktrees/postlanding-main`）で回した。full 層（quick・
+core・full の累積に文書層を足した 84 本）は `TALLY: 3894/3894 passed; red: none` で
+赤は 1 本も無い。`cargo test --offline` は full 層の門番 `verify-m0` の検査 2 が
+`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。quick 層の門番
+6 本は full 層の走行に含まれ、すべて緑である。
+
+```
+$ bash scripts/run-gates.sh --tier full target/.gates-full | tail -1
+TALLY: 3894/3894 passed; red: none
+$ ./target/debug/hado run tools/gates/main.hd -- target/.gates-full
+3894/3894 passed; red: none
+$ grep cargo-test target/.gates-full/verify-m0.log
+OK: 2 cargo-test passed=850
+$ for f in verify-ci verify-gate-cache verify-m1-spec verify-repl verify-rustfmt verify-spec-model; do tail -1 target/.gates-full/$f.log; done
+PASSED: 8/8
+PASSED: 26/26
+PASSED: 1/1
+PASSED: 10/10
+PASSED: 2/2
+PASSED: 3/3
+$ tail -1 target/.gates-full/verify-r46.log
+PASSED: 5/5
+$ tail -1 target/.gates-full/verify-r47.log
+PASSED: 4/4
+$ tail -1 target/.gates-full/verify-r63.log
+PASSED: 4/4
+```
+
+着地時は `verify-r63` が 63-c・63-d の別原因で 2/4 だった。`landed-gate-reds`（#86）が 63-c、PR #81 が 63-d を直し、4/4 になった。

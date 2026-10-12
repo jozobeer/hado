@@ -262,3 +262,33 @@ passed=824 failed=0
 2 回走らせても `Switch` の腕の順が入れ替わる（`$Yield#1` と `$Yield#2`）。
 `cargo test --offline` が参照する順序はこの出力ではないので、`mono.rs` の
 振る舞いは全走（824 passed / 0 failed）と `r26_effects`（92 passed）で見る。
+
+### 着地後の全走（2026-10-13、main `b6f7126`）
+
+main を checkout した側（`.worktrees/postlanding-main`）で回した。full 層（quick・
+core・full の累積に文書層を足した 84 本）は `TALLY: 3894/3894 passed; red: none` で
+赤は 1 本も無い。`cargo test --offline` は full 層の門番 `verify-m0` の検査 2 が
+`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。quick 層の門番
+6 本は full 層の走行に含まれ、すべて緑である。
+
+```
+$ bash scripts/run-gates.sh --tier full target/.gates-full | tail -1
+TALLY: 3894/3894 passed; red: none
+$ ./target/debug/hado run tools/gates/main.hd -- target/.gates-full
+3894/3894 passed; red: none
+$ grep cargo-test target/.gates-full/verify-m0.log
+OK: 2 cargo-test passed=850
+$ for f in verify-ci verify-gate-cache verify-m1-spec verify-repl verify-rustfmt verify-spec-model; do tail -1 target/.gates-full/$f.log; done
+PASSED: 8/8
+PASSED: 26/26
+PASSED: 1/1
+PASSED: 10/10
+PASSED: 2/2
+PASSED: 3/3
+$ tail -1 target/.gates-full/verify-cognitive-complexity.log
+PASSED: 3/3
+$ tail -1 target/.gates-full/verify-fmt-layout.log
+PASSED: 6/6
+```
+
+`verify-cognitive-complexity` は分割後も 3/3 で、閾値 7 は変えていない。印字のバイト同一も保たれている。
