@@ -10,6 +10,7 @@
 | 門番 | 赤の理由 | 分類 |
 |---|---|---|
 | verify-clippy | `function comment_line is never used`（`crates/hado/src/postfix_print.rs:155`） | 偽の赤（木の競合） |
+| verify-r57 / r62 / r63 | 綴り直し・`=>` の後のコメント・Boolean 腕の併合の検査が落ちる | 偽の赤（`verify-postfix-binding` の変異との競合） |
 | verify-treesitter | `marks=[]`（検査 5） | 既知の flake（`docs/issues/flaky-treesitter-extmark-probe.md`） |
 
 `comment_line` は同じファイルの 200 行目（`place_comments`）から使われている。赤は、
@@ -17,6 +18,16 @@
 `comment_line` の唯一の使用を一時的に消して `cargo build` している窓に、
 `verify-clippy` が重なって変異中の木を読んだためである。clean な木では clippy は
 exit 0 で終わる（下の実測）。
+
+同じ走行の後半で `verify-r57`・`verify-r62`・`verify-r63` も落ちた。これらは
+`postfix_print.rs` と `parser.rs` の印字結果を測る門番で、`verify-postfix-binding` が
+同じ 2 ファイルへ当てる変異（`drop-option-question` など）と重なって赤になっていた。
+clean な木では 3 本とも緑である（下の実測）。
+
+この競合は赤だけでなく時間も食う。`verify-m7`（core）の `cargo_cached test --offline
+--no-fail-fast` は、m0 が公開した clean な指紋の全走ログに畳まれるはずが、fan-out の
+変異で指紋が変わって実走し直していた。走行 `38276533203` では 46 分走っていた。
+変異を直列へ移すと fan-out の指紋は clean に戻り、この実走は消える。
 
 `hado_tier_serial_gates`（`scripts/lib/gate-tiers.sh`）は「共有ツリーを書き換える
 門番をファンアウトの前段で直列に完走させる」一覧である（`docs/plan.md` 34 節）。
@@ -116,4 +127,26 @@ extmarks: 39
 
 $ cat /proc/loadavg
 17.77 17.21 13.29 21/2263 3
+```
+
+clean な木の `verify-r57`・`verify-r62`・`verify-r63`。
+
+```
+$ bash scripts/verify-r57.sh | tail -1
+PASSED: 6/6
+$ bash scripts/verify-r62.sh | tail -1
+PASSED: 4/4
+$ bash scripts/verify-r63.sh | tail -1
+PASSED: 4/4
+```
+
+走行 `38276533203` の fan-out で実走し直していた `verify-m7` の全走。
+
+```
+$ grep -n cargo scripts/verify-m7.sh
+89:if cargo_cached test --offline --no-fail-fast; then ...
+
+$ docker exec hado-ci-docker ps -eo etime,args | grep 'verify-m7'
+      46:15 bash scripts/verify-m7.sh
+      46:15 ... cargo test --offline --no-fail-fast
 ```
