@@ -522,13 +522,13 @@ struct Lowerer {
     )>,
     active: Vec<(String, FunctionId, Signature)>,
     schemes: std::collections::HashMap<String, crate::types::Scheme>,
-    value_types: std::collections::HashMap<(usize, usize), Ty>,
+    value_types: std::collections::HashMap<crate::NodeTypeKey, Ty>,
     specialization: crate::types::Inference,
-    composite_types: std::collections::HashMap<(usize, usize), Ty>,
+    composite_types: std::collections::HashMap<crate::NodeTypeKey, Ty>,
     /// `with` の位置ごとの節点の型（`crate::WithTypes`）。同じ節点が答え型の
     /// 違う複数の `with` に現れると span 単位の表は最後のもので上書きされる
     /// ので、腕を lower する間だけその `with` の型に差し替える。
-    with_types: std::collections::HashMap<(usize, usize), crate::WithTypes>,
+    with_types: std::collections::HashMap<crate::NodeTypeKey, crate::WithTypes>,
     /// 外側の `with` が型を差し替えている深さ。handler の腕の中の内側の
     /// `with` は定義側の 1 節点なので、`with_types` は最後の答え型のまま。
     /// 差し替え中は内側を再適用せず、外側の snapshot を使う。
@@ -579,8 +579,8 @@ struct HandlerValueBindings {
 
 /// `with` ごとの型を差し替えるとき、元の表の値を戻せるよう控える。
 struct InstalledTypes {
-    values: Vec<((usize, usize), Option<Ty>)>,
-    composites: Vec<((usize, usize), Option<Ty>)>,
+    values: Vec<(crate::NodeTypeKey, Option<Ty>)>,
+    composites: Vec<(crate::NodeTypeKey, Option<Ty>)>,
 }
 
 pub fn lower_expression(node: &crate::parser::Node) -> Result<Expression, String> {
@@ -633,13 +633,10 @@ impl Lowerer {
                         .as_ref()
                         .is_some_and(|fallback| self.callee_is_outcome_closure(fallback))
             }
-            NodeKind::Field(..) => self
-                .value_types
-                .get(&(callee.span.line, callee.span.col))
-                .is_some_and(|ty| {
-                    self.outcome_closure_of(&self.specialization.resolve(ty))
-                        .is_some()
-                }),
+            NodeKind::Field(..) => self.value_types.get(&callee.span).is_some_and(|ty| {
+                self.outcome_closure_of(&self.specialization.resolve(ty))
+                    .is_some()
+            }),
             _ => false,
         }
     }
@@ -964,7 +961,7 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let ty = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing record type")?;
         let result = Type::try_from(&self.specialization.resolve(ty))
             .map_err(|_| "record type is not concrete")?;
@@ -992,7 +989,7 @@ impl Lowerer {
     ) -> Result<(Type, Vec<Expression>), String> {
         let ty = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing list type")?
             .clone();
         // 要素が効果を持つ関数なら、mono の要素型は結果が outcome の閉包。
@@ -1247,7 +1244,7 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let ty = self
             .value_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing constructor type")?;
         // 効果多相の callee の中では、この位置の型が `$Outcome` に
         // なっている。構築するのは成功型なので、そこでほどく。
@@ -3056,7 +3053,7 @@ impl Lowerer {
             .clone();
         let ty = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing named constructor type")?
             .clone();
         let mut bindings = Vec::new();
@@ -3267,7 +3264,7 @@ impl Lowerer {
                     {
                         let ty = self
                             .composite_types
-                            .get(&(node.span.line, node.span.col))
+                            .get(&node.span)
                             .ok_or("missing array allocation result type")?;
                         let allocation = Type::try_from(&self.specialization.resolve(ty))
                             .map_err(|_| "array allocation result type is not concrete")?;
@@ -3284,7 +3281,7 @@ impl Lowerer {
             if crate::names::is_upper_reference(name) {
                 let ty = self
                     .composite_types
-                    .get(&(node.span.line, node.span.col))
+                    .get(&node.span)
                     .ok_or("missing constructor result type")?;
                 let declared = Type::try_from(&self.specialization.resolve(ty))
                     .map_err(|_| "constructor type is not concrete")?;
@@ -3309,7 +3306,7 @@ impl Lowerer {
                 }
                 let expected = self
                     .composite_types
-                    .get(&(node.span.line, node.span.col))
+                    .get(&node.span)
                     .map(|ty| self.actual_type(&self.specialization.resolve(ty)))
                     .transpose()
                     .map_err(|_| "call result type is not concrete")?;
@@ -3321,7 +3318,7 @@ impl Lowerer {
         // 期待する結果型から解くため。
         let expected = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .and_then(|ty| self.actual_type(&self.specialization.resolve(ty)).ok());
         self.call(callee, arguments, expected.as_ref())
     }
@@ -3334,8 +3331,8 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let ty = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
-            .or_else(|| self.value_types.get(&(node.span.line, node.span.col)))
+            .get(&node.span)
+            .or_else(|| self.value_types.get(&node.span))
             .ok_or("missing abort result type")?;
         let result = match Type::try_from(&self.specialization.resolve(ty)) {
             Ok(ty) => ty,
@@ -3484,7 +3481,7 @@ impl Lowerer {
     fn begin_with_types(&mut self, span: crate::parser::Span) -> Option<InstalledTypes> {
         let installed = if self.with_type_installs == 0 {
             self.with_types
-                .get(&(span.line, span.col))
+                .get(&span)
                 .cloned()
                 .map(|types| self.install_with_types(&types))
         } else {
@@ -3609,7 +3606,7 @@ impl Lowerer {
         }
         let expected = self
             .composite_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing default operation result type")?;
         let expected = Type::try_from(&self.specialization.resolve(expected))
             .map_err(|_| "default operation result type is not concrete")?;
@@ -3939,7 +3936,7 @@ impl Lowerer {
     }
 
     fn again_answer_of(&self, node: &crate::parser::Node) -> Result<Option<Type>, String> {
-        match self.composite_types.get(&(node.span.line, node.span.col)) {
+        match self.composite_types.get(&node.span) {
             Some(ty) => Type::try_from(&self.specialization.resolve(ty))
                 .map(Some)
                 .map_err(|_| "with type is not concrete".into()),
@@ -3996,7 +3993,7 @@ impl Lowerer {
         // pipe と左辺は span を共有するので、複合式の型ではなく操作名の型を使う。
         let ty = self
             .value_types
-            .get(&(callee.span.line, callee.span.col))
+            .get(&callee.span)
             .ok_or("again operation type missing")?;
         let ty = self.specialization.resolve(ty);
         let result = match &ty {
@@ -5061,8 +5058,8 @@ impl Lowerer {
 
     fn node_type(&self, node: &crate::parser::Node) -> Option<Type> {
         self.composite_types
-            .get(&(node.span.line, node.span.col))
-            .or_else(|| self.value_types.get(&(node.span.line, node.span.col)))
+            .get(&node.span)
+            .or_else(|| self.value_types.get(&node.span))
             .and_then(|ty| Type::try_from(&self.specialization.resolve(ty)).ok())
     }
 
@@ -5079,7 +5076,7 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let ty = self
             .value_types
-            .get(&(node.span.line, node.span.col))
+            .get(&node.span)
             .ok_or("missing lambda type")?;
         let resolved = self.specialization.resolve(ty);
         let Type::Closure(declared_parameters, result) =
@@ -5835,7 +5832,7 @@ impl Lowerer {
     ) -> Result<Expression, String> {
         let inferred = self
             .value_types
-            .get(&(span.line, span.col))
+            .get(&span)
             .ok_or("missing function reference type")?;
         // 型引数に効果付き閉包が載っている値（`Map.empty` の V など）は、
         // 行を落とすと `Fn(Int => Int)` になり、実体の `$Outcome` と単一化できない。

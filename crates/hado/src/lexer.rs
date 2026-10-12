@@ -8,7 +8,7 @@
 /// unit `Lexer::bump` already uses, §50). The end is the column of the scalar
 /// after the last one of the element, so `end_col - col` is the number of
 /// scalars the element spans and `end_line - line` is its line count minus one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub line: usize,
     pub col: usize,

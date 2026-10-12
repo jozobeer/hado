@@ -632,11 +632,10 @@ impl<'a> Collector<'a> {
 
     /// 推論済みの型が付いていれば、その型が指す宣言への辺を足す。
     fn record_inferred_type(&self, node: &Node, scope: &Scope, references: &mut References) {
-        let Some(ty) = self.checked.and_then(|checked| {
-            checked
-                .composite_types
-                .get(&(node.span.line, node.span.col))
-        }) else {
+        let Some(ty) = self
+            .checked
+            .and_then(|checked| checked.composite_types.get(&node.span))
+        else {
             return;
         };
         inferred_type(ty, scope, references);

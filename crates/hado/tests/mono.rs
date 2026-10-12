@@ -377,11 +377,30 @@ fn concrete_named_function_values_create_closures() {
 }
 
 #[test]
+fn nested_apply_and_toplevel_field_keep_distinct_inferred_types() {
+    hado::dump_mono("def get x => fn(y => y + x)\ndef main = (get 1) 40", "t").unwrap();
+    hado::dump_mono(
+        "type R = { a: Int }\ndef r = { a = 41 }\ndef main = r.a",
+        "t",
+    )
+    .unwrap();
+    hado::dump_mono(
+        "def g x => x\ndef inc n => n + 1\ndef main = (g inc) 1",
+        "t",
+    )
+    .unwrap();
+}
+
+#[test]
 fn checked_lambdas_retain_types_resolved_by_their_calls() {
     let source = "def main = fn(x => x) 4";
     let checked = hado::check_source(source, "t").unwrap();
+    let ast = hado::parser::parse_source(source, "t").unwrap();
+    let hado::parser::NodeKind::Apply(callee, _) = &ast.main().unwrap().kind else {
+        panic!("expected apply");
+    };
     assert_eq!(
-        checked.value_types[&(1, source.find("fn(").unwrap() + 1)],
+        checked.value_types[&callee.span],
         hado::types::Ty::fn_of(vec![hado::types::Ty::Int], hado::types::Ty::Int)
     );
 }

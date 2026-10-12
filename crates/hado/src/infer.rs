@@ -33,14 +33,14 @@ struct Checker<'a> {
     trusted_start: Option<usize>,
     module_path: Vec<String>,
     module_definitions: HashMap<String, Scheme>,
-    composite_types: HashMap<(usize, usize), Ty>,
-    value_types: HashMap<(usize, usize), Ty>,
+    composite_types: HashMap<crate::NodeTypeKey, Ty>,
+    value_types: HashMap<crate::NodeTypeKey, Ty>,
     /// 各 `with` の本体と handler の腕を推論している間に出た節点の型を、
     /// `with` の位置ごとに控える（`crate::WithTypes`）。同じ節点が答え型の
     /// 違う複数の `with` の下に現れても、mono が `with` ごとの型で腕を
     /// lower できるようにする。
-    with_types: HashMap<(usize, usize), crate::WithTypes>,
-    active_withs: Vec<(usize, usize)>,
+    with_types: HashMap<crate::NodeTypeKey, crate::WithTypes>,
+    active_withs: Vec<crate::NodeTypeKey>,
     path: &'a str,
     current_definition: Option<String>,
     inference: Inference,
@@ -224,7 +224,7 @@ pub(crate) fn infer_with_diagnostics(
                 .with_types
                 .iter()
                 .map(|(span, types)| {
-                    let resolve = |map: &HashMap<(usize, usize), Ty>| {
+                    let resolve = |map: &HashMap<crate::NodeTypeKey, Ty>| {
                         map.iter()
                             .map(|(span, ty)| (*span, checker.inference.resolve(ty)))
                             .collect()
@@ -697,9 +697,9 @@ impl Checker<'_> {
         &mut self,
         module: &crate::parser::ModuleImpl,
         exports: &mut HashMap<String, Scheme>,
-        saved_value_spans: &HashSet<(usize, usize)>,
-        saved_composite_spans: &HashSet<(usize, usize)>,
-        saved_with_spans: &HashSet<(usize, usize)>,
+        saved_value_spans: &HashSet<crate::NodeTypeKey>,
+        saved_composite_spans: &HashSet<crate::NodeTypeKey>,
+        saved_with_spans: &HashSet<crate::NodeTypeKey>,
     ) {
         let type_names: HashMap<_, _> = module
             .items
@@ -764,9 +764,9 @@ impl Checker<'_> {
     fn qualify_module_value_types(
         &mut self,
         type_names: &HashMap<String, String>,
-        saved_value_spans: &HashSet<(usize, usize)>,
-        saved_composite_spans: &HashSet<(usize, usize)>,
-        saved_with_spans: &HashSet<(usize, usize)>,
+        saved_value_spans: &HashSet<crate::NodeTypeKey>,
+        saved_composite_spans: &HashSet<crate::NodeTypeKey>,
+        saved_with_spans: &HashSet<crate::NodeTypeKey>,
     ) {
         for (span, ty) in &mut self.value_types {
             if !saved_value_spans.contains(span) {
@@ -785,7 +785,7 @@ impl Checker<'_> {
     fn qualify_module_with_types(
         &mut self,
         type_names: &HashMap<String, String>,
-        saved_with_spans: &HashSet<(usize, usize)>,
+        saved_with_spans: &HashSet<crate::NodeTypeKey>,
     ) {
         for (with_span, types) in &mut self.with_types {
             if saved_with_spans.contains(with_span) {
@@ -1823,7 +1823,7 @@ impl Checker<'_> {
                 | NodeKind::NamedConstructor(..)
                 | NodeKind::With { .. }
         ) {
-            let key = (node.span.line, node.span.col);
+            let key = node.span;
             self.composite_types.insert(key, ty.clone());
             self.note_type(key, &ty, true);
         }
@@ -1832,7 +1832,7 @@ impl Checker<'_> {
 
     // span 単位の型は最後に推論した `with` のもので上書きされる。今いる
     // `with`（入れ子なら全部）にも同じ型を控え、mono が差し替えられるようにする。
-    fn note_type(&mut self, span: (usize, usize), ty: &Ty, composite: bool) {
+    fn note_type(&mut self, span: crate::NodeTypeKey, ty: &Ty, composite: bool) {
         for key in self.active_withs.clone() {
             let types = self.with_types.entry(key).or_default();
             if composite {
@@ -1887,7 +1887,7 @@ impl Checker<'_> {
                 let (ty, constraints, rows) = self.inference.instantiate_constrained(&scheme);
                 let ty = self.unwrap_operation(name, ty);
                 let ty = self.unwrap_thunk(ty);
-                let key = (node.span.line, node.span.col);
+                let key = node.span;
                 self.value_types.insert(key, ty.clone());
                 self.note_type(key, &ty, false);
                 self.record_comparisons(constraints, node.span);
@@ -1896,7 +1896,7 @@ impl Checker<'_> {
             }
             NodeKind::Fn { params, body } => {
                 let ty = self.function(params, body)?;
-                let key = (node.span.line, node.span.col);
+                let key = node.span;
                 self.value_types.insert(key, ty.clone());
                 self.note_type(key, &ty, false);
                 Ok(ty)
@@ -1906,7 +1906,7 @@ impl Checker<'_> {
             NodeKind::NamedConstructor(name, fields) => self.named_construct(name, fields),
             NodeKind::Field(value, field) => {
                 let ty = self.project(value, field)?;
-                let key = (node.span.line, node.span.col);
+                let key = node.span;
                 self.value_types.insert(key, ty.clone());
                 self.note_type(key, &ty, false);
                 Ok(ty)
@@ -2582,7 +2582,7 @@ impl Checker<'_> {
             })?;
         }
         let result = self.inference.resolve(&result);
-        let key = (span.line, span.col);
+        let key = span;
         self.value_types.insert(key, result.clone());
         self.note_type(key, &result, false);
         Ok(result)
@@ -3394,7 +3394,7 @@ impl Checker<'_> {
         // 本体と腕の型をこの `with` の位置ごとに控える。mono が腕を lower
         // するとき、同じ節点を答え型の違う別の `with` が上書きしていても、
         // この `with` の答え型で具体化できる。
-        self.active_withs.push((span.line, span.col));
+        self.active_withs.push(span);
         let result = self.with_handler_body(handler, args, body);
         self.active_withs.pop();
         result

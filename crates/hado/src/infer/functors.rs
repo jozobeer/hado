@@ -19,8 +19,8 @@ pub(super) struct Template {
     named_constructors: HashMap<String, Vec<String>>,
     records: HashMap<String, (Vec<String>, Scheme)>,
     constructors: HashMap<String, (u32, Scheme)>,
-    values: HashMap<(usize, usize), Ty>,
-    composites: HashMap<(usize, usize), Ty>,
+    values: HashMap<crate::NodeTypeKey, Ty>,
+    composites: HashMap<crate::NodeTypeKey, Ty>,
     comparisons: Vec<ComparisonConstraint>,
 }
 
@@ -814,13 +814,18 @@ impl Checker<'_> {
         names: &HashMap<String, String>,
         offset: usize,
     ) {
-        for ((line, col), ty) in &template.values {
+        for (span, ty) in &template.values {
             let revealed = ty.rename_modules(names).reveal(&self.shared_realizations);
-            self.value_types.insert((line + offset, *col), revealed);
+            let mut key = *span;
+            // `functor_instances` は合成 AST の `line` だけをずらす。
+            key.line += offset;
+            self.value_types.insert(key, revealed);
         }
-        for ((line, col), ty) in &template.composites {
+        for (span, ty) in &template.composites {
             let revealed = ty.rename_modules(names).reveal(&self.shared_realizations);
-            self.composite_types.insert((line + offset, *col), revealed);
+            let mut key = *span;
+            key.line += offset;
+            self.composite_types.insert(key, revealed);
         }
     }
 }
