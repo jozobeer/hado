@@ -96,10 +96,23 @@ hado_tier_all_gates() {
 #   m0              : ビルドと全走テスト。full-test の証拠を確定させる barrier
 #   m1-corpus/m2/m3 : tests/accept・tests/reject に probe を置き、入れ替える
 # ため直列にする。run-gates はこの一覧 ∩ 走行する門番を前段に置く。
+#
+# 後ろの 6 本は crates/hado/src のソースを一時的に書き換えて cargo build し、
+# 元へ戻す。ファンアウトで走らせると、同じ窓でソースを読む門番（clippy・
+# rustfmt・他の変異門番）が書き換え中の木を見て偽の赤になる（2026-10-12 の
+# main の全走で、verify-fmt-layout の変異中に verify-clippy が comment_line を
+# dead_code と報告した。docs/rounds/ci-serial-mutators.md）。
 # ツリーを書く門番を足したら、ここにも足す。verify-gate-cache.sh が一覧が
 # 実在の門番の部分集合であることを機械で見る。
 hado_tier_serial_gates() {
-    printf '%s\n' gate-cache m0 m1-corpus m2 m3
+    printf '%s\n' \
+        gate-cache m0 m1-corpus m2 m3 \
+        fmt-layout \
+        localize-message-positions \
+        restore-option-question \
+        pure-closure-in-type-variable-argument-fails-specialization \
+        recursive-effectful-closure-specialization-reads-outcome-as-int \
+        postfix-binding
 }
 
 hado_tiers() {
