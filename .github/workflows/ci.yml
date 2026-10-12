@@ -41,7 +41,11 @@ jobs:
     # ようになると、PR のコードが sudo の通る runner で走るのを許容できなくなる）。
     # 門番はどちらの形も受ける。
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 60
+    # full 層は自前 runner で 60 分を超える。2026-10-12 の走行 38257234801 は m0 だけで
+    # 40 分 01 秒、m1-corpus に 8 分 37 秒、m2 を 11 分 26 秒走ったところで job timeout に
+    # 当たり cancelled になった（docs/rounds/ci-full-timeout.md）。GitHub Actions の上限に
+    # 合わせて 360 分まで許す。門番の判定は変えない。
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
 
