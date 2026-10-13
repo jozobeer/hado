@@ -139,3 +139,38 @@ main の full の走行 38418467127 は 24 分、PR の core の走行 384214442
 | — | — | — | prune-meta-gates | 仕様は変えない |
 
 ## 実測
+
+門番は 84 本から 74 本になった。触った門番 21 本（2026-10-14、手元、`--jobs 4`）:
+
+```
+$ HADO_GATE_TIMES=touched.times bash scripts/run-gates.sh --jobs 4 touched m0 m1-corpus m2 m3 m7 fmt-layout ... string-split-linear m1-spec
+TALLY: 1427/1427 passed; red: none
+real	3m18.628s
+```
+
+full 層（2026-10-14、手元、`--jobs 4`。文書層を含む）:
+
+```
+$ HADO_GATE_TIMES=full.times bash scripts/run-gates.sh --jobs 4 --tier full full
+TALLY: 3662/3662 passed; red: none
+real	5m15.911s
+```
+
+文書と lock:
+
+```
+$ bash scripts/lint-docs.sh | tail -1
+PASSED: 16/16
+$ bash scripts/corpus-lock.sh --check && bash scripts/frozen-docs-lock.sh --check
+（差分なし）
+```
+
+PR #103 の CI（core、走行 38427398926）。着手前の PR の core（38421444290）は門番の区間が 14 分だった:
+
+```
+ci-run: event=pull_request ref=refs/pull/103/merge tier=core jobs=4 out=target/ci-gates
+TALLY: 565/565 passed; red: none
+PASSED: 16/16
+gates	pass	4m23s
+m0（前段）174 s、fan-out 53 s、門番の計 227 s
+```

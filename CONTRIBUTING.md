@@ -10,8 +10,8 @@
 cargo test --offline                     # 単体テストとコーパス判定
 cargo nextest run --offline              # 同じテストを nextest で並列に（門番の全体テストはこちら）
 bash scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い門番（≦ 2 分）
-bash scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
-bash scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
+bash scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7 と core の門番
+bash scripts/run-gates.sh --tier full 出力先  # 節目。門番すべてと文書層（--jobs 4 で約 5 分）
 bash scripts/run-gates.sh 出力先              # 引数なしは full と同じ（文書層まで回す）
 bash scripts/run-gates.sh --jobs 8 --tier full 出力先 # 同じ判定を 8 並列で（既定 1=直列）
 bash scripts/verify-m0.sh                # 門番は単独でも走る
