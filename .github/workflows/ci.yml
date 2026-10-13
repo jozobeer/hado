@@ -35,12 +35,9 @@ env:
 
 jobs:
   gates:
-    # private のあいだは org の Free 枠（2000 分/月）と spending limit に当たるので、
-    # 自前の Linux x86_64 runner で回す（docs/rounds/ci.md の決定 9）。public にしたら
-    # standard runner が無料になるので ubuntu-latest に戻す（決定 12。誰でも PR を出せる
-    # ようになると、PR のコードが sudo の通る runner で走るのを許容できなくなる）。
-    # 門番はどちらの形も受ける。
-    runs-on: [self-hosted, linux, x64]
+    # public なので standard runner は無料。誰でも PR を出せるため、PR のコードを sudo の
+    # 通る自前 runner で走らせない（docs/rounds/ci-public.md、docs/rounds/ci.md の決定 12）。
+    runs-on: ubuntu-latest
     # full 層は自前 runner で 60 分を超える。2026-10-12 の走行 38257234801 は m0 だけで
     # 40 分 01 秒、m1-corpus に 8 分 37 秒、m2 を 11 分 26 秒走ったところで job timeout に
     # 当たり cancelled になった（docs/rounds/ci-full-timeout.md）。GitHub Actions の上限に

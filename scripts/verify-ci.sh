@@ -11,8 +11,8 @@
 #      回さずに落ちる。
 #   c. ワークフローの配線。YAML として読み、入口を呼び、依存の取得・libgc-dev・
 #      キャッシュ・打ち切り・失敗ログを持つ。層と門番の一覧をワークフローに
-#      書かない。runner は Linux x86_64（standard か、既定のラベルを持つ自前）で、
-#      cargo の PATH は取得より前に通す。
+#      書かない。runner は standard の ubuntu-latest で、cargo の PATH は取得より
+#      前に通す。
 #
 # 判定 a・b は合成木で測る。scripts/ci-run.sh と scripts/lib/gate-tiers.sh だけを
 # 写し、run-gates と lint-docs を「受けた引数を記録する stub」に置き換える。
@@ -261,15 +261,12 @@ jobs = doc.get('jobs')
 if not isinstance(jobs, dict) or len(jobs) != 1:
     fail('jobs must be exactly one')
 job = next(iter(jobs.values()))
-# 門番は Linux x86_64 を要る（libgc-dev・Cranelift）。GitHub の standard runner か、
-# 既定のラベルを持つ自前の Linux x86_64 runner のどちらでもよい（docs/rounds/ci.md の決定 9）。
-# 自前の側はラベルを**厳密に**比べる。GitHub は全てのラベルを持つ runner を要るので、
-# 余分なラベルを足すと job が誰にも拾われなくなる（`windows` を足しても subset では緑になる。
-# 審査の指摘）。ラベルを増やすときは docs/rounds/ci.md の決定とここを同時に直す。
+# 門番は Linux x86_64 を要る（libgc-dev・Cranelift）。public なので誰でも PR を出せ、
+# PR のコードは runner の中で sudo を取れる。自前の runner は受けない
+# （docs/rounds/ci-public.md、docs/rounds/ci.md の決定 12）。
 runs_on = job.get('runs-on')
-self_hosted = isinstance(runs_on, list) and set(runs_on) == {'self-hosted', 'linux', 'x64'}
-if runs_on != 'ubuntu-latest' and not self_hosted:
-    fail(f'runs-on: {runs_on!r} (the gates need Linux x86_64)')
+if runs_on != 'ubuntu-latest':
+    fail(f'runs-on: {runs_on!r} (a public repository runs on ubuntu-latest)')
 if not isinstance(job.get('timeout-minutes'), int):
     fail('no timeout-minutes')
 

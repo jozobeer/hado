@@ -41,7 +41,7 @@ CI は GitHub Actions で実行する（`.github/workflows/ci.yml`、`docs/round
 
 - **実行層**: PR は core 層と `scripts/lint-docs.sh`、main への push は full 層を実行する。手動実行（workflow_dispatch）では層を選択できる（既定: full）。
 - **層の管理**: 層の選択は `scripts/ci-run.sh` が持ち、`scripts/verify-ci.sh`（quick）が整合性を固定する。
-- **依存と制約**: 依存関係は初回に `cargo fetch --locked` で取得し、以降は `--offline` で回す。private リポジトリのため branch protection は使えず、CI を必須チェックには設定できない。
+- **依存と制約**: 依存関係は初回に `cargo fetch --locked` で取得し、以降は `--offline` で回す。runner は GitHub の standard runner（`ubuntu-latest`）で、public リポジトリのため無料（`docs/rounds/ci-public.md`）。
 
 ## 構成
 
