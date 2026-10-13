@@ -9,7 +9,7 @@
 //! String は引用符なし）。`main` の型が Int なら終了コードにする規則だけは
 //! 当てない。対話では値を見せる必要があるためである。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 
@@ -21,6 +21,7 @@ use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 
 use crate::lexer::{lex_full, Tok, TokKind};
 use crate::mono::{self, FunctionId};
+use crate::parser::{parse_source, DefKind, Item};
 use crate::project::Project;
 use crate::runtime_abi::RuntimeFunction;
 use crate::types::{Scheme, Ty};
@@ -240,15 +241,24 @@ impl Session {
         false
     }
 
-    /// 本体が字句として使う束縛の位置。使う束縛だけを仮引数にする（未使用の
-    /// 仮引数は E505 になる）。
+    /// 本体が値として使う束縛の位置。使う束縛だけを仮引数にする（未使用の
+    /// 仮引数は E505 になる）。同じ綴りがラムダの仮引数や field に出ても、
+    /// それは値の参照ではないので仮引数にしない。同じ名前を打ち直したときは
+    /// 新しい方だけを残す。
     fn used_binders(&self, body: &str) -> Vec<usize> {
-        self.binders
-            .iter()
-            .enumerate()
-            .filter(|(_, binder)| occurs(body, &binder.name))
-            .map(|(index, _)| index)
-            .collect()
+        let names = expression_free_names(body).unwrap_or_default();
+        let mut seen = HashSet::new();
+        let mut used = Vec::new();
+        for (index, binder) in self.binders.iter().enumerate().rev() {
+            if !seen.insert(binder.name.clone()) {
+                continue;
+            }
+            if names.contains(&binder.name) {
+                used.push(index);
+            }
+        }
+        used.reverse();
+        used
     }
 
     /// 合成したソースを書いて検査・単相化し、1 歩の関数と値の型を取る。断る
@@ -492,12 +502,20 @@ fn is_name(name: &str) -> bool {
     characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-/// `body` が名前 `name` を字句として含むか。使う束縛だけを仮引数にする
-/// （未使用の仮引数は E505 になる）。
-fn occurs(body: &str, name: &str) -> bool {
-    tokens(body)
-        .iter()
-        .any(|token| matches!(&token.kind, TokKind::Name(found) if found == name))
+/// 本体の自由な名前。字句に同じ綴りがあっても、ラムダの仮引数や field・
+/// module member は値の参照ではない。構文として読めない入力は `None` で、
+/// 仮引数を足さず本検査の診断に任せる。
+fn expression_free_names(body: &str) -> Option<HashSet<String>> {
+    let ast = parse_source(&format!("def main = {body}\n"), "repl").ok()?;
+    let node = ast.items.iter().find_map(|item| match item {
+        Item::Def(def) if def.name == "main" => match &def.kind {
+            DefKind::Value(node) | DefKind::Function { body: node, .. } => Some(node),
+        },
+        _ => None,
+    })?;
+    let mut names = BTreeSet::new();
+    crate::names::free_names(node, &BTreeSet::new(), &mut names);
+    Some(names.into_iter().collect())
 }
 
 fn tokens(text: &str) -> Vec<Tok> {
