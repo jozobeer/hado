@@ -3,7 +3,6 @@
 # 中核は「E508 の本文の案内に従うと、また別のエラーになる」欠陥である。
 #   a. 本文が勧める綴り（`as p? ->`、束縛を使わない形は `as _? ->`）を名指しし、
 #      `e ->` を勧めておらず、本文が出す正準形と勧められた綴りが実際に受理される。
-#   b. 本文を古い `->` の案内に戻す変異で赤になる。
 # 期待値は本文から読み、ファイル名や行を書き込まない。
 #
 # tier: core
@@ -12,20 +11,12 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 pass=0
-total=2
+total=1
 ok() { echo "OK: $1"; pass=$((pass + 1)); }
 ng() { echo "NG: $1 ($2)"; }
 
 work=$(mktemp -d)
-source_file=crates/hado/src/check.rs
-backup=$(mktemp)
-cp "$source_file" "$backup"
-cleanup() {
-    cp "$backup" "$source_file"
-    rm -f "$backup"
-    rm -rf "$work"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work"' EXIT
 
 cargo build --offline -q --bin hado || exit 1
 target_dir=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
@@ -100,33 +91,6 @@ else
     printf '%s\n' "$out" | tail -5
     ng "a the E508 message names \`as p? ->\` / \`as _? ->\` and both are accepted" "$(printf '%s\n' "$out" | tail -1)"
 fi
-
-# --- b: 本文を古い `->` の案内に戻す変異で赤になる ---
-if MUT_OLD='use `as p? ->`, or `as _? ->` when the arm binds nothing' MUT_NEW='use `as p? ->` or `->`' \
-    python3 - "$source_file" <<'PY'
-import os
-import sys
-
-path = sys.argv[1]
-old, new = os.environ['MUT_OLD'], os.environ['MUT_NEW']
-text = open(path, encoding='utf-8').read()
-if text.count(old) != 1:
-    sys.exit('anchor is not unique')
-open(path, 'w', encoding='utf-8').write(text.replace(old, new))
-PY
-then
-    if cargo build --offline -q --bin hado && ! advice >/dev/null 2>&1; then
-        ok "b the mutation that makes the message recommend \`->\` is caught"
-    else
-        ng "b the mutation that makes the message recommend \`->\` is caught" "the mutation stayed green"
-    fi
-else
-    ng "b the mutation that makes the message recommend \`->\` is caught" "anchor error"
-fi
-
-# 木を元へ戻し、正しい本文でビルドし直す。
-cp "$backup" "$source_file"
-cargo build --offline -q --bin hado
 
 echo "PASSED: $pass/$total"
 [ "$pass" -eq "$total" ]

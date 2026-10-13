@@ -105,3 +105,26 @@ ci-run: event=pull_request ref=refs/pull/99/merge tier=core jobs=4 out=target/ci
 TALLY: 771/771 passed; red: none
 PASSED: 16/16
 ```
+
+着地後の main の full 層（走行 38418467127、#99 のマージ、`ubuntu-latest`）。job は
+15:01:37 に始まり 15:25:52 に `success` で終わった（約 24 分）。360 分の job timeout に
+対して十分に収まる。
+
+```
+$ gh api repos/jozobeer/hado/actions/runs/38418467127/jobs -q '.jobs[0]|[.runner_name,.labels[0],.started_at,.completed_at]|@tsv'
+GitHub Actions 1000003594	ubuntu-latest	2026-10-13T15:01:37Z	2026-10-13T15:25:52Z
+
+$ gh run view 38418467127 --log | grep -aE 'ci-run:|RUN: verify-(gate-cache|m0|m1-corpus|m2|m3)\b|TALLY|PASSED:'
+15:01:59 ci-run: event=push ref=refs/heads/main tier=full jobs=4 out=target/ci-gates
+15:01:59 RUN: verify-gate-cache
+15:02:10 RUN: verify-m0
+15:06:01 RUN: verify-m1-corpus
+15:07:07 RUN: verify-m2
+15:07:35 RUN: verify-m3
+15:25:22 TALLY: 3900/3900 passed; red: none
+15:25:40 PASSED: 16/16
+```
+
+自前の runner（12 コア）での full 層は m0 だけで 40〜47 分かかり、60 分の timeout で
+打ち切られていた（`docs/rounds/ci-full-timeout.md`）。今回の m0 は 3 分 51 秒である。
+差の原因は測っていない。

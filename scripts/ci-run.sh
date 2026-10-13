@@ -9,6 +9,10 @@
 # workflow_dispatch は requested-tier（空なら full）とする。知らない event・
 # 知らない ref・知らない層は回さずに落ちる。
 #
+# ただし pull_request の差分が docs_only_path の文書だけなら、門番を回さず文書層
+# だけを回す（docs/rounds/ci-docs-only.md）。差分は checkout した merge commit の
+# 1 番目の親（取り込み先の先端）との比較で取り、取れなければ core に倒す。
+#
 # 文書層（scripts/lint-docs.sh）は run-gates の層に含まれない（full の最後に
 # run-gates が回すだけ）ので、どの層でもここで必ず回す。full では 2 回になるが、
 # 判定は同じで所要は数秒である。
@@ -30,11 +34,48 @@ requested=${3:-}
 # shellcheck source=scripts/lib/gate-tiers.sh
 . scripts/lib/gate-tiers.sh
 
+# core 以上の門番が読まず、文書層（scripts/lint-docs.sh）だけが読む文書。
+docs_only_path() {
+    case "$1" in
+        README.md | CONTRIBUTING.md | docs/rounds/*.md | docs/issues/*.md | docs/plans/*.md) return 0 ;;
+    esac
+    return 1
+}
+
+# PR に core が要る理由を出す。差分がすべて docs_only_path なら何も出さずに偽。
+# merge commit でない・差分が取れない・空なら core とする。リネームは
+# --no-renames で削除と追加に分け、元のパスも見る。
+pr_core_reason() {
+    local changed path
+    if [ -z "$(git rev-parse -q --verify 'HEAD^2' 2>/dev/null)" ] ||
+        ! changed=$(git diff --no-renames --name-only 'HEAD^1' HEAD 2>/dev/null); then
+        echo 'the merge commit and its first parent are unavailable'
+        return 0
+    fi
+    if [ -z "$changed" ]; then
+        echo 'the diff is empty'
+        return 0
+    fi
+    while IFS= read -r path; do
+        if ! docs_only_path "$path"; then
+            echo "$path is not a document-only path"
+            return 0
+        fi
+    done <<<"$changed"
+    return 1
+}
+
 tier=
+docs_only=0
 case "$event" in
     pull_request)
         # PR は core 以上。quick だけでは m0 の全走テストとコーパスが落ちる。
         tier=core
+        if reason=$(pr_core_reason); then
+            echo "ci-run: pull_request runs core: $reason"
+        else
+            docs_only=1
+        fi
         ;;
     push)
         if [ "$ref" != "refs/heads/main" ]; then
@@ -75,9 +116,13 @@ if [ -z "$jobs" ]; then
 fi
 out=${HADO_CI_OUT:-target/ci-gates}
 
-echo "ci-run: event=$event ref=$ref tier=$tier jobs=$jobs out=$out"
+if [ "$docs_only" -eq 1 ]; then
+    echo "ci-run: event=$event ref=$ref docs-only: the gates are skipped, the document layer runs"
+else
+    echo "ci-run: event=$event ref=$ref tier=$tier jobs=$jobs out=$out"
+fi
 status=0
-if ! bash scripts/run-gates.sh --jobs "$jobs" --tier "$tier" "$out"; then
+if [ "$docs_only" -eq 0 ] && ! bash scripts/run-gates.sh --jobs "$jobs" --tier "$tier" "$out"; then
     status=1
 fi
 # 門番が赤でも文書層は回す（赤を隠さない。判定は status に畳む）。
