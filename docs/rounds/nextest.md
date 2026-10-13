@@ -40,7 +40,7 @@ doctest は 0 件（`Doc-tests hado` が `running 0 tests`）なので、nextest
 - `scripts/nextest-setup.sh`・`scripts/nextest-full.sh`
 - `scripts/lib/gate-cache.sh` の `nextest_full_cached`・`scripts/gate-cache-run.sh` の `--nextest-full`
 - `scripts/verify-m0.sh`・`scripts/verify-m2.sh`・`scripts/verify-m3.sh`・`scripts/verify-m7.sh`
-- `scripts/verify-nextest.sh`（quick）
+- `scripts/verify-nextest.sh`（quick）と `scripts/gate-tiers.lock` の 1 行
 - `AGENTS.md`・`CONTRIBUTING.md` のコマンド
 - `docs/issues/gate-cache-libtest-evidence.md`
 - 本ファイル
@@ -132,4 +132,13 @@ $ HADO_NEXTEST_BIN=stub bash scripts/verify-m3.sh
 NG: 8 glue+unit-hm
 $ HADO_NEXTEST_BIN=stub bash scripts/verify-m7.sh
 PASSED: 1/2
+```
+
+core 層（`--jobs 4`、同じ機械で main の full 層の CI が走っていた）。層の lock に新しい門番の行が無く `verify-spec-contracts` が赤になったので、`scripts/gate-tiers-lock.sh` で作り直した（差分は `nextest	quick` の 1 行）。
+
+```
+$ bash scripts/run-gates.sh --jobs 4 --tier core out
+TALLY: 770/771 passed; red: verify-spec-contracts.log
+$ bash scripts/gate-tiers-lock.sh && bash scripts/verify-spec-contracts.sh | tail -1
+PASSED: 2/2
 ```
