@@ -174,3 +174,14 @@ PASSED: 16/16
 gates	pass	4m23s
 m0（前段）174 s、fan-out 53 s、門番の計 227 s
 ```
+
+着地後の main の CI（full、走行 38429110134、`f75201c`）。着手前の main の full（38418467127）は走行が
+24 分 20 秒、門番の区間が約 1,400 秒だった:
+
+```
+ci-run: event=push ref=refs/heads/main tier=full jobs=4 out=target/ci-gates
+TALLY: 3662/3662 passed; red: none
+PASSED: 16/16
+success 2026-10-13T16:16:15Z → 2026-10-13T16:27:52Z（11 分 37 秒）
+m0（前段）230 s、fan-out と文書層 418 s、門番の計 648 s
+```
