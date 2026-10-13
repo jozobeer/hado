@@ -12,7 +12,10 @@
 #   c. ワークフローの配線。YAML として読み、入口を呼び、依存の取得・libgc-dev・
 #      キャッシュ・打ち切り・失敗ログを持つ。層と門番の一覧をワークフローに
 #      書かない。runner は standard の ubuntu-latest で、cargo の PATH は取得より
-#      前に通す。
+#      前に通す。checkout は merge commit の親まで取る。
+#   d. 文書だけの PR。差分が round・issue・plan の文書と README・CONTRIBUTING だけ
+#      なら門番を回さず文書層だけを回す。それ以外の変更・差分が取れない形は
+#      core 以上。合成木を git リポジトリにして merge commit を作って測る。
 #
 # 判定 a・b は合成木で測る。scripts/ci-run.sh と scripts/lib/gate-tiers.sh だけを
 # 写し、run-gates と lint-docs を「受けた引数を記録する stub」に置き換える。
@@ -180,6 +183,102 @@ red_is_not_hidden() {
     [ "$?" -ne 0 ]
 }
 
+# --- d: 文書だけの PR ---
+# 合成木を git リポジトリにし、actions/checkout が PR で取る形（取り込み先の先端を
+# 1 番目の親に持つ merge commit）を作る。$1 は topic 側で木を変える shell の断片。
+pr_tree() {
+    local change=$1 repo="$workdir/pr"
+    rm -rf "$repo"
+    cp -a "$tree" "$repo"
+    (
+        cd "$repo" || exit 1
+        g() { git -c user.name=ci -c user.email=ci@example.invalid "$@" >/dev/null 2>&1; }
+        mkdir -p crates docs/rounds docs/issues docs/plans
+        for f in crates/x.rs docs/spec.md docs/plan.md docs/rounds/a.md docs/issues/a.md \
+            docs/plans/a.md README.md CONTRIBUTING.md AGENTS.md; do
+            echo base >"$f"
+        done
+        g init -q -b main . && g add -A && g commit -q -m base || exit 1
+        g checkout -q -b topic || exit 1
+        eval "$change" || exit 1
+        g add -A && g commit -q -m topic || exit 1
+        g checkout -q main && g merge -q --no-ff -m merge topic
+    ) || return 1
+    printf '%s\n' "$repo"
+}
+
+# PR の入口を合成した merge commit で 1 回走らせる。終了コードを返し、記録は $record。
+ci_on_pr() {
+    local repo
+    repo=$(pr_tree "$1") || return 2
+    : >"$record"
+    (
+        cd "$repo" || exit 1
+        HADO_CI_TEST_RECORD="$record" HADO_CI_JOBS=1 HADO_CI_OUT="$out" \
+            HADO_CI_STUB_LINT_DOCS_STATUS="${2:-0}" \
+            bash scripts/ci-run.sh pull_request refs/pull/1/merge ""
+    ) >"$stdout" 2>"$stderr"
+}
+
+docs_only_pr_runs_document_layer_alone() {
+    local change
+    for change in \
+        'echo x >>docs/rounds/a.md' \
+        'echo x >>docs/issues/a.md; echo x >>docs/plans/a.md; echo x >>docs/rounds/new.md' \
+        'echo x >>README.md; echo x >>CONTRIBUTING.md' \
+        'git rm -q docs/issues/a.md'; do
+        ci_on_pr "$change" || return 1
+        grep -q '^lint-docs$' "$record" || return 1
+        ! grep -q '^run-gates' "$record" || return 1
+    done
+    # 文書層が赤なら赤（門番を省いても赤は隠さない）。
+    ci_on_pr 'echo x >>docs/rounds/a.md' 1
+    [ "$?" -eq 1 ] || return 1
+}
+
+# core に倒した理由（文書以外の最初のパス）をログに出す。ログだけで判定を追える。
+other_pr_runs_at_least_core() {
+    local spec change want tier
+    while IFS='|' read -r change want; do
+        ci_on_pr "$change" || return 1
+        tier=$(awk '$1 == "run-gates" { for (i = 1; i <= NF; i++) if ($i == "--tier") print $(i + 1) }' "$record")
+        [ -n "$tier" ] && tier_covers "$tier" core || return 1
+        grep -qF "core: $want is not a document-only path" "$stdout" || return 1
+    done <<'CASES'
+echo x >>docs/spec.md|docs/spec.md
+echo x >>docs/plan.md|docs/plan.md
+echo x >>AGENTS.md|AGENTS.md
+echo x >>docs/rounds/a.md; echo x >>crates/x.rs|crates/x.rs
+echo x >>docs/rounds/a.md; mkdir -p docs/rounds/x; echo x >docs/rounds/x/a.rs|docs/rounds/x/a.rs
+git mv crates/x.rs docs/rounds/x.md|crates/x.rs
+CASES
+}
+
+# 差分が取れないとき（merge commit でない・親が無い）は core に倒す。
+unknown_diff_runs_at_least_core() {
+    local repo tier
+    for shape in single-parent root; do
+        repo=$(pr_tree 'echo x >>docs/rounds/a.md') || return 1
+        (
+            cd "$repo" || exit 1
+            g() { git -c user.name=ci -c user.email=ci@example.invalid "$@" >/dev/null 2>&1; }
+            case $shape in
+                single-parent) g reset -q --hard topic ;;
+                root) g checkout -q --orphan lone && g commit -q -m lone ;;
+            esac
+        ) || return 1
+        : >"$record"
+        (
+            cd "$repo" || exit 1
+            HADO_CI_TEST_RECORD="$record" HADO_CI_JOBS=1 HADO_CI_OUT="$out" \
+                bash scripts/ci-run.sh pull_request refs/pull/1/merge ""
+        ) >"$stdout" 2>"$stderr" || return 1
+        tier=$(awk '$1 == "run-gates" { for (i = 1; i <= NF; i++) if ($i == "--tier") print $(i + 1) }' "$record")
+        [ -n "$tier" ] && tier_covers "$tier" core || return 1
+        grep -qF 'core: the merge commit and its first parent are unavailable' "$stdout" || return 1
+    done
+}
+
 # --- c: ワークフローの配線 ---
 # ワークフローを YAML として読む python。runner の python3 が toolcache のものでも
 # apt の python3-yaml（/usr/bin/python3）を使えるよう、yaml を import できる方を選ぶ。
@@ -306,6 +405,12 @@ path_steps = [
 if len(path_steps) != 1 or path_steps[0] >= fetch[0]:
     fail(f'the .cargo/bin PATH step must run exactly once, before the fetch: {path_steps!r}')
 
+# PR の差分は merge commit と 1 番目の親で取る。浅い clone で親が無いと core に
+# 倒れ、文書だけの PR を見分けられない（docs/rounds/ci-docs-only.md）。
+checkouts = [step for step in steps if str(step.get('uses', '')).startswith('actions/checkout@')]
+if len(checkouts) != 1 or (checkouts[0].get('with') or {}).get('fetch-depth') != 2:
+    fail('the checkout must fetch the merge commit and its first parent (fetch-depth: 2)')
+
 if not any('libgc-dev' in run_text(step) for step in steps):
     fail('libgc-dev is not installed')
 if not any(str(step.get('uses', '')).startswith('actions/cache@') for step in steps):
@@ -335,6 +440,9 @@ check 'every entry runs the document layer' doc_layer_always_runs
 check 'an unknown event, ref, or tier is refused before any gate' refuses_unknown_before_running
 check 'a red gate or a red document layer is not hidden' red_is_not_hidden
 check 'the workflow parses and is wired for the decisions' workflow_case
+check 'a pull_request that changes only round, issue, and plan documents runs the document layer alone' docs_only_pr_runs_document_layer_alone
+check 'a pull_request that changes anything else runs at least the core tier' other_pr_runs_at_least_core
+check 'a pull_request whose diff is unknown runs at least the core tier' unknown_diff_runs_at_least_core
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
