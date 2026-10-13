@@ -1,5 +1,5 @@
 # 門番の全体テスト（scripts/nextest-full.sh）が使う profile。結果は JUnit から読む。
-# junit の置き場所を変えたら scripts/nextest-full.sh の junit も直す（verify-nextest が突き合わせる）。
+# junit の置き場所を変えたら scripts/nextest-full.sh の junit も直す。
 [profile.gate]
 fail-fast = false
 

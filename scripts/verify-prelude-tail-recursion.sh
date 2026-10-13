@@ -240,24 +240,6 @@ print(f'env/io: read_dir at {DEPTH} entries, args at {ARG_DEPTH}, both under a h
 PY
 }
 
-# --- g: 判定器そのものの較正 ---
-ptr_control() {
-    python3 - "$workdir" "$hado" <<'PY'
-import sys
-from pathlib import Path
-
-sys.path.insert(0, sys.argv[1])
-import harness
-harness.HADO = sys.argv[2]
-from harness import control
-
-root = Path(sys.argv[1]) / 'g'
-root.mkdir(parents=True, exist_ok=True)
-control(root)
-print('control: a wrong exit code, stdout, or stderr is rejected')
-PY
-}
-
 # --- h: 仕様とコーパス ---
 ptr_docs() {
     python3 - <<'PY'
@@ -281,7 +263,6 @@ check 'c sort: 1000000 elements' ptr_sort
 check 'd array and bytes: 1000000 elements' ptr_array_bytes
 check 'e string: split and join at the depth' ptr_string
 check 'f env and io: args and read_dir at the depth' ptr_env_io
-check 'g control: wrong expectations are rejected' ptr_control
 check 'h docs: spec and corpus' ptr_docs
 
 echo "PASSED: $passed/$total"

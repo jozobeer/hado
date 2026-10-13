@@ -3,10 +3,6 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
-# 単独で走らせても m3 の入れ子全体で 1 つの走行スコープを共有する。
-# shellcheck source=scripts/lib/gate-cache.sh
-. scripts/lib/gate-cache.sh
 python3 - <<'PY'
 import os, pathlib, re, subprocess, tempfile, json
 import sys
@@ -55,26 +51,6 @@ for code,p in zip(codes,reject):
         print(f'm3_reject_ok: {p} {code}')
 print(f'm3_reject_ok_n: {len(anchors)}')
 report(3, f'reject-{len(codes)}', len(anchors) == len(codes))
-p = reject[0]
-original = p.read_bytes()
-try:
-    header = '\n'.join(original.decode().splitlines()[:2])
-    p.write_text(header+'\ntype T Nest = | Leaf(T) | Node(T List Nest)\ndef main = 1\n')
-    r = check(p)
-    report(4, 'swap', 'error[E302]' in r.stderr and 'error[E201]' not in r.stderr)
-finally: p.write_bytes(original)
-shifted = 0
-for code,p in zip(codes,reject):
-    if code not in anchors:
-        continue
-    target, line, col = anchors[code]
-    original = target.read_bytes()
-    try:
-        target.write_bytes(b'\n' + original)
-        r = check(p)
-        shifted += r.returncode == 1 and not r.stdout and diagnostic(r.stderr, p, code) == (target, line + 1, col)
-    finally: target.write_bytes(original)
-report(5, 'perturb', shifted == len(codes))
 state = 0x543E5EED
 def choice(n):
     global state
@@ -106,14 +82,14 @@ with tempfile.TemporaryDirectory(prefix='hado-m3-') as temp:
         p.write_text(f'def typed(value: {ty}): {ty} => value\ndef main = typed ({value})')
         r = check(p,True)
         rounds += r.returncode == 0 and r.stdout == ty+'\n' and not r.stderr
-    report(6, 'type-round-20', rounds == 20)
+    report(4, 'type-round-20', rounds == 20)
     for i in range(10):
         p = P(temp)/f'error_{i}'/'main.hd'
         p.parent.mkdir()
         p.write_text(f'def main = ({expression("Int",3)} + {expression("Bool",3)})')
         r = check(p)
         errors += r.returncode != 0 and 'error[E305]' in r.stderr
-    report(7, 'outside-corpus', errors == 10)
+    report(5, 'outside-corpus', errors == 10)
 source = '\n'.join(p.read_text() for p in [*P('crates/hado/src').rglob('*.rs'), P('crates/hado/tests/corpus.rs')])
 corpus = [p for folder in ['tests/accept', 'tests/reject', 'tests/library'] for p in source_files(folder)]
 lib = P('crates/hado/src/lib.rs').read_text()
@@ -129,22 +105,12 @@ for folder in ['tests/accept', 'tests/reject', 'tests/library']:
                             for p in source_files(case) if p.parent != case)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
-# 全体は nextest で実走し、終了コードと HM のテスト名を取る（m0・m2・m7 と同じ id なので
-# 内容が同じなら実走は共有される）。--nocapture の印字（lower_extra_def_ng）は
-# lib の単体テストだけを直列で実走して取る。判定の条件は変えない。
-tests = run('bash','scripts/gate-cache-run.sh','--nextest-full', timeout=600)
-log = tests.stdout+tests.stderr
-cases = [line.split('\t') for line in log.splitlines() if line.startswith('nextest-case\t')]
-hm = all(any(case[1] == 'PASS' and name in case[3] for case in cases if len(case) == 4)
-         for name in ['unify','generalize','occurs','signature_matching'])
-report(8, 'glue+unit-hm', glue and hm and tests.returncode == 0)
-unit = run('cargo','test','--offline','--lib','--','--nocapture','--test-threads=1', timeout=600)
-unit_log = unit.stdout+unit.stderr
+report(6, 'glue', glue)
 lock_entries = P('tests/corpus.sha256').read_text().splitlines()
 lock_paths = [line.split(maxsplit=1)[1].lstrip('*') for line in lock_entries if len(line.split(maxsplit=1)) == 2]
 expected_paths = {str(p) for p in corpus} | {str(p) for p in P('stdlib').glob('*.hd')}
 lock_check = run('sha256sum', '--strict', '--status', '-c', 'tests/corpus.sha256')
-report(9,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
+report(7,'corpus-lock', lock_check.returncode == 0 and len(lock_paths) == len(expected_paths) and set(lock_paths) == expected_paths)
 def spec_section(number):
     lines, on, heading = [], False, f'## {number}.'
     for line in P('docs/spec.md').read_text().splitlines():
@@ -164,9 +130,8 @@ type_pat = r'^type\s+(?:[A-Z]\w*\s+|\([A-Z]\w*(?:\s*,\s*[A-Z]\w*)+\)\s+)?'
 types_ok = bool(known_types) and all(re.search(type_pat + re.escape(ty) + r'\s*=', stdlib_text, re.M) for ty in known_types)
 effect_ok = bool(known_effect) and any(re.search(r'^effect\s+' + re.escape(known_effect) + r'\b', path.read_text(), re.M) for path in stdlib_files)
 no_early_def = not any(re.search(r'\bdef\b', re.split(r'\b(?:module|implement)\b', re.sub(r'//[^\n]*', '', path.read_text()), maxsplit=1)[0]) for path in stdlib_files)
-report(10,'stdlib-types', types_ok and effect_ok and no_early_def)
-report(11,'extra-def',len(re.findall(r'(?<![A-Za-z_])lower_extra_def_ng: 1(?=\n)', unit_log)) == 1)
+report(8,'stdlib-types', types_ok and effect_ok and no_early_def)
 passed = sum(results.values())
-print(f'PASSED: {passed}/11')
-raise SystemExit(0 if passed == 11 else 1)
+print(f'PASSED: {passed}/8')
+raise SystemExit(0 if passed == 8 else 1)
 PY

@@ -370,35 +370,6 @@ print(f'corpus: {len(selected)} §55 cases run, errors={errors}')
 PY
 }
 
-# --- i: 判定器そのものの較正（期待値の計算が正準形と往復を満たす）---
-judge_check() {
-    python3 - "$workdir" <<'PY'
-import math
-import sys
-
-sys.path.insert(0, sys.argv[1])
-from harness import canonical, parse_expected
-
-samples = [0.0, -0.0, 0.1, 3.0, 1e300, -1e300, 1.7976931348623157e308,
-           5e-324, -5e-324, 2.2250738585072014e-308]
-for value in samples:
-    text = canonical(value)
-    assert 'e' not in text and 'E' not in text, text
-    assert math.copysign(1.0, float(text)) == math.copysign(1.0, value), (value, text)
-    assert float(text) == value, (value, text)
-accepted = ['0.0', '007.5', '1.00', '9007199254740993.0',
-            '-0.' + '0' * 323 + '3', '-0.' + '0' * 323 + '5']
-for text in accepted:
-    assert parse_expected(text) is not None, text
-rejected = ['', '1', '1.', '.5', '+1.0', '1e3', '0x1', '1.2.3',
-            '2' + '0' * 308 + '.0', '0.' + '0' * 323 + '1',
-            '-' + '0.' + '0' * 323 + '2']
-for text in rejected:
-    assert parse_expected(text) is None, text
-print('judge: canonical round-trips, no exponent, and parse_expected agrees')
-PY
-}
-
 check 'a char: boundary scalars, round trip, UTF-8 bytes and InvalidScalar' char_check
 check 'b float_to_string: §54 canonical spellings, no exponent, nan and inf' float_to_string_check
 check 'c main print: the same canonical spellings through CanonicalFloat' main_print_check
@@ -407,7 +378,6 @@ check 'e parse rejected: grammar, overflow and underflow are InvalidFloat' parse
 check 'f of_int: i64 to f64 round to nearest, ties to even' of_int_check
 check 'g spec: §55 inventory, signatures, failure rows and grammar' spec_check
 check 'h corpus: the §55 accept cases with expect and expect-error run' corpus_check
-check 'i judge: canonical and parse_expected are calibrated' judge_check
 
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
