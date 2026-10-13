@@ -186,3 +186,12 @@ ci-run: event=pull_request ref=refs/pull/100/merge tier=core jobs=4 out=target/c
 TALLY: 774/774 passed; red: none
 PASSED: 16/16
 ```
+
+着地後、文書だけの PR（#102、`docs/rounds/ci-public.md` だけを変える）の走行 38423295640。
+15:34:57 に作成、15:35:51 に `success`（約 54 秒）。`RUN: verify-` の行は無い。
+
+```
+$ gh run view 38423295640 --log | grep -aE 'ci-run:|RUN: verify|TALLY|PASSED:'
+ci-run: event=pull_request ref=refs/pull/102/merge docs-only: the gates are skipped, the document layer runs
+PASSED: 16/16
+```
