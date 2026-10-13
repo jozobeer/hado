@@ -223,3 +223,32 @@ $ git log --oneline -3
 3723b9a Merge pull request #88 from jozobeer/full-tier-reds
 8edf94b Merge main into full-tier-reds
 ```
+
+### 着地後の全走（2026-10-13、main `b6f7126`）
+
+main を checkout した側（`.worktrees/postlanding-main`）で回した。full 層（quick・
+core・full の累積に文書層を足した 84 本）は `TALLY: 3894/3894 passed; red: none` で
+赤は 1 本も無い。`cargo test --offline` は full 層の門番 `verify-m0` の検査 2 が
+`cargo-test passed=850` で緑である（終了コード 0、`FAILED` は 0）。同じ木で回し
+直しても 75 スイートすべて `test result: ok`、合計 850 passed で一致した。quick 層
+の門番 6 本は full 層の走行に含まれ、すべて緑である。
+
+```
+$ bash scripts/run-gates.sh --tier full target/.gates-full | tail -1
+TALLY: 3894/3894 passed; red: none
+$ ./target/debug/hado run tools/gates/main.hd -- target/.gates-full
+3894/3894 passed; red: none
+$ grep cargo-test target/.gates-full/verify-m0.log
+OK: 2 cargo-test passed=850
+$ for f in verify-ci verify-gate-cache verify-m1-spec verify-repl verify-rustfmt verify-spec-model; do tail -1 target/.gates-full/$f.log; done
+PASSED: 8/8
+PASSED: 26/26
+PASSED: 1/1
+PASSED: 10/10
+PASSED: 2/2
+PASSED: 3/3
+$ tail -1 target/.gates-full/verify-string-split-linear.log
+PASSED: 11/11
+```
+
+`join: small` は着地後の full 全走でも床（1 ms）を割るが、床が時計の分解能から導かれるので検査 i は緑である。
