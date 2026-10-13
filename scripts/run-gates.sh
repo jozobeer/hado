@@ -398,7 +398,7 @@ fi
 # 赤を見逃さないため（docs/plan.md 33 節）。明示的に足した門番は差し引く。
 if [ "$tier" = "core" ]; then
     echo "full-only gates (not run in this run):"
-    comm -23 <(hado_tier_all_gates | LC_ALL=C sort) \
+    LC_ALL=C comm -23 <(hado_tier_all_gates | LC_ALL=C sort) \
         <(for name in "${gates[@]}"; do printf '%s\n' "${name#verify-}"; done | LC_ALL=C sort) |
         sed 's/^/  /'
 fi

@@ -1,3 +1,9 @@
 [workspace]
 members = ["crates/hado"]
 resolver = "2"
+
+# テストと門番は反復のたびに debug ビルドの hado を起動し、そのたびに prelude を解析する。
+# opt-level 0 ではその固定費が 1 回約 1 秒になる（docs/rounds/dev-opt-level.md）。
+# debug-assertions と overflow-checks は dev の既定のまま有効である。
+[profile.dev]
+opt-level = 1
