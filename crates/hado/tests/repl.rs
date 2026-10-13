@@ -90,6 +90,24 @@ fn repl_binds_a_function_value_without_printing_it() {
     assert_eq!(out, "5\n");
 }
 
+/// 束縛の仮引数は、本体の自由な名前だけにする。字句に同じ綴りがあっても、
+/// ラムダの仮引数や field・module member は値の参照ではない。字句で拾うと
+/// 合成した `hado_step` が E505 になり、その入力が捨てられる。
+#[test]
+fn repl_does_not_pass_a_binding_that_only_shares_a_token_spelling() {
+    let out = stdout("1 as x ->\nfn(x => x + 1) 2\n");
+    assert_eq!(out, "3\n");
+    let out = stdout("1 as map ->\nList.map [1, 2] fn(v => v + 1)\n");
+    assert_eq!(out, "[2, 3]\n");
+    let out = stdout("\"hello\" as message ->\n{ message = \"err\" }\n");
+    assert_eq!(out, "{ message = \"err\" }\n");
+    // 本当に使う束縛は、同名の仮引数や field があっても残る。
+    let out = stdout("1 as x ->\nfn(a => a + x) 2\n");
+    assert_eq!(out, "3\n");
+    let out = stdout("1 as x ->\n2 as x ->\nx\n");
+    assert_eq!(out, "2\n");
+}
+
 /// §52: `hado repl <dir>` はそのライブラリを読み込んだセッションを始める。
 #[test]
 fn repl_loads_a_library_from_its_directory() {
