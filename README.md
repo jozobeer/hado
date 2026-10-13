@@ -22,7 +22,7 @@ def create_user input =>
 
 ## 必要なもの
 
-- Rust（Cranelift 0.135 が 1.95 以上を要求。1.98 で実測済み）
+- Rust 1.99.0（`rust-toolchain.toml` で固定し、rustup が自動で入れる。Cranelift 0.135 は 1.95 以上を要求）
 - `cc`（リンクに使う）
 - `libgc-dev`（Boehm GC）
 

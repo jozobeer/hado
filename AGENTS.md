@@ -13,7 +13,7 @@
 
 ## 環境
 
-- Rust（rustfmt と clippy を含む）、`cc`、`libgc-dev`。Cranelift の版は `Cargo.lock` に固定
+- Rust（rustfmt と clippy を含む）、`cc`、`libgc-dev`。Rust の版は `rust-toolchain.toml`、Cranelift の版は `Cargo.lock` に固定。環境変数 `RUSTUP_TOOLCHAIN` は `rust-toolchain.toml` より優先されるので設定しない
 - `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/spec-lock.sh` と `scripts/verify-spec-model.sh` は TOML を読むので 3.11 以上（3.10 以前は `tomli` を入れる）。`scripts/verify-ci.sh` はワークフローを YAML として読むので `yaml` も要る（Ubuntu は `python3-yaml`）
 - `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
