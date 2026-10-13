@@ -906,11 +906,10 @@ fn call_text(f: &Node, args: &[Node], indent: usize) -> String {
 fn field_text(l: &Node, r: &FieldName, indent: usize) -> String {
     // `.` は適用より強い（§7）。base が適用だと括弧が無く `f a.b` になり、
     // `.` が最後の引数に付く。`1.a` は浮動小数の字句（E103）にも読まれる。
-    // 括弧の中は入力の終わりと同じなので、右端は続きの無い位置として印字する。
-    let base = if matches!(
-        l.kind,
-        NodeKind::Int(_) | NodeKind::Apply(..) | NodeKind::Call(..)
-    ) {
+    // 構築子の括弧呼び出し `B(x)` は primary なので括弧は要らない（`parser` の
+    // `canonical_field` と同じ判定）。括弧の中は入力の終わりと同じなので、
+    // 右端は続きの無い位置として印字する。
+    let base = if matches!(l.kind, NodeKind::Int(_) | NodeKind::Apply(..)) {
         format!("({})", expr(l, indent, true))
     } else {
         expr_prec(l, indent, false, 9)
