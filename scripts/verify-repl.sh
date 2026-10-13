@@ -214,5 +214,18 @@ repl_usage() {
 }
 check '10 repl takes at most one library directory' repl_usage
 
+# --- 11. 束縛の仮引数は自由な名前だけ。字句の同綴り（ラムダの仮引数・field）は使わない ---
+binding_not_a_token_match() {
+    session lambda-param '1 as x ->\nfn(x => x + 1) 2\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  lambda status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '3')" ] || { echo "  lambda stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  lambda stderr=$stderr" >&2; return 1; }
+    session member '1 as map ->\nList.map [1, 2] fn(v => v + 1)\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  member status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '[2, 3]')" ] || { echo "  member stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  member stderr=$stderr" >&2; return 1; }
+}
+check '11 a later input may reuse a binding name as a parameter or field' binding_not_a_token_match
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
