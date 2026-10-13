@@ -42,16 +42,27 @@ docs_only_path() {
     return 1
 }
 
-# PR の差分がすべて docs_only_path か。merge commit でない・差分が取れない・
-# 空なら偽。リネームは --no-renames で削除と追加に分け、元のパスも見る。
-pr_is_docs_only() {
+# PR に core が要る理由を出す。差分がすべて docs_only_path なら何も出さずに偽。
+# merge commit でない・差分が取れない・空なら core とする。リネームは
+# --no-renames で削除と追加に分け、元のパスも見る。
+pr_core_reason() {
     local changed path
-    [ -n "$(git rev-parse -q --verify 'HEAD^2' 2>/dev/null)" ] || return 1
-    changed=$(git diff --no-renames --name-only 'HEAD^1' HEAD 2>/dev/null) || return 1
-    [ -n "$changed" ] || return 1
+    if [ -z "$(git rev-parse -q --verify 'HEAD^2' 2>/dev/null)" ] ||
+        ! changed=$(git diff --no-renames --name-only 'HEAD^1' HEAD 2>/dev/null); then
+        echo 'the merge commit and its first parent are unavailable'
+        return 0
+    fi
+    if [ -z "$changed" ]; then
+        echo 'the diff is empty'
+        return 0
+    fi
     while IFS= read -r path; do
-        docs_only_path "$path" || return 1
+        if ! docs_only_path "$path"; then
+            echo "$path is not a document-only path"
+            return 0
+        fi
     done <<<"$changed"
+    return 1
 }
 
 tier=
@@ -60,7 +71,9 @@ case "$event" in
     pull_request)
         # PR は core 以上。quick だけでは m0 の全走テストとコーパスが落ちる。
         tier=core
-        if pr_is_docs_only; then
+        if reason=$(pr_core_reason); then
+            echo "ci-run: pull_request runs core: $reason"
+        else
             docs_only=1
         fi
         ;;
