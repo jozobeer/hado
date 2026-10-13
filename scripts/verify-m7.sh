@@ -86,6 +86,6 @@ print(f"prelude inventory: {passed}/{total}")
 sys.exit(0 if passed == total else 1)
 PY
 if [ "$?" -eq 0 ]; then passed=$((passed + 1)); else failed=1; fi
-if cargo_cached test --offline --no-fail-fast; then passed=$((passed + 1)); else failed=1; fi
+if nextest_full_cached; then passed=$((passed + 1)); else failed=1; fi
 echo "PASSED: $passed/$total"
 exit "$failed"
