@@ -24,18 +24,26 @@ else
     fail 1 "cargo-build exit!=0"
 fi
 
-# --- shared cargo test output for checks 2..4 ---
-cargo_cached test --offline --no-fail-fast >"$TMPD/test.log" 2>&1
+# --- shared full test output for checks 2..4 and 8 ---
+# テストごとの結果は scripts/nextest-full.sh の `nextest-case` 行から読む。
+nextest_full_cached >"$TMPD/test.log" 2>&1
 test_status=$?
-passed=$(grep -E "test result:" "$TMPD/test.log" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | awk '{s+=$1} END{print s+0}')
-walk_ok=$(awk '/tests.walk.rs/{f=1} f && /test result: ok/{ok=1; f=0} f && /test result: FAILED/{f=0} END{print ok+0}' "$TMPD/test.log")
-tail_ok=$(awk '/tests.tail.rs/{f=1} f && /test result: ok/{ok=1; f=0} f && /test result: FAILED/{f=0} END{print ok+0}' "$TMPD/test.log")
+passed=$(awk -F'\t' '$1 == "nextest-case" && $2 == "PASS" { n++ } END { print n + 0 }' "$TMPD/test.log")
+# バイナリのテストが 1 件以上あり、すべて PASS なら 1。
+binary_ok() {
+    awk -F'\t' -v b="$1" '
+        $1 == "nextest-case" && $3 == b { n++; if ($2 != "PASS") bad = 1 }
+        END { print (n > 0 && !bad) ? 1 : 0 }
+    ' "$TMPD/test.log"
+}
+walk_ok=$(binary_ok hado::walk)
+tail_ok=$(binary_ok hado::tail)
 
-# --- check 2: cargo test passes >= 2 with exit 0 ---
+# --- check 2: the full test passes >= 2 with exit 0 ---
 if [ "$test_status" -eq 0 ] && [ "${passed:-0}" -ge 2 ]; then
-    pass 2 "cargo-test passed=$passed"
+    pass 2 "nextest passed=$passed"
 else
-    fail 2 "cargo-test status=$test_status passed=${passed:-0} (<2 or nonzero)"
+    fail 2 "nextest status=$test_status passed=${passed:-0} (<2 or nonzero)"
 fi
 
 # --- check 3: walk ---
@@ -118,7 +126,7 @@ fi
 
 # --- check 8: 専用のテストターゲットが実在し、走っている ---
 # 削除したラッパー門番（`cargo test --test rN_...` を呼んでいた verify-r13.sh や
-# verify-record-constructors.sh）が持っていた検査。`cargo test` は対象ごと消えても残りを
+# verify-record-constructors.sh）が持っていた検査。全体テストは対象ごと消えても残りを
 # 走らせて緑になるので、対象の名前が全走の出力に現れることを見る（審査の指摘）。名前は
 # ディスクから導くと、消えた対象が期待からも消えて素通りするため、削除した門番が守っていた
 # 組をここに固定する。
@@ -132,15 +140,12 @@ for name in \
 do
     if [ ! -f "crates/hado/tests/$name.rs" ]; then
         target_reasons="$target_reasons absent-$name"
-    elif ! grep -qF "Running tests/$name.rs" "$TMPD/test.log"; then
-        target_reasons="$target_reasons not-run-$name"
     else
-        # 中身を空にすると `Running` は出るが 0 件になる。1 件以上を要求する。
-        count=$(awk -v n="tests/$name.rs" '
-            index($0, "Running " n) { seen = 1; next }
-            seen && /^running [0-9]+ tests?$/ { print $2; exit }
+        # 走らなかった対象と中身を空にした対象は、どちらも結果の行が 0 件になる。
+        count=$(awk -F'\t' -v b="hado::$name" '
+            $1 == "nextest-case" && $3 == b { n++ } END { print n + 0 }
         ' "$TMPD/test.log")
-        [ "${count:-0}" -ge 1 ] || target_reasons="$target_reasons empty-$name"
+        [ "$count" -ge 1 ] || target_reasons="$target_reasons not-run-or-empty-$name"
     fi
 done
 if [ -z "$target_reasons" ]; then
