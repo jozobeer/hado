@@ -29,7 +29,7 @@ $ wc -c /tmp/out/legacy.hd
 
 - 構文で読めない項目を含むファイルは、診断つきで `skipped` に数えられ、出力先へ書かれない。
 - 空のファイルが黙って書かれないことを門番が測る（`scripts/verify-r57.sh` か `scripts/verify-r71.sh` の隣）。
-- `bash scripts/verify-postfix-binding.sh` と `bash scripts/run-gates.sh --tier full` が red なし。
+- `cargo test --offline --test postfix_close` が緑で、`bash scripts/run-gates.sh --tier full` が red なし。
 
 ## 由来
 

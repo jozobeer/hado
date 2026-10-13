@@ -1,5 +1,0 @@
-// spec: §55
-def main =
-  IoDefault.read_stdin as bytes ->
-  Bytes.to_string bytes |> String.split "\n" as values ->
-  values |> List.length |> Int.to_string |> IoDefault.log

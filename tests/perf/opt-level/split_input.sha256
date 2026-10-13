@@ -1,5 +1,0 @@
-# string-split-linear の完了条件（scripts/verify-string-split-linear.sh 検査 e）の
-# lines(1000000, 64) の出力の錠。生成は tests/perf/opt-level/split_input.py。
-# 1 行目が sha256、2 行目がバイト数。
-6f7551b861ea5f59c30bf16d41bfcf4467491e35453103f89276b9b85f4faed8
-64999999
