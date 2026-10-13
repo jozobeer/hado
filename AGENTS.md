@@ -17,12 +17,13 @@
 - `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/spec-lock.sh` と `scripts/verify-spec-model.sh` は TOML を読むので 3.11 以上（3.10 以前は `tomli` を入れる）。`scripts/verify-ci.sh` はワークフローを YAML として読むので `yaml` も要る（Ubuntu は `python3-yaml`）
 - `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
-- `curl`・`tar`・`gunzip`・`sha256sum`（coreutils）。`scripts/treesitter-setup.sh` が固定した版の tree-sitter CLI と Neovim を取ってきて展開するのに使う
+- `curl`・`tar`・`gunzip`・`sha256sum`（coreutils）。`scripts/treesitter-setup.sh` が固定した版の tree-sitter CLI と Neovim を、`scripts/nextest-setup.sh` が門番の全体テストに使う cargo-nextest を取ってきて展開するのに使う
 
 ## コマンド
 
 ```
 cargo test --offline                 # 単体テストとコーパス判定
+cargo nextest run --offline          # 同じテストを nextest で並列に（門番の全体テストはこちら）
 cargo fmt --all --check                  # 整形（門番 verify-rustfmt、quick）
 cargo clippy --offline --all-targets -- -D warnings # lint（門番 verify-clippy、core）
 bash scripts/verify-*.sh             # リポジトリルートから。最後に PASSED: n/N

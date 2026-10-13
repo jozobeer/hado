@@ -8,6 +8,7 @@
 
 ```
 cargo test --offline                     # 単体テストとコーパス判定
+cargo nextest run --offline              # 同じテストを nextest で並列に（門番の全体テストはこちら）
 bash scripts/run-gates.sh --tier quick 出力先 # 保存ごと。ビルドと軽い門番（≦ 2 分）
 bash scripts/run-gates.sh --tier core 出力先  # コミット前。m0〜m7・r38（≦ 7 分）
 bash scripts/run-gates.sh --tier full 出力先  # 節目・夜間。38 本すべて（≦ 18 分）
@@ -20,7 +21,7 @@ cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（cor
 
 ### 門番の実行と畳み込み
 
-`run-gates.sh` は 1 回の全走中、重複する門番や `cargo test` の実走を 1 度に畳み込んで省略する（`docs/plan.md` 32 節）。畳み込みは、全走ログに「対象の実行」と「ok」の証拠がある場合のみ適用される（33 節）。門番を別々のシェルで個別に走らせた場合、畳み込みは各門番の入れ子範囲でのみ機能する。
+`run-gates.sh` は 1 回の全走中、重複する門番や全体テスト（`scripts/nextest-full.sh`）の実走を 1 度に畳み込んで省略する（`docs/plan.md` 32 節、`docs/rounds/nextest.md`）。全体テストは固定した版の nextest で走り、門番はその結果を `nextest-case` 行で読む。門番を別々のシェルで個別に走らせた場合、畳み込みは各門番の入れ子範囲でのみ機能する。
 
 - 層に個別の門番を追加する場合は `--tier core 出力先 verify-r33` のように指定する。
 - 文書の整合性は `scripts/lint-docs.sh` が検証し、full 層の最後に実行される。
