@@ -129,12 +129,14 @@ for folder in ['tests/accept', 'tests/reject', 'tests/library']:
                             for p in source_files(case) if p.parent != case)
 for p in corpus:
     glue &= not any(line in source for line in p.read_text().splitlines() if len(line)>=20)
-# 全体は並列で実走し、終了コードと HM のテスト名を取る（m7 と同じコマンドなので
+# 全体は nextest で実走し、終了コードと HM のテスト名を取る（m0・m2・m7 と同じ id なので
 # 内容が同じなら実走は共有される）。--nocapture の印字（lower_extra_def_ng）は
 # lib の単体テストだけを直列で実走して取る。判定の条件は変えない。
-tests = run('bash','scripts/gate-cache-run.sh','--cargo','test','--offline','--no-fail-fast', timeout=600)
+tests = run('bash','scripts/gate-cache-run.sh','--nextest-full', timeout=600)
 log = tests.stdout+tests.stderr
-hm = all(re.search(r'test [^\n]*'+name+r'[^\n]* \.\.\. ok',log) for name in ['unify','generalize','occurs','signature_matching'])
+cases = [line.split('\t') for line in log.splitlines() if line.startswith('nextest-case\t')]
+hm = all(any(case[1] == 'PASS' and name in case[3] for case in cases if len(case) == 4)
+         for name in ['unify','generalize','occurs','signature_matching'])
 report(8, 'glue+unit-hm', glue and hm and tests.returncode == 0)
 unit = run('cargo','test','--offline','--lib','--','--nocapture','--test-threads=1', timeout=600)
 unit_log = unit.stdout+unit.stderr
