@@ -89,3 +89,19 @@ PASSED: 8/8
 === ubuntu-24.04-arm ===          runs-on: 'ubuntu-24.04-arm' (a public repository runs on ubuntu-latest) PASSED: 7/8
 === macos-latest ===              runs-on: 'macos-latest' (a public repository runs on ubuntu-latest) PASSED: 7/8
 ```
+
+PR の core 層（走行 38411482495、2026-10-13、`ubuntu-latest`）。14:13:16 に作成、14:27:20 に
+`success`。比較として、直前の自前 runner での PR の core 層（走行 38406705678）は 20 分 21 秒。
+
+```
+$ gh api repos/jozobeer/hado/actions/runs/38411482495/jobs -q '.jobs[0]|{runner_name,labels}'
+{"labels":["ubuntu-latest"],"runner_name":"GitHub Actions 1000003591"}
+
+$ gh run view 38411482495 --log | grep -aE 'toolchain|ci-run:|TALLY|PASSED:'
+rustc 1.99.0 (b940084d7 2026-09-28)
+cargo 1.99.0 (5f94df478 2026-08-27)
+4
+ci-run: event=pull_request ref=refs/pull/99/merge tier=core jobs=4 out=target/ci-gates
+TALLY: 771/771 passed; red: none
+PASSED: 16/16
+```
