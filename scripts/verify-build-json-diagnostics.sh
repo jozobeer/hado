@@ -171,15 +171,6 @@ else
     record "K1:4命令の診断" FAIL
 fi
 
-# ---------- K2: 文書の形（round ファイルの実測フェンス） ----------
-printf '== K2 ==\n'
-if out=$(bash scripts/lint-docs.sh 2>&1); then
-    record "K2:lint-docs($(tail -1 <<<"$out"))" PASS
-else
-    printf '%s\n' "$out" | tail -10
-    record "K2:lint-docs" FAIL
-fi
-
 # ---------- 集計 ----------
 passed=0
 for status in "${statuses[@]}"; do

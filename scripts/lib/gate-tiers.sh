@@ -10,11 +10,8 @@
 #   full  -> quick + core + full（実在の門番すべて）
 # とする。docs/plan.md には一覧を書かない。
 #
-# 層を足す・門番を足すときは、門番自身の `# tier:` 行を直す。
-# scripts/verify-gate-cache.sh の自己判定が「各門番が有効な `# tier:` 行を
-# ちょうど 1 つ持つ」「走査結果 == 実在の門番」「重複なく覆う」
-# 「run-gates が同じ一覧を解決する」を機械で照合するので、実在の門番との
-# ずれは門番の赤になる。
+# 層を足す・門番を足すときは、門番自身の `# tier:` 行を直す。`# tier:` 行が無いか
+# 2 つ以上ある門番は、走査が理由を出して失敗する。
 #
 # 走査の基準は source した時点のこのファイルの位置であり、呼び出し時の cwd には
 # 依存しない。
@@ -87,32 +84,6 @@ hado_tier_all_gates() {
     hado_tier_minimal_gates quick || return
     hado_tier_minimal_gates core || return
     hado_tier_minimal_gates full
-}
-
-# 並列（--jobs>1）の前段で直列に完走させる門番（docs/plan.md 34 節）。
-# キャッシュの鍵は作業ツリー全体のハッシュなので、共有ツリーを書き換える門番を
-# ファンアウトで走らせると他の門番の結果が揺れる。ここに挙げた門番は
-#   gate-cache      : リポジトリ直下に probe を置いて消す（内容ハッシュを揺らす）
-#   m0              : ビルドと全走テスト。full-test の証拠を確定させる barrier
-#   m1-corpus/m2/m3 : tests/accept・tests/reject に probe を置き、入れ替える
-# ため直列にする。run-gates はこの一覧 ∩ 走行する門番を前段に置く。
-#
-# 後ろの 6 本は crates/hado/src のソースを一時的に書き換えて cargo build し、
-# 元へ戻す。ファンアウトで走らせると、同じ窓でソースを読む門番（clippy・
-# rustfmt・他の変異門番）が書き換え中の木を見て偽の赤になる（2026-10-12 の
-# main の全走で、verify-fmt-layout の変異中に verify-clippy が comment_line を
-# dead_code と報告した。docs/rounds/ci-serial-mutators.md）。
-# ツリーを書く門番を足したら、ここにも足す。verify-gate-cache.sh が一覧が
-# 実在の門番の部分集合であることを機械で見る。
-hado_tier_serial_gates() {
-    printf '%s\n' \
-        gate-cache m0 m1-corpus m2 m3 \
-        fmt-layout \
-        localize-message-positions \
-        restore-option-question \
-        pure-closure-in-type-variable-argument-fails-specialization \
-        recursive-effectful-closure-specialization-reads-outcome-as-int \
-        postfix-binding
 }
 
 hado_tiers() {

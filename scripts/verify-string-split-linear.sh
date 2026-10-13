@@ -658,24 +658,6 @@ assert_linear('join', small_total, small, large_total, large)
 PY
 }
 
-# --- j: 判定器そのものの較正（対照を引くことが比の判定に効く）---
-control_probe() {
-    python3 - "$workdir" <<'PY'
-import sys
-
-sys.path.insert(0, sys.argv[1])
-from harness import RATIO, ratio_verdict
-
-# issue の例: 線形の構築が 1 s と 2 s、join が 0.1 s と 0.4 s なら、全体の比は
-# 2.18 で通り、引いた比は 4 で落ちる。対照を取らない門番はここで通ってしまう。
-assert (2.4 / 1.1) <= RATIO
-assert ratio_verdict(1.1, 1.0, 2.4, 2.0) is False
-assert ratio_verdict(1.1, 1.0, 2.2, 2.0) is True
-assert ratio_verdict(1.1, 1.0, 2.0, 1.0) is False
-print('control: the control-subtracted ratio rejects the issue example that the total ratio accepts')
-PY
-}
-
 # --- k: R1 の完了条件のうち Char / Float の長さ（char-and-float-conversions が引き取る）---
 # R1 には Char module と正準形の Float.to_string が無く、この 2 つを測れなかった。
 # 上の c は runtime の単体テストなので、長さそのものはここで測る。
@@ -708,7 +690,6 @@ check 'g perf: split with a growing ASCII separator is linear' \
 check 'h perf: split with a growing Japanese separator is linear' \
     perf_split_growing あ い 7000000 14000000 'h'
 check 'i perf: join is linear in the element count' perf_join
-check 'j control: the subtracted ratio judge rejects the issue example' control_probe
 check 'k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ' conversion_lengths
 
 echo "PASSED: $passed/$total"

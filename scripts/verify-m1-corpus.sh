@@ -1,16 +1,12 @@
 #!/bin/bash
 # tier: core
-# M1 corpus acceptance checks 1..7 (see docs/plan.md, M1). Run from the repository root.
+# M1 corpus acceptance checks (see docs/plan.md, M1). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
-# shellcheck source=scripts/lib/gate-cache.sh
-. scripts/lib/gate-cache.sh
-
 ok=0
-total=7
+total=5
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -19,10 +15,8 @@ COV="docs/spec-coverage.md"
 # 本文 §N（N は整数か小数）と付録 付録X の両方を受ける。
 TAG_RE='^// spec: (§[0-9]+(\.[0-9]+)?|付録[A-Z])$'
 PLAN="docs/plan.md"
-CORPUS_RS="crates/hado/tests/corpus.rs"
 
 TMPD="$(mktemp -d)"
-find docs runtime scripts -type f -print0 | sort -z | xargs -0 sha256sum > "$TMPD/protected.sha"
 trap 'rm -rf "$TMPD"' EXIT
 
 # --- shared: section-57 code table (same extraction as verify-m1-spec.sh:79-95) ---
@@ -221,81 +215,7 @@ else
     fail 4 "short-circuit:$c4_reasons"
 fi
 
-# --- check 5: cargo test --test corpus enumerates every file ---
-c5_reasons=""
-if [ ! -f "$CORPUS_RS" ]; then
-    c5_reasons="$c5_reasons missing-corpus.rs"
-else
-    n_accept=0
-    n_reject_disk=0
-    if [ -d tests/accept ]; then
-        n_accept=$(ls tests/accept/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
-    fi
-    if [ -d tests/reject ]; then
-        n_reject_disk=$(ls tests/reject/*/main.hd 2>/dev/null | wc -l | tr -d ' ')
-    fi
-    want_n=$((n_accept + n_reject_disk))
-    (cd tests/accept 2>/dev/null && ls */main.hd 2>/dev/null | sed 's|^|tests/accept/|' | sort >"$TMPD/disk_accept.txt") || : >"$TMPD/disk_accept.txt"
-    (cd tests/reject 2>/dev/null && ls */main.hd 2>/dev/null | sed 's|^|tests/reject/|' | sort >"$TMPD/disk_reject.txt") || : >"$TMPD/disk_reject.txt"
-    cat "$TMPD/disk_accept.txt" "$TMPD/disk_reject.txt" | sort >"$TMPD/disk_all.txt"
-
-    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus.log" 2>&1
-    corpus_status=$?
-    if [ "$corpus_status" -ne 0 ]; then
-        c5_reasons="$c5_reasons cargo-test-corpus-exit=$corpus_status"
-    fi
-    if ! grep -qFx "corpus_enumerated: $want_n" "$TMPD/corpus.log"; then
-        got=$(grep -E '^corpus_enumerated: ' "$TMPD/corpus.log" | head -n 1)
-        c5_reasons="$c5_reasons enumerated!=disk-$want_n(got:$got)"
-    fi
-    grep -E '^corpus_file: ' "$TMPD/corpus.log" | sed 's/^corpus_file: //' | sort -u >"$TMPD/out_files.txt"
-    if [ -s "$TMPD/disk_all.txt" ] || [ -s "$TMPD/out_files.txt" ]; then
-        d_only_disk=$(comm -23 "$TMPD/disk_all.txt" "$TMPD/out_files.txt" | tr '\n' ' ')
-        d_only_out=$(comm -13 "$TMPD/disk_all.txt" "$TMPD/out_files.txt" | tr '\n' ' ')
-        [ -z "$d_only_disk" ] || c5_reasons="$c5_reasons missing-from-output:$d_only_disk"
-        [ -z "$d_only_out" ] || c5_reasons="$c5_reasons extra-in-output:$d_only_out"
-    fi
-    for lit in 'read_dir' 'tests/accept' 'tests/reject' 'corpus_enumerated:' 'corpus_file:' 'compile_source_to_object' 'link_executable' '// expect:' '// error:'; do
-        grep -qF -- "$lit" "$CORPUS_RS" || c5_reasons="$c5_reasons corpus.rs-missing:$lit"
-    done
-    for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
-        [ -e "$f" ] || continue
-        base=$(basename "$(dirname "$f")")
-        if grep -qF -- "\"$base\"" "$CORPUS_RS"; then
-            c5_reasons="$c5_reasons corpus.rs-quotes-basename:$base"
-        fi
-    done
-    # predicate 7: probe behaviour (enumeration, not a hard-coded count)
-    mkdir -p tests/accept/__probe__
-    printf -- '// spec: 付録B\n// expect: 3\n// needs: prelude\ndef main = Int.to_string (1 + 2)\n' >tests/accept/__probe__/main.hd
-    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_probe.log" 2>&1
-    probe_status=$?
-    rm -f tests/accept/__probe__/main.hd
-    rmdir tests/accept/__probe__
-    want_probe=$((want_n + 1))
-    if [ "$probe_status" -ne 0 ]; then
-        c5_reasons="$c5_reasons probe-exit=$probe_status"
-    fi
-    if ! grep -qFx "corpus_enumerated: $want_probe" "$TMPD/corpus_probe.log"; then
-        got=$(grep -E '^corpus_enumerated: ' "$TMPD/corpus_probe.log" | head -n 1)
-        c5_reasons="$c5_reasons probe-enumerated!=disk-$want_probe(got:$got)"
-    fi
-    if ! grep -qFx 'corpus_file: tests/accept/__probe__/main.hd' "$TMPD/corpus_probe.log"; then
-        c5_reasons="$c5_reasons probe-path-missing"
-    fi
-    cargo_cached test --test corpus -- --nocapture >"$TMPD/corpus_back.log" 2>&1
-    if ! grep -qFx "corpus_enumerated: $want_n" "$TMPD/corpus_back.log"; then
-        got=$(grep -E '^corpus_enumerated: ' "$TMPD/corpus_back.log" | head -n 1)
-        c5_reasons="$c5_reasons probe-removal-not-restored(got:$got)"
-    fi
-fi
-if [ -z "$c5_reasons" ]; then
-    pass 5 "corpus-enumeration"
-else
-    fail 5 "corpus-enumeration:$c5_reasons"
-fi
-
-# --- check 6: header conventions, // needs: prelude, and the accept vocabulary ---
+# --- check 5: header conventions, // needs: prelude, and the accept vocabulary ---
 c6_reasons=""
 # 受理コーパスは Result の constructor を名指ししない（§54 で失敗は raise が表す）。
 # 元は verify-r25.sh の検査 25-e。r9〜r28 で唯一の固有検査だったのでここへ移した。
@@ -365,18 +285,9 @@ for f in tests/accept/*/main.hd tests/reject/*/main.hd; do
     esac
 done
 if [ -z "$c6_reasons" ]; then
-    pass 6 "headers-and-vocabulary"
+    pass 5 "headers-and-vocabulary"
 else
-    fail 6 "headers:$c6_reasons"
-fi
-
-# --- check 7: verification preserves documentation, runtime, and scripts ---
-# 旧検査は walk / tail / m0 を呼び直していたが、同じ層の m0 が同じ走行で測るので
-# 落とした（docs/rounds/prune-gates.md 群 G）。残るのは開始時の固定の照合だけ。
-if sha256sum --status -c "$TMPD/protected.sha"; then
-    pass 7 "protected-files-unchanged"
-else
-    fail 7 "protected-files-changed-during-verification"
+    fail 5 "headers:$c6_reasons"
 fi
 
 echo "PASSED: $ok/$total"

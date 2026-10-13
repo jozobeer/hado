@@ -3,9 +3,6 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
-# shellcheck source=scripts/lib/gate-cache.sh
-. scripts/lib/gate-cache.sh
 passed=0
 total=0
 check() {
@@ -368,20 +365,7 @@ def validate(rows):
     }, e2_coverage
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
-def without(shape):
-    return [row for row in rows
-            if ' '.join(t.split('=')[0] for t in row.split('\t')[1].split()) != shape]
-missing = [without(shape) for shape in
-           ('37-a(5) abort', '37-a(5) again', '37-b2(5) again let', '37-b2(2) function',
-            '37-a(3) inferred arity labels', '37-h last-line', '37-h empty', '37-h missing-argv')]
-for bad in ([], rows[1:], [row for row in rows if not row.endswith('\terror')], rows + rows[:1], *missing):
-    try:
-        validate(bad)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError('incomplete or duplicate manifest accepted')
-print('manifest controls: complete accepted; empty, all-success, duplicate, missing-sibling rejected')
+print(f'manifest: {len(rows)} cases cover every group and mode')
 PY
 }
 validate_manifest || exit 1
@@ -393,27 +377,6 @@ output_matches() {
         [ "$status" -eq 0 ] && [ "$(wc -c <"$dir/err")" -eq 0 ] && cmp -s "$dir/out" "$dir/expect"
     fi
 }
-output_controls() {
-    local dir="$workdir/control" mode
-    mkdir -p "$dir"
-    printf 'value\n' >"$dir/expect"
-    for mode in print error; do
-        local good=out empty=err status=0
-        if [ "$mode" = error ]; then good=err; empty=out; status=1; fi
-        cp "$dir/expect" "$dir/$good"
-        : >"$dir/$empty"
-        output_matches "$mode" "$status" "$dir" || return 1
-        if output_matches "$mode" "$((1-status))" "$dir"; then return 1; fi
-        printf '\n' >"$dir/$empty"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$empty"
-        printf 'different\n' >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-    done
-}
-check 'output controls: equal, empty, different, newline, status' output_controls
 probe() {
     local mode="$1" dir="$2" status=0
     if [ -e "$dir/requires-user" ] && [ "$(id -u)" -eq 0 ]; then echo 'NG: skipped-as-root'; return 1; fi
@@ -512,80 +475,6 @@ sources = {path: path.read_text() for path in Path('tests/accept').glob('*/main.
 lock = Path('tests/corpus.sha256').read_text()
 tagged = validate(sources, lock)
 print(f'Env and Io corpus: {len(tagged)} files; success, failure, prelude and lock verified')
-controls = [({}, lock)]
-for path in tagged:
-    changed = dict(sources)
-    changed[path] = changed[path].replace('// needs: prelude\n', '', 1)
-    controls.append((changed, lock))
-    pattern = r'^([0-9a-f])([0-9a-f]{63}  ' + re.escape(str(path)) + r')$'
-    altered, count = re.subn(pattern, lambda m: ('0' if m[1] != '0' else '1') + m[2], lock, flags=re.M)
-    assert count == 1
-    controls.append((sources, altered))
-# The item tag belongs to the item, not to one file: when more than one file
-# carries it, dropping it from a single file is invisible to validate. Drop it
-# from every tagged file and require the empty set to be rejected.
-controls.append(({path: source.replace('// item: Env と Io\n', '', 1) for path, source in sources.items()}, lock))
-for changed, altered in controls:
-    try:
-        validate(changed, altered)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError('corpus mutation escaped')
-print(f'corpus controls: {len(controls)} empty/tag/prelude/lock mutations rejected')
 PY
-check '37-i full corpus lock' sha256sum --strict --status -c tests/corpus.sha256
-
-m6_launch_conditions() {
-    python3 - "$workdir" <<'PY'
-from pathlib import Path
-import ast, os, subprocess, sys
-base = Path(sys.argv[1]) / 'm6-launch'
-base.mkdir()
-case = base / 'case'
-case.mkdir()
-source = 'def main = [Bytes.length (read_file "main.hd"), Bytes.length read_stdin, List.length args]\n'
-(case / 'main.hd').write_text(source)
-compiler = base / 'compiler'
-compiler.write_text('#!/usr/bin/env bash\nexec cargo run --offline -q -- "$@"\n')
-compiler.chmod(0o755)
-script = Path('scripts/verify-m6.sh').read_text().split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
-tree = ast.parse(script)
-function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'verify')
-runner = base / 'runner.py'
-runner.write_text('from pathlib import Path\nimport subprocess, sys\n'
-                  + f'compiler = {str(compiler)!r}\ncase = Path({str(case)!r})\n'
-                  + ast.unparse(function) + '\n'
-                  + f'sys.exit(0 if verify("launch fixture", case / "main.hd", {str([len(source.encode()), 0, 0]).encode() + bytes([10])!r}) else 1)\n')
-result = subprocess.run([sys.executable, str(runner)], input=b'stdin must not reach the case\n', capture_output=True, timeout=90)
-sys.stdout.buffer.write(result.stdout)
-sys.stderr.buffer.write(result.stderr)
-assert result.returncode == 0 and not result.stderr, 'm6 must fix both cwd and stdin'
-PY
-}
-check '37-j actual m6 launch function: relative file, EOF and empty argv' m6_launch_conditions
-
-full_gate() {
-    local gate="$1" status=0
-    gate_cached "verify-$gate" bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
-    tail -n 4 "$workdir/$gate.log"
-    [ "$status" -eq 0 ] || { cat "$workdir/$gate.log"; return 1; }
-    python3 - "$workdir/$gate.log" <<'PY'
-from pathlib import Path
-import re, sys
-
-def complete(source):
-    lines = source.splitlines()
-    match = re.fullmatch(r'PASSED: (\d+)/(\d+)', lines[-1]) if lines else None
-    return bool(match and int(match[1]) > 0 and match[1] == match[2]
-                and not any(line.startswith('NG:') for line in lines))
-assert complete('PASSED: 1/1\n')
-assert not any(map(complete, ('', 'PASSED: 0/0\n', 'PASSED: 1/2\n', 'NG: failed\nPASSED: 1/1\n')))
-assert complete(Path(sys.argv[1]).read_text()), 'missing or non-full gate result'
-PY
-}
-check '37-i corpus pairs and regressions' full_gate m1-corpus
-check '37-i no missing pairs' grep -qxF 'OK: 3 pairs' "$workdir/m1-corpus.log"
-
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]

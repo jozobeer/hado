@@ -44,14 +44,17 @@ jobs:
     # 合わせて 360 分まで許す。門番の判定は変えない。
     timeout-minutes: 360
     steps:
+      # PR の merge commit と 1 番目の親（取り込み先の先端）を取る。scripts/ci-run.sh が
+      # 差分を見て、文書だけの PR では門番を省く（docs/rounds/ci-docs-only.md）。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
 
       # libgc-dev は runtime/hado_runtime.c の <gc.h> と -lgc に要る。
-      # python3-yaml は門番 scripts/verify-ci.sh がワークフローを読むのに使う。
       - name: runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgc-dev python3-yaml
+          sudo apt-get install -y --no-install-recommends libgc-dev
 
       # 依存の tarball だけを保存する。target/ は 4 GB 級なので保存しない
       # （docs/rounds/ci.md の実測）。--offline の門番はこの取得で足りる。
