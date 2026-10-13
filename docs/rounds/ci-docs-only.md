@@ -33,6 +33,9 @@ core 以上の門番と `cargo test` が読む文書を、`scripts/` と `crates
 5. 文書だけの扱いは層ではない。`workflow_dispatch` に層として渡すことはできない。
 6. ワークフローの checkout は `fetch-depth: 2` で、merge commit の親を取る。
 7. main への push は差分によらず full 層を回す（`docs/rounds/ci.md` の決定 1 のまま）。
+8. PR で core に倒したときは、理由（文書以外の最初のパス、差分が取れない、差分が空）を
+   `ci-run: pull_request runs core: <理由>` の 1 行でログに出す。`tier=core` だけでは、
+   差分が取れずに倒れたのか、コードを含むので選んだのかを区別できない。
 
 ### 期待値の根拠
 
@@ -63,8 +66,8 @@ core 以上の門番と `cargo test` が読む文書を、`scripts/` と `crates
 
 ### 判定
 
-- `bash scripts/verify-ci.sh` が `PASSED: 11/11`。否定的対照は各 `10/11`。
-- この PR の走行のログに `tier=core` が出る。
+- `bash scripts/verify-ci.sh` が `PASSED: 11/11`。否定的対照はどれも 1 つ以上 `NG`。
+- この PR の走行のログに `runs core: <文書以外のパス>` と `tier=core` が出る。
 - 文書だけの PR の走行のログに `docs-only` と文書層の `PASSED:` が出て、`RUN: verify-` が無い。
 
 ### 許容される赤
@@ -138,4 +141,48 @@ exit=1
 # 否定的対照（checkout の fetch-depth）
 === drop:   NG: the workflow parses and is wired for the decisions PASSED: 10/11
 === depth1: NG: the workflow parses and is wired for the decisions PASSED: 10/11
+```
+
+core に倒した理由をログに出す（決定 8）。実際の PR #100 の merge ref を `fetch-depth` 2 で
+取って入口を回した（門番と文書層は stub）。深さ 1 では親が無い。
+
+```
+== depth=1
+HEAD^2: なし
+fatal: ambiguous argument 'HEAD^1': unknown revision or path not in the working tree.
+== depth=2
+HEAD^2: 233c15ac6530d0cd45fb4e65219bb987abda1223
+
+$ bash scripts/ci-run.sh pull_request refs/pull/100/merge "" | head -2
+ci-run: pull_request runs core: .github/workflows/ci.yml is not a document-only path
+ci-run: event=pull_request ref=refs/pull/100/merge tier=core jobs=1 out=target/ci-gates
+```
+
+ネストしたスタック（main ← A（コード）← B（文書だけ））の合成リポジトリで入口を回した。
+判定は PR の向き先との差分だけで決まる。
+
+```
+B→A（ネスト中）                      docs-only
+A が main に入った後、B は積み直さず   docs-only
+B を main へ積み直した後               docs-only
+（対照）D→main で下の C が未着地       tier=core
+```
+
+否定的対照（`scripts/ci-run.sh` を 1 箇所ずつ壊す。決定 8 の反映後）。
+
+```
+=== allowlist-docs-star  NG: a pull_request that changes anything else runs at least the core tier PASSED: 10/11
+=== allowlist-agents     NG: a pull_request that changes anything else runs at least the core tier PASSED: 10/11
+=== renames-detected     NG: a pull_request that changes anything else runs at least the core tier PASSED: 10/11
+=== no-merge-check       NG: (4 checks) PASSED: 7/11
+=== skip-doc-layer       NG: a pull_request that changes only round, issue, and plan documents runs the document layer alone PASSED: 10/11
+=== silent-reason        NG: a pull_request that changes anything else runs at least the core tier NG: a pull_request whose diff is unknown runs at least the core tier PASSED: 9/11
+```
+
+PR #100 の core 層（走行 38418474034、`ubuntu-latest`、決定 8 の前）。
+
+```
+ci-run: event=pull_request ref=refs/pull/100/merge tier=core jobs=4 out=target/ci-gates
+TALLY: 774/774 passed; red: none
+PASSED: 16/16
 ```
