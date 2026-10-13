@@ -51,11 +51,10 @@ jobs:
           fetch-depth: 2
 
       # libgc-dev は runtime/hado_runtime.c の <gc.h> と -lgc に要る。
-      # python3-yaml は門番 scripts/verify-ci.sh がワークフローを読むのに使う。
       - name: runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgc-dev python3-yaml
+          sudo apt-get install -y --no-install-recommends libgc-dev
 
       # 依存の tarball だけを保存する。target/ は 4 GB 級なので保存しない
       # （docs/rounds/ci.md の実測）。--offline の門番はこの取得で足りる。

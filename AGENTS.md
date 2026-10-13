@@ -14,7 +14,7 @@
 ## 環境
 
 - Rust（rustfmt と clippy を含む）、`cc`、`libgc-dev`。Rust の版は `rust-toolchain.toml`、Cranelift の版は `Cargo.lock` に固定。環境変数 `RUSTUP_TOOLCHAIN` は `rust-toolchain.toml` より優先されるので設定しない
-- `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/spec-lock.sh` と `scripts/verify-spec-model.sh` は TOML を読むので 3.11 以上（3.10 以前は `tomli` を入れる）。`scripts/verify-ci.sh` はワークフローを YAML として読むので `yaml` も要る（Ubuntu は `python3-yaml`）
+- `python3`（`scripts/corpus-lock.sh`・門番）。`scripts/spec-lock.sh` と `scripts/verify-spec-model.sh` は TOML を読むので 3.11 以上（3.10 以前は `tomli` を入れる）
 - `CARGO_TARGET_DIR` は設定しない。target は worktree ごとに `./target` に分かれる。バイナリのパスを探さず `cargo run --offline -q -- <args>` で呼ぶ
 - Cranelift の API は docs.rs の latest と食い違う。`docs/cranelift-<版>.md` を先に読む
 - `curl`・`tar`・`gunzip`・`sha256sum`（coreutils）。`scripts/treesitter-setup.sh` が固定した版の tree-sitter CLI と Neovim を、`scripts/nextest-setup.sh` が門番の全体テストに使う cargo-nextest を取ってきて展開するのに使う
@@ -43,9 +43,9 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 - **門番を緩めて green にしない。** 赤の門番は理由とともに報告する
 - **門番は小さく回す。** 開発中は触ったところに効く 1 本（`bash scripts/verify-<名>.sh`）だけを回す。`scripts/run-gates.sh` の層別（quick / core / full）と `cargo test` の全走は、そのラウンドの最後に 1 回だけにする
 - **木が変わらないなら門番を回さない。** コミットメッセージの言い直しや履歴の整理のように、追跡ファイルの中身が変わらない変更では `cargo test` も層別も回さない。
-- **門番の走行中は木を触らない。** `verify-m1-corpus.sh` の検査 7 は `docs` `runtime` `scripts` を開始時に固定する。全走と文書の編集は直列にする（走行中の編集は `protected-files-changed-during-verification` の偽の赤になる）
 - **仕様に疑義が出たら仕様を変えない。** 解釈を選ばず、報告の「仕様への疑義」に書く。依存しない作業は進め、依存する作業は止める
 - **ラウンドは slug で識別し、1 ラウンド 1 worktree。** `git worktree add .worktrees/<slug> -b <slug>` で切り、`docs/rounds/<slug>.md` に手順書・系譜・実測を書く。`docs/plan.md` と `docs/ledger.md` と `docs/spec-trace.md` にラウンドの節や行を足さない（`docs/rounds.md`）。`docs/plan.md` と `docs/ledger.md` は凍結した記録である（`scripts/frozen-docs-lock.sh` が書き換えを見る）。版ごとの決定と版をまたぐ計画は `docs/plans/<名前>.md` が持つ。2 本が同じ版の表を触るなら、先に着地する側を決めてから始める。
+- **常設の門番にテストのテストを置かない。** 門番の検査は、製品（`crates/` `runtime/` `stdlib/` `tools/` とコーパス）かこの節の契約の変更で赤になり得るものに限る。変異・探針・判定器の較正・`cargo test` や他の門番の呼び直し・門番の仕組みの自己検査は、ラウンドの時点で 1 回測って `docs/rounds/<slug>.md` の実測に残す（`docs/rounds/prune-meta-gates.md`）
 - **門番は自分の層とラウンドを宣言する。** 新しい `scripts/verify-*.sh` は冒頭に `# tier: quick|core|full` と `# round: <slug>` を置く。`scripts/lib/gate-tiers.sh` に一覧は無い
 - **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから `bash scripts/corpus-lock.sh` で作り直す。説明できない行があれば作り直さずに止めて報告する。そのラウンドの門番と quick 層を回してから PR にする。着地後の全走は main を checkout した側が回し、結果は同じ `docs/rounds/<slug>.md` の `## 実測` に追記する `docs:` コミット 1 本を PR で足す（main に直接は書かない）
 

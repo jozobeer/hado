@@ -227,27 +227,6 @@ output_matches() {
         [ "$status" -eq 0 ] && [ "$(wc -c <"$dir/err")" -eq 0 ] && cmp -s "$dir/out" "$dir/expect"
     fi
 }
-output_controls() {
-    local dir="$workdir/control" mode
-    mkdir -p "$dir"
-    printf 'value\n' >"$dir/expect"
-    for mode in print error; do
-        local good=out empty=err status=0
-        if [ "$mode" = error ]; then good=err; empty=out; status=1; fi
-        cp "$dir/expect" "$dir/$good"
-        : >"$dir/$empty"
-        output_matches "$mode" "$status" "$dir" || return 1
-        if output_matches "$mode" "$((1-status))" "$dir"; then return 1; fi
-        printf '\n' >"$dir/$empty"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$empty"
-        printf 'different\n' >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-    done
-}
-check '35-a/35-b output controls: equal, empty, different, newline, status' output_controls
 build_case() {
     cargo run --offline -q -- build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
     [ "$(wc -c <"$1/build.err")" -eq 0 ]

@@ -2,8 +2,7 @@
 # dogfood-text-tool: tools/dogfood-text-tool のテキスト処理ツールが、第56節のエラーコード表と
 # tests/reject の // error: タグを突き合わせ、欠け・余り・重複を印字して差分があれば非 0 で
 # 終わることを測る。行数・期待値は実ファイルと入力から導き、コードや件数を判定器へ書き込まない。
-# 常に成功を返す実装は、入力の変異（拒否ケースを隠す・表に無い // error: を足す・重複させる）と、
-# 道具の字句と集計の変異（split・trim・Char・Map）の両方で落ちる。
+# 常に成功を返す実装は、入力の変異（拒否ケースを隠す・表に無い // error: を足す・重複させる）で落ちる。
 #
 # tier: core
 # round: dogfood-text-tool
@@ -60,8 +59,6 @@ fi
 
 # --- b: 実木では表とコーパスが一致し、差分を出さず 0 で終わる ---
 run_tool "$tool" "$spec" "$reject"
-baseline_out=$out
-baseline_rc=$rc
 if [ "$rc" -eq 0 ] && grep -q '^dogfood-text-tool: ' <<<"$out" && ! grep -qE '^(missing|extra|duplicate|empty):' <<<"$out"; then
     ok "b clean: the code table and tests/reject agree ($(grep '^dogfood-text-tool: ' <<<"$out"))"
 else
@@ -131,53 +128,6 @@ if [ -z "$missing_apis" ]; then
     ok "f api: split, trim, Char and Map appear in the tool source"
 else
     ng "f api" "not found:$missing_apis"
-fi
-
-# --- g: 4 つの API を 1 箇所ずつ壊すと、実木の走行の出力か終了コードが変わる ---
-# 変異は専用のディレクトリ（.hd は 1 本だけ）に写して走らせる。木は触らない。
-# ビルドが通ったことは要約行で確かめ、コンパイル失敗を「捕まえた」と数えない。
-mutate_and_run() {
-    local dir=$1 old=$2 new=$3
-    mkdir -p "$dir"
-    if ! MUT_OLD="$old" MUT_NEW="$new" python3 - "$tool" "$dir/main.hd" <<'PY'
-import os, sys
-source = open(sys.argv[1], encoding='utf-8').read()
-old, new = os.environ['MUT_OLD'], os.environ['MUT_NEW']
-if source.count(old) != 1:
-    sys.exit(f'anchor is not unique: {source.count(old)}')
-open(sys.argv[2], 'w', encoding='utf-8').write(source.replace(old, new))
-PY
-    then
-        return 2
-    fi
-    run_tool "$dir/main.hd" "$spec" "$reject"
-    grep -q '^dogfood-text-tool: ' <<<"$out" || return 3
-    if [ "$rc" -ne "$baseline_rc" ] || [ "$out" != "$baseline_out" ]; then
-        return 0
-    fi
-    return 1
-}
-
-mutations=0
-caught=0
-check_mutation() {
-    local label=$1 old=$2 new=$3
-    mutations=$((mutations + 1))
-    if mutate_and_run "$work/mut-$label" "$old" "$new"; then
-        caught=$((caught + 1))
-        echo "g $label: caught"
-    else
-        echo "g $label: not caught (rc=$rc)"
-    fi
-}
-check_mutation split 'def lines_of text => String.split text "\n"' 'def lines_of text => [text]'
-check_mutation trim 'def token_of text => String.trim text' 'def token_of text => text'
-check_mutation char 'if 48 <= value => value <= 57 | false' 'if 48 <= value => value <= 8 | false'
-check_mutation map 'fn(entry => entry_count entry > 1)' 'fn(entry => entry_count entry > 0)'
-if [ "$caught" -eq "$mutations" ]; then
-    ok "g mutations: split, trim, Char and Map are on the execution path (cases=$caught)"
-else
-    ng "g mutations" "$caught/$mutations caught"
 fi
 
 echo "PASSED: $pass/$total"
