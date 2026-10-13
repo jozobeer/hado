@@ -205,6 +205,17 @@ pub struct Inference {
     next: u32,
     substitutions: HashMap<u32, Ty>,
     rows: HashMap<u32, Row>,
+    /// `unify` の途中で書いた束縛の以前の値。失敗したらここから戻す。表ごと複製して
+    /// 戻すと、1 回の `unify` が表の大きさに比例する。
+    trail: Vec<Undo>,
+    /// 入れ子の `unify` の深さ。0 のとき（外側に戻す者がいない）は記録しない。
+    depth: usize,
+}
+
+#[derive(Clone)]
+enum Undo {
+    Substitution(u32, Option<Ty>),
+    Row(u32, Option<Row>),
 }
 
 impl Ty {
@@ -353,28 +364,72 @@ impl Inference {
         if self.occurs(id, ty) {
             return Err(TypeError::Occurs);
         }
-        self.substitutions.insert(id, ty.clone());
+        self.set_substitution(id, ty.clone());
         Ok(())
     }
 
-    pub fn unify(&mut self, left: &Ty, right: &Ty) -> Result<(), TypeError> {
-        let saved = (self.substitutions.clone(), self.rows.clone());
-        let result = self.unify_inner(left, right);
+    fn set_substitution(&mut self, id: u32, ty: Ty) {
+        let previous = self.substitutions.insert(id, ty);
+        if self.depth > 0 {
+            self.trail.push(Undo::Substitution(id, previous));
+        }
+    }
+
+    fn set_row(&mut self, id: u32, row: Row) {
+        let previous = self.rows.insert(id, row);
+        if self.depth > 0 {
+            self.trail.push(Undo::Row(id, previous));
+        }
+    }
+
+    /// 束縛が無ければ純粋な行で閉じる。
+    fn close_row_variable(&mut self, id: u32) {
+        if !self.rows.contains_key(&id) {
+            self.set_row(id, Row::pure());
+        }
+    }
+
+    /// `step` が失敗したら、その間に書いた束縛を書いた逆順に戻す。入れ子の呼び出しは
+    /// 自分の印より後ろだけを戻す。いちばん外側を抜けたら記録は要らない。
+    fn transaction(
+        &mut self,
+        step: impl FnOnce(&mut Self) -> Result<(), TypeError>,
+    ) -> Result<(), TypeError> {
+        let mark = self.trail.len();
+        self.depth += 1;
+        let result = step(self);
+        self.depth -= 1;
         if result.is_err() {
-            self.substitutions = saved.0;
-            self.rows = saved.1;
+            while self.trail.len() > mark {
+                match self.trail.pop() {
+                    Some(Undo::Substitution(id, Some(ty))) => {
+                        self.substitutions.insert(id, ty);
+                    }
+                    Some(Undo::Substitution(id, None)) => {
+                        self.substitutions.remove(&id);
+                    }
+                    Some(Undo::Row(id, Some(row))) => {
+                        self.rows.insert(id, row);
+                    }
+                    Some(Undo::Row(id, None)) => {
+                        self.rows.remove(&id);
+                    }
+                    None => {}
+                }
+            }
+        }
+        if self.depth == 0 {
+            self.trail.clear();
         }
         result
     }
 
+    pub fn unify(&mut self, left: &Ty, right: &Ty) -> Result<(), TypeError> {
+        self.transaction(|inference| inference.unify_inner(left, right))
+    }
+
     pub fn unify_row(&mut self, left: &Row, right: &Row) -> Result<(), TypeError> {
-        let saved = (self.substitutions.clone(), self.rows.clone());
-        let result = self.unify_row_inner(left, right);
-        if result.is_err() {
-            self.substitutions = saved.0;
-            self.rows = saved.1;
-        }
-        result
+        self.transaction(|inference| inference.unify_row_inner(left, right))
     }
 
     pub fn row_contained(&mut self, inner: &Row, outer: &Row) -> Result<(), TypeError> {
@@ -429,7 +484,7 @@ impl Inference {
         if variables.contains(&id) {
             return Err(TypeError::Occurs);
         }
-        self.rows.insert(id, row.clone());
+        self.set_row(id, row.clone());
         Ok(())
     }
 
@@ -469,11 +524,11 @@ impl Inference {
         let row = self.resolve_row(row);
         match row {
             Row::Var(id) => {
-                self.rows.entry(id).or_insert_with(Row::pure);
+                self.close_row_variable(id);
                 Row::pure()
             }
             Row::Open(id, labels) => {
-                self.rows.entry(id).or_insert_with(Row::pure);
+                self.close_row_variable(id);
                 Row::Closed(labels)
             }
             closed => closed,
@@ -569,7 +624,7 @@ impl Inference {
         let mut variables = BTreeSet::new();
         collect_row_vars(&self.resolve(ty), &mut variables);
         for id in variables {
-            self.rows.entry(id).or_insert_with(Row::pure);
+            self.close_row_variable(id);
         }
     }
 
@@ -1104,5 +1159,45 @@ impl Scheme {
                 .collect(),
             row_constraints: self.row_constraints.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn function(args: Vec<Ty>, result: Ty, row: Row) -> Ty {
+        Ty::Fn(args, Box::new(result), Box::new(row))
+    }
+
+    #[test]
+    fn failed_unification_undoes_the_bindings_it_made() {
+        let mut inference = Inference::default();
+        let a = inference.fresh();
+        let b = inference.fresh();
+        let row = inference.fresh_row();
+        inference.unify(&b, &Ty::Char).unwrap();
+        // 引数で a と row を束縛した後、結果の Int と Bool で失敗する。
+        let left = function(vec![a.clone()], Ty::Int, row.clone());
+        let right = function(vec![Ty::String], Ty::Bool, Row::Closed(vec![Ty::Void]));
+        assert!(inference.unify(&left, &right).is_err());
+        assert_eq!(inference.resolve(&a), a);
+        assert_eq!(inference.resolve_row(&row), row);
+        assert_eq!(inference.resolve(&b), Ty::Char);
+        assert!(inference.unify_row(&row, &Row::Closed(vec![])).is_ok());
+        assert_eq!(inference.resolve_row(&row), Row::Closed(vec![]));
+    }
+
+    #[test]
+    fn nested_failure_keeps_the_outer_unification_going() {
+        let mut inference = Inference::default();
+        let a = inference.fresh();
+        let row = inference.fresh_row();
+        let left = function(vec![a.clone()], Ty::Int, row.clone());
+        let right = function(vec![Ty::String], Ty::Int, Row::Closed(vec![]));
+        inference.unify(&left, &right).unwrap();
+        assert!(inference.unify(&a, &Ty::Int).is_err());
+        assert_eq!(inference.resolve(&a), Ty::String);
+        assert_eq!(inference.resolve_row(&row), Row::Closed(vec![]));
     }
 }
