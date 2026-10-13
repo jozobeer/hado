@@ -236,19 +236,22 @@ docs_only_pr_runs_document_layer_alone() {
     [ "$?" -eq 1 ] || return 1
 }
 
+# core に倒した理由（文書以外の最初のパス）をログに出す。ログだけで判定を追える。
 other_pr_runs_at_least_core() {
-    local change tier
-    for change in \
-        'echo x >>docs/spec.md' \
-        'echo x >>docs/plan.md' \
-        'echo x >>AGENTS.md' \
-        'echo x >>docs/rounds/a.md; echo x >>crates/x.rs' \
-        'echo x >>docs/rounds/a.md; mkdir -p docs/rounds/x; echo x >docs/rounds/x/a.rs' \
-        'git mv crates/x.rs docs/rounds/x.md'; do
+    local spec change want tier
+    while IFS='|' read -r change want; do
         ci_on_pr "$change" || return 1
         tier=$(awk '$1 == "run-gates" { for (i = 1; i <= NF; i++) if ($i == "--tier") print $(i + 1) }' "$record")
         [ -n "$tier" ] && tier_covers "$tier" core || return 1
-    done
+        grep -qF "core: $want is not a document-only path" "$stdout" || return 1
+    done <<'CASES'
+echo x >>docs/spec.md|docs/spec.md
+echo x >>docs/plan.md|docs/plan.md
+echo x >>AGENTS.md|AGENTS.md
+echo x >>docs/rounds/a.md; echo x >>crates/x.rs|crates/x.rs
+echo x >>docs/rounds/a.md; mkdir -p docs/rounds/x; echo x >docs/rounds/x/a.rs|docs/rounds/x/a.rs
+git mv crates/x.rs docs/rounds/x.md|crates/x.rs
+CASES
 }
 
 # 差分が取れないとき（merge commit でない・親が無い）は core に倒す。
@@ -272,6 +275,7 @@ unknown_diff_runs_at_least_core() {
         ) >"$stdout" 2>"$stderr" || return 1
         tier=$(awk '$1 == "run-gates" { for (i = 1; i <= NF; i++) if ($i == "--tier") print $(i + 1) }' "$record")
         [ -n "$tier" ] && tier_covers "$tier" core || return 1
+        grep -qF 'core: the merge commit and its first parent are unavailable' "$stdout" || return 1
     done
 }
 
