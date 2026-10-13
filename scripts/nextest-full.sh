@@ -10,17 +10,13 @@
 # 終了コードは nextest の終了コード。nextest が 0 で終わっても結果を読めなければ 1。
 #
 # nextest は scripts/nextest-setup.sh が target/nextest-setup に取ってくる。
-# HADO_NEXTEST_BIN があればそれを使う（scripts/verify-nextest.sh の stub）。
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-# .config/nextest.toml の profile.gate.junit（verify-nextest が突き合わせる）。
+# .config/nextest.toml の profile.gate.junit。
 junit=target/nextest/gate/junit.xml
 
-bin=${HADO_NEXTEST_BIN:-}
-if [ -z "$bin" ]; then
-    bin=$(bash scripts/nextest-setup.sh --cache target/nextest-setup) || exit 1
-fi
+bin=$(bash scripts/nextest-setup.sh --cache target/nextest-setup) || exit 1
 
 # 同じ木で別々に起動した門番どうしが junit を取り合わないよう、走行を直列にする。
 mkdir -p target/nextest

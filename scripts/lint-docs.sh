@@ -309,7 +309,6 @@ PY
 }
 
 # --- 検査 7: R38 が足した規則の文が spec に逐語で 1 回ずつある ---
-# r38 の構造検査（probe の key と §番号の対応・見出しの実在）は verify-r38.sh に残る。
 doc_r38_sentences() {
     python3 - <<'PY'
 import re
