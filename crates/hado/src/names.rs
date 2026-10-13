@@ -16,50 +16,137 @@ pub(crate) fn is_value_reference(name: &str) -> bool {
 }
 
 pub fn definition_groups(ast: &Ast) -> Vec<Vec<String>> {
-    let mut graph = dependency_graph(ast);
-    let mut groups = Vec::new();
-    while !graph.is_empty() {
-        let first = graph
-            .keys()
-            .find(|name| {
-                graph.keys().all(|dependency| {
-                    !reachable(name, dependency, &graph, &mut BTreeSet::new())
-                        || reachable(dependency, name, &graph, &mut BTreeSet::new())
-                })
-            })
-            .unwrap()
-            .clone();
-        let group: Vec<_> = graph
-            .keys()
-            .filter(|name| {
-                reachable(&first, name, &graph, &mut BTreeSet::new())
-                    && reachable(name, &first, &graph, &mut BTreeSet::new())
-            })
-            .cloned()
-            .collect();
-        for name in &group {
-            graph.remove(name);
+    graph_groups(&dependency_graph(ast))
+}
+
+/// 強連結成分を、依存される側から順に返す。取り出せる成分（残りの成分に依存しない
+/// もの）が複数あれば、最小の名前を含む成分を先にする。成分の中は名前の順である。
+fn graph_groups(graph: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<String>> {
+    let names: Vec<&String> = graph.keys().collect();
+    let edges = index_edges(graph);
+    let component = strongly_connected(&edges);
+    let count = component.iter().max().map_or(0, |last| last + 1);
+    // 添字は名前の順なので、各成分の members[c][0] がその成分の最小の名前である。
+    let mut members = vec![Vec::new(); count];
+    for (node, &c) in component.iter().enumerate() {
+        members[c].push(node);
+    }
+    let (mut pending, dependents) = condensation(&edges, &component, count);
+    let mut ready: BTreeSet<(usize, usize)> = (0..count)
+        .filter(|&c| pending[c] == 0)
+        .map(|c| (members[c][0], c))
+        .collect();
+    let mut groups = Vec::with_capacity(count);
+    while let Some((_, c)) = ready.pop_first() {
+        groups.push(members[c].iter().map(|&node| names[node].clone()).collect());
+        for &dependent in &dependents[c] {
+            pending[dependent] -= 1;
+            if pending[dependent] == 0 {
+                ready.insert((members[dependent][0], dependent));
+            }
         }
-        groups.push(group);
     }
     groups
 }
 
-fn reachable(
-    from: &str,
-    to: &str,
-    graph: &BTreeMap<String, BTreeSet<String>>,
-    seen: &mut BTreeSet<String>,
-) -> bool {
-    if from == to {
-        return true;
-    }
-    if !seen.insert(from.into()) {
-        return false;
-    }
+/// 名前の順の添字で表した辺。グラフの外の名前への辺は落とす。
+fn index_edges(graph: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<usize>> {
+    let index: BTreeMap<&str, usize> = graph
+        .keys()
+        .enumerate()
+        .map(|(i, name)| (name.as_str(), i))
+        .collect();
     graph
-        .get(from)
-        .is_some_and(|edges| edges.iter().any(|edge| reachable(edge, to, graph, seen)))
+        .values()
+        .map(|targets| {
+            targets
+                .iter()
+                .filter_map(|target| index.get(target.as_str()).copied())
+                .collect()
+        })
+        .collect()
+}
+
+/// 成分どうしの辺。成分ごとの未処理の依存先の数と、依存元の一覧を返す。
+fn condensation(
+    edges: &[Vec<usize>],
+    component: &[usize],
+    count: usize,
+) -> (Vec<usize>, Vec<Vec<usize>>) {
+    let mut pending = vec![0usize; count];
+    let mut dependents = vec![Vec::new(); count];
+    for (node, targets) in edges.iter().enumerate() {
+        for &target in targets {
+            let (from, to) = (component[node], component[target]);
+            if from != to {
+                pending[from] += 1;
+                dependents[to].push(from);
+            }
+        }
+    }
+    (pending, dependents)
+}
+
+/// Tarjan の強連結成分分解。節点ごとの成分の番号を返す。
+fn strongly_connected(edges: &[Vec<usize>]) -> Vec<usize> {
+    struct Tarjan<'a> {
+        edges: &'a [Vec<usize>],
+        order: Vec<Option<usize>>,
+        low: Vec<usize>,
+        on_stack: Vec<bool>,
+        stack: Vec<usize>,
+        component: Vec<usize>,
+        visited: usize,
+        components: usize,
+    }
+    impl Tarjan<'_> {
+        fn visit(&mut self, node: usize) {
+            self.order[node] = Some(self.visited);
+            self.low[node] = self.visited;
+            self.visited += 1;
+            self.stack.push(node);
+            self.on_stack[node] = true;
+            for &target in &self.edges[node] {
+                match self.order[target] {
+                    None => {
+                        self.visit(target);
+                        self.low[node] = self.low[node].min(self.low[target]);
+                    }
+                    Some(order) if self.on_stack[target] => {
+                        self.low[node] = self.low[node].min(order);
+                    }
+                    Some(_) => {}
+                }
+            }
+            if Some(self.low[node]) == self.order[node] {
+                while let Some(member) = self.stack.pop() {
+                    self.on_stack[member] = false;
+                    self.component[member] = self.components;
+                    if member == node {
+                        break;
+                    }
+                }
+                self.components += 1;
+            }
+        }
+    }
+    let size = edges.len();
+    let mut tarjan = Tarjan {
+        edges,
+        order: vec![None; size],
+        low: vec![0; size],
+        on_stack: vec![false; size],
+        stack: Vec::new(),
+        component: vec![0; size],
+        visited: 0,
+        components: 0,
+    };
+    for node in 0..size {
+        if tarjan.order[node].is_none() {
+            tarjan.visit(node);
+        }
+    }
+    tarjan.component
 }
 
 pub(crate) fn bound_names(pattern: &Pattern) -> BTreeSet<String> {
@@ -977,14 +1064,144 @@ fn dependency_graph(ast: &Ast) -> BTreeMap<String, BTreeSet<String>> {
 }
 
 pub fn unused_definitions(ast: &Ast, roots: &[String]) -> Vec<String> {
-    let graph = dependency_graph(ast);
+    unreached(&dependency_graph(ast), roots)
+}
+
+/// 根のどれからも辿れない定義の名前（名前の順）。
+fn unreached(graph: &BTreeMap<String, BTreeSet<String>>, roots: &[String]) -> Vec<String> {
+    let mut reached = BTreeSet::new();
+    let mut work: Vec<&str> = roots.iter().map(String::as_str).collect();
+    while let Some(name) = work.pop() {
+        if reached.insert(name) {
+            if let Some(edges) = graph.get(name) {
+                work.extend(edges.iter().map(String::as_str));
+            }
+        }
+    }
     graph
         .keys()
-        .filter(|name| {
-            !roots
-                .iter()
-                .any(|root| reachable(root, name, &graph, &mut BTreeSet::new()))
-        })
+        .filter(|name| !reached.contains(name.as_str()))
         .cloned()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Graph = BTreeMap<String, BTreeSet<String>>;
+
+    // 組ごとの到達可能性で群を取り出す素朴な定義。群の中身と順の正本として比べる。
+    fn reference_groups(mut graph: Graph) -> Vec<Vec<String>> {
+        let mut groups = Vec::new();
+        while !graph.is_empty() {
+            let first = graph
+                .keys()
+                .find(|name| {
+                    graph.keys().all(|dependency| {
+                        !reference_reachable(name, dependency, &graph, &mut BTreeSet::new())
+                            || reference_reachable(dependency, name, &graph, &mut BTreeSet::new())
+                    })
+                })
+                .unwrap()
+                .clone();
+            let group: Vec<_> = graph
+                .keys()
+                .filter(|name| {
+                    reference_reachable(&first, name, &graph, &mut BTreeSet::new())
+                        && reference_reachable(name, &first, &graph, &mut BTreeSet::new())
+                })
+                .cloned()
+                .collect();
+            for name in &group {
+                graph.remove(name);
+            }
+            groups.push(group);
+        }
+        groups
+    }
+
+    fn reference_reachable(
+        from: &str,
+        to: &str,
+        graph: &Graph,
+        seen: &mut BTreeSet<String>,
+    ) -> bool {
+        if from == to {
+            return true;
+        }
+        if !seen.insert(from.into()) {
+            return false;
+        }
+        graph.get(from).is_some_and(|edges| {
+            edges
+                .iter()
+                .any(|edge| reference_reachable(edge, to, graph, seen))
+        })
+    }
+
+    // 名前の辞書順と添字の順がずれるよう、桁数の違う名前を混ぜる。グラフの外の名前
+    // （prelude や局所の名前）への辺も張る。
+    fn random_graph(seed: u64) -> Graph {
+        let mut state = seed;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let size = 1 + (next() % 14) as usize;
+        let names: Vec<String> = (0..size).map(|i| format!("d{}", i * 7 % 23)).collect();
+        let density = 1 + next() % 4;
+        names
+            .iter()
+            .map(|name| {
+                let mut edges = BTreeSet::new();
+                for target in &names {
+                    if next() % 10 < density {
+                        edges.insert(target.clone());
+                    }
+                }
+                if next() % 3 == 0 {
+                    edges.insert("outside".into());
+                }
+                (name.clone(), edges)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn groups_match_pairwise_reachability() {
+        for seed in 1..=2000 {
+            let graph = random_graph(seed);
+            assert_eq!(
+                graph_groups(&graph),
+                reference_groups(graph.clone()),
+                "seed {seed}: {graph:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unreached_matches_pairwise_reachability() {
+        for seed in 1..=2000 {
+            let graph = random_graph(seed);
+            let mut roots: Vec<String> = graph.keys().step_by(3).cloned().collect();
+            roots.push("outside".into());
+            let expected: Vec<String> = graph
+                .keys()
+                .filter(|name| {
+                    !roots
+                        .iter()
+                        .any(|root| reference_reachable(root, name, &graph, &mut BTreeSet::new()))
+                })
+                .cloned()
+                .collect();
+            assert_eq!(
+                unreached(&graph, &roots),
+                expected,
+                "seed {seed}: {graph:?}"
+            );
+        }
+    }
 }
