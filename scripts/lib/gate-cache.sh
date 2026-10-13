@@ -16,6 +16,7 @@
 #   gate_cached <label> <command> [args...]
 #   cargo_cached <cargo の引数...>
 #   cargo_test_cached <cargo test の引数...>
+#   nextest_full_cached
 #
 # cargo_test_cached は、同じ走行の中で全走の全体テストが成功していて、その
 # ログに対象の実行と ok の証拠があるときだけ、`--test <名前>` の部分テストの
@@ -312,4 +313,11 @@ cargo_test_cached() {
         hado_gate_full_log_evidence "$log" "$target"
     done
     return 0
+}
+
+# 全体テスト（scripts/nextest-full.sh）を、1 回の走行の中で 1 度だけ実走する。
+# m0・m2・m3・m7 が同じ id を引くので、どれから先に呼ばれても実走は 1 回である
+# （docs/rounds/nextest.md）。
+nextest_full_cached() {
+    gate_cached nextest-full bash scripts/nextest-full.sh
 }

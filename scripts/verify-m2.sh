@@ -240,25 +240,25 @@ fi
 
 # --- check 7: the whole test suite passes, including the associativity probe ---
 # docs/corpus.md: 式木の往復は結合性を見ない（描画側が括弧を必ず付ける）ので、
-# `parser::tests::left_assoc_add_and_mul` がそれを固定し、この門番が `cargo test` 全体を
+# `parser::tests::left_assoc_add_and_mul` がそれを固定し、この門番が全体テストを
 # 見ることで捕まえる。単体で m2 を回す手順では m0 が走らないので、ここで見ないと
-# 無括弧の連鎖の退行が誰にも見えない（審査の指摘）。全走では cargo_cached が m0 の
-# 同じ実走に畳むので、費用は増えない。
+# 無括弧の連鎖の退行が誰にも見えない（審査の指摘）。全走では nextest_full_cached が
+# m0 の同じ実走に畳むので、費用は増えない。
 c7_reasons=""
-cargo_cached test --offline --no-fail-fast >"$TMPD/cargo.log" 2>&1
-[ "$?" -eq 0 ] || c7_reasons="$c7_reasons cargo-test-exit!=0"
-grep -Eq '^test parser::tests::left_assoc_add_and_mul \.\.\. ok$' "$TMPD/cargo.log" \
+nextest_full_cached >"$TMPD/cargo.log" 2>&1
+[ "$?" -eq 0 ] || c7_reasons="$c7_reasons nextest-exit!=0"
+grep -qxF "$(printf 'nextest-case\tPASS\thado\tparser::tests::left_assoc_add_and_mul')" "$TMPD/cargo.log" \
     || c7_reasons="$c7_reasons associativity-probe-not-run"
 if [ -z "$c7_reasons" ]; then
-    pass 7 "cargo-test+assoc"
+    pass 7 "nextest+assoc"
 else
-    fail 7 "cargo-test+assoc:$c7_reasons"
+    fail 7 "nextest+assoc:$c7_reasons"
 fi
 
 # --- check 8: verification preserves the corpus, documentation, runtime, and scripts ---
 # m1-corpus の検査 7 は自分の走行の間しか見ない。単体で門番を回す手順（AGENTS.md）と
 # 直列の全走（--jobs 1）では、M2 の前後を覆うものが他に無いので、ここでも固定する。
-# 照合は最後に置く。検査 7 の `cargo test` が保護対象を書き換えても、その前に比べて
+# 照合は最後に置く。検査 7 の全体テストが保護対象を書き換えても、その前に比べて
 # いては緑のままになる（審査の指摘）。検査 5 のコーパスの照合も同じ理由でここで繰り返す
 # （片付けが戻すのは `tests/accept` と `tests/reject` だけで、`tests/library` や
 # `crates/hado/tests/corpus.rs` の書き換えは残る。審査の指摘）。
