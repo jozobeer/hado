@@ -130,3 +130,16 @@ EXIT=0 WALL=339
 TALLY: 765/765 passed; red: none
 PASSED: 16/16
 ```
+
+PR #95 の CI（走行 38388275944、core 層、job `gates` 11:09:31〜11:16:55 の 7 分 24 秒）。
+
+```
+11:09:55 ci-run: event=pull_request ref=refs/pull/95/merge tier=core jobs=12 out=target/ci-gates
+11:10:05 RUN: verify-m0
+11:12:42 RUN: verify-m1-corpus
+11:13:37 RUN: verify-m2
+11:14:00 RUN: verify-m3
+11:15:43 RUN: verify-ci
+11:16:36 TALLY: 765/765 passed; red: none
+conclusion: success
+```
