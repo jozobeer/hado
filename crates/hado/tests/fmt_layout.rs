@@ -404,6 +404,36 @@ fn field_after_application_keeps_the_base_grouped() {
     }
 }
 
+/// 構築子の括弧呼び出し `B(x)` の後ろの field は括弧で囲まない（§7: `.` は
+/// 呼び出しの結果に付く）。`B(x).a` と `(B(x)).a` は同じ木を綴るので、印字し直しは
+/// 括弧の無い正準形へ寄せる。位置引数の構築子に field は付けられないので、この
+/// 入力は型検査を通らない（E305）。測るのは印字だけである。
+#[test]
+fn field_after_constructor_call_drops_the_redundant_parens() {
+    let plain = "type R = { a: Int }\ntype B = | B(R)\ndef v = B({ a = 1 }).a\ndef main = \"x\"\n";
+    let redundant =
+        "type R = { a: Int }\ntype B = | B(R)\ndef v = (B({ a = 1 })).a\ndef main = \"x\"\n";
+    // 括弧の無い綴りが正準形。冗長な括弧の綴りはそこへ寄る。
+    let canonical = formatted(plain);
+    assert_eq!(canonical, plain, "括弧の無い綴りが動いた:\n{canonical}");
+    assert_eq!(
+        formatted(redundant),
+        canonical,
+        "同じ木の 2 つの綴りが同じバイト列にならない"
+    );
+    assert_eq!(formatted(&canonical), canonical, "冪等でない:\n{canonical}");
+    parse_source(&canonical, "t").unwrap_or_else(|error| panic!("{error}: {canonical}"));
+
+    // 適用の base は括弧が要る（`.` は適用より強い）。この境界は外さない。
+    let applied =
+        "type R = { a: Int }\ndef f (x: Int): R => { a = x }\ndef v = (f 1).a\ndef main = \"x\"\n";
+    assert!(
+        formatted(applied).contains("(f 1).a"),
+        "適用の base の括弧が消えた:\n{}",
+        formatted(applied)
+    );
+}
+
 /// 印字し直しは 1 通りに決まる。もう一度当てても何も変わらない。
 #[test]
 fn formatting_is_idempotent_and_settles() {
