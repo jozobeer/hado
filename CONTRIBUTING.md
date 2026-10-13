@@ -19,9 +19,9 @@ cargo fmt --all --check                  # 整形。verify-rustfmt（quick）と
 cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（core）と同じ
 ```
 
-### 門番の実行と畳み込み
+### 門番の実行
 
-`run-gates.sh` は 1 回の全走中、重複する門番や全体テスト（`scripts/nextest-full.sh`）の実走を 1 度に畳み込んで省略する（`docs/plan.md` 32 節、`docs/rounds/nextest.md`）。全体テストは固定した版の nextest で走り、門番はその結果を `nextest-case` 行で読む。門番を別々のシェルで個別に走らせた場合、畳み込みは各門番の入れ子範囲でのみ機能する。
+全体テストは固定した版の nextest で `scripts/nextest-full.sh` が走らせ、m0 がその結果を `nextest-case` 行で読む（`docs/rounds/nextest.md`）。常設の門番は、製品か AGENTS.md の守ることの契約の変更で赤になり得る検査だけを持つ。変異・探針・判定器の較正のような「テストのテスト」はラウンドの時点で 1 回測り、その `docs/rounds/<slug>.md` の実測に残す（`docs/rounds/prune-meta-gates.md`）。
 
 - 層に個別の門番を追加する場合は `--tier core 出力先 verify-r33` のように指定する。
 - 文書の整合性は `scripts/lint-docs.sh` が検証し、full 層の最後に実行される。
@@ -29,18 +29,14 @@ cargo clippy --offline --all-targets -- -D warnings # lint。verify-clippy（cor
 
 ### 並列実行（`--jobs N`）
 
-`--jobs N`（既定 1）は門番を N 並列で実行する（34 節）。合否判定は直列実行と同じで、直列と同一の `PASSED: n/N` を出力する。既定が直列なのは再現性のためであり、指定なしの挙動は 33 節と変わらない。
-
-- **2 段階実行**: 共有ツリーを書き換える門番（m0・m1-corpus・m2・m3・gate-cache）は前段で 1 本ずつ直列に完走させ、その後に残りの門番をファンアウト（並列実行）する。ゲートキャッシュの鍵が作業ツリーの内容であるため、これらを並列に走らせると他門番の結果が揺れるのを防ぐためである。
-- **整合性検証とフォールバック**: 前段終了後とファンアウト終了後に作業ツリーの内容ハッシュを比較し、変化があれば分類漏れとして失敗（赤）にする。前段に赤がある場合、後段は直列実行に切り替える（失敗した門番が probe を戻し切らずに終わった際、キャッシュ鍵の変動で入れ子門番が再走するのを防ぐ。赤は確定済みのため判定は緩まない）。
-- **出力先と中断**: ログ出力先は内容ハッシュの対象外のため、`--jobs` の出力先は `target/` 配下でもツリー外でもよい（`HADO_GATE_TIMES` と `HADO_GATE_RUNS` も同様）。実行中断時は、親プロセスが全子孫ワーカーを停止してから走行スコープを削除する。
+`--jobs N`（既定 1）は門番を N 並列で実行する。合否判定は直列実行と同じである。m0（ビルドと全体テスト）を先に完走させ、残りをファンアウトする。門番は作業ツリーを書かないので、どの組でも並べられる。実行中断時は、親プロセスが全子孫の門番を停止する。`HADO_GATE_TIMES` にファイルを渡すと、門番ごとの所要と終了コードを追記する。
 
 ## CI
 
 CI は GitHub Actions で実行する（`.github/workflows/ci.yml`、`docs/rounds/ci.md`）。
 
 - **実行層**: PR は core 層と `scripts/lint-docs.sh`、main への push は full 層を実行する。手動実行（workflow_dispatch）では層を選択できる（既定: full）。
-- **層の管理**: 層の選択は `scripts/ci-run.sh` が持ち、`scripts/verify-ci.sh`（quick）が整合性を固定する。
+- **層の管理**: 層の選択は `scripts/ci-run.sh` が持つ。
 - **依存と制約**: 依存関係は初回に `cargo fetch --locked` で取得し、以降は `--offline` で回す。runner は GitHub の standard runner（`ubuntu-latest`）で、public リポジトリのため無料（`docs/rounds/ci-public.md`）。
 
 ## 構成
