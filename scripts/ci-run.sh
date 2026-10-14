@@ -17,9 +17,9 @@
 # run-gates が回すだけ）ので、どの層でもここで必ず回す。full では 2 回になるが、
 # 判定は同じで所要は数秒である。
 #
-# shard（I/N）を渡すと、層の門番の I 番目の取り分だけを回す（scripts/run-gates.sh の
-# --shard、docs/rounds/ci-shards.md）。ワークフローは N 台の job で I = 1..N を同時に回す。
-# 文書層は 1 番だけが回す。
+# shard（tests:I/N か gates:I/N）を渡すと、その取り分だけを回す（scripts/run-gates.sh の
+# --shard、docs/rounds/ci-shards.md）。ワークフローは tests と gates の各 I = 1..N を別々の
+# job で同時に回す。文書層は gates:1 だけが回す。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -43,7 +43,7 @@ if [ -n "$shard" ]; then
         exit 1
     fi
     shard_args=(--shard "$shard")
-    [ "${shard%%/*}" = 1 ] || shard_first=0
+    [ "${shard%%/*}" = gates:1 ] || shard_first=0
 fi
 
 # shellcheck source=scripts/lib/gate-tiers.sh

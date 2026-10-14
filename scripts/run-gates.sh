@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    echo 'usage: run-gates.sh [--jobs N] [--tier quick|core|full] [--shard I/N] <output-directory> [verify-<name> ...]' >&2
+    echo 'usage: run-gates.sh [--jobs N] [--tier quick|core|full] [--shard tests|gates:I/N] <output-directory> [verify-<name> ...]' >&2
     echo '       run-gates.sh --print-tier quick|core|full' >&2
 }
 
@@ -62,18 +62,20 @@ case "$gate_jobs" in
         ;;
 esac
 
-# --shard は I/N（1 <= I <= N、先頭 0 なし）。
+# --shard は tests:I/N か gates:I/N（1 <= I <= N、先頭 0 なし）。
+shard_role=
 shard_index=1
 shard_count=1
 if [ -n "$shard" ]; then
-    if ! [[ "$shard" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] ||
-        [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    if ! [[ "$shard" =~ ^(tests|gates):([1-9][0-9]*)/([1-9][0-9]*)$ ]] ||
+        [ "${BASH_REMATCH[2]}" -gt "${BASH_REMATCH[3]}" ]; then
         echo "invalid --shard: $shard" >&2
         usage
         exit 1
     fi
-    shard_index=${BASH_REMATCH[1]}
-    shard_count=${BASH_REMATCH[2]}
+    shard_role=${BASH_REMATCH[1]}
+    shard_index=${BASH_REMATCH[2]}
+    shard_count=${BASH_REMATCH[3]}
 fi
 
 for name in "$tier" "$print_tier"; do
@@ -157,32 +159,44 @@ for gate in "${all[@]}"; do
     esac
 done
 
-# シャード（--shard I/N）。CI は層の門番を N 台の runner に分けて同時に回す
-# （docs/rounds/ci-shards.md）。m0 はどのシャードでも走り、全体テストの I 番目の切れだけを
-# 回す。残りの門番は一覧の順に 1 本ずつ N 台へ配る。N 台の和集合が層の門番と全体テストを
-# ちょうど 1 回ずつ覆う。
+# シャード（docs/rounds/ci-shards.md）。CI は層の門番を 2 種の runner に分けて同時に回す。
+#   tests:I/N  m0 だけを回し、全体テストの I 番目の切れ（nextest --partition count:I/N）を走らせる
+#   gates:I/N  m0 以外の門番を一覧の順に 1 本ずつ N 台へ配り、I 番目の取り分を回す
+# tests の N 台と gates の N 台の和集合が、層の門番と全体テストをちょうど 1 回ずつ覆う。
 all_gates=("${gates[@]}")
-if [ "$shard_count" -gt 1 ]; then
-    export HADO_TEST_PARTITION="count:$shard_index/$shard_count"
-    mine=()
-    k=0
-    for name in "${gates[@]}"; do
-        if [ "$name" = verify-m0 ]; then
-            mine+=("$name")
-            continue
-        fi
-        if [ $((k % shard_count + 1)) -eq "$shard_index" ]; then
-            mine+=("$name")
-        fi
-        k=$((k + 1))
-    done
-    gates=("${mine[@]}")
-    echo "run-gates: shard $shard_index/$shard_count runs ${#gates[@]} gates, test partition $HADO_TEST_PARTITION"
+first_shard=1
+case "$shard_role" in
+    tests)
+        export HADO_TEST_PARTITION="count:$shard_index/$shard_count"
+        mine=()
+        for name in "${gates[@]}"; do
+            [ "$name" != verify-m0 ] || mine+=("$name")
+        done
+        gates=("${mine[@]}")
+        first_shard=0
+        ;;
+    gates)
+        mine=()
+        k=0
+        for name in "${gates[@]}"; do
+            [ "$name" != verify-m0 ] || continue
+            if [ $((k % shard_count + 1)) -eq "$shard_index" ]; then
+                mine+=("$name")
+            fi
+            k=$((k + 1))
+        done
+        gates=("${mine[@]}")
+        [ "$shard_index" -eq 1 ] || first_shard=0
+        ;;
+esac
+if [ -n "$shard_role" ]; then
+    echo "run-gates: shard $shard runs ${#gates[@]} gates${HADO_TEST_PARTITION:+, test partition $HADO_TEST_PARTITION}"
 fi
 
-# quick 層は「保存ごと」なので、門番の前にビルドを 1 回だけ実走する。
+# quick 層は「保存ごと」なので、門番の前にビルドを 1 回だけ実走する。gates のシャードも
+# m0 がビルドしないので、同じくここでビルドする。
 # ログは tools/gates/main.hd の集計に混ざるので、末尾を PASSED: n/N に揃える。
-if [ "$tier" = "quick" ]; then
+if [ "$tier" = "quick" ] || [ "$shard_role" = gates ]; then
     echo "RUN: build -> $output/build.log"
     started=$SECONDS
     build_status=0
@@ -283,8 +297,8 @@ done
 
 # core の終わりに、この走行で回さなかった門番を見せる。層をまたいだ取り違えで
 # 赤を見逃さないため（docs/plan.md 33 節）。明示的に足した門番は差し引く。
-# シャードでは 1 番だけが出し、他のシャードが回す門番も差し引く。
-if [ "$tier" = "core" ] && [ "$shard_index" -eq 1 ]; then
+# シャードでは gates:1 だけが出し、他のシャードが回す門番も差し引く。
+if [ "$tier" = "core" ] && [ "$first_shard" -eq 1 ]; then
     echo "full-only gates (not run in this run):"
     LC_ALL=C comm -23 <(hado_tier_all_gates | LC_ALL=C sort) \
         <(for name in "${all_gates[@]}"; do printf '%s\n' "${name#verify-}"; done | LC_ALL=C sort) |
@@ -293,7 +307,7 @@ fi
 
 # 文書の整合は処理系の門番ではないので、full 層（と引数なしの全走）の最後に
 # 文書層として回す（docs/plan.md 33 節）。
-if { [ "$tier" = "full" ] || [ "$default_all" -eq 1 ]; } && [ "$shard_index" -eq 1 ]; then
+if { [ "$tier" = "full" ] || [ "$default_all" -eq 1 ]; } && [ "$first_shard" -eq 1 ]; then
     echo "RUN: lint-docs -> $output/lint-docs.log"
     started=$SECONDS
     lint_status=0
