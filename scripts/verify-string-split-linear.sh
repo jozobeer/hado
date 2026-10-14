@@ -222,9 +222,11 @@ size_t hado_format_float(double value, unsigned char *bytes, size_t capacity) {
   return (size_t)written;
 }
 
+/* 壁時計ではなくこのプロセスの CPU 時間で測る。CI は門番を並べて走らせるので、
+   壁時計は他の門番に取られた時間を含み、比が揺れる（docs/rounds/ci-shards.md）。 */
 static double now_seconds(void) {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
