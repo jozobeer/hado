@@ -478,14 +478,16 @@ fn split_step(text: &str) -> Step {
 /// `… as name` の末尾を `(本体, 名前)` に割る。
 fn trailing_binding(text: &str) -> Option<(String, String)> {
     let trimmed = text.trim_end();
-    let start = trimmed
-        .rfind(|character: char| !(character.is_alphanumeric() || character == '_'))
-        .map_or(0, |index| index + 1);
-    let name = &trimmed[start..];
+    // 区切りは Unicode 空白（NBSP・全角空白）にもなる。`rfind` のバイト位置に
+    // 1 を足すと、その文字の途中を切って panic する。
+    let name = trimmed
+        .rsplit(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .next()
+        .unwrap_or("");
     if !is_name(name) {
         return None;
     }
-    let before = trimmed[..start].trim_end();
+    let before = trimmed[..trimmed.len() - name.len()].trim_end();
     let head = before.strip_suffix("as")?;
     if head.ends_with(|character: char| character.is_alphanumeric() || character == '_') {
         return None;
