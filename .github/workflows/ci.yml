@@ -97,13 +97,17 @@ jobs:
 
       # 依存（cranelift など）のビルド成果物。どの台もクリーンからのビルドで 1 分前後を
       # 依存に使う。target/ 全体（4 GB 級、docs/rounds/ci.md の決定 5）ではなく、hado 自身を
-      # 消した target/ を保存する（docs/rounds/ci-shards.md）。鍵は依存の版・toolchain・profile。
+      # 消した target/ を保存する（docs/rounds/ci-shards.md）。鍵は toolchain と profile、
+      # 続けて依存の版。依存の版だけが違うときは古い成果物から始め、変わった依存だけを
+      # ビルドする。toolchain か profile が違えば使わない。
       - name: restore dependency build
         id: deps
         uses: actions/cache/restore@v6
         with:
           path: target
-          key: deps-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml') }}
+          key: deps-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            deps-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml') }}-
 
       - name: gates
         run: bash scripts/ci-run.sh "${{ github.event_name }}" "${{ github.ref }}" "${{ inputs.tier }}" "${{ matrix.shard }}"
