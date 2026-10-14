@@ -55,7 +55,6 @@ issue の完了条件をそのまま使う。門番 `scripts/verify-nested-appli
 
 - `postfix_print.rs` の実装。現象は既に直っており、このラウンドの門番は実装を変えずに緑になる。
 - `stdlib`・`tools` への検体追加。issue は受理コーパスへと定めており、`tools/gates` は門番の道具で印字の対象ではない。
-- トップレベルの curry した `def` を直接入れ子適用する形（`def f a => fn(b => a + b)` の `((f 1) 41)`）。検体は `fn(...)` の直接適用と `as mk ->` の束縛を使う。
 
 ### 中断の条件
 
