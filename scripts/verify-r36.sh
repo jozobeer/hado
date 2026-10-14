@@ -16,9 +16,14 @@ check() {
         echo "NG: $label"
     fi
 }
+# shellcheck source=scripts/lib/prerun.sh
+. scripts/lib/prerun.sh
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
+# ケースは並列に走るので、cargo の錠を取り合う cargo run ではなく、ビルドした処理系を直接呼ぶ。
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+compiler=$(readlink -f "$hado_target_dir/debug/hado")
 
 if ! SEED=${SEED:-$(( (RANDOM << 15) | RANDOM ))} python3 - "$workdir" <<'PY'
 from pathlib import Path
@@ -181,7 +186,7 @@ output_matches() {
     fi
 }
 build_case() {
-    cargo run --offline -q -- build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
+    "$compiler" build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
     [ "$(wc -c <"$1/build.err")" -eq 0 ]
 }
 check_prints() {
@@ -297,11 +302,20 @@ for name in sorted(expected.keys() | actual.keys()):
         print(f"   {module}.{name}: args={actual[name][0]}, result={actual[name][1]}, effect={actual[name][2]}")
 sys.exit(1 if mismatches else 0)
 PY
+# 判定は先に並列で走らせ、下のループが manifest の順に読む（scripts/lib/prerun.sh）。
+prerun_init "$workdir/prerun"
 while IFS=$'\t' read -r kind label mode; do
     dir="$workdir/$kind"
     case "$mode" in
-        print) check "$label" check_prints "$dir" ;;
-        error) check "$label" expects_error "$dir" ;;
+        print) prerun_start "$kind" check_prints "$dir" ;;
+        error) prerun_start "$kind" expects_error "$dir" ;;
+    esac
+done <"$workdir/manifest.tsv"
+prerun_wait
+while IFS=$'\t' read -r kind label mode; do
+    dir="$workdir/$kind"
+    case "$mode" in
+        print | error) check "$label" prerun_result "$kind" ;;
         *) exit 1 ;;
     esac
     if [[ "$label" == 36-e* ]] && [ -f "$dir/out" ] && [ -f "$dir/err" ]; then

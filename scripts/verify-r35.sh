@@ -15,9 +15,14 @@ check() {
         echo "NG: $label"
     fi
 }
+# shellcheck source=scripts/lib/prerun.sh
+. scripts/lib/prerun.sh
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
+# ケースは並列に走るので、cargo の錠を取り合う cargo run ではなく、ビルドした処理系を直接呼ぶ。
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+compiler=$(readlink -f "$hado_target_dir/debug/hado")
 
 if ! SEED=${SEED:-$(( (RANDOM << 15) | RANDOM ))} PAD=$RANDOM python3 - "$workdir" <<'PY'
 from pathlib import Path
@@ -228,7 +233,7 @@ output_matches() {
     fi
 }
 build_case() {
-    cargo run --offline -q -- build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
+    "$compiler" build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
     [ "$(wc -c <"$1/build.err")" -eq 0 ]
 }
 check_prints() {
@@ -246,9 +251,9 @@ expects_error() {
 within_deadline() {
     local dir="$1" status=0
     /usr/bin/time -f 'build+run=%es' -o "$dir/time" timeout 2 bash -c '
-        cargo run --offline -q -- build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" &&
+        "$2" build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" &&
         "$1/main" >"$1/out" 2>"$1/err"
-    ' _ "$dir" || status=$?
+    ' _ "$dir" "$compiler" || status=$?
     cat "$dir/time"
     [ "$status" -eq 0 ] || return 1
     cat "$dir/out"
@@ -256,7 +261,7 @@ within_deadline() {
 }
 expects_code() {
     local dir="$1" status=0
-    cargo run --offline -q -- check "$dir/main.hd" >"$dir/out" 2>"$dir/err" || status=$?
+    "$compiler" check "$dir/main.hd" >"$dir/out" 2>"$dir/err" || status=$?
     [ "$status" -eq 1 ] && [ "$(wc -c <"$dir/out")" -eq 0 ] || return 1
     python3 - "$dir" <<'PY'
 from pathlib import Path
@@ -268,13 +273,23 @@ assert len(actual.splitlines()) == 1, actual
 assert expected in actual, actual
 PY
 }
+# 判定は先に並列で走らせ、下のループが manifest の順に読む（scripts/lib/prerun.sh）。
+# timeout は期限を測るので、並列の負荷の下では走らせず、下のループで 1 件ずつ走らせる。
+prerun_init "$workdir/prerun"
 while IFS=$'\t' read -r kind label mode; do
     dir="$workdir/$kind"
     case "$mode" in
-        print) check "$label" check_prints "$dir" ;;
-        error) check "$label" expects_error "$dir" ;;
+        print) prerun_start "$kind" check_prints "$dir" ;;
+        error) prerun_start "$kind" expects_error "$dir" ;;
+        code:*) prerun_start "$kind" expects_code "$dir" ;;
+    esac
+done <"$workdir/manifest.tsv"
+prerun_wait
+while IFS=$'\t' read -r kind label mode; do
+    dir="$workdir/$kind"
+    case "$mode" in
+        print | error | code:*) check "$label" prerun_result "$kind" ;;
         timeout) check "$label" within_deadline "$dir" ;;
-        code:*) check "$label" expects_code "$dir" ;;
         *) exit 1 ;;
     esac
 done <"$workdir/manifest.tsv"

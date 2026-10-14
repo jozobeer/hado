@@ -151,12 +151,13 @@ mod launch_tests {
         }
         let scratch = Scratch::new();
         std::fs::create_dir(scratch.0.join("ambient")).unwrap();
+        // テスト二進の中での名前。束ねた二進（tests/command.rs）では上位の module が前に付く。
+        let name = format!(
+            "{}::isolates_work_and_stdin",
+            module_path!().split_once("::").unwrap().1
+        );
         let mut child = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "launch_tests::isolates_work_and_stdin",
-                "--nocapture",
-            ])
+            .args(["--exact", &name, "--nocapture"])
             .env(CHILD_ROOT, &scratch.0)
             .current_dir(scratch.0.join("ambient"))
             .stdin(Stdio::piped())

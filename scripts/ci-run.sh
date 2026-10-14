@@ -3,7 +3,7 @@
 # 回す層を選んで門番と文書層を回す。層の中身と門番の一覧は
 # scripts/lib/gate-tiers.sh が唯一の正で、この script は層の名前だけを決める。
 #
-#   bash scripts/ci-run.sh <event> <ref> [requested-tier]
+#   bash scripts/ci-run.sh <event> <ref> [requested-tier] [shard]
 #
 # pull_request は core 以上、push は refs/heads/main だけを full、
 # workflow_dispatch は requested-tier（空なら full）とする。知らない event・
@@ -16,11 +16,15 @@
 # 文書層（scripts/lint-docs.sh）は run-gates の層に含まれない（full の最後に
 # run-gates が回すだけ）ので、どの層でもここで必ず回す。full では 2 回になるが、
 # 判定は同じで所要は数秒である。
+#
+# shard（tests:I/N か gates:I/N）を渡すと、その取り分だけを回す（scripts/run-gates.sh の
+# --shard、docs/rounds/ci-shards.md）。ワークフローは tests と gates の各 I = 1..N を別々の
+# job で同時に回す。文書層は gates:1 だけが回す。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 usage() {
-    echo 'usage: ci-run.sh <event> <ref> [requested-tier]' >&2
+    echo 'usage: ci-run.sh <event> <ref> [requested-tier] [shard]' >&2
 }
 
 if [ "$#" -lt 2 ]; then
@@ -30,6 +34,17 @@ fi
 event=$1
 ref=$2
 requested=${3:-}
+shard=${4:-}
+shard_args=()
+shard_first=1
+if [ -n "$shard" ]; then
+    # 形は run-gates が検める。文書だけの PR では run-gates を呼ばないので、ここでも落とす。
+    if ! bash scripts/run-gates.sh --shard "$shard" --print-tier quick >/dev/null; then
+        exit 1
+    fi
+    shard_args=(--shard "$shard")
+    [ "${shard%%/*}" = gates:1 ] || shard_first=0
+fi
 
 # shellcheck source=scripts/lib/gate-tiers.sh
 . scripts/lib/gate-tiers.sh
@@ -117,16 +132,28 @@ fi
 out=${HADO_CI_OUT:-target/ci-gates}
 
 if [ "$docs_only" -eq 1 ]; then
-    echo "ci-run: event=$event ref=$ref docs-only: the gates are skipped, the document layer runs"
+    echo "ci-run: event=$event ref=$ref docs-only: the gates are skipped, the document layer runs${shard:+ (shard $shard)}"
 else
-    echo "ci-run: event=$event ref=$ref tier=$tier jobs=$jobs out=$out"
+    echo "ci-run: event=$event ref=$ref tier=$tier jobs=$jobs out=$out${shard:+ shard=$shard}"
 fi
 status=0
-if [ "$docs_only" -eq 0 ] && ! bash scripts/run-gates.sh --jobs "$jobs" --tier "$tier" "$out"; then
+# 文書層は門番と並べて走らせ、門番の後に出力を出す。門番が赤でも文書層は回す
+# （赤を隠さない。判定は status に畳む）。
+docs_log=
+if [ "$shard_first" -eq 1 ]; then
+    mkdir -p target
+    docs_log=$(mktemp "$PWD/target/lint-docs.XXXXXX")
+    bash scripts/lint-docs.sh >"$docs_log" 2>&1 &
+    docs_pid=$!
+fi
+if [ "$docs_only" -eq 0 ] && ! bash scripts/run-gates.sh --jobs "$jobs" --tier "$tier" "${shard_args[@]}" "$out"; then
     status=1
 fi
-# 門番が赤でも文書層は回す（赤を隠さない。判定は status に畳む）。
-if ! bash scripts/lint-docs.sh; then
-    status=1
+if [ -n "$docs_log" ]; then
+    docs_status=0
+    wait "$docs_pid" || docs_status=$?
+    cat -- "$docs_log"
+    rm -f -- "$docs_log"
+    [ "$docs_status" -eq 0 ] || status=1
 fi
 exit "$status"

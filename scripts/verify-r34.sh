@@ -23,6 +23,8 @@ if ! cargo build --offline --bin hado; then
     exit 1
 fi
 
+# shellcheck source=scripts/lib/prerun.sh
+. scripts/lib/prerun.sh
 hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 compiler=$(readlink -f "$hado_target_dir/debug/hado")
 workdir=$(mktemp -d)
@@ -765,11 +767,24 @@ code_present() {
     [[ "$(cat "$workdir/check-$kind.err")" == *"error[$code]:"* ]]
 }
 
+# 判定は先に並列で走らせ、下のループが manifest の順に読む（scripts/lib/prerun.sh）。
+prerun_manifest() { # manifest results-dir
+    local kind desc mode
+    prerun_init "$2"
+    while IFS=$'\t' read -r kind desc mode; do
+        case "$mode" in
+            print) prerun_start "$kind" prints_match "$kind" ;;
+            error) prerun_start "$kind" error_matches "$kind" ;;
+            code:*) prerun_start "$kind" code_present "$kind" "${mode#code:}" ;;
+        esac
+    done <"$1"
+    prerun_wait
+}
+
+prerun_manifest "$workdir/cases/manifest.tsv" "$workdir/prerun-cases"
 while IFS=$'\t' read -r kind desc mode; do
     case "$mode" in
-        print) check "$desc" prints_match "$kind" ;;
-        error) check "$desc" error_matches "$kind" ;;
-        code:*) check "$desc" code_present "$kind" "${mode#code:}" ;;
+        print | error | code:*) check "$desc" prerun_result "$kind" ;;
     esac
 done <"$workdir/cases/manifest.tsv"
 
@@ -1108,10 +1123,10 @@ then
     echo 'NG: 34-i generator failed'
     exit 1
 fi
+prerun_manifest "$workdir/cases/fields-manifest.tsv" "$workdir/prerun-fields"
 while IFS=$'\t' read -r kind desc mode; do
     case "$mode" in
-        print) check "$desc" prints_match "$kind" ;;
-        error) check "$desc" error_matches "$kind" ;;
+        print | error) check "$desc" prerun_result "$kind" ;;
         *) echo "NG: 34-i invalid mode: $mode"; exit 1 ;;
     esac
 done <"$workdir/cases/fields-manifest.tsv"
