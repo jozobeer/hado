@@ -57,11 +57,12 @@ jobs:
         with:
           fetch-depth: 2
 
-      # libgc-dev は runtime/hado_runtime.c の <gc.h> と -lgc に要る。
+      # libgc-dev は runtime/hado_runtime.c の <gc.h> と -lgc に要る。image の索引で
+      # 入らないときだけ apt-get update する（update が段の所要の大半を占める）。
       - name: runtime dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgc-dev
+          sudo apt-get install -y --no-install-recommends libgc-dev ||
+            { sudo apt-get update && sudo apt-get install -y --no-install-recommends libgc-dev; }
 
       # 依存の tarball だけを保存する。target/ は 4 GB 級なので保存しない
       # （docs/rounds/ci.md の実測）。--offline の門番はこの取得で足りる。
@@ -94,6 +95,16 @@ jobs:
           cargo --version
           nproc
 
+      # 依存（cranelift など）のビルド成果物。どの台もクリーンからのビルドで 1 分前後を
+      # 依存に使う。target/ 全体（4 GB 級、docs/rounds/ci.md の決定 5）ではなく、hado 自身を
+      # 消した target/ を保存する（docs/rounds/ci-shards.md）。鍵は依存の版・toolchain・profile。
+      - name: restore dependency build
+        id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: target
+          key: deps-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml') }}
+
       - name: gates
         run: bash scripts/ci-run.sh "${{ github.event_name }}" "${{ github.ref }}" "${{ inputs.tier }}" "${{ matrix.shard }}"
 
@@ -107,3 +118,19 @@ jobs:
           path: target/ci-gates
           if-no-files-found: ignore
           retention-days: 14
+
+      # 鍵が外れたときは、tests:1 の台が依存を含む target/ を保存する。hado 自身の成果物と
+      # 門番のログは保存しない（チェックアウトのたびに hado はビルドし直される）。
+      - name: prune target for the dependency cache
+        if: steps.deps.outputs.cache-hit != 'true' && matrix.shard == 'tests:1/3'
+        run: |
+          cargo clean --offline -p hado
+          rm -rf target/ci-gates target/nextest
+          du -sh target
+
+      - name: save dependency build
+        if: steps.deps.outputs.cache-hit != 'true' && matrix.shard == 'tests:1/3'
+        uses: actions/cache/save@v6
+        with:
+          path: target
+          key: ${{ steps.deps.outputs.cache-primary-key }}
