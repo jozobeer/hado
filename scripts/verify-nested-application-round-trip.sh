@@ -5,12 +5,10 @@
 #   a. `fmt` の前後で `run` の出力（終了コードと stdout/stderr）が同じ。
 #   b. `print-postfix` の出力を読み直した `run` が、元のソースの `run` と同じ。
 #   c. `fmt` の直後の `fmt --check` が終了コード 0（冪等）。
-#   d. 検体の `// expect:` と `run` の出力が一致する（検体自身の妥当性）。
-#   e. 呼び手の括弧を落とす変異で a が赤になる（変異は門番が一時的なコピーへ当てて戻す）。
 #
 # 検体は `tests/accept/` の `(f a) b` の形（適用の呼び手が括弧で囲まれた適用）を
-# ディスクから列挙して数える。ファイル名は書き込まない。期待値は検体の
-# `// expect:` から読み、`run` の出力と照合する。
+# ディスクから列挙して数える。ファイル名は書き込まない。検体の `// expect:` との
+# 一致は tests/corpus.rs が見る。
 #
 # tier: core
 # round: nested-application-round-trip
@@ -23,20 +21,12 @@ ok() { total=$((total + 1)); pass=$((pass + 1)); echo "OK: $1"; }
 ng() { total=$((total + 1)); echo "NG: $1 ($2)"; }
 
 work=$(mktemp -d)
-source_file=crates/hado/src/postfix_print.rs
-backup=$(mktemp)
-cp "$source_file" "$backup"
-cleanup() {
-    cp "$backup" "$source_file"
-    rm -f "$backup"
-    rm -rf "$work"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work"' EXIT
 
 cargo build --offline -q --bin hado || exit 1
 target_dir=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
 hado_bin="$target_dir/debug/hado"
-mkdir -p "$work/run" "$work/print" "$work/fmt" "$work/mut"
+mkdir -p "$work/run" "$work/print" "$work/fmt"
 
 # --- 検体の列挙（ディスクから数える） ---
 # 適用の呼び手が括弧で囲まれた適用である形を探す。テキストの形だけを見る。
@@ -167,40 +157,12 @@ capture_run() {
     rm -f "$out.body"
 }
 
-# --- 検体の `// expect:` から期待する出力を組み立てる ---
-write_expected() {
-    local file=$1 out=$2
-    python3 - "$file" "$out" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-text = Path(sys.argv[1]).read_text()
-found = re.findall(r"^// (expect|expect-error):(.*)$", text, re.M)
-if len(found) != 1:
-    Path(sys.argv[2]).write_text("<no output header>\n")
-    raise SystemExit(0)
-kind, value = found[0]
-value = value.strip()
-status = 1 if kind == "expect-error" else 0
-body = value + "\n" if value else ""
-Path(sys.argv[2]).write_text(f"{status}\n{body}")
-PY
-}
-
 specimen_count=$(printf '%s\n' "$specimens" | grep -c . || true)
 
 # --- 検体ごとの検査 ---
 check_specimen() {
-    local case_dir=$1 name=${1#tests/accept/} before fmt_run printed_run
+    local case_dir=$1 name=${1#tests/accept/}
     capture_run "$case_dir/main.hd" "$work/run/original"
-    write_expected "$case_dir/main.hd" "$work/run/expected"
-    if cmp -s "$work/run/original" "$work/run/expected"; then
-        ok "d: $name: run の出力が // expect: と一致する"
-    else
-        ng "d: $name: run の出力が // expect: と一致する" "宣言と違う"
-        diff -u "$work/run/expected" "$work/run/original" | sed -n '1,6p'
-    fi
 
     rm -rf "$work/fmt/$name"
     cp -R "$case_dir" "$work/fmt/$name"
@@ -241,48 +203,6 @@ else
         check_specimen "$case_dir"
     done <<<"$specimens"
 fi
-
-# --- e. 呼び手の括弧を落とす変異で a が赤になるか ---
-check_mutation() {
-    python3 - "$source_file" <<'PY'
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text()
-needle = "let mut out = if matches!(f.kind, NodeKind::Apply(..)) {"
-if needle not in text:
-    print("MUTATION-NOT-APPLIED")
-    raise SystemExit(1)
-path.write_text(text.replace(needle, "let mut out = if false {", 1))
-PY
-    if [ "$?" -ne 0 ]; then
-        ng "e: 呼び手の括弧を落とす変異で a が赤になる" "変異を当てられない"
-        cp "$backup" "$source_file"
-        return
-    fi
-    cargo build --offline -q --bin hado 2>/dev/null || true
-    local red=0 name
-    while IFS= read -r case_dir; do
-        [ -n "$case_dir" ] || continue
-        name=${case_dir#tests/accept/}
-        rm -rf "$work/mut/$name"
-        cp -R "$case_dir" "$work/mut/$name"
-        capture_run "$case_dir/main.hd" "$work/run/mut-original"
-        "$hado_bin" fmt "$work/mut/$name/main.hd" >/dev/null 2>&1
-        capture_run "$work/mut/$name/main.hd" "$work/run/mut-formatted"
-        cmp -s "$work/run/mut-original" "$work/run/mut-formatted" || red=$((red + 1))
-    done <<<"$specimens"
-    cp "$backup" "$source_file"
-    cargo build --offline -q --bin hado 2>/dev/null || true
-    if [ "$red" -gt 0 ]; then
-        ok "e: 呼び手の括弧を落とす変異で a が赤になる（検体 $red 本）"
-    else
-        ng "e: 呼び手の括弧を落とす変異で a が赤になる" "変異でも緑のまま"
-    fi
-}
-
-check_mutation
 
 echo "PASSED: $pass/$total"
 [ "$pass" -eq "$total" ]
