@@ -172,6 +172,23 @@ $ bash scripts/run-gates.sh --jobs 4 --tier quick target/.gates-nart | tail -1
 TALLY: 51/51 passed; red: none
 ```
 
+着地後の main の CI（full、走行 38583363283、`4a0e26a`）。門番は `gates:2/5` で走った:
+
+```
+$ gh run view 38583363283 --log | grep -E 'TALLY|RUN: verify-nested' \
+> | sed -E 's/\tUNKNOWN STEP\t[0-9T:.-]+Z / /' | sort
+gates (gates:1/5) TALLY: 170/170 passed; red: none
+gates (gates:2/5) RUN: verify-nested-application-round-trip -> /home/runner/work/hado/hado/target/ci-gates/verify-nested-application-round-trip.log
+gates (gates:2/5) TALLY: 1457/1457 passed; red: none
+gates (gates:3/5) TALLY: 952/952 passed; red: none
+gates (gates:4/5) TALLY: 593/593 passed; red: none
+gates (gates:5/5) TALLY: 506/506 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+success 2026-10-14T14:45:29Z → 2026-10-14T14:48:54Z（3 分 25 秒）
+```
+
 ### 仕様への疑義
 
 - **issue の「由来」は適用を §36 とするが、§36 は「伝播と分岐」である。** 適用と呼び出しの規範文は §13（「関数の呼び出しは並置」「定義の引数数と呼び出しの引数数は一致しなければならない」）にある。仕様本文を正として、検体の `// spec:` は §13 を指す。issue はこのラウンドで消すので、仕様は動かさない。
