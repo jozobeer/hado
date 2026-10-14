@@ -194,3 +194,11 @@ $ cargo nextest list --offline | awk '{print $1}' | sort | uniq -c
 cargo build（クリーン）                 real 1m2.623s
 cargo clean -p hado 後の cargo build    real 0m25.442s
 ```
+
+PR #105 の `pull_request` の走行 38516298200。PR の走行はブランチのキャッシュを読めないので、
+1 回目は鍵が外れて保存し、2 回目（再実行）は当たる。
+
+| 試行 | 依存のキャッシュ | 所要 | 結果 |
+|---|---|---|---|
+| 1 | 外れ（`tests:1/3` が保存） | 3 分 04 秒 | 緑 |
+| 2 | 当たり | 2 分 24 秒 | 緑 |
