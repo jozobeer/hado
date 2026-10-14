@@ -49,7 +49,7 @@ issue の完了条件をそのまま使う。門番 `scripts/verify-nested-appli
 
 ### 許容される赤
 
-- なし。`verify-r62`・`verify-r63`・`verify-r68` などの既知の赤は main でも赤く、このラウンドの成果ではない。
+- なし。
 
 ### スコープ外
 
