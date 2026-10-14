@@ -14,7 +14,7 @@ fail() { echo "NG: $1 $2"; }
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 
-cargo test --offline --test parse_corpus -- --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
+cargo test --offline --test compiler -- parse_corpus:: --nocapture --test-threads=1 >"$TMPD/base.log" 2>&1
 
 # --- check 1: E1xx の診断の位置（行は error code が定める構文から導く） ---
 c1_reasons=""

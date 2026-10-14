@@ -6,7 +6,7 @@
 #
 # 出力は nextest の出力に続けて、テストごとに次の 1 行（区切りはタブ）:
 #   nextest-case  PASS|FAIL|SKIP  <バイナリ ID>  <テスト名>
-# バイナリ ID は lib の単体テストが `hado`、tests/walk.rs が `hado::walk` である。
+# バイナリ ID は lib の単体テストが `hado`、束ねた二進が `hado::command`・`hado::compiler` である。
 # 終了コードは nextest の終了コード。nextest が 0 で終わっても結果を読めなければ 1。
 #
 # 環境変数 HADO_TEST_PARTITION（例 `count:2/4`）があれば、nextest の --partition に渡して

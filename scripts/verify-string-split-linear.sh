@@ -305,8 +305,8 @@ C
 
 # --- c: HadoString の配置を移行した runtime の単体テスト ---
 runtime_tests() {
-    cargo test --offline -q \
-        --test runtime_string --test r34_bytes --test r36_int --test r37_world --test repr
+    cargo test --offline -q --test compiler --test command -- \
+        runtime_string:: r34_bytes:: r36_int:: r37_world:: repr::
 }
 
 # --- d: HadoString * を返す関数をソースから列挙し、全部の不変条件を測る ---
