@@ -22,14 +22,16 @@ fi
 
 # --- check 2: the full test passes with exit 0 ---
 # テストごとの結果は scripts/nextest-full.sh の `nextest-case` 行から読む。
+# HADO_TEST_PARTITION があれば、その切れだけを走らせる（scripts/nextest-full.sh）。
+part=${HADO_TEST_PARTITION:+ partition=$HADO_TEST_PARTITION}
 bash scripts/nextest-full.sh >"$TMPD/test.log" 2>&1
 test_status=$?
 passed=$(awk -F'\t' '$1 == "nextest-case" && $2 == "PASS" { n++ } END { print n + 0 }' "$TMPD/test.log")
 if [ "$test_status" -eq 0 ] && [ "${passed:-0}" -ge 2 ]; then
-    pass 2 "nextest passed=$passed"
+    pass 2 "nextest passed=$passed$part"
 else
     tail -n 40 "$TMPD/test.log"
-    fail 2 "nextest status=$test_status passed=${passed:-0} (<2 or nonzero)"
+    fail 2 "nextest status=$test_status passed=${passed:-0}$part (<2 or nonzero)"
 fi
 
 # --- check 3: dependencies ---
