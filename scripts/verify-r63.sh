@@ -131,8 +131,9 @@ import harness
 harness.HADO = sys.argv[2]
 from harness import check_code, fmt
 
+# §58.1: `fmt` は印字し直すので、並置の引数の constructor は括弧で囲む（`g (A)`）。
 MIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b | true => 2 | false => 3\ndef g (t: T): Int => if t | A => 1 | _ => 0\ndef main = f true + g A\n'
-FIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b => 2 | 3\ndef g (t: T): Int => if t | A => 1 | 0\ndef main = f true + g A\n'
+FIXED = 'type T = | A | B\ndef f (b: Bool): Int => if b => 2 | 3\ndef g (t: T): Int => if t | A => 1 | 0\ndef main = f true + g (A)\n'
 check_code(sys.argv[1], 'c/mixed', MIXED, 'E520')
 assert fmt(sys.argv[1], 'c/mixed-fmt', MIXED, FIXED) == FIXED
 print('mixed: both rewrites settle in one fmt')
@@ -159,7 +160,13 @@ check_code(sys.argv[1], 'd/rule', 'def f (b: Bool): Int => if b | true => 1 | fa
 ARGUMENT = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b | true => 1 | false => 2)\ndef main = f true\n'
 ARGUMENT_FIXED = 'def id (n: Int): Int => n\ndef f (b: Bool): Int => id (if b => 1 | 2)\ndef main = f true\n'
 LET_VALUE = 'def f (b: Bool): Int =>\n  if(b | true => 1 | false => 2) as v ->\n  v + 1\ndef main = f true\n'
-LET_VALUE_FIXED = 'def f (b: Bool): Int =>\n  if(b => 1 | 2) as v ->\n  v + 1\ndef main = f true\n'
+# §58.1 は「改行は式の形だけで決める」とし、束縛は改行を持つ。この定義の本体は
+# 束縛 `if(b => 1 | 2) as v -> v + 1` なので、改行は `->` の後ろにだけ入り、
+# `def f … =>` と束縛の頭は同じ行に並ぶ。付録B の
+# `def create_user input => parse input as parsed ->` の次に `validate parsed ->`
+# が続く形が同じである。旧期待の `=>` 直後の改行は `fmt --check` が 1 rewrite を
+# 報告する（§58.1 の不動点でない）。
+LET_VALUE_FIXED = 'def f (b: Bool): Int => if(b => 1 | 2) as v ->\n  v + 1\ndef main = f true\n'
 accepted(sys.argv[1], 'd/argument-ok', check_fix(sys.argv[1], 'd/argument-fix', ARGUMENT, ARGUMENT_FIXED))
 accepted(sys.argv[1], 'd/let-ok', check_fix(sys.argv[1], 'd/let-fix', LET_VALUE, LET_VALUE_FIXED))
 print('controls: the exclusions are accepted and other positions are rewritten too')

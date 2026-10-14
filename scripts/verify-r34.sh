@@ -23,6 +23,8 @@ if ! cargo build --offline --bin hado; then
     exit 1
 fi
 
+# shellcheck source=scripts/lib/prerun.sh
+. scripts/lib/prerun.sh
 hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 compiler=$(readlink -f "$hado_target_dir/debug/hado")
 workdir=$(mktemp -d)
@@ -223,33 +225,10 @@ add("c2b", "34-c(2b) get が生成した要素を返す", "print")
 write("c2c", f'def main = Bytes.to_string (Bytes.of_string "{text}")\n', expect=text + "\n")
 add("c2c", "34-c(2c) of_string → to_string の往復", "print")
 
-# 34-c(3): 3 万要素の of_list。構築が O(n²) なら 2 秒に収まらない。
-# 3 万要素のリテラルはコンパイラの深い再帰でスタックを溢れさせるため、リストは
-# hado 側の純粋な生成器で実行時に作る（Bytes.of_list が見る要素数は同じ 3 万）。
-large_count = 30000
-large_indices = [0, large_count // 2, large_count - 1]
-large_expect = plist([large_count] + [(large_count - 1 - index) % 256 for index in large_indices]) + "\n"
-large_source = (
-    "def rec mod256 n => if n < 256 => n | mod256 (n - 256)\n"
-    "def rec gen n => if n <= 0 => [] | [mod256 (n - 1), ...gen (n - 1)]\n"
-)
-write(
-    "c3",
-    large_source + f"def main = Bytes.of_list (gen {large_count}) as b -> "
-    "[Bytes.length b, " + ", ".join(f"Bytes.get b {index}" for index in large_indices) + "]\n",
-    expect=large_expect,
-)
-add("c3", "34-c(3) 3 万要素の of_list が 2 秒以内に一致", "timeout")
-write(
-    "c3_to_list",
-    large_source
-    + "def rec at values index => if values | [] => -1 | [head, ...tail] => at_head head tail index\n"
-    "def rec at_head head tail index => if index == 0 => head | at tail (index - 1)\n"
-    f"def main = Bytes.to_list (Bytes.of_list (gen {large_count})) as values -> "
-    "[List.length values, " + ", ".join(f"at values {index}" for index in large_indices) + "]\n",
-    expect=large_expect,
-)
-add("c3_to_list", "34-c(3) 3 万要素の to_list の長さ・先頭・中間・末尾が 2 秒以内に一致", "timeout")
+# 34-c(3): 3 万要素の of_list / to_list。3 万要素のリテラルはコンパイラの深い
+# 再帰でスタックを溢れさせるため、リストは hado 側の純粋な生成器で実行時に作る。
+# 値の一致（打ち切りなし）と要素数に対する線形性は、下の perf_c3 が 1 つの検査で
+# 測る（絶対時間の上限を置かない理由は docs/rounds/r34-timing.md）。
 
 # 34-c(4a): of_list の 0..255 の範囲外。
 write("c4a_256", "def main = Bytes.of_list [256]\n", expect_error="ByteOutOfRange")
@@ -779,25 +758,6 @@ SH
 
 check '34-a/34-b 出力照合の対照: 全件一致は受理、空・値違い・余分な改行は拒否' output_controls
 
-# build と実行を合わせて 1 つの期限で測る。build だけ遅い注入も落ちるよう、
-# build と実行の両方に timeout を掛け、経過時間の合計も seconds 以下を要求する。
-builds_runs_within() {
-    local kind="$1" seconds="$2" dir start end status=0
-    dir=$(case_dir "$kind")
-    start=$(date +%s%N)
-    if ! timeout "$seconds" "$compiler" build "$dir/main.hd" >/dev/null 2>"$workdir/build-$kind.err"; then
-        echo "   ($kind: build timed out or failed)"
-        return 1
-    fi
-    timeout "$seconds" "$dir/main" >"$workdir/out-$kind" 2>"$workdir/err-$kind" || status=$?
-    end=$(date +%s%N)
-    echo "   ($kind: build+run=$(( (end - start) / 1000000 ))ms run_status=$status)"
-    [ "$status" -eq 0 ] || return 1
-    [ "$(wc -c <"$workdir/err-$kind")" -eq 0 ] || return 1
-    cmp -s "$workdir/out-$kind" "$dir/expect" || return 1
-    [ $(( end - start )) -le $(( seconds * 1000000000 )) ]
-}
-
 code_present() {
     local kind="$1" code="$2" dir status
     dir=$(case_dir "$kind")
@@ -807,14 +767,141 @@ code_present() {
     [[ "$(cat "$workdir/check-$kind.err")" == *"error[$code]:"* ]]
 }
 
+# 判定は先に並列で走らせ、下のループが manifest の順に読む（scripts/lib/prerun.sh）。
+prerun_manifest() { # manifest results-dir
+    local kind desc mode
+    prerun_init "$2"
+    while IFS=$'\t' read -r kind desc mode; do
+        case "$mode" in
+            print) prerun_start "$kind" prints_match "$kind" ;;
+            error) prerun_start "$kind" error_matches "$kind" ;;
+            code:*) prerun_start "$kind" code_present "$kind" "${mode#code:}" ;;
+        esac
+    done <"$1"
+    prerun_wait
+}
+
+prerun_manifest "$workdir/cases/manifest.tsv" "$workdir/prerun-cases"
 while IFS=$'\t' read -r kind desc mode; do
     case "$mode" in
-        print) check "$desc" prints_match "$kind" ;;
-        error) check "$desc" error_matches "$kind" ;;
-        timeout) check "$desc" builds_runs_within "$kind" 2 ;;
-        code:*) check "$desc" code_present "$kind" "${mode#code:}" ;;
+        print | error | code:*) check "$desc" prerun_result "$kind" ;;
     esac
 done <"$workdir/cases/manifest.tsv"
+
+# 34-c(3): 3 万要素の of_list / to_list。値の一致（打ち切りなし）と、要素数に対する
+# 線形性を測る。線形性は絶対時間ではなく、同じ 3 万要素を線形に 1 回走査する対照
+# （生成器 + List.length）に対する比で判定する。二乗の実装では比が桁で跳ねる。
+perf_c3() {
+    python3 - "$compiler" "$workdir" "$1" <<'PY'
+import resource
+import statistics
+import subprocess
+import sys
+from pathlib import Path
+
+HADO = sys.argv[1]
+label = sys.argv[3]
+root = Path(sys.argv[2]) / 'c3-perf' / label
+root.mkdir(parents=True, exist_ok=True)
+
+# 3 万要素。二乗の構築はこの大きさで桁が変わる。
+COUNT = 30000
+INDICES = [0, COUNT // 2, COUNT - 1]
+EXPECT = ('[' + ', '.join(str(value) for value in
+                          [COUNT] + [(COUNT - 1 - index) % 256 for index in INDICES]) + ']\n').encode()
+CONTROL_EXPECT = b'30000\n'
+
+# 比は同じ機械で対照と対象を交互に測るので、機械の速さと負荷に依らない。
+# 実測: 線形の of_list は 1.04〜1.07、to_list は 1.22〜1.33、二乗の of_list は 381.89。
+RATIO_MAX = 8.0
+RUNS = 5
+# 壁時計の 10 秒は性能の上限ではなく、暴走した実装で門番が止まらないための枠。
+WALL_TIMEOUT = 10.0
+# 床は「比の分母が時計の分解能に埋もれないこと」だけを測る。getrusage の量子は
+# 1 µs。対照は 3 万要素の生成を含むので、実測で約 5 ms（約 5000 tick）になる。
+TIMER_RESOLUTION = 1e-6
+CONTROL_FLOOR_TICKS = 1000
+
+
+def generator():
+    return ('def rec mod256 n => if n < 256 => n | mod256 (n - 256)\n'
+            'def rec gen n => if n <= 0 => [] | [mod256 (n - 1), ...gen (n - 1)]\n')
+
+
+def sources():
+    return {
+        'control': generator() + f'def main = gen {COUNT} |> List.length |> Int.to_string\n',
+        'of_list': generator() + (
+            f'def main = gen {COUNT} as values -> Bytes.of_list values as b -> '
+            '[Bytes.length b, ' + ', '.join(f'Bytes.get b {index}' for index in INDICES) + ']\n'),
+        'to_list': generator() + (
+            'def rec at values index => if values | [] => -1 | [head, ...tail] => at_head head tail index\n'
+            'def rec at_head head tail index => if index == 0 => head | at tail (index - 1)\n'
+            f'def main = gen {COUNT} as values -> Bytes.of_list values as b -> Bytes.to_list b as xs -> '
+            '[List.length xs, ' + ', '.join(f'at xs {index}' for index in INDICES) + ']\n'),
+    }
+
+
+def build(name, source, expected):
+    directory = root / name
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / 'main.hd'
+    path.write_text(source)
+    binary = directory / 'program'
+    done = subprocess.run([HADO, 'build', '-o', str(binary), str(path)], capture_output=True)
+    assert done.returncode == 0, (name, done.stderr.decode()[:800])
+    return binary, expected
+
+
+def child_cpu_seconds():
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def run_once(binary, expected):
+    start = child_cpu_seconds()
+    done = subprocess.run([str(binary)], capture_output=True, timeout=WALL_TIMEOUT)
+    elapsed = child_cpu_seconds() - start
+    assert done.returncode == 0, (binary, done.returncode, done.stderr[:400])
+    assert done.stdout == expected, (binary, done.stdout[:200], expected[:200])
+    assert done.stderr == b'', (binary, done.stderr[:200])
+    return elapsed
+
+
+def medians(control, target):
+    """対照と対象を 1 回ずつ交互に測り、組ごとの比の中央値を返す。順番待ちの揺れを
+    各組で打ち消すため、中央値どうしの比ではなく組ごとの比の中央値を使う。"""
+    run_once(*control)
+    run_once(*target)
+    controls = []
+    targets = []
+    ratios = []
+    for _ in range(RUNS):
+        control_seconds = run_once(*control)
+        target_seconds = run_once(*target)
+        controls.append(control_seconds)
+        targets.append(target_seconds)
+        ratios.append(target_seconds / control_seconds)
+    return statistics.median(controls), statistics.median(targets), statistics.median(ratios)
+
+
+source = sources()
+control = build('control', source['control'], CONTROL_EXPECT)
+target = build(label, source[label], EXPECT)
+control_median, target_median, ratio = medians(control, target)
+floor = CONTROL_FLOOR_TICKS * TIMER_RESOLUTION
+assert control_median >= floor, (
+    f'{label}: control median {control_median:.6f}s is below the '
+    f'{CONTROL_FLOOR_TICKS} tick ({floor:.0e}s) clock floor')
+assert ratio <= RATIO_MAX, (
+    f'{label}: target/control ratio {ratio:.2f} > {RATIO_MAX} '
+    f'(control={control_median:.4f}s target={target_median:.4f}s)')
+print(f'{label}: control={control_median:.4f}s target={target_median:.4f}s ratio={ratio:.2f}')
+PY
+}
+
+check '34-c(3) 3 万要素の of_list が一致し、要素数に線形' perf_c3 of_list
+check '34-c(3) 3 万要素の to_list の長さ・先頭・中間・末尾が一致し、要素数に線形' perf_c3 to_list
 
 # 34-f: 予約名。BUILTIN_TYPES に Bytes を足すと type Bytes は E205 になる。診断の
 # 行:列は探針の行頭の空白と先頭の空行から計算する（定数で書かない）。
@@ -1036,10 +1123,10 @@ then
     echo 'NG: 34-i generator failed'
     exit 1
 fi
+prerun_manifest "$workdir/cases/fields-manifest.tsv" "$workdir/prerun-fields"
 while IFS=$'\t' read -r kind desc mode; do
     case "$mode" in
-        print) check "$desc" prints_match "$kind" ;;
-        error) check "$desc" error_matches "$kind" ;;
+        print | error) check "$desc" prerun_result "$kind" ;;
         *) echo "NG: 34-i invalid mode: $mode"; exit 1 ;;
     esac
 done <"$workdir/cases/fields-manifest.tsv"

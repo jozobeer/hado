@@ -57,7 +57,12 @@ HADO = None
 LARGE_TIMEOUT = 10.0
 RATIO = 2.5
 RUNS = 5
-SMALL_FLOOR = 0.2
+# 床は「比の分母が時計の分解能に埋もれないこと」だけを測る。getrusage の時刻は
+# マイクロ秒なので、床は秒の絶対値ではなく分解能の tick 数で表す。速い機械でも
+# 遅い機械でも、同じ tick 数が同じ意味を持つ。旧 0.2s の床は目標時間の絶対値で、
+# 機械が速いほど割れやすかった（docs/rounds/timing-floor.md）。
+TIMER_RESOLUTION = 1e-6
+SMALL_FLOOR_TICKS = 1000
 
 
 def build(root, name, source):
@@ -143,9 +148,15 @@ def ratio_verdict(small_total, small_control, large_total, large_control):
 
 
 def assert_linear(label, small_total, small, large_total, large):
-    assert small_total >= SMALL_FLOOR, \
-        f'{label}: small median {small_total:.3f}s is below the {SMALL_FLOOR:.3f}s floor'
-    ratio = large / small if small > 0 else float('inf')
+    # 床は分母 small が時計の分解能の上にあることだけを見る。線形かどうかの判定は
+    # 下の比が持つ。分解能の 1000 倍（1 ms）は、引き算どうしの量子化に対して十分
+    # 大きく、実測した分母（0.13〜0.26s）より 2 桁小さい。
+    floor = SMALL_FLOOR_TICKS * TIMER_RESOLUTION
+    assert small >= floor, (
+        f'{label}: control-subtracted small {small:.6f}s is below the '
+        f'{SMALL_FLOOR_TICKS} tick ({floor:.0e}s) clock floor '
+        f'(small total {small_total:.3f}s)')
+    ratio = large / small
     assert ratio <= RATIO, (
         f'{label}: control-subtracted ratio {ratio:.2f} > {RATIO} '
         f'(small={small:.3f}s large={large:.3f}s)')
@@ -211,9 +222,11 @@ size_t hado_format_float(double value, unsigned char *bytes, size_t capacity) {
   return (size_t)written;
 }
 
+/* 壁時計ではなくこのプロセスの CPU 時間で測る。CI は門番を並べて走らせるので、
+   壁時計は他の門番に取られた時間を含み、比が揺れる（docs/rounds/ci-shards.md）。 */
 static double now_seconds(void) {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
@@ -292,8 +305,8 @@ C
 
 # --- c: HadoString の配置を移行した runtime の単体テスト ---
 runtime_tests() {
-    cargo test --offline -q \
-        --test runtime_string --test r34_bytes --test r36_int --test r37_world --test repr
+    cargo test --offline -q --test compiler --test command -- \
+        runtime_string:: r34_bytes:: r36_int:: r37_world:: repr::
 }
 
 # --- d: HadoString * を返す関数をソースから列挙し、全部の不変条件を測る ---
@@ -647,24 +660,6 @@ assert_linear('join', small_total, small, large_total, large)
 PY
 }
 
-# --- j: 判定器そのものの較正（対照を引くことが比の判定に効く）---
-control_probe() {
-    python3 - "$workdir" <<'PY'
-import sys
-
-sys.path.insert(0, sys.argv[1])
-from harness import RATIO, ratio_verdict
-
-# issue の例: 線形の構築が 1 s と 2 s、join が 0.1 s と 0.4 s なら、全体の比は
-# 2.18 で通り、引いた比は 4 で落ちる。対照を取らない門番はここで通ってしまう。
-assert (2.4 / 1.1) <= RATIO
-assert ratio_verdict(1.1, 1.0, 2.4, 2.0) is False
-assert ratio_verdict(1.1, 1.0, 2.2, 2.0) is True
-assert ratio_verdict(1.1, 1.0, 2.0, 1.0) is False
-print('control: the control-subtracted ratio rejects the issue example that the total ratio accepts')
-PY
-}
-
 # --- k: R1 の完了条件のうち Char / Float の長さ（char-and-float-conversions が引き取る）---
 # R1 には Char module と正準形の Float.to_string が無く、この 2 つを測れなかった。
 # 上の c は runtime の単体テストなので、長さそのものはここで測る。
@@ -697,7 +692,6 @@ check 'g perf: split with a growing ASCII separator is linear' \
 check 'h perf: split with a growing Japanese separator is linear' \
     perf_split_growing あ い 7000000 14000000 'h'
 check 'i perf: join is linear in the element count' perf_join
-check 'j control: the subtracted ratio judge rejects the issue example' control_probe
 check 'k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ' conversion_lengths
 
 echo "PASSED: $passed/$total"

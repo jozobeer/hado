@@ -63,12 +63,27 @@ local function probe()
     local redraw_ok, redraw_err = pcall(vim.cmd, 'redraw!')
     emit('redraw ' .. tostring(redraw_ok) .. ' ' .. (tostring(redraw_err):gsub('%s+', ' ')))
 
+    -- `redraw!` は描画を予約するだけで、highlighter が extmark を置くのは
+    -- そのあとである。予約した描画をここで完了させてから記録を読む。それでも
+    -- 置かれないなら本物の欠陥として扱う（docs/issues/flaky-treesitter-extmark-probe.md）。
+    if vim.api.nvim__redraw then
+        pcall(vim.api.nvim__redraw, { flush = true })
+    end
+    if vim.wait then
+        vim.wait(1000, function()
+            return next(marks) ~= nil
+        end, 5)
+    end
+
     local tsns = vim.api.nvim_get_namespaces()['nvim.treesitter.highlighter']
+    local placed = 0
     for _, m in ipairs(marks) do
         if m.ns == tsns and m.end_row ~= nil then
+            placed = placed + 1
             emit(string.format('mark %d %d %d %d %d', m.row, m.col, m.end_row, m.end_col, m.hl))
         end
     end
+    emit(string.format('marks %d %d', #marks, placed))
 end
 
 local ok, err = pcall(probe)

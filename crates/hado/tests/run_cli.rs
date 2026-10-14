@@ -158,6 +158,35 @@ fn run_skips_dunder_directories_that_are_not_namespaces() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// 括弧を外した入れ子の適用は開始位置を共有する。型表の鍵が開始位置だけだと
+/// 外側の結果型が内側を上書きし、`check` は通っても `run` が `Mismatch` になる。
+#[test]
+fn run_nested_application_of_a_returned_closure() {
+    let dir = scratch("nested-apply");
+    let source = write(
+        &dir,
+        "def get x => fn(y => y + x)\ndef main = Int.to_string ((get 1) 40)\n",
+    );
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"41\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// 最上位の record 値の field 参照も、base の名前と開始位置を共有する。
+#[test]
+fn run_projects_a_toplevel_record_field() {
+    let dir = scratch("field-proj");
+    let source = write(
+        &dir,
+        "type R = { a: Int; b: Int }\ndef r = { a = 1; b = 2 }\ndef main = Int.to_string (r.a + r.b)\n",
+    );
+    let output = hado().arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"3\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn run_reads_dunder_named_source_files() {
     let dir = scratch("dunder-file");

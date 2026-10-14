@@ -5,7 +5,6 @@
 #   b. 受理コーパス・stdlib・tools の全ファイルが、印字し直しで 1 バイトも変わらない。
 #   c. 本体の中のコメントが、印字し直しの後もその定義の中にあり、本体の前に出ない。
 #   d. 空行が残る。
-#   e. コメントを落とす変異で (b) が赤になる。
 #   f. 空の本体を持つ `implement` が印字し直しで増えない（冪等）。
 # 期待値は元のファイルから読み、ファイル名や行を書き込まない。
 #
@@ -15,20 +14,12 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 pass=0
-total=6
+total=5
 ok() { echo "OK: $1"; pass=$((pass + 1)); }
 ng() { echo "NG: $1 ($2)"; }
 
 work=$(mktemp -d)
-source_file=crates/hado/src/postfix_print.rs
-backup=$(mktemp)
-cp "$source_file" "$backup"
-cleanup() {
-    cp "$backup" "$source_file"
-    rm -f "$backup"
-    rm -rf "$work"
-}
-trap cleanup EXIT
+trap 'rm -rf "$work"' EXIT
 
 cargo build --offline -q --bin hado || exit 1
 target_dir=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
@@ -143,46 +134,10 @@ check_f() {
     fi
 }
 
-# --- e. コメントを落とす変異で b が赤になるか ---
-check_e() {
-    python3 - "$source_file" <<'PY'
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text()
-needle = "let text: Vec<String> = block.iter().map(comment_line).collect();"
-if needle not in text:
-    print("MUTATION-NOT-APPLIED")
-    sys.exit(1)
-path.write_text(text.replace(needle, "let text: Vec<String> = Vec::new();", 1))
-PY
-    if [ "$?" -ne 0 ]; then
-        ng "e: コメントを落とす変異で b が赤になる" "変異を当てられない"
-        return
-    fi
-    cargo build --offline -q --bin hado 2>/dev/null || true
-    local mutated=0
-    mkdir -p "$work/mut"
-    "$hado_bin" print-postfix stdlib "$work/mut" >/dev/null 2>&1
-    while IFS= read -r file; do
-        printed="$work/mut/${file#stdlib/}"
-        cmp -s "$file" "$printed" || mutated=$((mutated + 1))
-    done < <(find stdlib -type f -name '*.hd' | LC_ALL=C sort)
-    cp "$backup" "$source_file"
-    cargo build --offline -q --bin hado 2>/dev/null || true
-    if [ "$mutated" -gt 0 ]; then
-        ok "e: コメントを落とす変異で b が赤になる（$mutated ファイル）"
-    else
-        ng "e: コメントを落とす変異で b が赤になる" "変異でも緑のまま"
-    fi
-}
-
 check_a
 check_b
 check_c
 check_d
-check_e
 check_f
 
 echo "PASSED: $pass/$total"

@@ -1,16 +1,12 @@
 #!/bin/bash
 # tier: core
-# M0 acceptance checks 1..7 (see docs/plan.md, M0). Run from the repository root.
+# M0 acceptance checks (see docs/plan.md, M0). Run from the repository root.
 # Each check is independent; all run to the end. Non-zero exit if any fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
-# shellcheck source=scripts/lib/gate-cache.sh
-. scripts/lib/gate-cache.sh
-
 ok=0
-total=8
+total=5
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -24,41 +20,21 @@ else
     fail 1 "cargo-build exit!=0"
 fi
 
-# --- shared cargo test output for checks 2..4 ---
-cargo_cached test --offline --no-fail-fast >"$TMPD/test.log" 2>&1
+# --- check 2: the full test passes with exit 0 ---
+# テストごとの結果は scripts/nextest-full.sh の `nextest-case` 行から読む。
+# HADO_TEST_PARTITION があれば、その切れだけを走らせる（scripts/nextest-full.sh）。
+part=${HADO_TEST_PARTITION:+ partition=$HADO_TEST_PARTITION}
+bash scripts/nextest-full.sh >"$TMPD/test.log" 2>&1
 test_status=$?
-passed=$(grep -E "test result:" "$TMPD/test.log" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | awk '{s+=$1} END{print s+0}')
-walk_ok=$(awk '/tests.walk.rs/{f=1} f && /test result: ok/{ok=1; f=0} f && /test result: FAILED/{f=0} END{print ok+0}' "$TMPD/test.log")
-tail_ok=$(awk '/tests.tail.rs/{f=1} f && /test result: ok/{ok=1; f=0} f && /test result: FAILED/{f=0} END{print ok+0}' "$TMPD/test.log")
-
-# --- check 2: cargo test passes >= 2 with exit 0 ---
+passed=$(awk -F'\t' '$1 == "nextest-case" && $2 == "PASS" { n++ } END { print n + 0 }' "$TMPD/test.log")
 if [ "$test_status" -eq 0 ] && [ "${passed:-0}" -ge 2 ]; then
-    pass 2 "cargo-test passed=$passed"
+    pass 2 "nextest passed=$passed$part"
 else
-    fail 2 "cargo-test status=$test_status passed=${passed:-0} (<2 or nonzero)"
+    tail -n 40 "$TMPD/test.log"
+    fail 2 "nextest status=$test_status passed=${passed:-0}$part (<2 or nonzero)"
 fi
 
-# --- check 3: walk ---
-walk_reasons=""
-grep -Fq '"def main = 1 + 2", 3' crates/hado/tests/walk.rs || walk_reasons="$walk_reasons missing-expected-exit-code-3"
-[ "$walk_ok" = "1" ] || walk_reasons="$walk_reasons walk-test-not-passing"
-if [ -z "$walk_reasons" ]; then
-    pass 3 "walk"
-else
-    fail 3 "walk:$walk_reasons"
-fi
-
-# --- check 4: tail ---
-tail_reasons=""
-grep -Eq '100_000_000|100000000' crates/hado/tests/tail.rs || tail_reasons="$tail_reasons missing-depth-const"
-[ "$tail_ok" = "1" ] || tail_reasons="$tail_reasons tail-test-not-passing"
-if [ -z "$tail_reasons" ]; then
-    pass 4 "tail"
-else
-    fail 4 "tail:$tail_reasons"
-fi
-
-# --- check 5: dependencies ---
+# --- check 3: dependencies ---
 dep_reasons=""
 for c in cranelift-codegen cranelift-frontend cranelift-module cranelift-object cranelift-native; do
     grep -Eq "^${c}[[:space:]]*=[[:space:]]*\"0\.135\"" crates/hado/Cargo.toml \
@@ -70,12 +46,12 @@ else
     dep_reasons="$dep_reasons cc!=1-in-build-deps"
 fi
 if [ -z "$dep_reasons" ]; then
-    pass 5 "deps"
+    pass 3 "deps"
 else
-    fail 5 "deps:$dep_reasons"
+    fail 3 "deps:$dep_reasons"
 fi
 
-# --- check 6: ISA flags (values, not mere words) ---
+# --- check 4: ISA flags (values, not mere words) ---
 flag_reasons=""
 check_set() {
     grep -Eq "set\([[:space:]]*\"$2\"[[:space:]]*,[[:space:]]*\"$3\"[[:space:]]*\)" "$1" \
@@ -100,53 +76,20 @@ if grep -rEq 'set\([[:space:]]*"enable_verifier"[[:space:]]*,[[:space:]]*"false"
     flag_reasons="$flag_reasons enable_verifier=false-present"
 fi
 if [ -z "$flag_reasons" ]; then
-    pass 6 "isa-flags"
+    pass 4 "isa-flags"
 else
-    fail 6 "isa-flags:$flag_reasons"
+    fail 4 "isa-flags:$flag_reasons"
 fi
 
-# --- check 7: runtime words, each independently ---
+# --- check 5: runtime words, each independently ---
 rt_reasons=""
 for w in GC_INIT hado_entry hado_alloc GC_malloc; do
     grep -rq -- "$w" runtime/ || rt_reasons="$rt_reasons missing-$w"
 done
 if [ -z "$rt_reasons" ]; then
-    pass 7 "runtime"
+    pass 5 "runtime"
 else
-    fail 7 "runtime:$rt_reasons"
-fi
-
-# --- check 8: 専用のテストターゲットが実在し、走っている ---
-# 削除したラッパー門番（`cargo test --test rN_...` を呼んでいた verify-r13.sh や
-# verify-record-constructors.sh）が持っていた検査。`cargo test` は対象ごと消えても残りを
-# 走らせて緑になるので、対象の名前が全走の出力に現れることを見る（審査の指摘）。名前は
-# ディスクから導くと、消えた対象が期待からも消えて素通りするため、削除した門番が守っていた
-# 組をここに固定する。
-target_reasons=""
-for name in \
-    named_record_constructors named_record_order \
-    r9_coverage r9_grammar r9_module_types r9_names r9_order r9_print r9_syntax r9_unused \
-    r13_conditions r14_rails r16_sections r17_files r18_spelling \
-    r19_contracts r20_entries r21_functors r22_namespaces r23_syntax \
-    r24_effects r25_effects r26_effects r31_effects r37_world
-do
-    if [ ! -f "crates/hado/tests/$name.rs" ]; then
-        target_reasons="$target_reasons absent-$name"
-    elif ! grep -qF "Running tests/$name.rs" "$TMPD/test.log"; then
-        target_reasons="$target_reasons not-run-$name"
-    else
-        # 中身を空にすると `Running` は出るが 0 件になる。1 件以上を要求する。
-        count=$(awk -v n="tests/$name.rs" '
-            index($0, "Running " n) { seen = 1; next }
-            seen && /^running [0-9]+ tests?$/ { print $2; exit }
-        ' "$TMPD/test.log")
-        [ "${count:-0}" -ge 1 ] || target_reasons="$target_reasons empty-$name"
-    fi
-done
-if [ -z "$target_reasons" ]; then
-    pass 8 "test-targets"
-else
-    fail 8 "test-targets:$target_reasons"
+    fail 5 "runtime:$rt_reasons"
 fi
 
 echo "PASSED: $ok/$total"

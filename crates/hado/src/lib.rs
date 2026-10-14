@@ -96,14 +96,18 @@ pub mod infer;
 mod name_resolution;
 mod named_patterns;
 
+/// 節点の型表の鍵。開始位置だけだと、括弧を外した入れ子の適用や field の
+/// base が同じ `(line, col)` を共有して上書きする。
+pub type NodeTypeKey = parser::Span;
+
 /// `with` ごとに checker が推論した節点の型。同じ節点が答え型の違う複数の
 /// `with` の下に現れると、span 単位の `value_types`/`composite_types` は
 /// 最後の `with` のもので上書きされる。mono がその `with` の本体と腕を
 /// lower する間だけ差し替えられるよう、`with` の位置ごとに控える。
 #[derive(Clone, Default)]
 pub struct WithTypes {
-    pub values: std::collections::HashMap<(usize, usize), types::Ty>,
-    pub composites: std::collections::HashMap<(usize, usize), types::Ty>,
+    pub values: std::collections::HashMap<NodeTypeKey, types::Ty>,
+    pub composites: std::collections::HashMap<NodeTypeKey, types::Ty>,
 }
 
 #[derive(Clone)]
@@ -122,9 +126,9 @@ pub struct Checked {
     pub constructor_tags: std::collections::HashMap<String, u32>,
     pub constructors: std::collections::HashMap<String, types::Scheme>,
     pub records: std::collections::HashMap<String, (Vec<String>, types::Scheme)>,
-    pub composite_types: std::collections::HashMap<(usize, usize), types::Ty>,
-    pub value_types: std::collections::HashMap<(usize, usize), types::Ty>,
-    pub with_types: std::collections::HashMap<(usize, usize), WithTypes>,
+    pub composite_types: std::collections::HashMap<NodeTypeKey, types::Ty>,
+    pub value_types: std::collections::HashMap<NodeTypeKey, types::Ty>,
+    pub with_types: std::collections::HashMap<NodeTypeKey, WithTypes>,
     pub main: types::Ty,
     pub effects: types::Row,
     pub definitions: std::collections::HashMap<String, types::Scheme>,
@@ -707,3 +711,5 @@ fn dump_parsed_with(
 pub mod runtime_abi;
 
 pub mod repr;
+
+pub mod repl;

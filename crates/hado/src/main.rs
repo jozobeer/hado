@@ -78,9 +78,28 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     if !matches!(
         command,
-        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp" | "print-postfix"
+        "check" | "dump-mono" | "build" | "run" | "fmt" | "test" | "lsp" | "print-postfix" | "repl"
     ) {
         return Err(usage_error());
+    }
+    // §52: `repl` は入力を 1 つも取らない（セッションの根は自分で作る）か、
+    // 読み込むライブラリのディレクトリを 1 つ取る。
+    if command == "repl" {
+        if args.len() > 2 {
+            return Err(usage_error());
+        }
+        return Ok(Cli {
+            command,
+            print: false,
+            type_name: None,
+            fix: false,
+            check_only: false,
+            show_all: false,
+            output: None,
+            path: args.get(1).map(String::as_str),
+            second_path: None,
+            program_args: Vec::new(),
+        });
     }
     // §58: `lsp` speaks JSON-RPC on stdin and stdout and takes no file.
     if command == "lsp" {
@@ -114,10 +133,10 @@ fn parse_args(args: &[String]) -> Result<Cli<'_>, ExitCode> {
     };
     parse_flags(&mut cli, &args[1..])?;
     // `print-postfix` は入力根と出力先の 2 つが要る。
-    let enough_paths = if cli.command == "print-postfix" {
-        cli.second_path.is_some()
-    } else {
-        cli.path.is_some()
+    let enough_paths = match cli.command {
+        "print-postfix" => cli.second_path.is_some(),
+        "repl" => true,
+        _ => cli.path.is_some(),
     };
     if !enough_paths {
         return Err(usage_error());
@@ -247,6 +266,16 @@ fn value_after<'a>(rest: &'a [String], index: &mut usize) -> Result<&'a str, Exi
 }
 
 fn run(cli: &Cli<'_>) -> ExitCode {
+    // §11: `repl` は標準入力を 1 入力ずつ評価する。ファイルは取らない。
+    if cli.command == "repl" {
+        return match hado::repl::run(cli.path.map(Path::new)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("repl: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     // §58: the LSP reads and writes the protocol streams, not a source file.
     if cli.command == "lsp" {
         return ExitCode::from(hado::lsp::serve() as u8);
@@ -758,6 +787,6 @@ fn collect_postfix_files(path: &Path, out: &mut Vec<PathBuf>) {
 }
 fn usage() {
     eprintln!(
-        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | lsp"
+        "usage: hado check [--print-type[=<name>]] [--fix] <file> | dump-mono <file> | build [-o <path>] [--fix] <file.hd> | run <file.hd> [-- <arg>...] | fmt [--check] <file.hd> | test <file.hd> | print-postfix <root> <out> | lsp | repl [<dir>]"
     );
 }

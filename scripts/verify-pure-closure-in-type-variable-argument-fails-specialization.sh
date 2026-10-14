@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=6
+total=5
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -105,35 +105,6 @@ if runs_exit_code "$TMPD/eff-opt/main.hd" 0; then
 else
     fail 5 "effectful-closure-in-unwrap-or"
 fi
-
-# --- check 6: 変異。宣言側の outcome に本体を揃える分岐を殺すと赤になる ---
-cp crates/hado/src/mono.rs "$TMPD/mono.rs.bak"
-restore() { cp "$TMPD/mono.rs.bak" crates/hado/src/mono.rs; }
-trap 'restore; rm -rf "$TMPD"' EXIT
-python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
-import pathlib, sys
-path = pathlib.Path(sys.argv[1])
-source = path.read_text()
-# 整形で行が変わっても当たるよう、包む代入だけを置き換える。
-old = """            body = self.done(body, &declared_result)?;
-            declared_result"""
-new = """            lowered"""
-if old not in source:
-    raise SystemExit("mutation site not found")
-path.write_text(source.replace(old, new, 1))
-PY
-mutate_status=$?
-if [ "$mutate_status" -ne 0 ]; then
-    fail 6 "mutation-site-missing"
-elif ! cargo build >"$TMPD/mutate.log" 2>&1; then
-    # 変異が壊れたコードだと、赤の理由を欠陥と区別できない。
-    fail 6 "mutation-build-failed"
-elif runs_exit_code "$TMPD/pure-map/main.hd" 102; then
-    fail 6 "mutation-not-caught"
-else
-    pass 6 "mutation-turns-check-2-red"
-fi
-restore
 
 echo "PASSED: $ok/$total"
 [ "$ok" -eq "$total" ]

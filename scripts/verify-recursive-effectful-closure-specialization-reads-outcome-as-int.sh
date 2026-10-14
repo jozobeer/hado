@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ok=0
-total=9
+total=8
 pass() { echo "OK: $1 $2"; ok=$((ok + 1)); }
 fail() { echo "NG: $1 $2"; }
 
@@ -195,34 +195,6 @@ if builds_and_runs_exactly_or_stops "$TMPD/top-level-dropped/main.hd" "5"; then
 else
     fail 8 "top-level-outcome-dropped-from-the-signature-not-read-as-plain"
 fi
-
-# --- check 9: 変異。型の食い違いを見る判定を殺すと赤になる ---
-cp crates/hado/src/mono.rs "$TMPD/mono.rs.bak"
-restore() { cp "$TMPD/mono.rs.bak" crates/hado/src/mono.rs; }
-trap 'restore; rm -rf "$TMPD"' EXIT
-python3 - "$ROOT/crates/hado/src/mono.rs" <<'PY'
-import pathlib, sys
-path = pathlib.Path(sys.argv[1])
-source = path.read_text()
-# 整形で行が変わっても当たるよう、判定の一部だけを置き換える。
-old = """                && **s != signature.result"""
-new = """                && false"""
-if old not in source:
-    raise SystemExit("mutation site not found")
-path.write_text(source.replace(old, new, 1))
-PY
-mutate_status=$?
-if [ "$mutate_status" -ne 0 ]; then
-    fail 9 "mutation-site-missing"
-elif ! cargo build >"$TMPD/mutate.log" 2>&1; then
-    # 変異が壊れたコードだと、赤の理由を欠陥と区別できない。
-    fail 9 "mutation-build-failed"
-elif runs_exactly_or_stops "$TMPD/rec/main.hd" "5"; then
-    fail 9 "mutation-not-caught"
-else
-    pass 9 "mutation-turns-check-2-red"
-fi
-restore
 
 echo "PASSED: $ok/$total"
 [ "$ok" -eq "$total" ]

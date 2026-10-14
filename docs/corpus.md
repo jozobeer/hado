@@ -68,10 +68,10 @@ R3・R5・R6 で繰り返し見つかった（`docs/ledger.md`）。コーパス
 
 | スクリプト | 守るもの |
 |---|---|
-| `verify-m0.sh` | ワークスペース・依存・ISA flags・ランタイムの記号・walk と tail のテスト |
+| `verify-m0.sh` | ビルド・全体テスト・依存・ISA flags・ランタイムの記号 |
 | `verify-m1-spec.sh` | §56 のエラーコード表の形式（E1xx〜E7xx が各段階に 1 つ以上あり、コードが重複せず、節の参照が実在する節を指す） |
-| `verify-m1-corpus.sh` | 拒否がコード表と 1 対 1（件数は §56 から導く）、付録B の例の被覆、2.2、9.2、11.2、13.2、18.4 の項目の被覆、`corpus.rs` が本当に列挙していること |
-| `verify-m2.sh` | 受理全件が parse、E1xx が指定コードと指定位置で落ちる、非 E1xx が parse、式木の往復 |
+| `verify-m1-corpus.sh` | 拒否がコード表と 1 対 1（件数は §56 から導く）、付録B の例の被覆、2.2、9.2、11.2、13.2、18.4 の項目の被覆、ヘッダの規約 |
+| `verify-m2.sh` | E1xx の診断が指定位置を指す、glue（受理・E1xx・非 E1xx の合否と式木の往復は `parse_corpus.rs` が assert する） |
 | `verify-m3.sh` | `hado check` の CLI、受理と拒否、型の往復、暗記の排除、corpus-lock |
 | `verify-m4.sh` 〜 `verify-m7.sh` | M4〜M7 の完了条件（`docs/plan.md`） |
 | `verify-r32.sh` 以降 | 各ラウンドの判定（`docs/plan.md` 24 節）。`tests/library/` は `hado check` で回す |
@@ -88,15 +88,16 @@ R3・R5・R6 で繰り返し見つかった（`docs/ledger.md`）。コーパス
 ### 件数の直書きを禁じる
 
 `corpus.rs` は `read_dir` で列挙し、件数を出力する。列挙が本物かは、
-`tests/accept/` に一時ケースディレクトリと `main.hd` を置いて **`corpus_enumerated:` が 1 増えるか**で確かめる
-（`verify-m1-corpus.sh` のチェック 5）。件数を定数で持つ実装はここで落ちる。
+`tests/accept/` に一時ケースディレクトリと `main.hd` を置いて **`corpus_enumerated:` が 1 増えるか**で確かめる。
+件数を定数で持つ実装はここで落ちる。この探針は判定器を書いたラウンドで測り、常設の門番には置かない
+（`docs/rounds/prune-meta-gates.md`）。常設の暗記排除は `verify-m3.sh` のチェック 6 が持つ。
 
 ### corpus-lock
 
 コーパスは既定でロックされ、実装の工程では触らない。`tests/corpus.sha256` に受理・拒否・`stdlib/` のチェックサムを置き、
-`verify-m3.sh` チェック 9（core）と `parallel-rounds` の d がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
+`verify-m3.sh` チェック 7（core）がそれと照合する（R8 の審査後に作る）。実装の工程では更新しない。
 lock は `find tests/accept tests/reject tests/library -type f \( -name '*.hd' -o -name '*.hdi' \)` が列挙する全ファイルと `stdlib/*.hd` を対象にする。サブディレクトリも含め、行数は対象の実数と一致させる。
-`corpus.rs` は判定器なので lock に含めず、チェック 8 の暗記排除（コーパスのファイル名と 20 文字以上の行が現れない）で守る。
+`corpus.rs` は判定器なので lock に含めず、`verify-m3.sh` チェック 6 の暗記排除（コーパスのファイル名と 20 文字以上の行が現れない）で守る。
 スクリプト実行の前後で比べる形は、実行の外で書き換えられたコーパスを見逃す（R6 で判明）。
 main を取り込んだ後は、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから作り直す。説明できない行があれば作り直さずに止めて報告する。
 
@@ -105,16 +106,16 @@ main を取り込んだ後は、まず `bash scripts/corpus-lock.sh --check` の
 入力がリポジトリに固定された判定器は、その入力だけを特別扱いする実装で通せてしまう。
 M2 の受け入れ条件を設計する過程で、実装を一切しない結託が 5 段階にわたって判定を
 すり抜けた（`docs/ledger.md` の R4・R5）。**入力を実行時に生成し、期待値は
-判定器側で計算する**のが対処で、このリポジトリでは次の形になっている:
+判定器側で計算する**のが対処で、このリポジトリでは次の形になっている。一時ファイルや空行を
+差し込む探針（列挙と位置情報）は判定器を書いたラウンドで測り、常設の門番には置かない:
 
 | 判定器 | 形 |
 |---|---|
-| `corpus.rs` の列挙 | 一時ファイルを置いて件数が動くか（`verify-m1-corpus.sh` チェック 5）|
+| `corpus.rs` の列挙 | 一時ファイルを置いて件数が動くか |
 | `parse_corpus.rs` の式木の往復 | 乱数で式木を作り、冗長な括弧・空白・行コメントを混ぜて描画し、完全括弧付きの正規形を照合する |
 | 位置情報 | `// error:` 行の直後に空行を入れると報告行が 1 増える。空白を 2 つ足すと列が 2 増える |
 | 型の往復（`verify-m3.sh`） | 乱数で式を組み、期待型を判定器側の規則で計算し、`hado check --print-type` と照合する |
 
 **式木の往復は結合性を見ていない。** 描画側が優先順位から必要な括弧を必ず付けるため、
 `a * b * c` のような無括弧の連鎖がソースに現れない。結合性は
-`parser::tests::left_assoc_add_and_mul` が固定しており、`verify-m2.sh` が `cargo test` 全体を
-見ることで捕まえる。
+`parser::tests::left_assoc_add_and_mul` が固定しており、`verify-m0.sh` の全体テストが捕まえる。

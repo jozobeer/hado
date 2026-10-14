@@ -293,7 +293,7 @@ def parse_probe_output(text):
             captures[int(parts[1])] = parts[2]
         elif parts[0] == 'mark' and len(parts) == 6:
             marks.append(tuple(int(x) for x in parts[1:]))
-        elif parts[0] in ('filetype', 'parser', 'query', 'active'):
+        elif parts[0] in ('filetype', 'parser', 'query', 'active', 'marks'):
             status[parts[0]] = ' '.join(parts[1:])
     return status, captures, marks
 
@@ -397,6 +397,7 @@ def main():
         assert status.get('active') == 'true', 'highlighter is not active'
         q = status.get('query', '').split()
         assert q and q[0] == 'true' and int(q[1]) > 0, 'highlights query not loaded: %r' % q
+        assert marks, 'probe placed no extmarks: marks=%s' % status.get('marks', 'unknown')
         names = set(captures.values())
         missing = [c for c in PROMISED if c not in names]
         assert not missing, 'query lacks captures: %s' % missing
@@ -414,8 +415,8 @@ def main():
             hit = [m for m in marks
                    if m[0] == row and m[1] == col and m[2] == row and m[3] == end_col
                    and captures.get(m[4]) == capture]
-            assert hit, 'no %s mark at %d:%d-%d (%r); marks=%s' % (
-                capture, row, col, end_col, needle, marks)
+            assert hit, 'no %s mark at %d:%d-%d (%r); marks=%s placed=%s' % (
+                capture, row, col, end_col, needle, marks, status.get('marks'))
         # コメントと文字列の中の数字には @number が付かない。
         for row, start_needle, span_needle, capture in ABSENT:
             line = index[row]
@@ -440,7 +441,7 @@ def main():
         assert hdi_status.get('active') == 'true', '.hdi highlighter is not active'
         hq = hdi_status.get('query', '').split()
         assert hq and hq[0] == 'true' and int(hq[1]) > 0, '.hdi query not loaded'
-        assert hdi_marks, '.hdi has no extmarks'
+        assert hdi_marks, '.hdi has no extmarks: marks=%s' % hdi_status.get('marks', 'unknown')
         state['mark_count'] = len(marks)
 
     check('Neovim marks each promised token with its capture group', highlights)

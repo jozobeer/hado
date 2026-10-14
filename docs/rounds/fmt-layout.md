@@ -357,11 +357,11 @@ $ bash scripts/run-gates.sh --tier full target/gates-full | tail -1
 TALLY: 3909/3922 passed; red: verify-cognitive-complexity.log verify-r42.log verify-r46.log verify-r47.log verify-r62.log verify-r63.log verify-r68.log verify-string-split-linear.log
 ```
 
-赤の内訳を `bf1310c`（F5 の直前）と比べた。**F5 が赤にしたのは 4 本**である。
+赤の内訳を `bf1310c`（F5 の直前）と比べた。**F5 がエラーを増やしたのは 4 本**である（`verify-cognitive-complexity` と `verify-r63` は F5 の前から赤く、F5 が新たに赤にしたのは `verify-r46`・`verify-r47`）。
 
 | 門番 | `bf1310c` | main | 差分 |
 |---|---|---|---|
-| `verify-cognitive-complexity.sh` | 2/3（エラー 1 件） | エラー 4 件 | F5 が 3 件増やした（`postfix_print.rs` の `place_comments` 16/7・`apply_text` 8/7 ほか）。`mono.rs` の `lift_again_arguments` 9/7 は F5 以前から |
+| `verify-cognitive-complexity.sh` | 2/3（エラー 1 件は `mono.rs` の `lambda` 9/7） | エラー 4 件 | F5 が `postfix_print.rs` の `place_comments` 16/7・`apply_text` 8/7 の 2 件を増やし、`0408ca2`（PR #78）が `mono.rs` の `lift_again_arguments` 9/7 を増やした。`lambda` 9/7 は `bf1310c` から赤 |
 | `verify-r46.sh` | 5/5 | 4/5 | F5 が赤にした。§57 の「書き換えのあと印字し直す」で `check --fix` の出力が変わったため |
 | `verify-r47.sh` | 4/4 | 3/4 | 同上 |
 | `verify-r63.sh` | 3/4 | 2/4 | F5 以前から 1 件赤。F5 がもう 1 件増やした |

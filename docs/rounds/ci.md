@@ -46,6 +46,7 @@
    2026-09-22 に job が起動しなくなった（`The job was not started because recent account payments
    have failed or your spending limit needs to be increased`）ので、standard runner の無料枠に
    依存しない形にした。public にしたら standard runner が無料になるので `ubuntu-latest` に戻す。
+   2026-10-13 に public にして戻した（`docs/rounds/ci-public.md`）。
    門番はどちらの形も受け、Linux x86_64 であることだけを固定する（決定 8 の一部）。
    ホストを汚さないため、runner は Docker のコンテナの中で動かす（`~/runner/hado-ci-runner.sh`。
    リポジトリの外の運用で、start / stop / status / logs を持つ）。コンテナは公式イメージ
@@ -65,7 +66,8 @@
     runner は 1 台でコンテナの中なので host の root には届かない。public にして誰でも PR を
     出せるようになった時点で `runs-on` を `ubuntu-latest` に戻す（standard runner が無料になり、
     門番はどちらの形も受ける）。`sudo` を外す案・承認を挟む案は採らない（前者は PR のコードが
-    runner の中で走り続け、後者は PR ごとに人の手が要る）。
+    runner の中で走り続け、後者は PR ごとに人の手が要る）。2026-10-13 に public にして戻し、
+    門番が自前の runner の形を赤にする（`docs/rounds/ci-public.md`）。
 
 ### 期待値の根拠
 

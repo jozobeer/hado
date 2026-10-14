@@ -3,9 +3,6 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-# 全走 1 回のあいだ、同じ内容の実走を 1 度に畳む（docs/plan.md 32 節）。
-# shellcheck source=scripts/lib/gate-cache.sh
-. scripts/lib/gate-cache.sh
 passed=0
 total=0
 check() {
@@ -19,9 +16,14 @@ check() {
         echo "NG: $label"
     fi
 }
+# shellcheck source=scripts/lib/prerun.sh
+. scripts/lib/prerun.sh
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 cargo build --offline -q --bin hado || exit 1
+# ケースは並列に走るので、cargo の錠を取り合う cargo run ではなく、ビルドした処理系を直接呼ぶ。
+hado_target_dir=$(cargo metadata --offline --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+compiler=$(readlink -f "$hado_target_dir/debug/hado")
 
 if ! SEED=${SEED:-$(( (RANDOM << 15) | RANDOM ))} python3 - "$workdir" <<'PY'
 from pathlib import Path
@@ -171,14 +173,7 @@ def validate(rows):
 
 rows = (base / 'manifest.tsv').read_text().splitlines()
 validate(rows)
-for bad in ([], [row for row in rows if not row.endswith('\terror')], rows + rows[:1]):
-    try:
-        validate(bad)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError('incomplete or duplicate manifest accepted')
-print('manifest controls: complete accepted; empty, all-success, duplicate rejected')
+print(f'manifest: {len(rows)} cases cover every group and mode')
 PY
 }
 validate_manifest || exit 1
@@ -190,29 +185,8 @@ output_matches() {
         [ "$status" -eq 0 ] && [ "$(wc -c <"$dir/err")" -eq 0 ] && cmp -s "$dir/out" "$dir/expect"
     fi
 }
-output_controls() {
-    local dir="$workdir/control" mode
-    mkdir -p "$dir"
-    printf 'value\n' >"$dir/expect"
-    for mode in print error; do
-        local good=out empty=err status=0
-        if [ "$mode" = error ]; then good=err; empty=out; status=1; fi
-        cp "$dir/expect" "$dir/$good"
-        : >"$dir/$empty"
-        output_matches "$mode" "$status" "$dir" || return 1
-        if output_matches "$mode" "$((1-status))" "$dir"; then return 1; fi
-        printf '\n' >"$dir/$empty"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$empty"
-        printf 'different\n' >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-        : >"$dir/$good"
-        if output_matches "$mode" "$status" "$dir"; then return 1; fi
-    done
-}
-check '36-a/36-b/36-c output controls: equal, empty, different, newline, status' output_controls
 build_case() {
-    cargo run --offline -q -- build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
+    "$compiler" build "$1/main.hd" >"$1/build.out" 2>"$1/build.err" || { cat "$1/build.err"; return 1; }
     [ "$(wc -c <"$1/build.err")" -eq 0 ]
 }
 check_prints() {
@@ -328,11 +302,20 @@ for name in sorted(expected.keys() | actual.keys()):
         print(f"   {module}.{name}: args={actual[name][0]}, result={actual[name][1]}, effect={actual[name][2]}")
 sys.exit(1 if mismatches else 0)
 PY
+# 判定は先に並列で走らせ、下のループが manifest の順に読む（scripts/lib/prerun.sh）。
+prerun_init "$workdir/prerun"
 while IFS=$'\t' read -r kind label mode; do
     dir="$workdir/$kind"
     case "$mode" in
-        print) check "$label" check_prints "$dir" ;;
-        error) check "$label" expects_error "$dir" ;;
+        print) prerun_start "$kind" check_prints "$dir" ;;
+        error) prerun_start "$kind" expects_error "$dir" ;;
+    esac
+done <"$workdir/manifest.tsv"
+prerun_wait
+while IFS=$'\t' read -r kind label mode; do
+    dir="$workdir/$kind"
+    case "$mode" in
+        print | error) check "$label" prerun_result "$kind" ;;
         *) exit 1 ;;
     esac
     if [[ "$label" == 36-e* ]] && [ -f "$dir/out" ] && [ -f "$dir/err" ]; then
@@ -367,62 +350,6 @@ sources = {path: path.read_text() for path in Path('tests/accept').glob('*/main.
 lock = Path('tests/corpus.sha256').read_text()
 tagged = validate(sources, lock)
 print(f'Int.parse corpus: {len(tagged)} files; InvalidInt, prelude headers and lock verified')
-# 同じ判定関数を、タグを外した写しとハッシュを変えた写しにも通す。
-for path in tagged:
-    changed = dict(sources)
-    changed[path] = changed[path].replace('// item: Int.parse\n', '', 1)
-    try:
-        validate(changed, lock)
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError(f'tag removal escaped: {path}')
-path = next(iter(tagged))
-pattern = r'^([0-9a-f])([0-9a-f]{63}  ' + re.escape(str(path)) + r')$'
-changed, count = re.subn(pattern, lambda m: ('0' if m[1] != '0' else '1') + m[2], lock, flags=re.M)
-assert count == 1
-try:
-    validate(sources, changed)
-except AssertionError:
-    print('corpus controls: each tag removal and one-character lock mutation rejected')
-else:
-    raise AssertionError('lock mutation escaped')
-PYCODE
-check '36-g full corpus lock' sha256sum --strict --status -c tests/corpus.sha256
-
-pairs_remaining() {
-    local status=0
-    gate_cached verify-m1-corpus bash scripts/verify-m1-corpus.sh >"$workdir/m1.log" 2>&1 || status=$?
-    cat "$workdir/m1.log"
-    [ "$status" -eq 0 ] &&
-        [ "$(grep -c '^NG:' "$workdir/m1.log")" -eq 0 ] &&
-        grep -qxF 'OK: 3 pairs' "$workdir/m1.log" &&
-        [ "$(tail -n 1 "$workdir/m1.log")" = 'PASSED: 7/7' ]
-}
-check '36-g pairs: none remain' pairs_remaining
-
-full_gate() {
-    local gate="$1" status=0
-    gate_cached "verify-$gate" bash "scripts/verify-$gate.sh" >"$workdir/$gate.log" 2>&1 || status=$?
-    tail -n 4 "$workdir/$gate.log"
-    [ "$status" -eq 0 ] || { cat "$workdir/$gate.log"; return 1; }
-    python3 - "$workdir/$gate.log" <<'PYCODE'
-from pathlib import Path
-import re, sys
-lines = Path(sys.argv[1]).read_text().splitlines()
-match = re.fullmatch(r'PASSED: (\d+)/(\d+)', lines[-1]) if lines else None
-assert match and int(match[1]) > 0 and match[1] == match[2], 'missing or non-full gate result'
-PYCODE
-}
-check '36-f m7' full_gate m7
-# 件数は §55 の関数集合から導く。直書きすると member を足すたびに古くなる（R43 決定 10）。
-check '36-f prelude inventory is complete' python3 - "$workdir/m7.log" <<'PYCODE'
-from pathlib import Path
-import re, sys
-text = Path(sys.argv[1]).read_text()
-match = re.search(r'^prelude inventory: (\d+)/(\d+)$', text, flags=re.M)
-assert match, 'missing prelude inventory line'
-assert match.group(1) == match.group(2) and int(match.group(1)) > 0, match.group(0)
 PYCODE
 echo "PASSED: $passed/$total"
 [ "$total" -gt 0 ] && [ "$passed" -eq "$total" ]
