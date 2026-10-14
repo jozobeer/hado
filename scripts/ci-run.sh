@@ -137,11 +137,23 @@ else
     echo "ci-run: event=$event ref=$ref tier=$tier jobs=$jobs out=$out${shard:+ shard=$shard}"
 fi
 status=0
+# 文書層は門番と並べて走らせ、門番の後に出力を出す。門番が赤でも文書層は回す
+# （赤を隠さない。判定は status に畳む）。
+docs_log=
+if [ "$shard_first" -eq 1 ]; then
+    mkdir -p target
+    docs_log=$(mktemp "$PWD/target/lint-docs.XXXXXX")
+    bash scripts/lint-docs.sh >"$docs_log" 2>&1 &
+    docs_pid=$!
+fi
 if [ "$docs_only" -eq 0 ] && ! bash scripts/run-gates.sh --jobs "$jobs" --tier "$tier" "${shard_args[@]}" "$out"; then
     status=1
 fi
-# 門番が赤でも文書層は回す（赤を隠さない。判定は status に畳む）。
-if [ "$shard_first" -eq 1 ] && ! bash scripts/lint-docs.sh; then
-    status=1
+if [ -n "$docs_log" ]; then
+    docs_status=0
+    wait "$docs_pid" || docs_status=$?
+    cat -- "$docs_log"
+    rm -f -- "$docs_log"
+    [ "$docs_status" -eq 0 ] || status=1
 fi
 exit "$status"
