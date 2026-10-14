@@ -108,6 +108,24 @@ fn repl_does_not_pass_a_binding_that_only_shares_a_token_spelling() {
     assert_eq!(out, "2\n");
 }
 
+/// 束縛の名前の直前が ASCII 以外の区切り（コピーした NBSP や全角空白）だと
+/// 字句が読めず、入力は未完のまま EOF で `split_step` に渡る。`->` で終わる
+/// その 1 行を束縛として剥がすとき、区切りのスライスが文字の途中なら panic
+/// してセッションが死ぬ。
+#[test]
+fn repl_does_not_panic_when_a_non_ascii_separator_precedes_the_binder_name() {
+    let (code, out, err) = repl("1 as\u{a0}x ->\n", None);
+    assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&err));
+    assert_eq!(String::from_utf8(out).unwrap(), "");
+    let err = String::from_utf8(err).unwrap();
+    assert!(!err.contains("not a char boundary"), "{err}");
+    let (code, out, err) = repl("1 as\u{3000}x ->\n", None);
+    assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&err));
+    assert_eq!(String::from_utf8(out).unwrap(), "");
+    let err = String::from_utf8(err).unwrap();
+    assert!(!err.contains("not a char boundary"), "{err}");
+}
+
 /// §52: `hado repl <dir>` はそのライブラリを読み込んだセッションを始める。
 #[test]
 fn repl_loads_a_library_from_its_directory() {

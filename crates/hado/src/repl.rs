@@ -853,3 +853,22 @@ fn opens_next_input(kind: &TokKind) -> bool {
         TokKind::Arrow | TokKind::PipeArrow | TokKind::Pipe | TokKind::Comma | TokKind::Eq
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trailing_binding_accepts_a_nbsp_before_the_name() {
+        let (body, name) = trailing_binding("1 as\u{a0}x").expect("binding");
+        assert_eq!(body, "1");
+        assert_eq!(name, "x");
+    }
+
+    #[test]
+    fn trailing_binding_accepts_an_ideographic_space_before_the_name() {
+        let (body, name) = trailing_binding("1 as\u{3000}x").expect("binding");
+        assert_eq!(body, "1");
+        assert_eq!(name, "x");
+    }
+}
