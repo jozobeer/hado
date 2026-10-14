@@ -58,6 +58,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 mode = sys.argv[1]
@@ -91,20 +92,26 @@ def observe(case):
     return subprocess.run([case / 'program'], **common)
 
 
-cases = sorted(p for p in Path('tests/accept').iterdir() if (p / 'main.hd').is_file())
-assert cases, 'no accept cases on disk'
-nonempty = 0
-bad = []
-for src in cases:
+def judge(src):
+    """1 件を走らせ、(期待値が空でないか, 食い違いの説明か None) を返す。"""
     case = work / src.name
     shutil.copytree(src, case)
     status, stdout, stderr = expected((src / 'main.hd').read_text())
-    nonempty += bool(stdout or stderr)
     got = observe(case)
-    if (got.returncode, got.stdout, got.stderr) != (status, stdout, stderr):
-        bad.append(f'{src.name}: status={got.returncode} stdout={got.stdout[:80]!r} '
-                   f'stderr={got.stderr[:200]!r}')
     shutil.rmtree(case)
+    if (got.returncode, got.stdout, got.stderr) == (status, stdout, stderr):
+        return bool(stdout or stderr), None
+    return bool(stdout or stderr), (f'{src.name}: status={got.returncode} '
+                                    f'stdout={got.stdout[:80]!r} stderr={got.stderr[:200]!r}')
+
+
+cases = sorted(p for p in Path('tests/accept').iterdir() if (p / 'main.hd').is_file())
+assert cases, 'no accept cases on disk'
+# ケースは互いに別のディレクトリで走るので並べる。結果はケースの順に集める。
+with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
+    results = list(pool.map(judge, cases))
+nonempty = sum(flag for flag, _ in results)
+bad = [why for _, why in results if why]
 assert nonempty, 'every expectation is empty; a silent binary would pass'
 assert not bad, f'{len(bad)} of {len(cases)} failed: ' + ' | '.join(bad[:3])
 print(f'{mode}: {len(cases)} accept cases match their headers ({nonempty} expect output)')
