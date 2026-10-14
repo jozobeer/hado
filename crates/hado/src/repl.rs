@@ -451,9 +451,13 @@ struct Step {
 }
 
 /// 入力の末尾が `->` なら継続の印として剥がす。直前が `as x` なら束縛。
+/// 字句が読めない入力は剥がさず、本検査の E100 に任せる。
 fn split_step(text: &str) -> Step {
     let without = text.trim_end();
-    let Some(head) = without.strip_suffix("->") else {
+    let Some(head) = without
+        .strip_suffix("->")
+        .filter(|_| lex_full(text).is_ok())
+    else {
         return Step {
             body: text.to_string(),
             binder: None,
@@ -478,8 +482,7 @@ fn split_step(text: &str) -> Step {
 /// `… as name` の末尾を `(本体, 名前)` に割る。
 fn trailing_binding(text: &str) -> Option<(String, String)> {
     let trimmed = text.trim_end();
-    // 区切りは Unicode 空白（NBSP・全角空白）にもなる。`rfind` のバイト位置に
-    // 1 を足すと、その文字の途中を切って panic する。
+    // 名前は末尾の断片として取る。区切りが多バイト文字でも文字境界で切れる。
     let name = trimmed
         .rsplit(|character: char| !(character.is_alphanumeric() || character == '_'))
         .next()
@@ -861,16 +864,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trailing_binding_accepts_a_nbsp_before_the_name() {
-        let (body, name) = trailing_binding("1 as\u{a0}x").expect("binding");
-        assert_eq!(body, "1");
-        assert_eq!(name, "x");
-    }
-
-    #[test]
-    fn trailing_binding_accepts_an_ideographic_space_before_the_name() {
-        let (body, name) = trailing_binding("1 as\u{3000}x").expect("binding");
-        assert_eq!(body, "1");
-        assert_eq!(name, "x");
+    fn trailing_binding_cuts_the_name_on_a_char_boundary() {
+        for separator in ['\u{a0}', '\u{3000}'] {
+            let binding = trailing_binding(&format!("1 as{separator}x"));
+            assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
+        }
     }
 }
