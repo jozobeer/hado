@@ -194,11 +194,3 @@ $ cargo nextest list --offline | awk '{print $1}' | sort | uniq -c
 cargo build（クリーン）                 real 1m2.623s
 cargo clean -p hado 後の cargo build    real 0m25.442s
 ```
-
-全体テストの切れの所要（手元、4 コア、束ねた後）。最長のテスト `corpus`（17.5 秒）を含む切れが長い。
-
-```
-count:1/3  Summary [  27.290s] 286 tests run: 286 passed, 571 skipped
-count:2/3  Summary [  38.175s] 286 tests run: 286 passed, 571 skipped
-count:3/3  Summary [  27.931s] 285 tests run: 285 passed, 572 skipped
-```

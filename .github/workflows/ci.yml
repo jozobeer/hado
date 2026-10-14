@@ -95,11 +95,9 @@ jobs:
           cargo --version
           nproc
 
-      # 依存（cranelift など）のビルド成果物。どの台もクリーンからのビルドで 1 分前後を
-      # 依存に使う。target/ 全体（4 GB 級、docs/rounds/ci.md の決定 5）ではなく、hado 自身を
-      # 消した target/ を保存する（docs/rounds/ci-shards.md）。鍵は toolchain と profile、
-      # 続けて依存の版。依存の版だけが違うときは古い成果物から始め、変わった依存だけを
-      # ビルドする。toolchain か profile が違えば使わない。
+      # 依存（cranelift など）のビルド成果物。target/ 全体（4 GB 級、docs/rounds/ci.md の
+      # 決定 5）ではなく、hado 自身を消した target/ を置く（docs/rounds/ci-shards.md）。
+      # toolchain か profile が違う成果物は使えないので、restore-keys は依存の版だけを外す。
       - name: restore dependency build
         id: deps
         uses: actions/cache/restore@v6
@@ -123,8 +121,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # 鍵が外れたときは、tests:1 の台が依存を含む target/ を保存する。hado 自身の成果物と
-      # 門番のログは保存しない（チェックアウトのたびに hado はビルドし直される）。
+      # hado 自身の成果物はチェックアウトのたびにビルドし直されるので保存しない。
       - name: prune target for the dependency cache
         if: steps.deps.outputs.cache-hit != 'true' && matrix.shard == 'tests:1/3'
         run: |
