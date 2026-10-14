@@ -97,10 +97,13 @@ jobs:
       - name: gates
         run: bash scripts/ci-run.sh "${{ github.event_name }}" "${{ github.ref }}" "${{ inputs.tier }}" "${{ matrix.shard }}"
 
+      # 緑の走行でも残す。台ごとの所要（ビルド・テストのコンパイル・切れの実行）は
+      # 門番のログにしか出ない（docs/rounds/ci-shards.md）。
       - name: gate logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: gate-logs-${{ strategy.job-index }}
           path: target/ci-gates
           if-no-files-found: ignore
+          retention-days: 14
