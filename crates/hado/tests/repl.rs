@@ -108,6 +108,20 @@ fn repl_does_not_pass_a_binding_that_only_shares_a_token_spelling() {
     assert_eq!(out, "2\n");
 }
 
+/// 束縛の名前の直前が ASCII 以外の区切り（コピーした NBSP や全角空白）だと
+/// 字句が読めず、入力は未完のまま EOF で評価される。束縛として剥がさず、
+/// `hado check` と同じ E100 を出す（剥がすと本体の `1` だけが通って黙って束縛する）。
+#[test]
+fn repl_reports_e100_when_a_non_ascii_separator_precedes_the_binder_name() {
+    for separator in ['\u{a0}', '\u{3000}'] {
+        let (code, out, err) = repl(&format!("1 as{separator}x ->\n"), None);
+        let err = String::from_utf8(err).unwrap();
+        assert_eq!(code, Some(0), "{err}");
+        assert_eq!(String::from_utf8(out).unwrap(), "");
+        assert!(err.contains("error[E100]"), "{err}");
+    }
+}
+
 /// §52: `hado repl <dir>` はそのライブラリを読み込んだセッションを始める。
 #[test]
 fn repl_loads_a_library_from_its_directory() {

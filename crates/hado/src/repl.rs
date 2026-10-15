@@ -451,9 +451,13 @@ struct Step {
 }
 
 /// 入力の末尾が `->` なら継続の印として剥がす。直前が `as x` なら束縛。
+/// 字句が読めない入力は剥がさず、本検査の E100 に任せる。
 fn split_step(text: &str) -> Step {
     let without = text.trim_end();
-    let Some(head) = without.strip_suffix("->") else {
+    let Some(head) = without
+        .strip_suffix("->")
+        .filter(|_| lex_full(text).is_ok())
+    else {
         return Step {
             body: text.to_string(),
             binder: None,
@@ -478,14 +482,15 @@ fn split_step(text: &str) -> Step {
 /// `… as name` の末尾を `(本体, 名前)` に割る。
 fn trailing_binding(text: &str) -> Option<(String, String)> {
     let trimmed = text.trim_end();
-    let start = trimmed
-        .rfind(|character: char| !(character.is_alphanumeric() || character == '_'))
-        .map_or(0, |index| index + 1);
-    let name = &trimmed[start..];
+    // 名前は末尾の断片として取る。区切りが多バイト文字でも文字境界で切れる。
+    let name = trimmed
+        .rsplit(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .next()
+        .unwrap_or("");
     if !is_name(name) {
         return None;
     }
-    let before = trimmed[..start].trim_end();
+    let before = trimmed[..trimmed.len() - name.len()].trim_end();
     let head = before.strip_suffix("as")?;
     if head.ends_with(|character: char| character.is_alphanumeric() || character == '_') {
         return None;
@@ -852,4 +857,17 @@ fn opens_next_input(kind: &TokKind) -> bool {
         kind,
         TokKind::Arrow | TokKind::PipeArrow | TokKind::Pipe | TokKind::Comma | TokKind::Eq
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trailing_binding_cuts_the_name_on_a_char_boundary() {
+        for separator in ['\u{a0}', '\u{3000}'] {
+            let binding = trailing_binding(&format!("1 as{separator}x"));
+            assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
+        }
+    }
 }
