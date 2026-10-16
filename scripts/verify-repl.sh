@@ -227,5 +227,30 @@ binding_not_a_token_match() {
 }
 check '11 a later input may reuse a binding name as a parameter or field' binding_not_a_token_match
 
+# --- 12. 抽象型（Map.T）は合成した main の E705 になる。E702 と同じ産物として
+#        落とし、束縛して次の入力から使えるようにする ---
+binds_abstract_map() {
+    session map-find 'Map.insert Map.empty 1 "a" as m ->\nMap.find m 1\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  find status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf 'Some("a")')" ] || { echo "  find stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  find stderr=$stderr" >&2; return 1; }
+    session map-list 'Map.insert Map.empty 1 "a" as m ->\nMap.to_list m\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  list status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '[MapEntry(1, "a")]')" ] || { echo "  list stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  list stderr=$stderr" >&2; return 1; }
+    # 写像そのものは印字できない（MapNode を漏らさない）。次の入力は評価する。
+    session map-print 'Map.insert Map.empty 1 "a" as m ->\nm\n7\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  print status=$status want=0 stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '7')" ] || { echo "  print stdout=$stdout" >&2; return 1; }
+    case "$stderr" in
+        *印字できない*) ;;
+        *) echo "  print stderr=$stderr" >&2; return 1 ;;
+    esac
+    case "$stderr" in
+        *MapNode*|*MapLeaf*) echo "  Map internals leaked: $stderr" >&2; return 1 ;;
+    esac
+}
+check '12 repl binds an abstract Map and the session continues if it cannot print it' binds_abstract_map
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
