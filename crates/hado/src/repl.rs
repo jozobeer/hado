@@ -797,7 +797,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
 /// 入力がここで完結したか（`docs/issues/repl.md` の段階 1）。
 ///
 /// - 括弧（`(` `[` `{`）が釣り合っている
-/// - `fn`・`module`・`implement`・`effect`・`handler` の開きと閉じ（`/…`）が釣り合う
+/// - `fn`・`module`・`implement` の開きと閉じ（`/fn` `/module` `/implement`）が釣り合う
 /// - 行末が開いた字句（`=>`・`|>`・`|`・`,`・`=`）でない
 ///
 /// 字句が読めない入力は未完として続きを待つ。`->` で終わる入力は束縛の印なので
@@ -817,7 +817,13 @@ fn input_complete(text: &str) -> bool {
     !opens_next_input(&last.kind)
 }
 
-/// 括弧と、`fn`・`module`・`implement`・`effect`・`handler` の開き／閉じの数。
+/// 括弧と、`fn`・`module`・`implement` の開き／閉じの数。
+///
+/// `effect` と `handler` は `/…` で閉じず、次の見出しかファイル末尾で終わる。
+/// 開きに数えると、その見出しのあとの入力が EOF まで 1 つに吸い込まれたまま
+/// 完結しない。`/if` は `if` の閉じであり `fn` の閉じではない。同じ計数に足すと、
+/// 関数の途中の `/if` で入力が割れて、`/fn` より後ろが別の式として走る。
+/// `/fn` の `fn` 自体は開きに数えない。数えると閉じた関数が釣り合わない。
 #[derive(Default)]
 struct Balance {
     depth: i64,
@@ -828,18 +834,23 @@ struct Balance {
 fn block_balance(tokens: &[Tok]) -> Balance {
     let mut balance = Balance::default();
     for (index, token) in tokens.iter().enumerate() {
+        let previous = index.checked_sub(1).and_then(|at| tokens.get(at));
         let next = tokens.get(index + 1).map(|next| &next.kind);
+        // `/fn` の `fn` は閉じの側である。開きに数えると、閉じた関数が
+        // 永遠に `open > close` のままになる。
+        let closes = matches!(previous.map(|token| &token.kind), Some(TokKind::Slash));
         match &token.kind {
             TokKind::LParen | TokKind::LBracket | TokKind::LBrace => balance.depth += 1,
             TokKind::RParen | TokKind::RBracket | TokKind::RBrace => balance.depth -= 1,
-            TokKind::KwFn if !matches!(next, Some(TokKind::LParen)) => balance.open += 1,
-            TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler => {
+            // `fn(` は式の中で閉じる形。開きは `fn … /fn` だけである。
+            TokKind::KwFn if !closes && !matches!(next, Some(TokKind::LParen)) => {
                 balance.open += 1;
             }
+            TokKind::KwModule | TokKind::KwImplement if !closes => balance.open += 1,
             TokKind::Slash
                 if matches!(
                     next,
-                    Some(TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement | TokKind::KwIf)
+                    Some(TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement)
                 ) =>
             {
                 balance.close += 1;
@@ -869,5 +880,19 @@ mod tests {
             let binding = trailing_binding(&format!("1 as{separator}x"));
             assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
         }
+    }
+
+    #[test]
+    fn if_close_does_not_finish_an_open_function() {
+        let partial = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n  /if\n";
+        assert!(!input_complete(partial), "{partial:?}");
+        let whole = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n  /if\n/fn\n";
+        assert!(input_complete(whole), "{whole:?}");
+    }
+
+    #[test]
+    fn effect_and_handler_headings_do_not_wait_for_a_close() {
+        assert!(input_complete("handler Error as Catch\n"));
+        assert!(input_complete("effect E\n"));
     }
 }
