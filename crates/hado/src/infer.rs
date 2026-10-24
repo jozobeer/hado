@@ -2897,24 +2897,43 @@ impl Checker<'_> {
             self.unify(operand, &Ty::Int, span)?;
         }
         let operand = self.inference.resolve(operand);
-        if matches!(op, BinOp::Div | BinOp::Mod) && operand == Ty::Int {
-            self.add_error_effect(site);
-        }
         let expected = self.numeric_binary(op, &operand, span)?;
-        self.unify(result, &expected, span)
+        self.unify(result, &expected, span)?;
+        // 結果型が決まってから効果を足す。先に足すと、Float の結果が Int と
+        // 合わないときの診断が効果行の不一致にすり替わる。
+        if matches!(op, BinOp::Div | BinOp::Mod) && operand == Ty::Int {
+            self.add_error_effect(site, span)?;
+        }
+        Ok(())
     }
 
     fn error_row() -> Row {
         Row::Closed(vec![Ty::Adt("Error".into(), vec![])])
     }
 
-    fn add_error_effect(&mut self, site: &Row) {
+    /// `/` と `%` は `Int {Error}`（§19）。被演算子が未確定な間は効果を足せず、
+    /// 注釈の閉じた行は先に確定する。その行に `Error` が無いと検査は通り、
+    /// 単相化が純粋な署名と `raise` した本体の食い違いで落ちる（§20）。
+    fn add_error_effect(&mut self, site: &Row, span: Span) -> Result<(), Diagnostic> {
         match self.inference.resolve_row(site) {
             Row::Var(id) | Row::Open(id, _) => {
                 let _ = self.inference.unify_row(&Row::Var(id), &Self::error_row());
+                Ok(())
             }
-            Row::Closed(_) => {}
+            Row::Closed(labels) => self.require_error_label(&labels, span),
         }
+    }
+
+    fn require_error_label(&self, labels: &[Ty], span: Span) -> Result<(), Diagnostic> {
+        if labels.iter().any(|label| self.is_error_label(label)) {
+            Ok(())
+        } else {
+            Err(self.error(span, Some("E305"), "effect row mismatch"))
+        }
+    }
+
+    fn is_error_label(&self, label: &Ty) -> bool {
+        crate::types::effect_ctor(&self.inference.resolve(label)) == "Error"
     }
 
     fn numeric(&mut self, ty: &Ty, span: Span) -> Result<(), Diagnostic> {
