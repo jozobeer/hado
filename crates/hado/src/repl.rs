@@ -450,52 +450,83 @@ struct Step {
     display: bool,
 }
 
-/// 入力の末尾が `->` なら継続の印として剥がす。直前が `as x` なら束縛。
+/// 入力の最後の字句が `->` なら継続の印として剥がす。その直前が `as 名前`
+/// なら束縛。行コメントの中の `->` は字句ではないので、束縛にも破棄にもしない。
 /// 字句が読めない入力は剥がさず、本検査の E100 に任せる。
 fn split_step(text: &str) -> Step {
-    let without = text.trim_end();
-    let Some(head) = without
-        .strip_suffix("->")
-        .filter(|_| lex_full(text).is_ok())
-    else {
-        return Step {
-            body: text.to_string(),
-            binder: None,
-            display: true,
-        };
+    let Ok(lexed) = lex_full(text) else {
+        return shown(text);
     };
-    let head = head.trim_end();
-    match trailing_binding(head) {
-        Some((body, name)) => Step {
-            body,
+    let tokens: Vec<Tok> = lexed
+        .into_iter()
+        .filter(|token| !matches!(token.kind, TokKind::Eof))
+        .collect();
+    let Some(arrow) = tokens.last() else {
+        return shown(text);
+    };
+    if !matches!(arrow.kind, TokKind::DashArrow) {
+        return shown(text);
+    }
+    match binding_name(&tokens) {
+        Some(name) => Step {
+            body: source_before(text, &tokens[tokens.len() - 3]),
             binder: Some(name),
             display: false,
         },
         None => Step {
-            body: head.to_string(),
+            body: source_before(text, arrow),
             binder: None,
             display: false,
         },
     }
 }
 
-/// `… as name` の末尾を `(本体, 名前)` に割る。
-fn trailing_binding(text: &str) -> Option<(String, String)> {
-    let trimmed = text.trim_end();
-    // 名前は末尾の断片として取る。区切りが多バイト文字でも文字境界で切れる。
-    let name = trimmed
-        .rsplit(|character: char| !(character.is_alphanumeric() || character == '_'))
-        .next()
-        .unwrap_or("");
-    if !is_name(name) {
+fn shown(text: &str) -> Step {
+    Step {
+        body: text.to_string(),
+        binder: None,
+        display: true,
+    }
+}
+
+/// `->` の直前が `as` と値の名前なら、その名前。`as x?` のように間に字句が
+/// あればセッションの束縛ではない。
+fn binding_name(tokens: &[Tok]) -> Option<String> {
+    if tokens.len() < 3 {
         return None;
     }
-    let before = trimmed[..trimmed.len() - name.len()].trim_end();
-    let head = before.strip_suffix("as")?;
-    if head.ends_with(|character: char| character.is_alphanumeric() || character == '_') {
+    let TokKind::Name(name) = &tokens[tokens.len() - 2].kind else {
+        return None;
+    };
+    if !matches!(tokens[tokens.len() - 3].kind, TokKind::KwAs) || !is_name(name) {
         return None;
     }
-    Some((head.trim_end().to_string(), name.to_string()))
+    Some(name.clone())
+}
+
+/// `token` より前のソース。列は字句と同じくスカラ単位なので、多バイト文字の
+/// 途中では切らない。
+fn source_before(source: &str, token: &Tok) -> String {
+    source[..byte_offset(source, token.span.line, token.span.col)]
+        .trim_end()
+        .to_string()
+}
+
+fn byte_offset(source: &str, line: usize, col: usize) -> usize {
+    let mut current_line = 1usize;
+    let mut current_col = 1usize;
+    for (index, character) in source.char_indices() {
+        if current_line == line && current_col == col {
+            return index;
+        }
+        if character == '\n' {
+            current_line += 1;
+            current_col = 1;
+        } else {
+            current_col += 1;
+        }
+    }
+    source.len()
 }
 
 fn is_name(name: &str) -> bool {
@@ -864,10 +895,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trailing_binding_cuts_the_name_on_a_char_boundary() {
-        for separator in ['\u{a0}', '\u{3000}'] {
-            let binding = trailing_binding(&format!("1 as{separator}x"));
-            assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
-        }
+    fn a_comment_ending_in_an_arrow_is_not_a_binding() {
+        let step = split_step("1 // as x ->\n");
+        assert!(step.display);
+        assert_eq!(step.binder, None);
+        assert!(step.body.contains("// as x ->"), "{}", step.body);
+    }
+
+    #[test]
+    fn a_comment_after_the_arrow_still_binds() {
+        let step = split_step("1 as x -> // keep\n");
+        assert_eq!(step.binder.as_deref(), Some("x"));
+        assert_eq!(step.body, "1");
+        assert!(!step.display);
+    }
+
+    #[test]
+    fn an_arrow_after_a_multibyte_comment_discards_the_expression() {
+        let step = split_step("// あ\n1 ->\n");
+        assert_eq!(step.body, "// あ\n1");
+        assert_eq!(step.binder, None);
+        assert!(!step.display);
+    }
+
+    #[test]
+    fn an_option_binding_is_not_a_session_binding() {
+        let step = split_step("1 as x? ->\n");
+        assert_eq!(step.binder, None);
+        assert!(!step.display);
+        assert_eq!(step.body, "1 as x?");
+    }
+
+    #[test]
+    fn a_nbsp_before_the_name_is_left_to_the_checker() {
+        let step = split_step("1 as\u{a0}x ->\n");
+        assert_eq!(step.binder, None);
+        assert!(step.display);
+        assert!(step.body.contains('\u{a0}'), "{}", step.body);
     }
 }
