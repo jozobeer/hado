@@ -864,10 +864,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trailing_binding_cuts_the_name_on_a_char_boundary() {
-        for separator in ['\u{a0}', '\u{3000}'] {
-            let binding = trailing_binding(&format!("1 as{separator}x"));
-            assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
-        }
+    fn a_comment_ending_in_an_arrow_is_not_a_binding() {
+        let step = split_step("1 // as x ->\n");
+        assert!(step.display);
+        assert_eq!(step.binder, None);
+        assert!(step.body.contains("// as x ->"), "{}", step.body);
+    }
+
+    #[test]
+    fn a_comment_after_the_arrow_still_binds() {
+        let step = split_step("1 as x -> // keep\n");
+        assert_eq!(step.binder.as_deref(), Some("x"));
+        assert_eq!(step.body, "1");
+        assert!(!step.display);
+    }
+
+    #[test]
+    fn an_arrow_after_a_multibyte_comment_discards_the_expression() {
+        let step = split_step("// あ\n1 ->\n");
+        assert_eq!(step.body, "// あ\n1");
+        assert_eq!(step.binder, None);
+        assert!(!step.display);
+    }
+
+    #[test]
+    fn an_option_binding_is_not_a_session_binding() {
+        let step = split_step("1 as x? ->\n");
+        assert_eq!(step.binder, None);
+        assert!(!step.display);
+        assert_eq!(step.body, "1 as x?");
+    }
+
+    #[test]
+    fn a_nbsp_before_the_name_is_left_to_the_checker() {
+        let step = split_step("1 as\u{a0}x ->\n");
+        assert_eq!(step.binder, None);
+        assert!(step.display);
+        assert!(step.body.contains('\u{a0}'), "{}", step.body);
     }
 }

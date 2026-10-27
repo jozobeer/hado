@@ -186,6 +186,24 @@ fn repl_defers_definition_input_to_a_later_stage() {
     assert!(err.contains("定義の入力"), "{err}");
 }
 
+/// 行コメントは字句ではない。`//` の中の `as x ->` で束縛を上書きせず、
+/// コメントの外の `->` の後ろにコメントがあっても束縛する。
+#[test]
+fn repl_does_not_take_a_binding_from_a_comment() {
+    let out = stdout("0 as x ->\n1 // as x ->\nx\n");
+    assert_eq!(out, "1\n0\n");
+    let out = stdout("1 as x -> // keep\nx\n");
+    assert_eq!(out, "1\n");
+    let (code, out, err) = repl("1 -> // gone\n2\n", None);
+    assert_eq!(code, Some(0), "{}", String::from_utf8_lossy(&err));
+    assert_eq!(String::from_utf8(out).unwrap(), "2\n");
+    assert!(
+        !String::from_utf8_lossy(&err).contains("error"),
+        "{}",
+        String::from_utf8_lossy(&err)
+    );
+}
+
 /// 完了条件: 前の入力の効果が再実行されないこと。`log` の出力だけでは
 /// 「出力を /dev/null へ向けてやり直す」実装を通してしまうので、ファイルへの
 /// 書き込みの回数で数える。1 入力につき 1 文字増える入力を 2 回、束縛と長さの
