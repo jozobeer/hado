@@ -227,5 +227,22 @@ binding_not_a_token_match() {
 }
 check '11 a later input may reuse a binding name as a parameter or field' binding_not_a_token_match
 
+# --- 12. 行コメントは束縛の印にならない。`->` の後ろのコメントは束縛を隠さない ---
+comment_is_not_a_binding() {
+    session comment-arrow '0 as x ->\n1 // as x ->\nx\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '1\n0')" ] || { echo "  stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  stderr=$stderr" >&2; return 1; }
+    session comment-after '1 as x -> // keep\nx\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  after status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '1')" ] || { echo "  after stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  after stderr=$stderr" >&2; return 1; }
+    session comment-discard '1 -> // gone\n2\n' || return 1
+    [ "$status" -eq 0 ] || { echo "  discard status=$status stderr=$stderr" >&2; return 1; }
+    [ "$stdout" = "$(printf '2')" ] || { echo "  discard stdout=$stdout" >&2; return 1; }
+    [ -z "$stderr" ] || { echo "  discard stderr=$stderr" >&2; return 1; }
+}
+check '12 a line comment does not create or hide a binding' comment_is_not_a_binding
+
 echo "PASSED: $passed/$total"
 [ "$passed" -eq "$total" ]
