@@ -823,6 +823,29 @@ void hado_abort_error(const HadoString *string) {
   exit(1);
 }
 
+/* §38: `resume` restarts the captured continuation once. The cell is a word
+   allocated when the continuation is built. The first enter marks it; a later
+   enter aborts instead of running the continuation again. */
+int64_t *hado_oneshot_new(void) {
+  int64_t *cell = hado_alloc(sizeof(int64_t));
+  if (cell == NULL) abort();
+  *cell = 0;
+  return cell;
+}
+
+void hado_oneshot_enter(int64_t *cell) {
+  static const char text[] = "resume was already used";
+  if (*cell != 0) {
+    HadoString *message = hado_alloc(sizeof(HadoString) + sizeof(text) - 1);
+    if (message == NULL) abort();
+    message->length = sizeof(text) - 1;
+    message->scalars = message->length;
+    memcpy(message->bytes, text, message->length);
+    hado_abort_error(message);
+  }
+  *cell = 1;
+}
+
 /* Bytes and String share the HadoString layout. Bytes.length is the byte
    count, String.length the scalar count; RFC 3629's well-formedness is what
    Bytes.to_string validates before the identity conversion runs. */
