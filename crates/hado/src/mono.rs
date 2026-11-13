@@ -633,12 +633,21 @@ impl Lowerer {
                         .as_ref()
                         .is_some_and(|fallback| self.callee_is_outcome_closure(fallback))
             }
-            NodeKind::Field(..) => self.value_types.get(&callee.span).is_some_and(|ty| {
+            // `(get 0) 0` の呼び手は適用そのもの。field と同じく、推論した型が
+            // 効果を運ぶ閉包なら呼び出しは outcome を返す。見逃すと `as` の続きが
+            // yield の継続に入らず、resume の値が続きを飛ばして返る。
+            _ => self.inferred_outcome_closure(callee),
+        }
+    }
+
+    fn inferred_outcome_closure(&self, node: &crate::parser::Node) -> bool {
+        self.composite_types
+            .get(&node.span)
+            .or_else(|| self.value_types.get(&node.span))
+            .is_some_and(|ty| {
                 self.outcome_closure_of(&self.specialization.resolve(ty))
                     .is_some()
-            }),
-            _ => false,
-        }
+            })
     }
 
     // handler の `once` の腕が効果を運ぶか。腕が同じ操作を呼んでも止まるように、

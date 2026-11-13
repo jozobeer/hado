@@ -1883,6 +1883,25 @@ fn nested_handlers_of_the_same_effect_pick_the_inner_answer() {
     );
 }
 
+// `(get 0) 0 as n -> n + 10` は、先に `get 0 as f -> f 0` と束ねたときと同じく
+// resume の値に続きを足す。呼び手が適用だと効果を見逃し、続きを飛ばして 1 になる。
+#[test]
+fn nested_application_of_an_effectful_closure_keeps_the_continuation() {
+    runs_effectful_closure_source(
+        "effect Choice\n\
+         again pick: Int\n\
+         handler Choice as C\n\
+         again pick => resume 1\n\
+         return value => value\n\
+         def get x => fn y =>\n\
+           pick as n ->\n\
+           n + x * 0 + y * 0\n\
+         /fn\n\
+         def main = Int.to_string ((with C -> (get 0) 0 as n -> n + 10))\n",
+        "11",
+    );
+}
+
 // 効果を持つ呼び出しを `|>` で書いた要素を末尾呼び出しの引数のリストに置いても、
 // 直接適用と同じ outcome の継続に載る。`|>` の target が module 修飾
 // （`Bytes.to_string`）だと、親の ANF が効果を見落として `Cons` の要素型が
