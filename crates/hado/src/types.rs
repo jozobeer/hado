@@ -375,6 +375,13 @@ impl Inference {
         }
     }
 
+    /// 群の推論が終わったあと、プレースホルダへ束縛した型を差し替える。
+    /// `unify` の外で呼ぶので、失敗しても戻さない。
+    pub(crate) fn replace_substitution(&mut self, id: u32, ty: Ty) {
+        debug_assert_eq!(self.depth, 0);
+        self.substitutions.insert(id, ty);
+    }
+
     fn set_row(&mut self, id: u32, row: Row) {
         let previous = self.rows.insert(id, row);
         if self.depth > 0 {

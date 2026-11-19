@@ -2136,6 +2136,105 @@ fn recursive_closure_result_carrying_outcome_is_not_read_as_a_plain_value() {
     );
 }
 
+// 相互再帰で効果を出すのが片方だけのとき、もう片方の行からもその効果が消えていた。
+// `h` は `Fn(Int => Int {A})` のまま `check` を通り、`run` は
+// `lowered return type differs from inferred signature` で落ちる。
+// `1 / 0` は handler が捕まえて 42 を返す。
+#[test]
+fn mutual_recursion_keeps_the_other_functions_effect() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h n => if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => 1 / n | h (n - 1)\n\
+         def main = with Catch -> h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 呼ばれる側だけがユーザー効果を出す相互再帰を、handler なしで main から呼ぶと E706。
+// 直しの前は `h` の行から `Ask` が落ち、`check` が通り、実行時に
+// `unhandled operation ask` になっていた。
+#[test]
+fn mutual_recursion_of_a_user_effect_reaches_main() {
+    let case = Case::new();
+    perturb_rejection(
+        &case,
+        "main.hd",
+        "effect Ask\n\
+         once ask: Int\n\
+         def rec h n => if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => ask | h (n - 1)\n\
+         def main = h 1\n",
+        "E706",
+        "def main",
+    );
+}
+
+// 書いた `Pure` は、相手の効果を足して広げない。
+#[test]
+fn mutual_recursion_does_not_widen_a_pure_annotation() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "def rec h (n: Int): Int Pure => if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => 1 / n | h (n - 1)\n\
+         def main = h 1\n",
+    );
+    case.reject("check", "main.hd", "main.hd", "E305", 0);
+}
+
+// 同じ呼び出しを handler の下で行うと、`Ask` は main に残らず、腕の値が返る。
+#[test]
+fn mutual_recursion_of_a_user_effect_is_handled() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Ask\n\
+         once ask: Int\n\
+         handler Ask as H\n\
+         once ask => 3\n\
+         return x => x\n\
+         def rec h n => if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => ask | h (n - 1)\n\
+         def main = with H -> h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"3\n");
+    assert!(output.stderr.is_empty());
+}
+
 // 相互再帰では、自分を呼ぶ控えが「呼んだ先の単相化の本体」を lower している間に
 // 積まれる。控えを呼ばれた単相化の id で区別しないと、その控えを呼んだ先の署名と
 // 比べてしまい、本来見るべき自分の再帰呼び出しの食い違いを見逃す。`pick` が `pock` を
