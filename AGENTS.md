@@ -48,6 +48,7 @@ cargo run --offline -q -- build <file>        # 入力の隣に実行ファイ�
 - **常設の門番にテストのテストを置かない。** 門番の検査は、製品（`crates/` `runtime/` `stdlib/` `tools/` とコーパス）かこの節の契約の変更で赤になり得るものに限る。変異・探針・判定器の較正・`cargo test` や他の門番の呼び直し・門番の仕組みの自己検査は、ラウンドの時点で 1 回測って `docs/rounds/<slug>.md` の実測に残す（`docs/rounds/prune-meta-gates.md`）
 - **門番は自分の層とラウンドを宣言する。** 新しい `scripts/verify-*.sh` は冒頭に `# tier: quick|core|full` と `# round: <slug>` を置く。`scripts/lib/gate-tiers.sh` に一覧は無い
 - **着地の直前に main を取り込み、lock を作り直す。** `git merge main`（または rebase）の後、まず `bash scripts/corpus-lock.sh --check` の差分を読み、変わる行が「main 側の変更」と「そのラウンドの成果物」だけで説明できることを確かめてから `bash scripts/corpus-lock.sh` で作り直す。説明できない行があれば作り直さずに止めて報告する。そのラウンドの門番と quick 層を回してから PR にする。着地後の全走は main を checkout した側が回し、結果は同じ `docs/rounds/<slug>.md` の `## 実測` に追記する `docs:` コミット 1 本を PR で足す（main に直接は書かない）
+- **着地したら worktree を消す。** 着地後の全走の `docs:` PR まで main に入ったら、main を checkout した側が `git worktree remove .worktrees/<slug>` と `git branch -d <slug>` を実行する。ignored の `target/` も一緒に消える。worktree ごとの target は数 GB あり、残すとディスクを圧迫する
 
 ## レビューと判断の振り分け
 
