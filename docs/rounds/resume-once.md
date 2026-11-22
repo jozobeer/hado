@@ -209,3 +209,47 @@ exit=0
 $ bash scripts/run-gates.sh --jobs 2 --tier quick target/.gates-round6 2>&1 | tail -1
 TALLY: 42/42 passed; red: none
 ```
+
+### 着地後（main `bb26fe2`）
+
+PR #128 を merge した。PR の CI（走行 44975272795）は 8/8 success。main の CI
+（走行 44975469904）は最初の走行で `gates:4/5` の `verify-string-split-linear` が赤に
+なった。
+
+```
+NG: i perf: join is linear in the element count
+AssertionError: join: control-subtracted ratio 2.99 > 2.5 (small=0.105s large=0.315s)
+```
+
+同じ門番は main `e716721` の走行 44974708071 でも赤で（検査 b・`length_probe` の時間の
+断言）、このラウンドは `String.length`・split・join に触れていない。時間の比を測る検査が
+走行環境の揺らぎで落ちたと判断し、失敗した job を再実行した。再実行は success。
+
+```
+$ gh run view 44975469904 --json status,conclusion,headSha --jq '{status,conclusion,headSha}'
+{"conclusion":"success","headSha":"bb26fe2c9967db38564a956fada5633d8e1e7703","status":"completed"}
+```
+
+```
+gates (gates:1/5) TALLY: 180/180 passed; red: none
+gates (gates:2/5) TALLY: 1456/1456 passed; red: none
+gates (gates:3/5) TALLY: 953/953 passed; red: none
+gates (gates:4/5) TALLY: 605/605 passed; red: none
+gates (gates:5/5) TALLY: 509/509 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
+`verify-resume-once` は gates:1/5 で走った。
+
+main を checkout した側でも門番と corpus lock を測った。
+
+```
+$ bash scripts/verify-resume-once.sh 2>&1 | tail -1
+PASSED: 4/4
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
+
+PR #114 は superseded として閉じた。
