@@ -212,6 +212,40 @@ fn repl_defers_definition_input_to_a_later_stage() {
     assert!(err.contains("定義の入力"), "{err}");
 }
 
+/// `/if` は `fn` の閉じではない。そこで入力を割ると、`/fn` より後ろが
+/// 別の式になり、束縛した関数は腕の中の効果を走らせない。
+#[test]
+fn repl_keeps_a_function_open_across_an_if_close() {
+    let out = stdout("fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n/if\n/fn as f ->\nf 1\nf 0\n");
+    assert_eq!(out, "1\nz\n0\n");
+}
+
+/// `handler` と `effect` は `/…` で閉じない。開きに数えると、見出しの
+/// あとの式が EOF まで同じ未完の入力に吸い込まれ、評価されない。
+#[test]
+fn repl_does_not_swallow_input_after_a_handler_or_effect_heading() {
+    for heading in ["handler Error as Catch", "effect E"] {
+        let (code, out, err) = repl(&format!("{heading}\n1\n"), None);
+        assert_eq!(code, Some(0), "{heading}");
+        assert_eq!(String::from_utf8(out).unwrap(), "1\n", "{heading}");
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.contains("定義の入力"), "{heading}: {err}");
+    }
+}
+
+/// `/module` と `/implement` は閉じの側である。閉じのキーワードを開きに
+/// 数えていたので、閉じたブロックのあとの入力が同じ未完の入力に残っていた。
+#[test]
+fn repl_finishes_a_module_or_implement_block_at_its_close() {
+    for heading in ["module M\n/module", "implement M as M\n/implement"] {
+        let (code, out, err) = repl(&format!("{heading}\n1\n"), None);
+        assert_eq!(code, Some(0), "{heading}");
+        assert_eq!(String::from_utf8(out).unwrap(), "1\n", "{heading}");
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.contains("定義の入力"), "{heading}: {err}");
+    }
+}
+
 /// 完了条件: 前の入力の効果が再実行されないこと。`log` の出力だけでは
 /// 「出力を /dev/null へ向けてやり直す」実装を通してしまうので、ファイルへの
 /// 書き込みの回数で数える。1 入力につき 1 文字増える入力を 2 回、束縛と長さの

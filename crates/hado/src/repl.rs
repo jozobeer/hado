@@ -816,7 +816,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
 /// 入力がここで完結したか（`docs/issues/repl.md` の段階 1）。
 ///
 /// - 括弧（`(` `[` `{`）が釣り合っている
-/// - `fn`・`module`・`implement`・`effect`・`handler` の開きと閉じ（`/…`）が釣り合う
+/// - `fn`・`module`・`implement` の開きと閉じ（`/fn` `/module` `/implement`）が釣り合う
 /// - 行末が開いた字句（`=>`・`|>`・`|`・`,`・`=`）でない
 ///
 /// 字句が読めない入力は未完として続きを待つ。`->` で終わる入力は束縛の印なので
@@ -836,12 +836,48 @@ fn input_complete(text: &str) -> bool {
     !opens_next_input(&last.kind)
 }
 
-/// 括弧と、`fn`・`module`・`implement`・`effect`・`handler` の開き／閉じの数。
+/// 括弧と、`fn`・`module`・`implement` の開き／閉じの数。
+///
+/// `effect` と `handler` は `/…` で閉じず、次の見出しかファイル末尾で終わる。
+/// 開きに数えると、その見出しのあとの入力が EOF まで 1 つに吸い込まれたまま
+/// 完結しない。`/if` は `if` の閉じであって `fn` の閉じではない。同じ計数に
+/// 足すと、関数の途中の `/if` で入力が割れて、`/fn` より後ろが別の式として
+/// 走る。閉じの側の `fn`・`module`・`implement` は開きに数えない。
 #[derive(Default)]
 struct Balance {
     depth: i64,
     open: i64,
     close: i64,
+}
+
+/// その字句が閉じのキーワード（`/fn` の `fn` など）か。`/` の直後の字句は
+/// 開きではなく閉じの側である。
+fn closes_block(tokens: &[Tok], index: usize) -> bool {
+    index
+        .checked_sub(1)
+        .and_then(|at| tokens.get(at))
+        .is_some_and(|token| matches!(token.kind, TokKind::Slash))
+}
+
+/// `/fn` `/module` `/implement` の直後のキーワードか。
+fn is_block_close(next: Option<&TokKind>) -> bool {
+    matches!(
+        next,
+        Some(TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement)
+    )
+}
+
+/// ブロックを開く字句か。`/fn` の `fn` など閉じの側と、`fn(` の形は開きで
+/// ない。`effect` と `handler` は閉じを持たないので開きでもない。
+fn opens_block(token: &Tok, tokens: &[Tok], index: usize, next: Option<&TokKind>) -> bool {
+    if closes_block(tokens, index) {
+        return false;
+    }
+    match &token.kind {
+        TokKind::KwFn => !matches!(next, Some(TokKind::LParen)),
+        TokKind::KwModule | TokKind::KwImplement => true,
+        _ => false,
+    }
 }
 
 fn block_balance(tokens: &[Tok]) -> Balance {
@@ -851,18 +887,8 @@ fn block_balance(tokens: &[Tok]) -> Balance {
         match &token.kind {
             TokKind::LParen | TokKind::LBracket | TokKind::LBrace => balance.depth += 1,
             TokKind::RParen | TokKind::RBracket | TokKind::RBrace => balance.depth -= 1,
-            TokKind::KwFn if !matches!(next, Some(TokKind::LParen)) => balance.open += 1,
-            TokKind::KwModule | TokKind::KwImplement | TokKind::KwEffect | TokKind::KwHandler => {
-                balance.open += 1;
-            }
-            TokKind::Slash
-                if matches!(
-                    next,
-                    Some(TokKind::KwFn | TokKind::KwModule | TokKind::KwImplement | TokKind::KwIf)
-                ) =>
-            {
-                balance.close += 1;
-            }
+            TokKind::Slash if is_block_close(next) => balance.close += 1,
+            _ if opens_block(token, tokens, index, next) => balance.open += 1,
             _ => {}
         }
     }
@@ -888,5 +914,33 @@ mod tests {
             let binding = trailing_binding(&format!("1 as{separator}x"));
             assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
         }
+    }
+
+    /// `/if` は `if` の閉じであって `fn` の閉じではない。`/if` で入力を
+    /// 割ると、`/fn` より後ろが別の式になる。
+    #[test]
+    fn if_close_does_not_finish_an_open_function() {
+        let partial = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n/if\n";
+        assert!(!input_complete(partial), "{partial:?}");
+        let whole = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n/if\n/fn\n";
+        assert!(input_complete(whole), "{whole:?}");
+    }
+
+    /// `handler` と `effect` は `/…` で閉じない。開きに数えると、見出しの
+    /// あとの入力が EOF まで 1 つに吸い込まれたまま完結しない。
+    #[test]
+    fn effect_and_handler_headings_do_not_wait_for_a_close() {
+        assert!(input_complete("handler Error as Catch\n"));
+        assert!(input_complete("effect E\n"));
+    }
+
+    /// `/module` と `/implement` は閉じの側である。閉じの `module` を開きに
+    /// 数えると、閉じたブロックが釣り合わない。
+    #[test]
+    fn module_and_implement_blocks_complete_at_their_close() {
+        assert!(!input_complete("module M\n"));
+        assert!(input_complete("module M\n/module\n"));
+        assert!(!input_complete("implement M as M\n"));
+        assert!(input_complete("implement M as M\n/implement\n"));
     }
 }
