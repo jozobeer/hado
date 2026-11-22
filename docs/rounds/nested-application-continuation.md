@@ -184,3 +184,32 @@ PASSED: 4/4
 $ cargo test --offline --test command r26_effects::
 test result: ok. 96 passed; 0 failed; 0 ignored; 0 measured; 304 filtered out
 ```
+
+### 着地後（main `220be09`）
+
+PR #130 を merge した。PR の CI（走行 44976960397）は 8/8 success。main の CI
+（走行 44977181483）も 8/8 success。
+
+```
+gates (gates:1/5) TALLY: 530/530 passed; red: none
+gates (gates:2/5) TALLY: 165/165 passed; red: none
+gates (gates:3/5) TALLY: 1451/1451 passed; red: none
+gates (gates:4/5) TALLY: 956/956 passed; red: none
+gates (gates:5/5) TALLY: 605/605 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
+`verify-nested-application-continuation` は gates:4/5 で走った。
+
+main を checkout した側でも門番と corpus lock を測った。
+
+```
+$ bash scripts/verify-nested-application-continuation.sh 2>&1 | tail -1
+PASSED: 4/4
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
+
+PR #115 は superseded として閉じた。
