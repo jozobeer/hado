@@ -67,6 +67,8 @@ pub enum RuntimeFunction {
     StringTrim,
     StringSplit,
     StringJoin,
+    OneshotNew,
+    OneshotEnter,
 }
 
 pub struct Declaration {
@@ -135,7 +137,9 @@ impl RuntimeFunction {
             | Self::AbortError
             | Self::PrintChar
             | Self::PrintFloat
-            | Self::ExitCodeOutOfRange => None,
+            | Self::ExitCodeOutOfRange
+            | Self::OneshotNew
+            | Self::OneshotEnter => None,
         }
     }
 
@@ -162,6 +166,8 @@ impl RuntimeFunction {
             | Self::ArrayAlloc
             | Self::ArrayFillUnchecked
             | Self::ExitCodeOutOfRange => return None,
+            Self::OneshotNew => (vec![], Type::Bytes),
+            Self::OneshotEnter => (vec![Type::Bytes], Type::Void),
             Self::CharToString | Self::QuoteChar => (vec![Type::Char], Type::String),
             Self::CharToInt => (vec![Type::Char], Type::Int),
             Self::CharOfIntIsValid => (vec![Type::Int], Type::Bool),
@@ -282,6 +288,8 @@ impl RuntimeFunction {
         Self::StringTrim,
         Self::StringSplit,
         Self::StringJoin,
+        Self::OneshotNew,
+        Self::OneshotEnter,
     ];
 
     pub fn id(self) -> u32 {
@@ -628,6 +636,18 @@ impl RuntimeFunction {
                 symbol: "hado_string_join",
                 parameters: &[AbiType::Pointer, AbiType::Pointer],
                 result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::OneshotNew => &Declaration {
+                symbol: "hado_oneshot_new",
+                parameters: &[],
+                result: Some(AbiType::Pointer),
+                may_allocate: true,
+            },
+            Self::OneshotEnter => &Declaration {
+                symbol: "hado_oneshot_enter",
+                parameters: &[AbiType::Pointer],
+                result: None,
                 may_allocate: true,
             },
         }
