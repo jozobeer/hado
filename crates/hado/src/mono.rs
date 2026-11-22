@@ -4526,23 +4526,45 @@ impl Lowerer {
                     ty: ty.clone(),
                 }),
         );
-        let body = Expression::call_direct(convert.convert_id, &convert.convert_sig, arguments)?;
+        // §38: the closure `resume` calls is this wrapper. Mark it on entry so a
+        // second call aborts instead of running the captured continuation again.
+        let cell = self.next;
+        self.next += 1;
+        let marker = self.next;
+        self.next += 1;
+        let entered = Expression::call_runtime(
+            crate::runtime_abi::RuntimeFunction::OneshotEnter,
+            vec![Expression::Variable {
+                id: cell,
+                ty: Type::Bytes,
+            }],
+        )?;
+        let body = Expression::Let {
+            id: marker,
+            value: Box::new(entered),
+            body: Box::new(Expression::call_direct(
+                convert.convert_id,
+                &convert.convert_sig,
+                arguments,
+            )?),
+        }
+        .in_tail_position();
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         let result = body.ty();
-        let mut captures = vec![(captured, continuation_ty)];
+        let mut captures = vec![(cell, Type::Bytes), (captured, continuation_ty)];
         captures.extend(convert.value_params.iter().cloned());
-        let closure = self.continuation_function(
-            id,
-            (param, input),
-            captures,
-            body.in_tail_position(),
-            &result,
-        )?;
+        let closure = self.continuation_function(id, (param, input), captures, body, &result)?;
+        let allocated =
+            Expression::call_runtime(crate::runtime_abi::RuntimeFunction::OneshotNew, Vec::new())?;
         Ok(Expression::Let {
-            id: captured,
-            value: Box::new(continuation),
-            body: Box::new(closure),
+            id: cell,
+            value: Box::new(allocated),
+            body: Box::new(Expression::Let {
+                id: captured,
+                value: Box::new(continuation),
+                body: Box::new(closure),
+            }),
         })
     }
 
