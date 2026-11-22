@@ -30,6 +30,53 @@ fn condition_arms_move_next_to_the_parameters() {
 }
 
 #[test]
+fn nested_application_inside_cons_keeps_call_boundaries() {
+    // `(add 1) 2` は 2 回の適用。正準形が括弧を落とすと `add 1 2` になり、
+    // 1 回の 2 引数呼び出しへ意味が変わる（§36）。E510 の書き換えはその
+    // 正準形をソースへ書く。
+    let source = "def add x => fn(y => x + y)\ndef main = Cons((add 1) 2, Nil)\n";
+    let fix = fixes(source)
+        .into_iter()
+        .find(|fix| fix.code == "E510" && fix.replacement.contains("add"))
+        .expect("E510");
+    assert_eq!(fix.replacement, "[(add 1) 2]");
+    let (formatted, _) = hado::fixes::format(source)
+        .expect("settled")
+        .expect("rewritten");
+    assert!(
+        formatted.contains("(add 1) 2"),
+        "fmt changed the nested application: {formatted}"
+    );
+    let restored = hado::parser::parse_source(&formatted, "<fmt>").expect("formatted parses");
+    let main = restored.main().expect("main");
+    let hado::parser::NodeKind::List(items, None) = &main.kind else {
+        panic!("formatted main is not a list: {formatted}");
+    };
+    let [item] = items.as_slice() else {
+        panic!("formatted list has {} items: {formatted}", items.len());
+    };
+    let hado::parser::NodeKind::Apply(callee, _) = &item.kind else {
+        panic!("formatted element is not an application: {formatted}");
+    };
+    assert!(
+        matches!(callee.kind, hado::parser::NodeKind::Apply(..)),
+        "formatted program lost the nested application: {formatted}"
+    );
+}
+
+#[test]
+fn nested_application_in_a_boolean_arm_keeps_call_boundaries() {
+    let source =
+        "def add x => fn(y => x + y)\ndef main = if true | true => (add 1) 2 | false => 0\n";
+    let fix = fixes(source)
+        .into_iter()
+        .find(|fix| fix.code == "E520")
+        .expect("E520");
+    assert!(fix.replacement.contains("(add 1) 2"), "{}", fix.replacement);
+    assert!(!fix.replacement.contains("add 1 2"), "{}", fix.replacement);
+}
+
+#[test]
 fn written_list_forms_become_literals() {
     let source = "def main = Cons(1, Cons(2, Nil))\n";
     let list = fixes(source);
