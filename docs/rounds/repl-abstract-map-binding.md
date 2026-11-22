@@ -149,3 +149,24 @@ exit=0
 $ bash scripts/run-gates.sh --jobs 2 --tier quick target/.gates-round1 | tail -1
 TALLY: 20/20 passed; red: none
 ```
+### 着地後（main `e7cf79a`）
+
+CI の full 層（走行 44968781749、`e7cf79a`）は成功した。新しい門番は `gates:3/5` で走った。
+
+```
+$ gh run view 44968781749 --json status,conclusion,headSha
+{"conclusion":"success","headSha":"e7cf79aaec0667d2aa1a28ec492db088de066765","status":"completed"}
+```
+
+```
+$ gh run view 44968781749 --log 2>&1 | grep -E 'TALLY|RUN: verify-repl-abstract' | sed -E 's/\tUNKNOWN STEP\t[0-9T:.-]+Z / /' | sort
+gates (gates:1/5) TALLY: 523/523 passed; red: none
+gates (gates:2/5) TALLY: 164/164 passed; red: none
+gates (gates:3/5) RUN: verify-repl-abstract-map-binding -> /home/runner/work/hado/hado/target/ci-gates/verify-repl-abstract-map-binding.log
+gates (gates:3/5) TALLY: 1449/1449 passed; red: none
+gates (gates:4/5) TALLY: 952/952 passed; red: none
+gates (gates:5/5) TALLY: 593/593 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
