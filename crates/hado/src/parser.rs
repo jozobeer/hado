@@ -3637,15 +3637,19 @@ fn canonical_float(x: f64) -> String {
     }
 }
 
-fn canonical_apply(f: &Node, args: &[Node]) -> String {
-    // 呼び手が適用のときは括弧で囲む。`(f a) b` を `f a b` と書くと、2 回の
-    // 適用が 1 回の 2 引数呼び出しになり、§57 の書き換えが意味を変える（§36）。
-    // `postfix_print` の `apply_text` と同じ判定である。
-    let mut s = if matches!(f.kind, NodeKind::Apply(..)) {
+/// 適用の呼び手を綴る。呼び手が適用のときは括弧で囲む。`(f a) b` を `f a b`
+/// と書くと、2 回の適用が 1 回の 2 引数呼び出しになり、§57 の書き換えが意味を
+/// 変える（§13）。`postfix_print` の `apply_text` と同じ判定である。
+fn canonical_callee(f: &Node) -> String {
+    if matches!(f.kind, NodeKind::Apply(..)) {
         format!("({})", canonical(f))
     } else {
         canonical(f)
-    };
+    }
+}
+
+fn canonical_apply(f: &Node, args: &[Node]) -> String {
+    let mut s = canonical_callee(f);
     for a in args {
         s.push(' ');
         if matches!(a.kind, NodeKind::Apply(..))
