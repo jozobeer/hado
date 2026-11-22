@@ -233,3 +233,40 @@ TALLY: 31/31 passed; red: none
 $ bash scripts/lint-docs.sh | tail -1
 PASSED: 16/16
 ```
+
+### 着地後（main `226a85e`）
+
+PR #122 を merge した。main の CI 44971418167 は 1 回目に
+`verify-string-split-linear` の検査 i（join の比 2.94 > 2.5）だけが赤になった。
+同時刻の親 `7ee9772` の run 44970458434 も同じ門番で赤になっており、このラウンドの
+変更（入力の区切り）とは独立な計時の揺れである。失敗した job だけを再走し、
+594/594 で緑になった。run 全体は success。門番は緩めていない。
+
+```
+$ gh run view 44971418167 --json conclusion,headSha
+{"conclusion":"success","headSha":"226a85e4e7fd6576c57978a6b09ee885bf718066"}
+```
+
+新しい門番は gates:5/5 で走った。
+
+```
+$ gh run view 44971418167 --log | grep -E 'TALLY|RUN: verify-repl-if-input-terminator'
+gates (gates:1/5) TALLY: 973/973 passed; red: none
+gates (gates:2/5) TALLY: 594/594 passed; red: none
+gates (gates:3/5) TALLY: 517/517 passed; red: none
+gates (gates:4/5) TALLY: 156/156 passed; red: none
+gates (gates:5/5) RUN: verify-repl-if-input-terminator -> /home/runner/work/hado/hado/target/ci-gates/verify-repl-if-input-terminator.log
+gates (gates:5/5) TALLY: 1452/1452 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
+main を checkout した側でも門番と corpus lock を測った。
+
+```
+$ bash scripts/verify-repl-if-input-terminator.sh | tail -1
+PASSED: 6/6
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
