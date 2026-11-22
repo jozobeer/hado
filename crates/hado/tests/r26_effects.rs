@@ -2254,6 +2254,123 @@ fn mutual_recursion_of_a_user_effect_is_handled() {
     assert!(output.stderr.is_empty());
 }
 
+// 相手を別名で呼んでも、その効果は呼び手の行に残る。綴りだけを見ると辺が落ち、
+// `check` は通り、単相化が `lowered return type differs` で止まっていた。
+#[test]
+fn mutual_recursion_through_an_alias_keeps_the_effect() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h n => g as f -> if n == 0 => f n | h (n - 1)\n\
+         def rec g n => if n == 0 => 1 / n | h (n - 1)\n\
+         def main = with Catch -> h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 別名経由のユーザー効果も main まで届く。落ちると `check` が通り、実行時に
+// `unhandled operation ask` になる。
+#[test]
+fn mutual_recursion_through_an_alias_reaches_main() {
+    let source = "effect Ask\n\
+         once ask: Int\n\
+         def rec h n => g as f -> if n == 0 => f n | h (n - 1)\n\
+         def rec g n => if n == 0 => ask | h (n - 1)\n\
+         def main = h 0\n";
+    let case = Case::new();
+    case.write("main.hd", source);
+    case.reject(
+        "check",
+        "main.hd",
+        "main.hd",
+        "E706",
+        source.find("def main").expect("anchor"),
+    );
+}
+
+// 入れ子の `fn` から相手を呼ぶと、その閉包の行に効果が残る。残らないと
+// `check` は通り、単相化が `lowered return type differs` で止まる。
+#[test]
+fn mutual_recursion_inside_a_nested_function_keeps_the_effect() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h n => if n == 0 => (fn(x => g x)) n | h (n - 1)\n\
+         def rec g n => if n == 0 => 1 / n | h (n - 1)\n\
+         def main = with Catch -> h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+// `once` の関数値を束ねて呼ぶ。結果を `$Outcome` として特殊化すると
+// `Mismatch` になり、直接呼ぶ形だけが腕の値を返す。
+#[test]
+fn once_effect_function_used_as_a_value_runs_the_handler() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Ask\n\
+         once ask: Int\n\
+         handler Ask as H\n\
+         once ask => 3\n\
+         return x => x\n\
+         def g n => if n == 0 => ask | n\n\
+         def main = with H -> g as f -> f 0\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"3\n");
+    assert!(output.stderr.is_empty());
+}
+
 // 相互再帰では、自分を呼ぶ控えが「呼んだ先の単相化の本体」を lower している間に
 // 積まれる。控えを呼ばれた単相化の id で区別しないと、その控えを呼んだ先の署名と
 // 比べてしまい、本来見るべき自分の再帰呼び出しの食い違いを見逃す。`pick` が `pock` を

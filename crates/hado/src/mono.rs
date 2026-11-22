@@ -3775,6 +3775,8 @@ impl Lowerer {
 
     // 効果行の効果を捕まえる handler がこの文脈にあれば、その答えを返す。同じ
     // 効果を捕まえる handler が入れ子のときは内側を選ぶ（`handler_for` と同じ）。
+    // `once` だけの handler は結果を `$Outcome` にしない。腕をその場で呼ぶので、
+    // 関数値の特殊化へ `$Outcome` を期待させると単一化が失敗する。
     fn answer_for_row(&self, row: &crate::types::Row) -> Option<Type> {
         let labels = match row {
             crate::types::Row::Closed(labels) | crate::types::Row::Open(_, labels) => labels,
@@ -3782,7 +3784,7 @@ impl Lowerer {
         };
         let names: Vec<String> = labels.iter().map(crate::types::effect_ctor).collect();
         for (index, handler) in self.handler_stack.iter().enumerate().rev() {
-            if self.arm_handlers.contains(&index) {
+            if self.arm_handlers.contains(&index) || !Self::handler_has_propagation_ops(handler) {
                 continue;
             }
             if names

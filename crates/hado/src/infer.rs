@@ -65,9 +65,15 @@ struct Checker<'a> {
     row_constraints: Vec<RowConstraint>,
     equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
+    /// 再帰プレースホルダの型変数から、その定義の名前へ。呼び出しの綴りが
+    /// 別名でも、効果を足す相手はこちらの定義である。
+    recursive_names: HashMap<u32, String>,
     /// 同じ群の再帰呼び出し（呼び手、呼ばれる定義）。効果の行は出現検査を
     /// 避けるため呼び出しの時点では繋がない。群の終わりに具体的な効果だけを足す。
     group_calls: Vec<(String, String)>,
+    /// 入れ子の `fn` から出た再帰呼び出し。行を同一化すると出現検査に当たるので、
+    /// 群の終わりに相手の具体的な効果だけを、その閉包の行へ足す。
+    nested_effect_calls: Vec<(Row, u32, Span)>,
     /// 定義の本体を推論している間の、その本体の `function_depth`。
     /// 入れ子の `fn` の中の呼び出しは、定義自身の効果行には足さない。
     direct_effect_depth: Option<usize>,
@@ -172,7 +178,9 @@ pub(crate) fn infer_with_diagnostics(
             })
             .collect(),
         recursive_calls: HashMap::new(),
+        recursive_names: HashMap::new(),
         group_calls: Vec::new(),
+        nested_effect_calls: Vec::new(),
         direct_effect_depth: None,
         function_depth: 0,
         eval_effects: Row::pure(),
@@ -1384,6 +1392,7 @@ impl Checker<'_> {
             .map(|name| (name.clone(), self.inference.fresh()))
             .collect();
         self.group_calls.clear();
+        self.nested_effect_calls.clear();
         self.install_group_placeholders(definitions, &placeholders);
         let mut invalid_group = self.check_group_definitions(group, definitions, &placeholders)?;
         let deferred_start = self.deferred.len();
@@ -1400,6 +1409,7 @@ impl Checker<'_> {
             .any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
             self.group_calls.clear();
+            self.nested_effect_calls.clear();
             self.invalidate_group(group, definitions, &inherited_projections);
             return Ok(());
         }
@@ -1418,6 +1428,7 @@ impl Checker<'_> {
                     unreachable!("fresh recursive placeholder")
                 };
                 self.recursive_calls.insert(*id, Vec::new());
+                self.recursive_names.insert(*id, name.clone());
             }
             self.values
                 .insert(name.clone(), Scheme::monomorphic(ty.clone()));
@@ -1596,17 +1607,84 @@ impl Checker<'_> {
         definitions: &HashMap<String, &crate::parser::Def>,
     ) -> Result<(), Diagnostic> {
         let calls = self.group_internal_calls(group);
-        if calls.is_empty() {
+        let nested = std::mem::take(&mut self.nested_effect_calls);
+        if calls.is_empty() && nested.is_empty() {
             return Ok(());
         }
         let labels = self.propagated_labels(group, &calls);
         if let Some(span) = self.closed_row_mismatch(group, definitions, &labels) {
             return Err(self.error(span, Some("E305"), "effect row mismatch"));
         }
+        if let Some(span) = self.install_nested_effect_labels(&labels, &nested) {
+            return Err(self.error(span, Some("E305"), "effect row mismatch"));
+        }
         for name in group {
             self.install_effect_labels(name, &labels[name]);
         }
         Ok(())
+    }
+
+    /// 入れ子の閉包の行へ、呼ばれた定義の具体的な効果を足す。行の末尾は
+    /// 同一化しない。閉じた行に入らないラベルは、その呼び出しの位置で E305。
+    fn install_nested_effect_labels(
+        &mut self,
+        labels: &HashMap<String, Vec<Ty>>,
+        nested: &[(Row, u32, Span)],
+    ) -> Option<Span> {
+        let mut mismatch: Option<Span> = None;
+        for (row, callee, span) in nested {
+            let Some(name) = self.recursive_names.get(callee) else {
+                continue;
+            };
+            let needed = labels.get(name).cloned().unwrap_or_default();
+            if needed.is_empty() {
+                continue;
+            }
+            if (self.row_rejects_labels(row, &needed) || !self.extend_row(row, &needed))
+                && mismatch.is_none_or(|kept: Span| (span.line, span.col) < (kept.line, kept.col))
+            {
+                mismatch = Some(*span);
+            }
+        }
+        mismatch
+    }
+
+    fn row_rejects_labels(&self, row: &Row, needed: &[Ty]) -> bool {
+        let resolved = self.inference.resolve_row(row);
+        if !matches!(resolved, Row::Closed(_)) {
+            return false;
+        }
+        let have: HashSet<String> = row_effect_labels(&resolved)
+            .iter()
+            .map(|ty| effect_ctor(&self.inference.resolve(ty)))
+            .collect();
+        needed.iter().any(|ty| !have.contains(&effect_ctor(ty)))
+    }
+
+    fn extend_row(&mut self, row: &Row, needed: &[Ty]) -> bool {
+        let resolved = self.inference.resolve_row(row);
+        let have: HashSet<String> = row_effect_labels(&resolved)
+            .iter()
+            .map(|ty| effect_ctor(&self.inference.resolve(ty)))
+            .collect();
+        let missing: Vec<Ty> = needed
+            .iter()
+            .filter(|ty| !have.contains(&effect_ctor(ty)))
+            .cloned()
+            .collect();
+        if missing.is_empty() {
+            return true;
+        }
+        let id = match resolved {
+            Row::Var(id) | Row::Open(id, _) => id,
+            Row::Closed(_) => return false,
+        };
+        let Row::Var(tail) = self.inference.fresh_row() else {
+            return false;
+        };
+        self.inference
+            .unify_row(&Row::Var(id), &Row::Open(tail, missing))
+            .is_ok()
     }
 
     fn group_internal_calls(&mut self, group: &[String]) -> Vec<(String, String)> {
@@ -2650,6 +2728,32 @@ impl Checker<'_> {
         self.expression(node)
     }
 
+    /// 再帰プレースホルダへの呼び出しを覚える。効果を足す相手は、呼び出し位置の
+    /// 綴りではなくプレースホルダの定義である（`g as f -> f n` の `f` は `g`）。
+    /// 定義自身の本体からの呼び出しだけを群の辺にする。入れ子の `fn` は
+    /// 閉包の行へ、群の終わりに具体的な効果だけを足す。
+    fn note_recursive_call(&mut self, function: &Ty, arguments: &[Ty], span: Span) -> bool {
+        let id = match function {
+            Ty::Var(id) => *id,
+            _ => return false,
+        };
+        let Some(calls) = self.recursive_calls.get_mut(&id) else {
+            return false;
+        };
+        calls.push((arguments.to_vec(), span));
+        if self.direct_effect_depth == Some(self.function_depth) {
+            let caller = self.current_definition.clone();
+            let callee = self.recursive_names.get(&id).cloned();
+            if let (Some(caller), Some(callee)) = (caller, callee) {
+                self.group_calls.push((caller, callee));
+            }
+        } else if self.direct_effect_depth.is_some() {
+            self.nested_effect_calls
+                .push((self.eval_effects.clone(), id, span));
+        }
+        true
+    }
+
     fn apply(&mut self, callee: &Node, args: &[Node], span: Span) -> Result<Ty, Diagnostic> {
         if let NodeKind::Name(name) = &callee.kind {
             if self.constructors.contains_key(name) {
@@ -2661,23 +2765,7 @@ impl Checker<'_> {
             .iter()
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        let recursive = if let Ty::Var(id) = &function {
-            self.recursive_calls
-                .get_mut(id)
-                .map(|calls| calls.push((argument_types.clone(), span)))
-                .is_some()
-        } else {
-            false
-        };
-        // 相手の効果行とは同一化しない（`docs/rounds/r61.md`）。定義自身の
-        // 本体から出た呼び出しだけを覚え、群の終わりに具体的な効果を足す。
-        // 入れ子の `fn` の中は、その閉包の行であって定義の行ではない。
-        if recursive && self.direct_effect_depth == Some(self.function_depth) {
-            let caller = self.current_definition.clone();
-            if let (Some(caller), NodeKind::Name(callee_name)) = (caller, &callee.kind) {
-                self.group_calls.push((caller, callee_name.clone()));
-            }
-        }
+        let recursive = self.note_recursive_call(&function, &argument_types, span);
         if self.inference.resolve(&function) == Ty::Error {
             return Ok(Ty::Error);
         }
@@ -2688,6 +2776,9 @@ impl Checker<'_> {
         // to the effects of this one call. The call's effects are their own row,
         // and they reach the definition's row through the body's row, which is
         // what the definition unifies with at the end of its group.
+        // 再帰呼び出しは定義の行とも入れ子の閉包の行とも同一化しない
+        // （`docs/rounds/r61.md`）。繋ぐと `R = {Error | R}` になる。具体的な
+        // 効果は群の終わりに足す。
         let callee_row = if recursive {
             self.inference.fresh_row()
         } else {
