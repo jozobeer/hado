@@ -2912,8 +2912,8 @@ impl Checker<'_> {
     }
 
     /// `/` と `%` は `Int {Error}`（§19）。被演算子が未確定な間は効果を足せず、
-    /// 注釈の閉じた行は先に確定する。その行に `Error` が無いと検査は通り、
-    /// 単相化が純粋な署名と `raise` した本体の食い違いで落ちる（§20）。
+    /// 注釈の閉じた行は先に確定する。その行に `Error` が無いと検査は通ってしまい、
+    /// 署名は純粋なまま本体だけが `raise` する（§20）。
     fn add_error_effect(&mut self, site: &Row, span: Span) -> Result<(), Diagnostic> {
         match self.inference.resolve_row(site) {
             Row::Var(id) | Row::Open(id, _) => {
