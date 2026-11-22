@@ -228,3 +228,29 @@ $ cargo test --offline
 ...
 test result: ok. 426 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
+
+### 認知複雑度（`b947c6e`）
+
+PR の CI の gates:5/5 で `verify-cognitive-complexity` が赤になった。
+`propagate_mutual_effects` の認知複雑度が 10/7 で、`-D warnings` の clippy では
+見えない門番だけが捕まえた。
+
+```
+$ bash scripts/verify-cognitive-complexity.sh
+error: the function has a cognitive complexity of (10/7)
+    --> crates/hado/src/infer.rs:1593:8
+NG: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean
+PASSED: 2/3
+```
+
+呼び出しの抽出・ラベルの固定点・閉じた行の照合を別の関数に分けた。振る舞いは
+変えていない。`r26_effects::` は 100 passed、`check_recursion::` は 4 passed、
+門番は 6/6 のまま。
+
+```
+$ bash scripts/verify-cognitive-complexity.sh
+OK: clippy.toml pins cognitive-complexity-threshold = 7
+OK: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is clean
+OK: no #[allow] / #![allow] for cognitive_complexity under crates/hado/src
+PASSED: 3/3
+```
