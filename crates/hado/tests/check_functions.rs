@@ -1,6 +1,37 @@
 use hado::{check_source, types::Ty};
 
 #[test]
+fn integer_division_of_unresolved_operands_keeps_error_in_a_closed_row() {
+    for source in [
+        "def f x y: Int Pure => x / y\ndef main = f 1 1\n",
+        "def f x y: Int Pure => x % y\ndef main = f 1 1\n",
+        "def f x y: Int {Io} => x / y\ndef main = 0\n",
+        "def f (x: Int, y: Int): Int Pure => x / y\ndef main = 0\n",
+    ] {
+        match check_source(source, "t") {
+            Err(error) => assert_eq!(error.code.as_deref(), Some("E305"), "{source}"),
+            Ok(_) => panic!("accepted:\n{source}"),
+        }
+    }
+    let checked = check_source("def f x y: Int {Error} => x / y\ndef main = f 8 2\n", "t").unwrap();
+    assert_eq!(checked.main, Ty::Int);
+    assert!(has_error(&checked.effects), "{:?}", checked.effects);
+    let checked = check_source("def f x y => x / y\ndef main = f 8 2\n", "t").unwrap();
+    assert_eq!(checked.main, Ty::Int);
+    assert!(has_error(&checked.effects), "{:?}", checked.effects);
+}
+
+fn has_error(row: &hado::types::Row) -> bool {
+    let labels = match row {
+        hado::types::Row::Closed(labels) | hado::types::Row::Open(_, labels) => labels,
+        hado::types::Row::Var(_) => return false,
+    };
+    labels
+        .iter()
+        .any(|ty| matches!(ty, Ty::Adt(name, _) if name == "Error"))
+}
+
+#[test]
 fn top_level_functions_are_polymorphic() {
     let checked = check_source(
         "def id x => x\ndef a = id 12\ndef main = (a > 0) && id true",
