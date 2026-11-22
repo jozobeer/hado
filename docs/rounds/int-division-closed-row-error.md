@@ -205,3 +205,61 @@ test result: ok. 395 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 test result: ok. 426 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
+
+### 層別（quick）
+
+```
+$ bash scripts/run-gates.sh --jobs 2 --tier quick target/.gates-round4 2>&1 | tail -1
+TALLY: 37/37 passed; red: none
+```
+
+`lint-docs.sh` は quick 層の中で緑である。
+
+```
+$ bash scripts/lint-docs.sh 2>&1 | tail -1
+PASSED: 16/16
+```
+
+### corpus lock
+
+このラウンドはコーパスを変えない。main `c6d8faa` を取り込んだ後の照合は差分なし
+（`--check` の出力は空）。
+
+```
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
+
+### 着地後（main `9af3651`）
+
+PR #124 を merge した。main の CI 44973040473 は success。
+
+```
+$ gh run view 44973040473 --json conclusion,headSha
+{"conclusion":"success","headSha":"9af36511f120ecff10f1ae2df275bb756dd5a0fd"}
+```
+
+新しい門番は gates:2/5 で走り、この層の計数は 958/958 だった。
+
+```
+gates (gates:1/5) TALLY: 1473/1473 passed; red: none
+gates (gates:2/5) RUN: verify-int-division-closed-row-error -> /home/runner/work/hado/hado/target/ci-gates/verify-int-division-closed-row-error.log
+gates (gates:2/5) TALLY: 958/958 passed; red: none
+gates (gates:3/5) TALLY: 594/594 passed; red: none
+gates (gates:4/5) TALLY: 517/517 passed; red: none
+gates (gates:5/5) TALLY: 156/156 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
+main を checkout した側でも門番と corpus lock を測った。
+
+```
+$ bash scripts/verify-int-division-closed-row-error.sh 2>&1 | tail -1
+PASSED: 6/6
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
+
+PR #112 は superseded として閉じた。
