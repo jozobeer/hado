@@ -254,3 +254,35 @@ OK: cargo clippy --offline --lib --bins -- -F clippy::cognitive_complexity is cl
 OK: no #[allow] / #![allow] for cognitive_complexity under crates/hado/src
 PASSED: 3/3
 ```
+
+### 着地後（main `92b1baf`）
+
+PR #132 を merge した。PR の CI（走行 44978377929）は 8/8 success。
+
+main の CI（走行 44978533650）は最初 gates:1/5 の `verify-string-split-linear` だけ赤
+（`TALLY: 625/626 passed`）。同じ門番はこの修正の前の main `3f63b32` の走行
+44977603872 でも赤だった。失敗した job を再実行すると 8/8 success になった。
+
+main を checkout した側で門番・corpus lock・現象の形を測った。
+
+```
+$ bash scripts/verify-mutual-recursion-effects.sh 2>&1 | tail -1
+PASSED: 6/6
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+$ ./target/debug/hado run .repro116/div/main.hd; echo "div exit=$?"
+div exit=42
+$ ./target/debug/hado check .repro116/ask/main.hd 2>&1; echo "ask exit=$?"
+main.hd:5:1: error[E706]: main cannot have a user-defined effect
+ask exit=1
+$ ./target/debug/hado run .repro116/handled/main.hd; echo "handled exit=$?"
+handled exit=3
+$ ./target/debug/hado check .repro116/pure/main.hd 2>&1; echo "pure exit=$?"
+main.hd:1:1: error[E305]: effect row mismatch
+pure exit=1
+$ bash scripts/verify-string-split-linear.sh 2>&1 | tail -2
+OK: k lengths: R1 leftovers Float.to_string 0.1 and Char.to_string あ
+PASSED: 10/10
+```
+
+PR #116 は superseded として CLOSED、issue #116 は CLOSED。
