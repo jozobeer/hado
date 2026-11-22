@@ -889,4 +889,32 @@ mod tests {
             assert_eq!(binding, Some(("1".to_string(), "x".to_string())));
         }
     }
+
+    /// `/if` は `if` の閉じであって `fn` の閉じではない。`/if` で入力を
+    /// 割ると、`/fn` より後ろが別の式になる。
+    #[test]
+    fn if_close_does_not_finish_an_open_function() {
+        let partial = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n/if\n";
+        assert!(!input_complete(partial), "{partial:?}");
+        let whole = "fn x =>\n  if x == 0 => log \"z\" -> 0 | x\n/if\n/fn\n";
+        assert!(input_complete(whole), "{whole:?}");
+    }
+
+    /// `handler` と `effect` は `/…` で閉じない。開きに数えると、見出しの
+    /// あとの入力が EOF まで 1 つに吸い込まれたまま完結しない。
+    #[test]
+    fn effect_and_handler_headings_do_not_wait_for_a_close() {
+        assert!(input_complete("handler Error as Catch\n"));
+        assert!(input_complete("effect E\n"));
+    }
+
+    /// `/module` と `/implement` は閉じの側である。閉じの `module` を開きに
+    /// 数えると、閉じたブロックが釣り合わない。
+    #[test]
+    fn module_and_implement_blocks_complete_at_their_close() {
+        assert!(!input_complete("module M\n"));
+        assert!(input_complete("module M\n/module\n"));
+        assert!(!input_complete("implement M as M\n"));
+        assert!(input_complete("implement M as M\n/implement\n"));
+    }
 }
