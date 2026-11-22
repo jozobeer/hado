@@ -6,7 +6,8 @@ use crate::parser::{
     PatternKind, TypeExpr, TypeKind,
 };
 use crate::types::{
-    ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError, TypeRealization,
+    effect_ctor, ComparisonConstraint, Inference, Row, RowConstraint, Scheme, Ty, TypeError,
+    TypeRealization,
 };
 use crate::Checked;
 use std::collections::{HashMap, HashSet};
@@ -64,6 +65,14 @@ struct Checker<'a> {
     row_constraints: Vec<RowConstraint>,
     equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
+    /// 同じ群の再帰呼び出し（呼び手、呼ばれる定義）。効果の行は出現検査を
+    /// 避けるため呼び出しの時点では繋がない。群の終わりに具体的な効果だけを足す。
+    group_calls: Vec<(String, String)>,
+    /// 定義の本体を推論している間の、その本体の `function_depth`。
+    /// 入れ子の `fn` の中の呼び出しは、定義自身の効果行には足さない。
+    direct_effect_depth: Option<usize>,
+    /// `function_body` の入れ子の深さ。定義の本体は 1、その中の `fn` は 2。
+    function_depth: usize,
     eval_effects: Row,
     main_effects: Row,
     effects: HashMap<String, Vec<(OpKind, String)>>,
@@ -163,6 +172,9 @@ pub(crate) fn infer_with_diagnostics(
             })
             .collect(),
         recursive_calls: HashMap::new(),
+        group_calls: Vec::new(),
+        direct_effect_depth: None,
+        function_depth: 0,
         eval_effects: Row::pure(),
         main_effects: Row::pure(),
         effects: HashMap::new(),
@@ -1371,6 +1383,7 @@ impl Checker<'_> {
             .iter()
             .map(|name| (name.clone(), self.inference.fresh()))
             .collect();
+        self.group_calls.clear();
         self.install_group_placeholders(definitions, &placeholders);
         let mut invalid_group = self.check_group_definitions(group, definitions, &placeholders)?;
         let deferred_start = self.deferred.len();
@@ -1378,10 +1391,15 @@ impl Checker<'_> {
         invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
         let result = self.resolve_projections(false);
         invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
+        if !invalid_group {
+            let result = self.propagate_mutual_effects(group, definitions);
+            invalid_group |= self.recover_inference_error(result.map(|()| false), true)?;
+        }
         invalid_group |= self.deferred[deferred_start..]
             .iter()
             .any(|error| crate::diagnostic_order(error).0 == 3);
         if invalid_group {
+            self.group_calls.clear();
             self.invalidate_group(group, definitions, &inherited_projections);
             return Ok(());
         }
@@ -1569,19 +1587,168 @@ impl Checker<'_> {
             })
     }
 
+    /// 再帰呼び出しは定義の効果行と同一化しない。同一化すると
+    /// `R = {Error | R}` になって E306 になる。相手の本体にだけある効果は、
+    /// 群を推論し終えてからラベルだけ足す。行の末尾は共有しない。
+    fn propagate_mutual_effects(
+        &mut self,
+        group: &[String],
+        definitions: &HashMap<String, &crate::parser::Def>,
+    ) -> Result<(), Diagnostic> {
+        let calls = std::mem::take(&mut self.group_calls);
+        let members: HashSet<&str> = group.iter().map(String::as_str).collect();
+        let calls: Vec<(String, String)> = calls
+            .into_iter()
+            .filter(|(caller, callee)| {
+                members.contains(caller.as_str()) && members.contains(callee.as_str())
+            })
+            .collect();
+        if calls.is_empty() {
+            return Ok(());
+        }
+        let mut labels: HashMap<String, Vec<Ty>> = HashMap::new();
+        for name in group {
+            labels.insert(name.clone(), self.direct_effect_labels(name));
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (caller, callee) in &calls {
+                let extra = labels.get(callee).cloned().unwrap_or_default();
+                let slot = labels.get_mut(caller).expect("caller is in the group");
+                for ty in extra {
+                    if slot
+                        .iter()
+                        .any(|have| effect_ctor(have) == effect_ctor(&ty))
+                    {
+                        continue;
+                    }
+                    slot.push(ty);
+                    changed = true;
+                }
+            }
+        }
+        let mut mismatch: Option<Span> = None;
+        for name in group {
+            if !self.closed_row_rejects(name, &labels[name]) {
+                continue;
+            }
+            let Some(def) = definitions.get(name) else {
+                continue;
+            };
+            let span = def.span;
+            if mismatch.is_none_or(|kept: Span| (span.line, span.col) < (kept.line, kept.col)) {
+                mismatch = Some(span);
+            }
+        }
+        if let Some(span) = mismatch {
+            return Err(self.error(span, Some("E305"), "effect row mismatch"));
+        }
+        for name in group {
+            self.install_effect_labels(name, &labels[name]);
+        }
+        Ok(())
+    }
+
+    fn direct_effect_labels(&self, name: &str) -> Vec<Ty> {
+        let Some(row) = self.function_row(name) else {
+            return Vec::new();
+        };
+        let mut labels = Vec::new();
+        let mut seen = HashSet::new();
+        for ty in row_effect_labels(&row) {
+            let ty = self.inference.resolve(ty);
+            if seen.insert(effect_ctor(&ty)) {
+                labels.push(ty);
+            }
+        }
+        labels
+    }
+
+    fn function_row(&self, name: &str) -> Option<Row> {
+        let scheme = self.values.get(name)?;
+        match self.inference.resolve(scheme.body()) {
+            Ty::Fn(_, _, row) => Some(self.inference.resolve_row(&row)),
+            _ => None,
+        }
+    }
+
+    /// 書いた行（閉じた行）に、伝播した効果が入らない。
+    fn closed_row_rejects(&self, name: &str, needed: &[Ty]) -> bool {
+        let Some(row) = self.function_row(name) else {
+            return false;
+        };
+        if !matches!(row, Row::Closed(_)) {
+            return false;
+        }
+        let have: HashSet<String> = row_effect_labels(&row)
+            .iter()
+            .map(|ty| effect_ctor(&self.inference.resolve(ty)))
+            .collect();
+        needed.iter().any(|ty| !have.contains(&effect_ctor(ty)))
+    }
+
+    fn install_effect_labels(&mut self, name: &str, needed: &[Ty]) {
+        let Some(Ty::Var(id)) = self.values.get(name).map(|scheme| scheme.body().clone()) else {
+            return;
+        };
+        let Ty::Fn(args, result, row) = self.inference.resolve(&Ty::Var(id)) else {
+            return;
+        };
+        let resolved = self.inference.resolve_row(&row);
+        if matches!(resolved, Row::Closed(_)) {
+            return;
+        }
+        let have: HashSet<String> = row_effect_labels(&resolved)
+            .iter()
+            .map(|ty| effect_ctor(&self.inference.resolve(ty)))
+            .collect();
+        let missing: Vec<Ty> = needed
+            .iter()
+            .filter(|ty| !have.contains(&effect_ctor(ty)))
+            .cloned()
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let new_row = match resolved {
+            Row::Var(tail) => Row::Open(tail, missing),
+            Row::Open(tail, mut labels) => {
+                labels.extend(missing);
+                Row::Open(tail, labels)
+            }
+            Row::Closed(_) => return,
+        };
+        self.inference
+            .replace_substitution(id, Ty::Fn(args, result, Box::new(new_row)));
+    }
+
+    /// `depth` は、この定義の本体を直接推論しているときの `function_depth`。
+    /// 値の定義は 0、関数の定義は本体の `function_body` に入った 1。
+    fn in_direct_body<T>(&mut self, depth: usize, step: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = self.direct_effect_depth;
+        self.direct_effect_depth = Some(depth);
+        let result = step(self);
+        self.direct_effect_depth = saved;
+        result
+    }
+
     fn definition(&mut self, def: &crate::parser::Def) -> Result<Ty, Diagnostic> {
         match &def.kind {
             DefKind::Value(body) => {
-                let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
-                if def.name == "main" || def.name.ends_with("$main") {
-                    self.main_effects = row;
-                    Ok(ty)
-                } else {
-                    Ok(Ty::fn_with(vec![], ty, row))
-                }
+                let name = def.name.clone();
+                self.in_direct_body(0, |this| {
+                    let (ty, row) = this.isolate_effects(|inner| inner.expression(body))?;
+                    if name == "main" || name.ends_with("$main") {
+                        this.main_effects = row;
+                        Ok(ty)
+                    } else {
+                        Ok(Ty::fn_with(vec![], ty, row))
+                    }
+                })
             }
             DefKind::Function { params, ret, body } => {
-                let ty = self.function(params, body)?;
+                let ty = self.in_direct_body(1, |this| this.function(params, body))?;
                 let Some(annotation) = ret else {
                     return Ok(ty);
                 };
@@ -2383,6 +2550,13 @@ impl Checker<'_> {
     }
 
     fn function_body(&mut self, params: &[Param], body: &Node) -> Result<Ty, Diagnostic> {
+        self.function_depth += 1;
+        let ty = self.function_body_at(params, body);
+        self.function_depth -= 1;
+        ty
+    }
+
+    fn function_body_at(&mut self, params: &[Param], body: &Node) -> Result<Ty, Diagnostic> {
         let saved_effects = self.eval_effects.clone();
         self.eval_effects = self.inference.fresh_row();
         let mut args = Vec::new();
@@ -2473,6 +2647,15 @@ impl Checker<'_> {
         } else {
             false
         };
+        // 相手の効果行とは同一化しない（`docs/rounds/r61.md`）。定義自身の
+        // 本体から出た呼び出しだけを覚え、群の終わりに具体的な効果を足す。
+        // 入れ子の `fn` の中は、その閉包の行であって定義の行ではない。
+        if recursive && self.direct_effect_depth == Some(self.function_depth) {
+            let caller = self.current_definition.clone();
+            if let (Some(caller), NodeKind::Name(callee_name)) = (caller, &callee.kind) {
+                self.group_calls.push((caller, callee_name.clone()));
+            }
+        }
         if self.inference.resolve(&function) == Ty::Error {
             return Ok(Ty::Error);
         }
@@ -3640,6 +3823,13 @@ fn effect_print_name(name: &str) -> String {
     name.rsplit_once('$')
         .map_or(name, |(_, name)| name)
         .to_string()
+}
+
+fn row_effect_labels(row: &Row) -> &[Ty] {
+    match row {
+        Row::Closed(labels) | Row::Open(_, labels) => labels,
+        Row::Var(_) => &[],
+    }
 }
 
 fn realization_reaches(
