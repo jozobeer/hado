@@ -80,6 +80,32 @@ fn repl_continues_after_a_diagnostic() {
     assert!(err.contains("error[E305]"), "{err}");
 }
 
+/// Map の公開型は抽象型なので、合成した `main` は E705 になる。E702 と同じ
+/// 合成の産物として落とし、束縛して次の入力から使えるようにする。落とさないと
+/// `m` が束縛されず、次の入力は E204 になる。
+#[test]
+fn repl_binds_an_abstract_map() {
+    let out = stdout("Map.insert Map.empty 1 \"a\" as m ->\nMap.find m 1\n");
+    assert_eq!(out, "Some(\"a\")\n");
+    let out = stdout("Map.insert Map.empty 1 \"a\" as m ->\nMap.to_list m\n");
+    assert_eq!(out, "[MapEntry(1, \"a\")]\n");
+}
+
+/// 抽象型そのものは印字できない（実装の constructor を漏らさない）。セッションは
+/// 落ちずに次の入力を評価する。
+#[test]
+fn repl_continues_when_an_abstract_map_cannot_be_printed() {
+    let (code, out, err) = repl("Map.insert Map.empty 1 \"a\" as m ->\nm\n7\n", None);
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(String::from_utf8(out).unwrap(), "7\n");
+    assert!(err.contains("印字できない"), "{err}");
+    assert!(
+        !err.contains("MapNode") && !err.contains("MapLeaf"),
+        "Map internals must not leak: {err}"
+    );
+}
+
 /// 関数値は束縛でき、次の入力から呼べる。印字はできないので出さない。
 /// 前の入力の束縛を捕まえた閉包も、そのまま次の入力で呼べる。
 #[test]

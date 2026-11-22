@@ -252,7 +252,7 @@ impl Project {
     }
 
     /// §11: `repl` が合成した 1 歩を検査して単相化する。落とす診断は
-    /// `is_repl_artifact` が決める（合成した `main` の E702 と、読み込んだ
+    /// `is_repl_artifact` が決める（合成した `main` の E702・E705 と、読み込んだ
     /// ライブラリのファイルに出る E513）。他の段の診断はそのまま返す。
     pub(crate) fn lower_repl_step(
         &self,
@@ -537,7 +537,7 @@ fn io_error(path: &Path, error: std::io::Error) -> Diagnostic {
 /// `lower_repl_step` が落とす診断か（`docs/rounds/repl.md` の決定 3・9）。
 fn is_repl_artifact(error: &Diagnostic, root: &str) -> bool {
     match error.code.as_deref() {
-        Some("E702") => true,
+        Some("E702" | "E705") => true,
         Some("E513") => error.path != root,
         _ => false,
     }

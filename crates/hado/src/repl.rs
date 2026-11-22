@@ -209,7 +209,7 @@ impl Session {
         let Some((program, checked, function, result)) = self.lower(&step.body, &used) else {
             return;
         };
-        match self.evaluate(&program, &checked, &function, &used, step.display) {
+        match self.evaluate(&program, &checked, &function, &used, step.display, &result) {
             Ok(Some(bits)) => {
                 if let Some(name) = step.binder {
                     self.bind(name, result, bits);
@@ -317,7 +317,15 @@ impl Session {
         step: &mono::Function,
         used: &[usize],
         display: bool,
+        value_ty: &Ty,
     ) -> Result<Option<u64>, Vec<String>> {
+        if display && contains_abstract(value_ty) {
+            // 実装の表現に開いた型で印字すると `Map.MapNode` が漏れる（§47）。
+            return Err(vec!["この入力の値は印字できない: abstract type".into()]);
+        }
+        // AOT の `compile_mono_to_object` と同じく、抽象型を実装の表現に開いてから
+        // 機械語の型を取る。開かないと `Map.T` は「unknown data type」になる。
+        let checked = &checked.for_codegen();
         let mut module = self.new_module()?;
         let functions = step_functions(program, step);
         let printers = if display {
@@ -540,6 +548,17 @@ fn starts_with_definition(text: &str) -> bool {
                 | TokKind::KwLibrary
         )
     )
+}
+
+/// ソースの型に抽象型が残っているか。合成した `main` の E705 を落としたあと、
+/// 印字はソースの型で断る（実装の表現に開くと `Map.MapNode` が漏れる）。
+fn contains_abstract(ty: &Ty) -> bool {
+    match ty {
+        Ty::Abstract(..) => true,
+        Ty::Fn(args, result, _) => args.iter().any(contains_abstract) || contains_abstract(result),
+        Ty::Adt(_, args) => args.iter().any(contains_abstract),
+        _ => false,
+    }
 }
 
 /// 合成した入口のソース。使う束縛が無ければ `def main = <本体>` にして、
