@@ -213,3 +213,32 @@ $ bash scripts/lint-docs.sh | tail -1
 PASSED: 16/16
 ```
 
+### 着地後（main `1bce993`）
+
+PR #119 を main に着地した（merge commit `b1ecfcb`）。最初の main の full CI
+（走行 44969789502）は `gates:5/5` の `verify-cognitive-complexity` で赤になった。
+括弧の判定を足した `canonical_apply` の認知複雑度が 8/7 だった。quick 層はこの門番を
+含まない（core 層）。
+
+呼び手の綴りを `canonical_callee` へ分ける `refactor:` を PR #120 で着地した
+（merge commit `1bce993`）。振る舞いは変えていない。2 回目の full CI（走行
+44970144401、`1bce993`）は成功した。新しい門番は `gates:1/5` で走った。
+
+```
+$ gh run view 44970144401 --json status,conclusion,headSha
+{"conclusion":"success","headSha":"1bce993030371aaa92119aaa20b6908dade656da","status":"completed"}
+```
+
+```
+$ gh run view 44970144401 --log 2>&1 | grep -E 'TALLY|RUN: verify-canonical-application' | sed -E 's/\tUNKNOWN STEP\t[0-9T:.-]+Z / /' | sort
+gates (gates:1/5) RUN: verify-canonical-application-parentheses -> /home/runner/work/hado/hado/target/ci-gates/verify-canonical-application-parentheses.log
+gates (gates:1/5) TALLY: 614/614 passed; red: none
+gates (gates:2/5) TALLY: 507/507 passed; red: none
+gates (gates:3/5) TALLY: 164/164 passed; red: none
+gates (gates:4/5) TALLY: 1449/1449 passed; red: none
+gates (gates:5/5) TALLY: 952/952 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
