@@ -2293,3 +2293,75 @@ fn option_unwrap_or_of_a_nested_effectful_closure_keeps_its_outcome() {
         "0",
     );
 }
+
+/// §38: `resume` restarts the captured continuation once. A second call in the
+/// same arm must not run the continuation again.
+#[test]
+fn second_resume_does_not_rerun_the_continuation() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Choice\nagain pick: Int\nhandler Choice as C\nagain pick =>\n  resume 1 as a ->\n  resume 2 as b ->\n  a + b\nreturn value => value\ndef main =\n  with C ->\n  pick as n ->\n  log \"after\" ->\n  n\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(output.stdout, b"after\n");
+    assert_eq!(output.stderr, b"resume was already used\n");
+}
+
+#[test]
+fn one_resume_runs_the_continuation_once() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Choice\nagain pick: Int\nhandler Choice as C\nagain pick => resume 7\nreturn value => value\ndef main =\n  with C ->\n  pick as n ->\n  log \"after\" ->\n  n\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"after\n7\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn resume_in_only_one_arm_still_runs_once() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Choice\nagain pick: Int\nhandler Choice as C\nagain pick => if true => resume 7 | resume 8\nreturn value => value\ndef main = with C -> pick\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"7\n");
+    assert!(output.stderr.is_empty());
+}
