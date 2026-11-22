@@ -203,3 +203,37 @@ exit=0
 $ bash scripts/run-gates.sh --jobs 2 --tier quick target/.gates-round5 2>&1 | tail -1
 TALLY: 38/38 passed; red: none
 ```
+
+### 着地後（main `37dfc2c`）
+
+PR #126 を merge した。main の CI 44974287917 は success。
+
+```
+$ gh run view 44974287917 --json conclusion,headSha
+{"conclusion":"success","headSha":"37dfc2c1fddf375003e73d24b3dc6ffa2c09a7e6"}
+```
+
+検査 12 は gates:4/5 で走り、この層の計数は 518/518 だった。
+
+```
+gates (gates:1/5) TALLY: 1473/1473 passed; red: none
+gates (gates:2/5) TALLY: 958/958 passed; red: none
+gates (gates:3/5) TALLY: 594/594 passed; red: none
+gates (gates:4/5) RUN: verify-repl -> /home/runner/work/hado/hado/target/ci-gates/verify-repl.log
+gates (gates:4/5) TALLY: 518/518 passed; red: none
+gates (gates:5/5) TALLY: 156/156 passed; red: none
+gates (tests:1/3) TALLY: 5/5 passed; red: none
+gates (tests:2/3) TALLY: 5/5 passed; red: none
+gates (tests:3/3) TALLY: 5/5 passed; red: none
+```
+
+main を checkout した側でも門番と corpus lock を測った。
+
+```
+$ bash scripts/verify-repl.sh 2>&1 | tail -1
+PASSED: 12/12
+$ bash scripts/corpus-lock.sh --check; echo "exit=$?"
+exit=0
+```
+
+PR #113 は superseded として閉じた。
