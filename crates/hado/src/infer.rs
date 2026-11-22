@@ -1595,25 +1595,44 @@ impl Checker<'_> {
         group: &[String],
         definitions: &HashMap<String, &crate::parser::Def>,
     ) -> Result<(), Diagnostic> {
+        let calls = self.group_internal_calls(group);
+        if calls.is_empty() {
+            return Ok(());
+        }
+        let labels = self.propagated_labels(group, &calls);
+        if let Some(span) = self.closed_row_mismatch(group, definitions, &labels) {
+            return Err(self.error(span, Some("E305"), "effect row mismatch"));
+        }
+        for name in group {
+            self.install_effect_labels(name, &labels[name]);
+        }
+        Ok(())
+    }
+
+    fn group_internal_calls(&mut self, group: &[String]) -> Vec<(String, String)> {
         let calls = std::mem::take(&mut self.group_calls);
         let members: HashSet<&str> = group.iter().map(String::as_str).collect();
-        let calls: Vec<(String, String)> = calls
+        calls
             .into_iter()
             .filter(|(caller, callee)| {
                 members.contains(caller.as_str()) && members.contains(callee.as_str())
             })
+            .collect()
+    }
+
+    fn propagated_labels(
+        &self,
+        group: &[String],
+        calls: &[(String, String)],
+    ) -> HashMap<String, Vec<Ty>> {
+        let mut labels: HashMap<String, Vec<Ty>> = group
+            .iter()
+            .map(|name| (name.clone(), self.direct_effect_labels(name)))
             .collect();
-        if calls.is_empty() {
-            return Ok(());
-        }
-        let mut labels: HashMap<String, Vec<Ty>> = HashMap::new();
-        for name in group {
-            labels.insert(name.clone(), self.direct_effect_labels(name));
-        }
         let mut changed = true;
         while changed {
             changed = false;
-            for (caller, callee) in &calls {
+            for (caller, callee) in calls {
                 let extra = labels.get(callee).cloned().unwrap_or_default();
                 let slot = labels.get_mut(caller).expect("caller is in the group");
                 for ty in extra {
@@ -1628,6 +1647,15 @@ impl Checker<'_> {
                 }
             }
         }
+        labels
+    }
+
+    fn closed_row_mismatch(
+        &self,
+        group: &[String],
+        definitions: &HashMap<String, &crate::parser::Def>,
+        labels: &HashMap<String, Vec<Ty>>,
+    ) -> Option<Span> {
         let mut mismatch: Option<Span> = None;
         for name in group {
             if !self.closed_row_rejects(name, &labels[name]) {
@@ -1641,13 +1669,7 @@ impl Checker<'_> {
                 mismatch = Some(span);
             }
         }
-        if let Some(span) = mismatch {
-            return Err(self.error(span, Some("E305"), "effect row mismatch"));
-        }
-        for name in group {
-            self.install_effect_labels(name, &labels[name]);
-        }
-        Ok(())
+        mismatch
     }
 
     fn direct_effect_labels(&self, name: &str) -> Vec<Ty> {
