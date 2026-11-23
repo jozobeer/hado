@@ -1902,6 +1902,56 @@ fn nested_application_of_an_effectful_closure_keeps_the_continuation() {
     );
 }
 
+// 呼び手が束縛だと、返した効果付き閉包の型が表に残らず、resume の値が
+// `+ 10` を飛ばして 1 になる。`|>` の target も同じ束縛である。
+#[test]
+fn let_bound_effectful_closure_keeps_the_continuation() {
+    let source = "effect Choice\n\
+         again pick: Int\n\
+         handler Choice as C\n\
+         again pick => resume 1\n\
+         return value => value\n\
+         def get x => fn y =>\n\
+           pick as n ->\n\
+           n + x * 0 + y * 0\n\
+         /fn\n";
+    runs_effectful_closure_source(
+        &format!(
+            "{source}def main = Int.to_string ((with C -> (get 0 as f -> if true => f | get 0) 0 as n -> n + 10))\n"
+        ),
+        "11",
+    );
+    runs_effectful_closure_source(
+        &format!(
+            "{source}def main = Int.to_string ((with C -> 0 |> (get 0 as f -> if true => f | get 0) as n -> n + 10))\n"
+        ),
+        "11",
+    );
+}
+
+// `(pick -> 1)` は again の操作そのものではない。束縛や加算の子に置くと
+// 単相化が `again do without operation` で落ち、括弧を外した形は 11 になる。
+#[test]
+fn parenthesized_again_do_keeps_the_continuation() {
+    let source = "effect Choice\n\
+         again pick: Int\n\
+         handler Choice as C\n\
+         again pick => resume 1\n\
+         return value => value\n";
+    runs_effectful_closure_source(
+        &format!("{source}def main = Int.to_string (with C -> (pick -> 1) as n -> n + 10)\n"),
+        "11",
+    );
+    runs_effectful_closure_source(
+        &format!("{source}def main = Int.to_string (with C -> (pick -> 1) + 10)\n"),
+        "11",
+    );
+    runs_effectful_closure_source(
+        &format!("{source}def main = Int.to_string (with C -> pick -> 1 as n -> n + 10)\n"),
+        "11",
+    );
+}
+
 // 効果を持つ呼び出しを `|>` で書いた要素を末尾呼び出しの引数のリストに置いても、
 // 直接適用と同じ outcome の継続に載る。`|>` の target が module 修飾
 // （`Bytes.to_string`）だと、親の ANF が効果を見落として `Cons` の要素型が
