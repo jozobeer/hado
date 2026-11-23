@@ -3937,11 +3937,14 @@ impl Lowerer {
         }
     }
 
+    // `e -> body` は again の操作ではない。操作は `e` であり、`contains_again`
+    // が子を歩く。do まで操作だと、`(pick -> 1)` を束縛や加算の子にしたとき
+    // `again_do` が操作名を取れず `again do without operation` で落ちる。
     fn is_again_node(&self, node: &crate::parser::Node) -> bool {
         self.operation_name(node).is_some_and(|name| {
             !self.scope.contains_key(name)
                 && self.operations.get(name) == Some(&crate::parser::OpKind::Again)
-        }) || matches!(&node.kind, crate::parser::NodeKind::DoQ { value, .. } if self.is_again_node(value))
+        })
     }
 
     fn again_answer_of(&self, node: &crate::parser::Node) -> Result<Option<Type>, String> {
