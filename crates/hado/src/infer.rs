@@ -2016,6 +2016,17 @@ impl Checker<'_> {
             self.composite_types.insert(key, ty.clone());
             self.note_type(key, &ty, true);
         }
+        // `(get 0 as f -> …) 0` や `0 |> (get 0 as f -> …)` の呼び手は束縛
+        // そのもの。結果の型を残さないと効果付き閉包と見えず、`as` の続きが
+        // resume に入らない。
+        if matches!(
+            node.kind,
+            NodeKind::Let { .. } | NodeKind::LetQ { .. } | NodeKind::DoQ { .. }
+        ) {
+            let key = node.span;
+            self.value_types.insert(key, ty.clone());
+            self.note_type(key, &ty, false);
+        }
         Ok(ty)
     }
 
