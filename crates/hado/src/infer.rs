@@ -65,9 +65,12 @@ struct Checker<'a> {
     row_constraints: Vec<RowConstraint>,
     equality_anchors: HashMap<(usize, usize, usize, usize), Span>,
     recursive_calls: HashMap<u32, Vec<(Vec<Ty>, Span)>>,
-    /// 同じ群の再帰呼び出し（呼び手、呼ばれる定義）。効果の行は出現検査を
-    /// 避けるため呼び出しの時点では繋がない。群の終わりに具体的な効果だけを足す。
-    group_calls: Vec<(String, String)>,
+    /// 同じ群の再帰呼び出し（呼び手、呼ばれる定義、その位置を囲む handler の効果）。
+    /// 効果の行は出現検査を避けるため呼び出しの時点では繋がない。群の終わりに、
+    /// 囲んでいる handler が捕まえるもの以外の具体的な効果だけを足す。
+    group_calls: Vec<(String, String, Vec<String>)>,
+    /// `with` が囲んでいる効果。内側から順ではなく、囲みの外側から積む。
+    handled_effects: Vec<String>,
     /// 定義の本体を推論している間の、その本体の `function_depth`。
     /// 入れ子の `fn` の中の呼び出しは、定義自身の効果行には足さない。
     direct_effect_depth: Option<usize>,
@@ -173,6 +176,7 @@ pub(crate) fn infer_with_diagnostics(
             .collect(),
         recursive_calls: HashMap::new(),
         group_calls: Vec::new(),
+        handled_effects: Vec::new(),
         direct_effect_depth: None,
         function_depth: 0,
         eval_effects: Row::pure(),
@@ -1609,12 +1613,12 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn group_internal_calls(&mut self, group: &[String]) -> Vec<(String, String)> {
+    fn group_internal_calls(&mut self, group: &[String]) -> Vec<(String, String, Vec<String>)> {
         let calls = std::mem::take(&mut self.group_calls);
         let members: HashSet<&str> = group.iter().map(String::as_str).collect();
         calls
             .into_iter()
-            .filter(|(caller, callee)| {
+            .filter(|(caller, callee, _)| {
                 members.contains(caller.as_str()) && members.contains(callee.as_str())
             })
             .collect()
@@ -1623,7 +1627,7 @@ impl Checker<'_> {
     fn propagated_labels(
         &self,
         group: &[String],
-        calls: &[(String, String)],
+        calls: &[(String, String, Vec<String>)],
     ) -> HashMap<String, Vec<Ty>> {
         let mut labels: HashMap<String, Vec<Ty>> = group
             .iter()
@@ -1632,10 +1636,13 @@ impl Checker<'_> {
         let mut changed = true;
         while changed {
             changed = false;
-            for (caller, callee) in calls {
+            for (caller, callee, handled) in calls {
                 let extra = labels.get(callee).cloned().unwrap_or_default();
                 let slot = labels.get_mut(caller).expect("caller is in the group");
                 for ty in extra {
+                    if effect_is_handled(&ty, handled) {
+                        continue;
+                    }
                     if slot
                         .iter()
                         .any(|have| effect_ctor(have) == effect_ctor(&ty))
@@ -2675,7 +2682,8 @@ impl Checker<'_> {
         if recursive && self.direct_effect_depth == Some(self.function_depth) {
             let caller = self.current_definition.clone();
             if let (Some(caller), NodeKind::Name(callee_name)) = (caller, &callee.kind) {
-                self.group_calls.push((caller, callee_name.clone()));
+                self.group_calls
+                    .push((caller, callee_name.clone(), self.handled_effects.clone()));
             }
         }
         if self.inference.resolve(&function) == Ty::Error {
@@ -3634,19 +3642,38 @@ impl Checker<'_> {
         for arg in args {
             arg_tys.push(self.expression(arg)?);
         }
-        let (ty, row) = self.isolate_effects(|this| this.expression(body))?;
-        let Some(effect) = self.handlers.get(&handler.name).cloned() else {
+        // 実引数は `with` の外で評価する。本体の再帰呼び出しだけが、この handler
+        // の効果を外へ出さない。
+        let handled = self.handlers.get(&handler.name).cloned();
+        if let Some(effect) = &handled {
+            self.handled_effects.push(effect.clone());
+        }
+        let isolated = self.isolate_effects(|this| this.expression(body));
+        if handled.is_some() {
+            self.handled_effects.pop();
+        }
+        let (ty, row) = isolated?;
+        let Some(effect) = handled else {
             return Err(self.error(
                 handler.span,
                 Some("E204"),
                 &format!("unbound name {}", handler.name),
             ));
         };
-        self.add_effects(&row.without_effect(&effect));
+        // 腕の検査は操作の効果を本体の行へ足す。行がまだ変数だと、その足し込みは
+        // `without_effect` の後まで残って関数の行へ漏れる。先に腕を検査してから
+        // 効果を除く。
         let Some(decl) = self.handler_decls.get(&handler.name).cloned() else {
+            let row = self.inference.resolve_row(&row);
+            self.add_effects(&row.without_effect(&effect));
             return Ok(ty);
         };
-        self.handler_answer(&decl, &ty, &row, handler.span, &arg_tys, args)
+        let answer = self.handler_answer(&decl, &ty, &row, handler.span, &arg_tys, args)?;
+        // 腕の検査が行変数へ効果を束縛したあとの形で除く。束縛前の `Var` のまま
+        // 除くと、同じ変数が後から閉じても効果が関数の行に残る。
+        let row = self.inference.resolve_row(&row);
+        self.add_effects(&row.without_effect(&effect));
+        Ok(answer)
     }
 
     fn handler_answer(
@@ -3845,6 +3872,13 @@ fn effect_print_name(name: &str) -> String {
     name.rsplit_once('$')
         .map_or(name, |(_, name)| name)
         .to_string()
+}
+
+fn effect_is_handled(ty: &Ty, handled: &[String]) -> bool {
+    let rendered = ty.to_string();
+    handled
+        .iter()
+        .any(|effect| crate::types::label_matches_effect(&rendered, effect))
 }
 
 fn row_effect_labels(row: &Row) -> &[Ty] {
