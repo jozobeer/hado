@@ -121,6 +121,26 @@ fn strip_outcome(ty: Type) -> Type {
     }
 }
 
+/// `[A, B, A, B]` を `[A, B]` にする。末尾が直前の同じ並びに重なるときだけ削るので、
+/// いちばん内側の handler は変わらない。
+fn collapse_repeated_handler_suffix(handlers: &mut Vec<&str>) {
+    while handlers.len() >= 2 {
+        let length = handlers.len();
+        let mut collapsed = false;
+        for period in 1..=length / 2 {
+            let start = length - period * 2;
+            if handlers[start..start + period] == handlers[start + period..] {
+                handlers.truncate(start + period);
+                collapsed = true;
+                break;
+            }
+        }
+        if !collapsed {
+            break;
+        }
+    }
+}
+
 fn same_specialization_result(stored: &Type, requested: &Type) -> bool {
     stored == requested || logical_argument(stored) == logical_argument(requested)
 }
@@ -520,7 +540,8 @@ struct Lowerer {
         Signature,
         std::collections::HashMap<String, Signature>,
     )>,
-    active: Vec<(String, FunctionId, Signature)>,
+    // 単相化の名前、id、署名、入口で見えている handler 値引数の個数。
+    active: Vec<(String, FunctionId, Signature, usize)>,
     schemes: std::collections::HashMap<String, crate::types::Scheme>,
     value_types: std::collections::HashMap<crate::NodeTypeKey, Ty>,
     specialization: crate::types::Inference,
@@ -546,6 +567,10 @@ struct Lowerer {
     handler_answers: Vec<Option<Type>>,
     again_answers: Vec<Type>,
     context_answer: Option<Type>,
+    /// いま lower している関数に入ったときの `handler_stack` の長さ。
+    /// それより外側の handler は呼び出し元にあり、関数の型が効果を出さないとき
+    /// は結果を `$Outcome` のまま外へ渡さない。
+    entry_handler_depth: usize,
     /// 本体を lower している間に見た再帰呼び出しの `(呼ばれた単相化, 呼び出しに付く結果型)`。
     /// 相互再帰では、自分を呼ぶ控えが呼んだ先の単相化の本体を lower している間に積まれる。
     /// 呼ばれた単相化の id を持たないと、その控えを呼んだ先の署名と比べてしまい、
@@ -1905,7 +1930,14 @@ impl Lowerer {
         signature: &Signature,
         arguments: Vec<Expression>,
     ) -> Result<Expression, String> {
-        let captures = self.frame_value_captures();
+        let mut captures = self.frame_value_captures();
+        // 再帰の本体が積んだ handler の分は、呼び先が自分の `with` で作り直す。
+        // 入口の個数だけ渡す。余分な capture を渡すと、値引数の個数が食い違う。
+        if let Some(expected) = self.specialization_capture_len(id) {
+            if captures.len() > expected {
+                captures.truncate(expected);
+            }
+        }
         if captures.is_empty() {
             return Expression::call_direct(id, signature, arguments);
         }
@@ -1917,6 +1949,19 @@ impl Lowerer {
             },
             arguments,
         )
+    }
+
+    fn specialization_capture_len(&self, id: FunctionId) -> Option<usize> {
+        self.active
+            .iter()
+            .find(|(_, active_id, _, _)| *active_id == id)
+            .map(|(_, _, _, count)| *count)
+            .or_else(|| {
+                self.functions
+                    .iter()
+                    .find(|function| function.id == id)
+                    .map(|function| function.captures.len())
+            })
     }
 
     /// §34: `e as p? ->` は `Some` の腕で `p` を束縛し、`None` の腕で `None` を返す。
@@ -3904,7 +3949,29 @@ impl Lowerer {
         if handlers.is_empty() {
             return name.into();
         }
-        format!("{name}#{}", handlers.join("/"))
+        let full = format!("{name}#{}", handlers.join("/"));
+        // 本体の `with` は再帰のたびに同じ handler を足す。名前へ全部載せると
+        // `h#H`、`h#H/H`、… と単相化が終わらない。いま lower している名前に
+        // 戻せるときだけ畳む。まだ無い名前は handler の個数を capture に残す。
+        let mut collapsed = handlers.clone();
+        collapse_repeated_handler_suffix(&mut collapsed);
+        if collapsed.len() == handlers.len() {
+            return full;
+        }
+        let shorter = if collapsed.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name}#{}", collapsed.join("/"))
+        };
+        if self
+            .active
+            .iter()
+            .any(|(active, _, _, _)| active == &shorter)
+        {
+            shorter
+        } else {
+            full
+        }
     }
 
     fn scheme_carries_effects(scheme: &crate::types::Scheme) -> bool {
@@ -4206,6 +4273,16 @@ impl Lowerer {
         })
     }
 
+    fn forwards_to_outer_handler(&self) -> bool {
+        let current = self.handler_stack.len().saturating_sub(1);
+        (0..current).any(|index| {
+            if self.arm_handlers.contains(&index) {
+                return false;
+            }
+            index >= self.entry_handler_depth || self.context_answer.is_some()
+        })
+    }
+
     fn interpret_outcome(
         &mut self,
         handler: &crate::parser::HandlerDecl,
@@ -4214,8 +4291,10 @@ impl Lowerer {
         let incoming = value.ty();
         let (success, answer, payload) = outcome_parts(&incoming)?;
         // 腕の本体を単相化している間、その handler の枠は外にあるものとして数えない。
-        let forwarding = (0..self.handler_stack.len().saturating_sub(1))
-            .any(|index| !self.arm_handlers.contains(&index));
+        // 関数に入る前から積んである handler は呼び出し元のものなので、この関数の
+        // 型が効果を出さないときは結果を `$Outcome` にしない。関数の中で積んだ
+        // handler へは、今までどおり渡す。
+        let forwarding = self.forwards_to_outer_handler();
         let handler_answer = self.handler_answers.last().cloned().flatten();
         let outgoing = if forwarding {
             Type::Data(
@@ -5821,7 +5900,7 @@ impl Lowerer {
         let mut prefix = self
             .active
             .last()
-            .and_then(|(current, _, _)| current.rsplit_once('.').map(|(prefix, _)| prefix));
+            .and_then(|(current, _, _, _)| current.rsplit_once('.').map(|(prefix, _)| prefix));
         while let Some(module) = prefix {
             let qualified = format!("{module}.{name}");
             if self.constructors.contains_key(&qualified) {
@@ -5836,7 +5915,7 @@ impl Lowerer {
         let mut prefix = self
             .active
             .last()
-            .and_then(|(current, _, _)| current.rsplit_once('.').map(|(prefix, _)| prefix));
+            .and_then(|(current, _, _, _)| current.rsplit_once('.').map(|(prefix, _)| prefix));
         while let Some(module) = prefix {
             let qualified = format!("{module}.{name}");
             if self.definitions.contains_key(&qualified) {
@@ -6097,10 +6176,10 @@ impl Lowerer {
         types: &[Type],
         result: &Type,
     ) -> Result<Option<(FunctionId, Signature)>, String> {
-        let Some((_, id, active)) = self
+        let Some((_, id, active, _)) = self
             .active
             .iter()
-            .find(|(active, _, _)| active.as_str() == key)
+            .find(|(active, _, _, _)| active.as_str() == key)
         else {
             return Ok(None);
         };
@@ -6144,13 +6223,18 @@ impl Lowerer {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
         let recursive_marker = self.recursive_results.len();
-        self.active.push((key.clone(), id, signature.clone()));
+        let capture_count = self.carry_frame_value_args().len();
+        self.active
+            .push((key.clone(), id, signature.clone(), capture_count));
         let saved_answer = std::mem::replace(&mut self.context_answer, outcome_answer.clone());
+        let saved_depth = self.entry_handler_depth;
+        self.entry_handler_depth = self.handler_stack.len();
         // §38: 外側の `with` の値引数を capture として引き継ぐ。呼んだ先の
         // `once` の腕が値引数を参照できるようにするためである。値引数が
         // 無ければ capture も無く、今までどおりの関数になる。
         let captures = self.carry_frame_value_args();
         let lowered = self.expression(&body);
+        self.entry_handler_depth = saved_depth;
         self.context_answer = saved_answer;
         self.active.pop();
         self.specialization = saved_specialization;

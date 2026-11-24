@@ -2254,6 +2254,197 @@ fn mutual_recursion_of_a_user_effect_is_handled() {
     assert!(output.stderr.is_empty());
 }
 
+// 再帰関数の本体にある `with` は、単相化の handler 名を `h#H`、`h#H/H`、…
+// と深くしてコンパイラのスタックを溢れさせていた。呼び出しは終わる。
+#[test]
+fn with_inside_recursion_terminates() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h n => with Catch -> if n == 0 => 0 | h (n - 1)\n\
+         def main = h 4\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"0\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 割り算を再帰関数の中の handler が捕まえる。handler を外に出した形は 42 のままで、
+// 中に入れると単相化が終わらなかった。
+#[test]
+fn division_handled_inside_recursive_function() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h n => with Catch -> if n == 0 => 1 / n | h (n - 1)\n\
+         def main = h 2\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 値引数つきの handler を再帰の中に置いても、内側の値が返る。外側の `with` の
+// 値引数では置き換わらない。
+#[test]
+fn handler_value_inside_recursion_keeps_the_inner_argument() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch(k: Int)\n\
+         abort raise _ => k\n\
+         return value => value\n\
+         def rec h n => with Catch(7) -> if n == 0 => 1 / n | h (n - 1)\n\
+         def main = with Catch(9) -> h 2\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"7\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 内側の腕が raise し直すと、再帰の外の handler の値引数へ届く。
+#[test]
+fn recursive_inner_handler_reraise_reaches_the_outer_value() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Outer(k: Int)\n\
+         abort raise _ => k\n\
+         return value => value\n\
+         handler Error as Inner\n\
+         abort raise _ => 1 / 0\n\
+         return value => value\n\
+         def rec h n => with Inner -> if n == 0 => 1 / n | h (n - 1)\n\
+         def main = with Outer(9) -> h 2\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"9\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 相手の効果を、呼び手の `with` が捕まえる。伝播が handler を見ないと main が
+// E706 になり、単相化は handler 名を深くしてスタックを溢れさせていた。
+#[test]
+fn mutual_recursion_handles_the_partner_effect_inside_the_caller() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Ask\n\
+         again ask: Int\n\
+         handler Ask as H\n\
+         again ask => resume 7\n\
+         return value => value\n\
+         def rec h n => with H -> if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => ask | h (n - 1)\n\
+         def main = h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"7\n");
+    assert!(output.stderr.is_empty());
+}
+
+// 書いた `Pure` は、handler の下でだけ起きる相手の効果では広がらない。
+#[test]
+fn handled_partner_effect_does_not_widen_a_pure_annotation() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "handler Error as Catch\n\
+         abort raise _ => 42\n\
+         return value => value\n\
+         def rec h (n: Int): Int Pure => with Catch -> if n == 0 => g n | h (n - 1)\n\
+         def rec g n => if n == 0 => 1 / n | h (n - 1)\n\
+         def main = h 1\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty());
+}
+
 // 相互再帰では、自分を呼ぶ控えが「呼んだ先の単相化の本体」を lower している間に
 // 積まれる。控えを呼ばれた単相化の id で区別しないと、その控えを呼んだ先の署名と
 // 比べてしまい、本来見るべき自分の再帰呼び出しの食い違いを見逃す。`pick` が `pock` を
