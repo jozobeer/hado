@@ -552,6 +552,8 @@ struct Lowerer {
     /// 本来見るべき自分の再帰呼び出しの食い違いを見逃す。
     recursive_results: Vec<(FunctionId, Type)>,
     resume_binding: Option<(usize, Type)>,
+    /// いま下げている again の腕で、`resume` の呼び出しが convert に足す値引数。
+    resume_value_params: Vec<ResumeValueParam>,
     rewriting_return: bool,
     /// 腕の本体を単相化している間、その handler が stack の何番目かを指す。
     /// 腕は自分の handler の外で走るので、handler は自分の腕を捕まえない。
@@ -1736,6 +1738,19 @@ struct ConvertCtx {
     /// §38: handler の値引数のうち `_` 以外。convert 関数の追加の引数で、
     /// 腕の本体からはこの id で見える。継続が convert を呼び直すときにも渡す。
     value_params: Vec<(usize, Type)>,
+    /// `value_params` と同じ順。どの handler の何番目の値引数か。
+    /// 腕の中の同じ handler の `with` が新しい値を渡したとき、`resume` は
+    /// その値を convert に渡す。
+    value_param_owners: Vec<(String, usize)>,
+}
+
+/// `resume` が convert に渡す値引数。`id` はこの腕を下げている convert の引数で、
+/// 同じ handler の内側の `with` があるときは、そのフレームの引数で置き換える。
+struct ResumeValueParam {
+    handler: String,
+    index: usize,
+    id: usize,
+    ty: Type,
 }
 
 impl ConvertCtx {
@@ -1859,6 +1874,13 @@ impl Lowerer {
         arguments: Vec<Expression>,
         expected: Option<&Type>,
     ) -> Result<Expression, String> {
+        if matches!(callee.kind, crate::parser::NodeKind::Resume)
+            && !self.resume_value_params.is_empty()
+        {
+            let mut arguments = arguments;
+            arguments.extend(self.resume_value_arguments());
+            return Expression::call_closure(self.resume_variable()?, arguments);
+        }
         if let crate::parser::NodeKind::Field(module, member) = &callee.kind {
             if let crate::parser::NodeKind::Name(module) = &module.kind {
                 let qualified = self.resolve_definition(&format!("{module}.{}", member.name));
@@ -4058,6 +4080,7 @@ impl Lowerer {
                 self.continuation_function(
                     id,
                     (param, input),
+                    &[],
                     Vec::new(),
                     body.in_tail_position(),
                     &outcome,
@@ -4122,26 +4145,33 @@ impl Lowerer {
         {
             return Err("continuation result type mismatch".into());
         }
-        self.continuation_function(id, (param, input), captures, body, &result)
+        self.continuation_function(id, (param, input), &[], captures, body, &result)
     }
 
     fn continuation_function(
         &mut self,
         id: FunctionId,
         param: (usize, Type),
+        extra: &[(usize, Type)],
         captures: Vec<(usize, Type)>,
         body: Expression,
         answer: &Type,
     ) -> Result<Expression, String> {
+        let mut parameters = vec![param.1];
+        let mut parameter_ids = vec![param.0];
+        for (id, ty) in extra {
+            parameter_ids.push(*id);
+            parameters.push(ty.clone());
+        }
         let signature = Signature {
-            parameters: vec![param.1],
+            parameters,
             result: answer.clone(),
         };
         self.functions.push(Function {
             id,
             name: format!("cont_{}", id.0),
             signature: signature.clone(),
-            parameters: vec![param.0],
+            parameters: parameter_ids,
             captures: captures.clone(),
             body,
         });
@@ -4238,17 +4268,24 @@ impl Lowerer {
         // その id で値引数を引く。
         let call_arguments = self.frame_value_captures();
         let mut convert_extras = Vec::new();
+        let mut value_param_owners = Vec::new();
         let mut convert_frame = Vec::new();
         for (index, values) in self.frame_value_args.iter().enumerate() {
             if self.arm_handlers.contains(&index) {
                 convert_frame.push(Vec::new());
                 continue;
             }
+            let handler_name = self
+                .handler_stack
+                .get(index)
+                .map(|handler| handler.name.clone())
+                .unwrap_or_default();
             let mut carried = Vec::new();
-            for (name, (_, ty)) in values {
+            for (param_index, (name, (_, ty))) in values.iter().enumerate() {
                 let id = self.next;
                 self.next += 1;
                 convert_extras.push((id, ty.clone()));
+                value_param_owners.push((handler_name.clone(), param_index));
                 carried.push((name.clone(), (id, ty.clone())));
             }
             convert_frame.push(carried);
@@ -4266,6 +4303,7 @@ impl Lowerer {
             },
             forwarding,
             value_params: convert_extras.clone(),
+            value_param_owners,
         };
         let variable = Expression::Variable {
             id: convert_param,
@@ -4412,8 +4450,14 @@ impl Lowerer {
                     .clone(),
             ),
         );
-        let resume = self.continuation_calling_convert(continuation, convert)?;
-        let body = self.yield_arm(handler, operation, yield_value, resume)?;
+        let resume = self.continuation_calling_convert(continuation, convert, true)?;
+        let saved_params = std::mem::replace(
+            &mut self.resume_value_params,
+            Self::resume_value_params(convert),
+        );
+        let body = self.yield_arm(handler, operation, yield_value, resume);
+        self.resume_value_params = saved_params;
+        let body = body?;
         Ok((constructor, self.finish_convert_arm(body, convert)?))
     }
 
@@ -4451,7 +4495,7 @@ impl Lowerer {
                         .clone(),
                 ),
             );
-            let wrapped = self.continuation_calling_convert(continuation, convert)?;
+            let wrapped = self.continuation_calling_convert(continuation, convert, false)?;
             arms.push((
                 constructor.clone(),
                 Expression::Construct {
@@ -4502,6 +4546,7 @@ impl Lowerer {
         &mut self,
         continuation: Expression,
         convert: &ConvertCtx,
+        pass_frame: bool,
     ) -> Result<Expression, String> {
         let continuation_ty = continuation.ty();
         let Type::Closure(inputs, _) = &continuation_ty else {
@@ -4525,16 +4570,28 @@ impl Lowerer {
                 ty: input.clone(),
             }],
         )?;
+        // 腕の中の `with H(新しい値) -> resume ...` は、resume を作ったときの
+        // 値ではなく、その `with` の値を convert に渡す。値をキャプチャすると
+        // 呼び出しより前の値が残る。引数にして、呼び出しのたびに今のフレームを渡す。
+        let pass_frame = pass_frame && !convert.value_params.is_empty();
+        let mut frame_params = Vec::new();
+        if pass_frame {
+            for (_, ty) in &convert.value_params {
+                let id = self.next;
+                self.next += 1;
+                frame_params.push((id, ty.clone()));
+            }
+        }
         let mut arguments = vec![called];
-        arguments.extend(
-            convert
-                .value_params
-                .iter()
-                .map(|(id, ty)| Expression::Variable {
-                    id: *id,
-                    ty: ty.clone(),
-                }),
-        );
+        let frame_source: Vec<(usize, Type)> = if pass_frame {
+            frame_params.clone()
+        } else {
+            convert.value_params.clone()
+        };
+        arguments.extend(frame_source.iter().map(|(id, ty)| Expression::Variable {
+            id: *id,
+            ty: ty.clone(),
+        }));
         // §38: the closure `resume` calls is this wrapper. Mark it on entry so a
         // second call aborts instead of running the captured continuation again.
         let cell = self.next;
@@ -4562,8 +4619,11 @@ impl Lowerer {
         self.next_function += 1;
         let result = body.ty();
         let mut captures = vec![(cell, Type::Bytes), (captured, continuation_ty)];
-        captures.extend(convert.value_params.iter().cloned());
-        let closure = self.continuation_function(id, (param, input), captures, body, &result)?;
+        if !pass_frame {
+            captures.extend(convert.value_params.iter().cloned());
+        }
+        let closure =
+            self.continuation_function(id, (param, input), &frame_params, captures, body, &result)?;
         let allocated =
             Expression::call_runtime(crate::runtime_abi::RuntimeFunction::OneshotNew, Vec::new())?;
         Ok(Expression::Let {
@@ -4575,6 +4635,52 @@ impl Lowerer {
                 body: Box::new(closure),
             }),
         })
+    }
+
+    fn resume_value_params(convert: &ConvertCtx) -> Vec<ResumeValueParam> {
+        convert
+            .value_params
+            .iter()
+            .zip(&convert.value_param_owners)
+            .map(|((id, ty), (handler, index))| ResumeValueParam {
+                handler: handler.clone(),
+                index: *index,
+                id: *id,
+                ty: ty.clone(),
+            })
+            .collect()
+    }
+
+    /// `resume` に足す値引数。同じ handler の内側の `with` があれば、その実引数を使う。
+    fn resume_value_arguments(&self) -> Vec<Expression> {
+        self.resume_value_params
+            .iter()
+            .map(|param| {
+                let id = self
+                    .latest_frame_param(&param.handler, param.index)
+                    .unwrap_or(param.id);
+                Expression::Variable {
+                    id,
+                    ty: param.ty.clone(),
+                }
+            })
+            .collect()
+    }
+
+    fn latest_frame_param(&self, handler: &str, index: usize) -> Option<usize> {
+        self.handler_stack
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(frame, decl)| {
+                if decl.name != handler {
+                    return None;
+                }
+                self.frame_value_args
+                    .get(frame)?
+                    .get(index)
+                    .map(|(_, (id, _))| *id)
+            })
     }
 
     fn abort_arm(
@@ -4964,6 +5070,7 @@ impl Lowerer {
         self.continuation_function(
             id,
             (param, input),
+            &[],
             captures,
             body.in_tail_position(),
             &signature.result,
