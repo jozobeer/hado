@@ -2031,6 +2031,32 @@ fn nested_with_in_a_shared_handler_arm_at_two_answer_types() {
     }
 }
 
+// 腕の中で同じ handler を付け直すと、型検査が腕を再検査してスタックを溢らし、
+// コンパイルが `stack overflow` で落ちていた。付け直した値引数は resume の
+// 継続から見え、最初の値は残らない。
+#[test]
+fn reinstalling_a_handler_in_its_arm_uses_the_new_value() {
+    let handler = "effect State\n\
+         again get: Int\n\
+         again put (n: Int): Void\n\
+         handler State as S(state: Int)\n\
+         again get => resume state\n\
+         again put n => with S(n) -> resume ()\n\
+         return value => value\n";
+    runs_effectful_closure_source(
+        &format!("{handler}def main = Int.to_string (with S(1) -> put 5 -> get)\n"),
+        "5",
+    );
+    runs_effectful_closure_source(
+        &format!("{handler}def main = Int.to_string (with S(1) -> put 5 -> put 8 -> get)\n"),
+        "8",
+    );
+    runs_effectful_closure_source(
+        &format!("{handler}def main = Int.to_string (with S(1) -> get)\n"),
+        "1",
+    );
+}
+
 // §38: `with` の値引数は `with` の位置で 1 回だけ評価する。`again` の腕が
 // `resume` を繰り返して `convert` が複数回走る形で、実引数に置いた `log` の
 // 出力が 1 回であることを stdout の完全一致で見る。直す前は値引数を lower して

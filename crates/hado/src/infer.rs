@@ -83,6 +83,10 @@ struct Checker<'a> {
     default_operations: HashMap<String, String>,
     operation_result_rows: HashMap<String, Row>,
     resume_type: Option<Ty>,
+    /// 腕を検査している handler の名前と、その `with` の成功型・答え型。
+    /// 腕の中の同じ handler の `with` は腕を再検査すると検査が終わらないので、
+    /// この型に合わせる。
+    handler_arm_types: Vec<(String, Ty, Ty)>,
 }
 
 pub fn check_ast(ast: &Ast, path: &str) -> Result<Checked, Diagnostic> {
@@ -191,6 +195,7 @@ pub(crate) fn infer_with_diagnostics(
         default_operations: HashMap::new(),
         operation_result_rows: HashMap::new(),
         resume_type: None,
+        handler_arm_types: Vec::new(),
     };
     checker
         .deferred
@@ -3643,10 +3648,36 @@ impl Checker<'_> {
             ));
         };
         self.add_effects(&row.without_effect(&effect));
+        if let Some(answer) = self.reentrant_handler_answer(&handler.name, &ty, handler.span)? {
+            return Ok(answer);
+        }
         let Some(decl) = self.handler_decls.get(&handler.name).cloned() else {
             return Ok(ty);
         };
         self.handler_answer(&decl, &ty, &row, handler.span, &arg_tys, args)
+    }
+
+    /// 腕の検査中に同じ handler の `with` へ戻ったときの答え。
+    ///
+    /// 腕を再検査すると、その腕の `with` がまた腕を検査して終わらない。
+    /// 成功型はいま検査している `with` の本体に合わせ、答えはその検査の答え型を返す。
+    fn reentrant_handler_answer(
+        &mut self,
+        handler: &str,
+        body: &Ty,
+        span: Span,
+    ) -> Result<Option<Ty>, Diagnostic> {
+        let Some((success, answer)) = self
+            .handler_arm_types
+            .iter()
+            .rev()
+            .find(|(name, _, _)| name == handler)
+            .map(|(_, success, answer)| (success.clone(), answer.clone()))
+        else {
+            return Ok(None);
+        };
+        self.unify(body, &success, span)?;
+        Ok(Some(self.inference.resolve(&answer)))
     }
 
     fn handler_answer(
@@ -3660,9 +3691,12 @@ impl Checker<'_> {
     ) -> Result<Ty, Diagnostic> {
         let answer = self.inference.fresh();
         let saved = self.values.clone();
+        self.handler_arm_types
+            .push((handler.name.clone(), body.clone(), answer.clone()));
         let result = self
             .bind_handler_params(handler, arg_tys, args, span)
             .and_then(|()| self.infer_handler_arms(handler, body, row, &answer, span));
+        self.handler_arm_types.pop();
         self.values = saved;
         result?;
         Ok(self.inference.resolve(&answer))
