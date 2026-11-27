@@ -1534,6 +1534,13 @@ impl Lowerer {
     }
 }
 
+fn contains_resume(node: &crate::parser::Node) -> bool {
+    matches!(node.kind, crate::parser::NodeKind::Resume)
+        || crate::check::children(node)
+            .iter()
+            .any(|child| contains_resume(child))
+}
+
 fn is_comparison(op: crate::parser::BinOp) -> bool {
     use crate::parser::BinOp;
     matches!(
@@ -4090,6 +4097,9 @@ impl Lowerer {
         // 関数の `once` の腕が値引数を参照できるようにするためである。
         let mut captures: Vec<_> = self.scope.values().cloned().collect();
         captures.extend(self.carry_frame_value_args());
+        // `resume` は名前ではなく腕の束縛である。継続の中の関数がそれを呼ぶとき、
+        // 束縛を capture しないと別関数の中で未定義の変数になる。
+        self.capture_resume(body, &mut captures);
         let param = self.next;
         self.next += 1;
         let id = FunctionId(self.next_function);
@@ -5099,6 +5109,18 @@ impl Lowerer {
         Ok(Expression::Variable { id, ty })
     }
 
+    /// `resume` はスコープの名前ではない。本体（入れ子の関数を含む）がそれを
+    /// 呼ぶ関数は、腕が束ねた継続を capture する。
+    fn capture_resume(&self, body: &crate::parser::Node, captures: &mut Vec<(usize, Type)>) {
+        let Some((id, ty)) = self.resume_binding.clone() else {
+            return;
+        };
+        if captures.iter().any(|(captured, _)| *captured == id) || !contains_resume(body) {
+            return;
+        }
+        captures.push((id, ty));
+    }
+
     fn lambda(
         &mut self,
         node: &crate::parser::Node,
@@ -5148,6 +5170,9 @@ impl Lowerer {
         // `once` の腕が値引数を参照できるようにするためである。
         let mut captures: Vec<_> = self.scope.values().cloned().collect();
         captures.extend(self.carry_frame_value_args());
+        // 腕の中の `fn(x => resume x)` は `resume` を名前で参照しない。
+        // capture しないと、この関数の入口に束縛が無く `unknown IR variable` になる。
+        self.capture_resume(body, &mut captures);
         let mut parameters = Vec::new();
         for (param, ty) in params.iter().zip(types) {
             let id = self.next;
