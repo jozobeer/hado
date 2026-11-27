@@ -2483,3 +2483,58 @@ fn resume_in_only_one_arm_still_runs_once() {
     assert_eq!(output.stdout, b"7\n");
     assert!(output.stderr.is_empty());
 }
+
+/// `resume` inside a nested function is still the arm's continuation. The
+/// function has to capture that binding; otherwise emit dies with
+/// `unknown IR variable` after `check` accepts the program.
+#[test]
+fn resume_inside_a_nested_function_runs_the_continuation() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Choice\nagain pick: Int\nhandler Choice as C\nagain pick => fn(x => resume x) 1\nreturn value => value\ndef main =\n  with C ->\n  pick as n ->\n  log \"after\" ->\n  n\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"after\n1\n");
+    assert!(output.stderr.is_empty());
+}
+
+/// The nested function may sit in the continuation of another effect in the
+/// arm. That continuation is its own function and also has to capture `resume`.
+#[test]
+fn resume_inside_a_nested_function_after_an_effect_runs_the_continuation() {
+    let case = Case::new();
+    case.write(
+        "main.hd",
+        "effect Choice\nagain pick: Int\nhandler Choice as C\nagain pick =>\n  log \"arm\" ->\n  fn(x => resume x) 1\nreturn value => value\ndef main =\n  with C ->\n  pick as n ->\n  log \"after\" ->\n  n\n",
+    );
+    let built = case.build("main.hd");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = case.run("main.hd");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"arm\nafter\n1\n");
+    assert!(output.stderr.is_empty());
+}
